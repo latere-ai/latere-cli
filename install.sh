@@ -70,10 +70,18 @@ fi
 
 tar -xzf "${tmp}/${asset}" -C "$tmp"
 
-if [ ! -w "$BIN_DIR" ] && [ "$(id -u)" -ne 0 ]; then
-  sudo install -m 0755 "${tmp}/${BIN}" "${BIN_DIR}/${BIN}"
-else
+if [ ! -d "$BIN_DIR" ]; then
+  if mkdir -p "$BIN_DIR" 2>/dev/null; then
+    :
+  else
+    sudo mkdir -p "$BIN_DIR"
+  fi
+fi
+
+if [ -w "$BIN_DIR" ]; then
   install -m 0755 "${tmp}/${BIN}" "${BIN_DIR}/${BIN}"
+else
+  sudo install -m 0755 "${tmp}/${BIN}" "${BIN_DIR}/${BIN}"
 fi
 
 printf 'latere-install: installed %s %s to %s/%s\n' "$BIN" "$VERSION" "$BIN_DIR" "$BIN" >&2
