@@ -2,16 +2,18 @@
 # Install the latere CLI. Downloads the latest GitHub release binary for the
 # current platform, verifies the checksum, and places it on PATH.
 #
+# Default install location is $HOME/.local/bin, so no sudo is required.
+#
 # Usage:
 #   curl -fsSL https://latere.ai/install.sh | sh
-#   curl -fsSL https://latere.ai/install.sh | sh -s -- v0.1.0      # pinned
-#   curl -fsSL https://latere.ai/install.sh | PREFIX=$HOME/.local sh
+#   curl -fsSL https://latere.ai/install.sh | sh -s -- v0.1.0       # pin version
+#   curl -fsSL https://latere.ai/install.sh | PREFIX=/usr/local sh  # system-wide (sudo)
 set -eu
 
 REPO="latere-ai/latere-cli"
 BIN="latere"
 VERSION="${1:-latest}"
-PREFIX="${PREFIX:-/usr/local}"
+PREFIX="${PREFIX:-$HOME/.local}"
 BIN_DIR="${PREFIX}/bin"
 
 err() { printf 'latere-install: %s\n' "$*" >&2; exit 1; }
@@ -86,3 +88,12 @@ fi
 
 printf 'latere-install: installed %s %s to %s/%s\n' "$BIN" "$VERSION" "$BIN_DIR" "$BIN" >&2
 "${BIN_DIR}/${BIN}" --version
+
+case ":$PATH:" in
+  *":${BIN_DIR}:"*) ;;
+  *)
+    printf '\nlatere-install: %s is not on your $PATH.\n' "$BIN_DIR" >&2
+    printf 'latere-install: add this to your shell profile (~/.zshrc, ~/.bashrc):\n' >&2
+    printf '\n  export PATH="%s:$PATH"\n\n' "$BIN_DIR" >&2
+    ;;
+esac

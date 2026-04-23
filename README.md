@@ -8,14 +8,18 @@ The command-line interface for the Latere product family.
 curl -fsSL https://latere.ai/install.sh | sh
 ```
 
+Default install location is `$HOME/.local/bin`, so no `sudo` is required.
+If that directory is not on your `$PATH`, the installer prints the line
+you need to add to your shell profile.
+
 Other options:
 
 ```sh
 # pin a version
 curl -fsSL https://latere.ai/install.sh | sh -s -- v0.1.0
 
-# install into a user-local prefix (no sudo)
-curl -fsSL https://latere.ai/install.sh | PREFIX=$HOME/.local sh
+# system-wide install (will prompt for sudo)
+curl -fsSL https://latere.ai/install.sh | PREFIX=/usr/local sh
 
 # Homebrew (coming soon)
 # brew install latere-ai/tap/latere
