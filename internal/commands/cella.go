@@ -54,24 +54,36 @@ type logsCursorDTO struct {
 
 // ---- top-level ----
 
-func newSandboxCmd() *cobra.Command {
+// newCellaCmd is the canonical `latere cella …` command tree. The
+// underlying API resource is "sandbox", but the product brand — and
+// the matching surface on https://latere.ai/cella — is Cella, so the
+// CLI follows the brand. `latere sandbox …` stays as a hidden alias
+// for v0.1.0 compatibility.
+func newCellaCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "sandbox",
-		Short: "Manage sandboxes (create, list, rename, start, stop, delete, run).",
+		Use:     "cella",
+		Aliases: []string{"sandbox"},
+		Short:   "Manage cellas (create, list, rename, start, stop, delete, run).",
+		Long: `Manage Cella sandboxes — per-user compute environments at cella.latere.ai.
+
+Each cella is a PVC-backed workspace plus a Pod for compute. Tier
+'ephemeral' auto-stops on idle and auto-deletes after a wall-clock
+window; tier 'persistent' stays until you delete it.`,
 	}
 	cmd.AddCommand(
-		newSbCreateCmd(),
-		newSbListCmd(),
-		newSbGetCmd(),
-		newSbRenameCmd(),
-		newSbStartCmd(),
-		newSbStopCmd(),
-		newSbDeleteCmd(),
-		newSbRunCmd(),
-		newSbLogsCmd(),
-		newSbWaitCmd(),
-		newSbImportCmd(),
-		newSbExportCmd(),
+		newCeCreateCmd(),
+		newCeListCmd(),
+		newCeGetCmd(),
+		newCeRenameCmd(),
+		newCeStartCmd(),
+		newCeStopCmd(),
+		newCeDeleteCmd(),
+		newCeRunCmd(),
+		newCeLogsCmd(),
+		newCeWaitCmd(),
+		newCeImportCmd(),
+		newCeExportCmd(),
+		newCeMcpCmd(),
 	)
 	return cmd
 }
@@ -81,7 +93,7 @@ func newExecCmd() *cobra.Command {
 	var apiURL string
 	cmd := &cobra.Command{
 		Use:   "exec <name|id> -- <cmd>...",
-		Short: "Run a command synchronously inside a sandbox (streams logs to stdout).",
+		Short: "Run a command synchronously inside a cella (streams logs to stdout).",
 		Args:  cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := authedClient(apiURL)
@@ -93,13 +105,13 @@ func newExecCmd() *cobra.Command {
 			return runAndStream(cmd.Context(), c, sandbox, argv, nil, "")
 		},
 	}
-	cmd.Flags().StringVar(&apiURL, "api-url", "", "override sandboxd base URL")
+	cmd.Flags().StringVar(&apiURL, "api-url", "", "override cella base URL")
 	return cmd
 }
 
 // ---- create / list / get / rename / start / stop / delete ----
 
-func newSbCreateCmd() *cobra.Command {
+func newCeCreateCmd() *cobra.Command {
 	var (
 		image           string
 		name            string
@@ -114,7 +126,7 @@ func newSbCreateCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "create",
-		Short: "Create a sandbox.",
+		Short: "Create a cella.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := authedClient(apiURL)
 			if err != nil {
@@ -171,14 +183,14 @@ func newSbCreateCmd() *cobra.Command {
 	return cmd
 }
 
-func newSbListCmd() *cobra.Command {
+func newCeListCmd() *cobra.Command {
 	var (
 		apiURL string
 		jsonF  bool
 	)
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List your sandboxes.",
+		Short: "List your cellas.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := authedClient(apiURL)
 			if err != nil {
@@ -206,11 +218,11 @@ func newSbListCmd() *cobra.Command {
 	return cmd
 }
 
-func newSbGetCmd() *cobra.Command {
+func newCeGetCmd() *cobra.Command {
 	var apiURL string
 	cmd := &cobra.Command{
 		Use:   "get <name|id>",
-		Short: "Get a sandbox by name or id.",
+		Short: "Get a cella by name or id.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := authedClient(apiURL)
@@ -228,11 +240,11 @@ func newSbGetCmd() *cobra.Command {
 	return cmd
 }
 
-func newSbRenameCmd() *cobra.Command {
+func newCeRenameCmd() *cobra.Command {
 	var apiURL string
 	cmd := &cobra.Command{
 		Use:   "rename <name|id> <new-name>",
-		Short: "Rename a sandbox.",
+		Short: "Rename a cella.",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := authedClient(apiURL)
@@ -253,8 +265,8 @@ func newSbRenameCmd() *cobra.Command {
 	return cmd
 }
 
-func newSbStartCmd() *cobra.Command { return simpleAction("start", "Start a stopped sandbox.") }
-func newSbStopCmd() *cobra.Command  { return simpleAction("stop", "Stop a running sandbox.") }
+func newCeStartCmd() *cobra.Command { return simpleAction("start", "Start a stopped sandbox.") }
+func newCeStopCmd() *cobra.Command  { return simpleAction("stop", "Stop a running sandbox.") }
 
 func simpleAction(verb, short string) *cobra.Command {
 	var apiURL string
@@ -280,11 +292,11 @@ func simpleAction(verb, short string) *cobra.Command {
 	return cmd
 }
 
-func newSbDeleteCmd() *cobra.Command {
+func newCeDeleteCmd() *cobra.Command {
 	var apiURL string
 	cmd := &cobra.Command{
 		Use:   "delete <name|id>",
-		Short: "Delete a sandbox (workspace contents are lost).",
+		Short: "Delete a cella (workspace contents are lost).",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := authedClient(apiURL)
@@ -304,7 +316,7 @@ func newSbDeleteCmd() *cobra.Command {
 
 // ---- run / logs / wait ----
 
-func newSbRunCmd() *cobra.Command {
+func newCeRunCmd() *cobra.Command {
 	var (
 		apiURL  string
 		envFlag []string
@@ -338,12 +350,12 @@ func newSbRunCmd() *cobra.Command {
 	f := cmd.Flags()
 	f.StringVar(&apiURL, "api-url", "", "override sandboxd base URL")
 	f.StringArrayVar(&envFlag, "env", nil, "KEY=VALUE; repeatable")
-	f.StringVar(&cwd, "cwd", "", "working dir inside the sandbox")
+	f.StringVar(&cwd, "cwd", "", "working dir inside the cella")
 	f.BoolVarP(&follow, "follow", "f", false, "stream logs and exit with the command's exit code")
 	return cmd
 }
 
-func newSbLogsCmd() *cobra.Command {
+func newCeLogsCmd() *cobra.Command {
 	var (
 		apiURL string
 		cursor int64
@@ -377,7 +389,7 @@ func newSbLogsCmd() *cobra.Command {
 	return cmd
 }
 
-func newSbWaitCmd() *cobra.Command {
+func newCeWaitCmd() *cobra.Command {
 	var (
 		apiURL string
 		secs   int
@@ -411,7 +423,7 @@ func newSbWaitCmd() *cobra.Command {
 
 // ---- import / export ----
 
-func newSbExportCmd() *cobra.Command {
+func newCeExportCmd() *cobra.Command {
 	var (
 		apiURL string
 		srcDir string
@@ -419,7 +431,7 @@ func newSbExportCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "export <name|id> [paths...]",
-		Short: "Stream a tar of files from the sandbox workspace.",
+		Short: "Stream a tar of files from the cella workspace.",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := authedClient(apiURL)
@@ -456,12 +468,12 @@ func newSbExportCmd() *cobra.Command {
 	}
 	f := cmd.Flags()
 	f.StringVar(&apiURL, "api-url", "", "override sandboxd base URL")
-	f.StringVar(&srcDir, "src-dir", "", "directory inside the sandbox; default /workspace")
+	f.StringVar(&srcDir, "src-dir", "", "directory inside the cella; default /workspace")
 	f.StringVarP(&out, "output", "o", "-", "output tar path (- for stdout)")
 	return cmd
 }
 
-func newSbImportCmd() *cobra.Command {
+func newCeImportCmd() *cobra.Command {
 	var (
 		apiURL string
 		dest   string
@@ -469,7 +481,7 @@ func newSbImportCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "import <name|id>",
-		Short: "Upload a tar into the sandbox workspace (reads stdin or --input).",
+		Short: "Upload a tar into the cella workspace (reads stdin or --input).",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := authedClient(apiURL)

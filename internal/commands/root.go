@@ -21,7 +21,7 @@ func NewRoot(version string) *cobra.Command {
 	root.SetVersionTemplate("latere {{.Version}}\n")
 
 	root.AddCommand(newAuthCmd())
-	root.AddCommand(newSandboxCmd())
+	root.AddCommand(newCellaCmd())
 	root.AddCommand(newExecCmd())
 	return root
 }
