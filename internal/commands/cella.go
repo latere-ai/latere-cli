@@ -78,6 +78,7 @@ window; tier 'persistent' stays until you delete it.`,
 		newCeStartCmd(),
 		newCeStopCmd(),
 		newCeDeleteCmd(),
+		newCeExecCmd(),
 		newCeRunCmd(),
 		newCeLogsCmd(),
 		newCeWaitCmd(),
@@ -88,8 +89,18 @@ window; tier 'persistent' stays until you delete it.`,
 	return cmd
 }
 
-// newExecCmd is the top-level `latere exec` shortcut.
+// newExecCmd is the top-level `latere exec` shortcut. The same
+// behavior is also wired in under `latere cella exec` via
+// newCeExecCmd, so both forms work.
 func newExecCmd() *cobra.Command {
+	cmd := newCeExecCmd()
+	cmd.Use = "exec <name|id> -- <cmd>..."
+	return cmd
+}
+
+// newCeExecCmd registers `latere cella exec`, the synchronous
+// streaming variant of `cella run`.
+func newCeExecCmd() *cobra.Command {
 	var apiURL string
 	cmd := &cobra.Command{
 		Use:   "exec <name|id> -- <cmd>...",

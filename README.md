@@ -52,10 +52,11 @@ latere sandbox start <name|id>
 latere sandbox stop <name|id>
 latere sandbox delete <name|id>
 
-latere exec <name|id> -- <cmd>...
+latere cella exec <name|id> -- <cmd>...
+latere exec <name|id> -- <cmd>...           # top-level shortcut
 ```
 
-Planned surface and product context: [latere.ai/cella](https://latere.ai/cella).
+Planned surface and product context: [cella.latere.ai](https://cella.latere.ai/).
 
 ## Build from source
 
