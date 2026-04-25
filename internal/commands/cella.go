@@ -601,8 +601,8 @@ func fetchLogsCursor(ctx context.Context, c *api.Client, sandbox, cmdID string, 
 }
 
 // streamLogs polls cursor-based logs until the command terminates.
-// Spec 15's SSE follow mode is the alternative; cursor polling works
-// with a simpler sandboxd build and survives reconnects naturally.
+// SSE follow mode is the alternative; cursor polling works against
+// a simpler sandboxd build and survives reconnects naturally.
 func streamLogs(ctx context.Context, c *api.Client, sandbox, cmdID string, cursor int64) error {
 	for {
 		out, err := fetchLogsCursor(ctx, c, sandbox, cmdID, cursor)
