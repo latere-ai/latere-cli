@@ -25,8 +25,37 @@ func newAuthCmd() *cobra.Command {
 	}
 	cmd.AddCommand(newAuthLoginCmd())
 	cmd.AddCommand(newAuthWhoamiCmd())
+	cmd.AddCommand(newAuthPrintTokenCmd())
 	cmd.AddCommand(newAuthLogoutCmd())
 	return cmd
+}
+
+// newAuthPrintTokenCmd prints the saved access token to stdout so it
+// can be embedded in shell scripts: `TOKEN=$(latere auth print-token)`.
+// Stays on stdout (without a trailing newline guaranteed by Println)
+// so command substitution gives a clean string.
+func newAuthPrintTokenCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "print-token",
+		Short: "Print the saved access token to stdout (for use in scripts).",
+		Long: `Print the OAuth access token from ~/.config/latere/token.json.
+
+Useful for piping into shell tools without depending on jq:
+
+    TOKEN=$(latere auth print-token)
+    curl -H "Authorization: Bearer $TOKEN" https://cella.latere.ai/v1/sandboxes`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			tok, err := api.LoadToken("")
+			if err != nil {
+				return err
+			}
+			if tok.AccessToken == "" {
+				return api.ErrNoToken
+			}
+			fmt.Println(tok.AccessToken)
+			return nil
+		},
+	}
 }
 
 func newAuthLoginCmd() *cobra.Command {
