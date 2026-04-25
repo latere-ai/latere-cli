@@ -3,8 +3,12 @@ package commands
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -27,67 +31,231 @@ func newAuthCmd() *cobra.Command {
 
 func newAuthLoginCmd() *cobra.Command {
 	var (
-		token   string
-		apiURL  string
+		token    string
+		apiURL   string
+		authURL  string
+		clientID string
+		scopes   string
 	)
 	cmd := &cobra.Command{
 		Use:   "login",
-		Short: "Store a sandboxd access token in ~/.config/latere/token.json.",
-		Long: `Store an access token used by every other latere command.
+		Short: "Sign in via OAuth2 device-code (or paste a token with --token).",
+		Long: `Sign in to Latere.
 
-Until the device-code flow on auth.latere.ai ships, login takes a token
-either via --token or piped on stdin. Get one from the dashboard at
-https://auth.latere.ai/me/token. The token is written to
+By default, login starts the OAuth2 device-code flow against
+auth.latere.ai: it prints a short user code and a URL, you visit the
+URL in any browser to approve, and the CLI then polls until the
+approval lands. The resulting access token is written to
 ~/.config/latere/token.json with 0600 perms; the MCP server
-(sandbox-mcp) reads the same file.`,
+(sandbox-mcp) reads the same file.
+
+For unattended setups (CI, scripts), pass --token to skip the device
+flow and store an access token directly.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			t := strings.TrimSpace(token)
-			if t == "" {
-				// Stdin fallback: piped or interactive paste.
-				stat, _ := os.Stdin.Stat()
-				if (stat.Mode() & os.ModeCharDevice) == 0 {
-					b, err := readAll(os.Stdin)
-					if err != nil {
-						return err
-					}
-					t = strings.TrimSpace(b)
-				} else {
-					fmt.Fprint(os.Stderr, "Paste access token: ")
-					line, err := bufio.NewReader(os.Stdin).ReadString('\n')
-					if err != nil {
-						return err
-					}
-					t = strings.TrimSpace(line)
+			ctx := cmd.Context()
+
+			// Token-paste fast path: --token wins, or stdin pipe falls
+			// back to it. The device flow only kicks in for an
+			// interactive terminal with no --token.
+			if t := strings.TrimSpace(token); t != "" {
+				return saveAndVerify(ctx, apiURL, t)
+			}
+			if stat, _ := os.Stdin.Stat(); (stat.Mode() & os.ModeCharDevice) == 0 {
+				b, err := readAll(os.Stdin)
+				if err != nil {
+					return err
+				}
+				if t := strings.TrimSpace(b); t != "" {
+					return saveAndVerify(ctx, apiURL, t)
 				}
 			}
-			if t == "" {
-				return errors.New("no token provided")
-			}
-			if err := api.SaveToken("", api.Token{
-				AccessToken: t,
-				TokenType:   "Bearer",
-				IssuedAt:    time.Now().UTC(),
-			}); err != nil {
-				return err
-			}
-			// Verify by hitting /v1/sandboxes (it's behind auth and
-			// cheap; a 200/empty list confirms the token).
-			c := api.NewClient(apiURL)
-			ctx, cancel := context.WithTimeout(cmd.Context(), 10*time.Second)
-			defer cancel()
-			var ignored any
-			if err := c.GetJSON(ctx, "/v1/sandboxes", &ignored); err != nil {
-				_ = api.ClearToken("")
-				return fmt.Errorf("token rejected by sandboxd: %w", err)
-			}
-			fmt.Fprintf(os.Stderr, "Logged in. Token saved to %s\n", api.TokenPath())
-			return nil
+
+			return runDeviceFlow(ctx, deviceFlowOpts{
+				AuthURL:  authURL,
+				APIURL:   apiURL,
+				ClientID: clientID,
+				Scopes:   scopes,
+			})
 		},
 	}
-	cmd.Flags().StringVar(&token, "token", "", "access token (skips stdin prompt)")
-	cmd.Flags().StringVar(&apiURL, "api-url", "", "override sandboxd base URL (default https://cella.latere.ai)")
+	f := cmd.Flags()
+	f.StringVar(&token, "token", "", "skip device flow; store an access token directly")
+	f.StringVar(&apiURL, "api-url", "", "override sandboxd base URL (default https://cella.latere.ai)")
+	f.StringVar(&authURL, "auth-url", "", "override auth base URL (default https://auth.latere.ai)")
+	f.StringVar(&clientID, "client-id", "latere-cli", "OAuth client_id used for the device-code request")
+	f.StringVar(&scopes, "scopes", "openid email profile read:sandbox write:sandbox exec:sandbox",
+		"space-delimited scope list")
 	return cmd
 }
+
+// saveAndVerify stores the token and confirms it by listing sandboxes.
+// Shared by the --token fast path and the device-code happy path.
+func saveAndVerify(ctx context.Context, apiURL, token string) error {
+	if err := api.SaveToken("", api.Token{
+		AccessToken: token,
+		TokenType:   "Bearer",
+		IssuedAt:    time.Now().UTC(),
+	}); err != nil {
+		return err
+	}
+	c := api.NewClient(apiURL)
+	verifyCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	var ignored any
+	if err := c.GetJSON(verifyCtx, "/v1/sandboxes", &ignored); err != nil {
+		_ = api.ClearToken("")
+		return fmt.Errorf("token rejected by sandboxd: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "Logged in. Token saved to %s\n", api.TokenPath())
+	return nil
+}
+
+// ---- device-code flow ----
+
+type deviceFlowOpts struct {
+	AuthURL, APIURL, ClientID, Scopes string
+}
+
+type deviceCodeResp struct {
+	DeviceCode              string `json:"device_code"`
+	UserCode                string `json:"user_code"`
+	VerificationURI         string `json:"verification_uri"`
+	VerificationURIComplete string `json:"verification_uri_complete"`
+	ExpiresIn               int    `json:"expires_in"`
+	Interval                int    `json:"interval"`
+}
+
+type tokenResp struct {
+	AccessToken      string `json:"access_token"`
+	TokenType        string `json:"token_type"`
+	ExpiresIn        int    `json:"expires_in"`
+	Scope            string `json:"scope"`
+	Error            string `json:"error,omitempty"`
+	ErrorDescription string `json:"error_description,omitempty"`
+}
+
+func runDeviceFlow(ctx context.Context, opts deviceFlowOpts) error {
+	authBase := opts.AuthURL
+	if authBase == "" {
+		authBase = inferAuthURL(opts.APIURL)
+	}
+	authBase = strings.TrimRight(authBase, "/")
+
+	// 1. Initiate.
+	form := url.Values{}
+	form.Set("client_id", opts.ClientID)
+	if opts.Scopes != "" {
+		form.Set("scope", opts.Scopes)
+	}
+	httpc := &http.Client{Timeout: 30 * time.Second}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		authBase+"/device/code", strings.NewReader(form.Encode()))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := httpc.Do(req)
+	if err != nil {
+		return fmt.Errorf("device/code: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<14))
+		return fmt.Errorf("device/code %d: %s", resp.StatusCode, b)
+	}
+	var dc deviceCodeResp
+	if err := json.NewDecoder(resp.Body).Decode(&dc); err != nil {
+		return fmt.Errorf("device/code decode: %w", err)
+	}
+
+	// 2. Surface the user code.
+	verify := dc.VerificationURIComplete
+	if verify == "" {
+		verify = dc.VerificationURI
+	}
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintf(os.Stderr, "  To sign in, open this URL:\n\n      %s\n\n", verify)
+	fmt.Fprintf(os.Stderr, "  And confirm the code:\n\n      %s\n\n", dc.UserCode)
+	fmt.Fprintln(os.Stderr, "  Waiting for approval...")
+
+	// 3. Poll /token until terminal status.
+	interval := time.Duration(dc.Interval) * time.Second
+	if interval <= 0 {
+		interval = 5 * time.Second
+	}
+	deadline := time.Now().Add(time.Duration(dc.ExpiresIn) * time.Second)
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(interval):
+		}
+		if time.Now().After(deadline) {
+			return errors.New("device code expired before approval")
+		}
+
+		tform := url.Values{}
+		tform.Set("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
+		tform.Set("device_code", dc.DeviceCode)
+		tform.Set("client_id", opts.ClientID)
+		treq, err := http.NewRequestWithContext(ctx, http.MethodPost,
+			authBase+"/token", strings.NewReader(tform.Encode()))
+		if err != nil {
+			return err
+		}
+		treq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		tresp, err := httpc.Do(treq)
+		if err != nil {
+			return fmt.Errorf("token poll: %w", err)
+		}
+		var body tokenResp
+		_ = json.NewDecoder(tresp.Body).Decode(&body)
+		_ = tresp.Body.Close()
+
+		switch body.Error {
+		case "":
+			if body.AccessToken == "" {
+				return errors.New("token endpoint returned no access_token")
+			}
+			return saveAndVerify(ctx, opts.APIURL, body.AccessToken)
+		case "authorization_pending":
+			continue
+		case "slow_down":
+			interval += 5 * time.Second
+			continue
+		case "expired_token":
+			return errors.New("device code expired before approval")
+		case "access_denied":
+			return errors.New("user denied the request")
+		default:
+			return fmt.Errorf("device-code login failed: %s (%s)", body.Error, body.ErrorDescription)
+		}
+	}
+}
+
+// inferAuthURL maps a sandboxd URL like https://cella.latere.ai to the
+// auth base https://auth.latere.ai. Falls back to a sane default for
+// the public deployment if the API URL isn't a known shape.
+func inferAuthURL(apiURL string) string {
+	if apiURL == "" {
+		return "https://auth.latere.ai"
+	}
+	if u, err := url.Parse(apiURL); err == nil && u.Host != "" {
+		// Replace the leading host label.
+		parts := strings.SplitN(u.Host, ".", 2)
+		if len(parts) == 2 {
+			u.Host = "auth." + parts[1]
+			u.Path = ""
+			return u.String()
+		}
+	}
+	return "https://auth.latere.ai"
+}
+
+// silence unused import warnings on older toolchains where bufio/io were
+// only used in pre-device-code code paths.
+var _ = bufio.NewReader
+
 
 func newAuthWhoamiCmd() *cobra.Command {
 	var apiURL string
