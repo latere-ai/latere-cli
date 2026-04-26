@@ -37,9 +37,9 @@ func newCeMcpCmd() *cobra.Command {
 		Short: "Run an MCP stdio server exposing this user's cellas as MCP tools.",
 		Long: `Run a Model Context Protocol server over stdio.
 
-Exposes seven tools to the MCP host:
-  cella_create / cella_run / cella_wait / cella_logs /
-  cella_export / cella_import / cella_delete
+Exposes the cella surface as MCP tools the host can call. Lifecycle
+(create, list, get, start, stop, extend, convert, delete), exec
+(run, wait, logs, kill), and files (export, import).
 
 The token at ~/.config/latere/token.json (written by 'latere auth login')
 is used for every call. A missing token starts the server anyway so the
@@ -67,6 +67,30 @@ func runMCPServer(ctx context.Context, c *api.Client) error {
 		Description: "Create a new cella. Returns its id and slug.",
 	}, mt.create)
 	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "cella_list",
+		Description: "List the caller's cellas with state, tier, and disk.",
+	}, mt.list)
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "cella_get",
+		Description: "Fetch one cella by id or slug.",
+	}, mt.get)
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "cella_start",
+		Description: "Start a stopped cella.",
+	}, mt.start)
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "cella_stop",
+		Description: "Stop a running cella; the disk persists if tier is persistent.",
+	}, mt.stop)
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "cella_extend",
+		Description: "Push the auto-delete deadline of an ephemeral cella forward by auto_delete_hours (default 24).",
+	}, mt.extend)
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "cella_convert",
+		Description: "Switch a cella between ephemeral and persistent. Persistent → ephemeral requires auto_delete_hours.",
+	}, mt.convert)
+	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "cella_run",
 		Description: "Start a command in the background; returns command_id immediately.",
 	}, mt.run)
@@ -78,6 +102,10 @@ func runMCPServer(ctx context.Context, c *api.Client) error {
 		Name:        "cella_logs",
 		Description: "Read command logs starting at since_cursor. Returns bytes + next_cursor.",
 	}, mt.logs)
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "cella_kill",
+		Description: "Kill a running command (sends DELETE on the command resource).",
+	}, mt.kill)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "cella_export",
 		Description: "Tar files from the cella workspace; returns base64-encoded tar.",
@@ -312,6 +340,149 @@ func (m *mcpTools) del(ctx context.Context, _ *mcp.CallToolRequest, a mcpDeleteA
 		return nil, mcpDeleteResult{}, err
 	}
 	return mcpText("deleted %s", a.Cella), mcpDeleteResult{OK: true}, nil
+}
+
+// ---- list / get / start / stop / extend / convert / kill ----
+
+type mcpListArgs struct {
+	NameFilter string `json:"name,omitempty" mcp:"optional name filter"`
+}
+type mcpCellaSummary struct {
+	ID    string `json:"id"`
+	Name  string `json:"name,omitempty"`
+	State string `json:"state"`
+	Tier  string `json:"tier,omitempty"`
+}
+type mcpListResult struct {
+	Cellas []mcpCellaSummary `json:"cellas"`
+}
+
+func (m *mcpTools) list(ctx context.Context, _ *mcp.CallToolRequest, a mcpListArgs) (*mcp.CallToolResult, mcpListResult, error) {
+	q := url.Values{}
+	if a.NameFilter != "" {
+		q.Set("name", a.NameFilter)
+	}
+	path := "/v1/sandboxes"
+	if e := q.Encode(); e != "" {
+		path += "?" + e
+	}
+	var rows []mcpCellaSummary
+	if err := m.c.GetJSON(ctx, path, &rows); err != nil {
+		return nil, mcpListResult{}, err
+	}
+	return mcpText("%d cellas", len(rows)), mcpListResult{Cellas: rows}, nil
+}
+
+type mcpGetArgs struct {
+	Cella string `json:"cella" mcp:"cella id or slug"`
+}
+type mcpGetResult struct {
+	ID       string `json:"id"`
+	Name     string `json:"name,omitempty"`
+	State    string `json:"state"`
+	Tier     string `json:"tier,omitempty"`
+	DiskGB   int    `json:"disk_gb,omitempty"`
+	Deadline string `json:"deadline,omitempty"`
+}
+
+func (m *mcpTools) get(ctx context.Context, _ *mcp.CallToolRequest, a mcpGetArgs) (*mcp.CallToolResult, mcpGetResult, error) {
+	var resp mcpGetResult
+	path := "/v1/sandboxes/" + url.PathEscape(a.Cella)
+	if err := m.c.GetJSON(ctx, path, &resp); err != nil {
+		return nil, mcpGetResult{}, err
+	}
+	return mcpText("%s (%s)", resp.Name, resp.State), resp, nil
+}
+
+type mcpVerbArgs struct {
+	Cella string `json:"cella"`
+}
+type mcpVerbResult struct {
+	State string `json:"state"`
+}
+
+func (m *mcpTools) start(ctx context.Context, _ *mcp.CallToolRequest, a mcpVerbArgs) (*mcp.CallToolResult, mcpVerbResult, error) {
+	return m.lifecycleVerb(ctx, a.Cella, "start")
+}
+func (m *mcpTools) stop(ctx context.Context, _ *mcp.CallToolRequest, a mcpVerbArgs) (*mcp.CallToolResult, mcpVerbResult, error) {
+	return m.lifecycleVerb(ctx, a.Cella, "stop")
+}
+func (m *mcpTools) lifecycleVerb(ctx context.Context, cella, verb string) (*mcp.CallToolResult, mcpVerbResult, error) {
+	var resp mcpVerbResult
+	path := "/v1/sandboxes/" + url.PathEscape(cella) + "/" + verb
+	if err := m.c.PostJSON(ctx, path, nil, &resp); err != nil {
+		return nil, mcpVerbResult{}, err
+	}
+	return mcpText("%s → %s", verb, resp.State), resp, nil
+}
+
+type mcpExtendArgs struct {
+	Cella           string `json:"cella"`
+	AutoDeleteHours int    `json:"auto_delete_hours,omitempty" mcp:"hours to push the deadline; default 24"`
+}
+type mcpExtendResult struct {
+	State    string `json:"state"`
+	Deadline string `json:"deadline,omitempty"`
+}
+
+func (m *mcpTools) extend(ctx context.Context, _ *mcp.CallToolRequest, a mcpExtendArgs) (*mcp.CallToolResult, mcpExtendResult, error) {
+	hours := a.AutoDeleteHours
+	if hours <= 0 {
+		hours = 24
+	}
+	body := map[string]any{"auto_delete_hours": hours}
+	var resp mcpExtendResult
+	path := "/v1/sandboxes/" + url.PathEscape(a.Cella) + "/extend"
+	if err := m.c.PostJSON(ctx, path, body, &resp); err != nil {
+		return nil, mcpExtendResult{}, err
+	}
+	return mcpText("extended to %s", resp.Deadline), resp, nil
+}
+
+type mcpConvertArgs struct {
+	Cella           string `json:"cella"`
+	Tier            string `json:"tier" mcp:"ephemeral or persistent"`
+	AutoDeleteHours int    `json:"auto_delete_hours,omitempty" mcp:"required when tier=ephemeral"`
+}
+type mcpConvertResult struct {
+	State string `json:"state"`
+	Tier  string `json:"tier,omitempty"`
+}
+
+func (m *mcpTools) convert(ctx context.Context, _ *mcp.CallToolRequest, a mcpConvertArgs) (*mcp.CallToolResult, mcpConvertResult, error) {
+	if a.Tier != "ephemeral" && a.Tier != "persistent" {
+		return nil, mcpConvertResult{}, fmt.Errorf("tier must be ephemeral or persistent")
+	}
+	body := map[string]any{"tier": a.Tier}
+	if a.Tier == "ephemeral" {
+		if a.AutoDeleteHours <= 0 {
+			return nil, mcpConvertResult{}, fmt.Errorf("auto_delete_hours is required when converting to ephemeral")
+		}
+		body["auto_delete_hours"] = a.AutoDeleteHours
+	}
+	var resp mcpConvertResult
+	path := "/v1/sandboxes/" + url.PathEscape(a.Cella) + "/convert"
+	if err := m.c.PostJSON(ctx, path, body, &resp); err != nil {
+		return nil, mcpConvertResult{}, err
+	}
+	return mcpText("converted → %s", a.Tier), resp, nil
+}
+
+type mcpKillArgs struct {
+	Cella     string `json:"cella"`
+	CommandID string `json:"command_id"`
+}
+type mcpKillResult struct {
+	OK bool `json:"ok"`
+}
+
+func (m *mcpTools) kill(ctx context.Context, _ *mcp.CallToolRequest, a mcpKillArgs) (*mcp.CallToolResult, mcpKillResult, error) {
+	path := "/v1/sandboxes/" + url.PathEscape(a.Cella) +
+		"/commands/" + url.PathEscape(a.CommandID)
+	if err := m.c.Do(ctx, http.MethodDelete, path, nil, "", nil); err != nil {
+		return nil, mcpKillResult{}, err
+	}
+	return mcpText("killed %s", a.CommandID), mcpKillResult{OK: true}, nil
 }
 
 // ---- helpers ----

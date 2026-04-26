@@ -84,6 +84,8 @@ window; tier 'persistent' stays until you delete it.`,
 		newCeWaitCmd(),
 		newCeImportCmd(),
 		newCeExportCmd(),
+		newCeExtendCmd(),
+		newCeConvertCmd(),
 		newCeMcpCmd(),
 	)
 	return cmd
@@ -543,6 +545,103 @@ func newCeImportCmd() *cobra.Command {
 	f.StringVar(&apiURL, "api-url", "", "override sandboxd base URL")
 	f.StringVar(&dest, "dest", "", "destination dir in the sandbox; default /workspace")
 	f.StringVarP(&input, "input", "i", "-", "input tar path (- for stdin)")
+	return cmd
+}
+
+// ---- extend / convert ----
+
+// newCeExtendCmd pushes the auto-delete deadline of an ephemeral
+// cella forward. Persistent cellas have no deadline so the API 409s.
+func newCeExtendCmd() *cobra.Command {
+	var (
+		apiURL   string
+		hours    int
+		deadline string
+	)
+	cmd := &cobra.Command{
+		Use:   "extend <name|id>",
+		Short: "Push the auto-delete deadline of an ephemeral cella forward.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := authedClient(apiURL)
+			if err != nil {
+				return err
+			}
+			body := map[string]any{}
+			if deadline != "" {
+				t, err := time.Parse(time.RFC3339, deadline)
+				if err != nil {
+					return fmt.Errorf("--deadline must be RFC3339: %w", err)
+				}
+				body["deadline"] = t
+			} else {
+				if hours <= 0 {
+					hours = 24
+				}
+				body["auto_delete_hours"] = hours
+			}
+			b, _ := json.Marshal(body)
+			var sb sandboxDTO
+			path := sbPath(args[0]) + "/extend"
+			if err := c.Do(cmd.Context(), http.MethodPost, path,
+				bytes.NewReader(b), "application/json", &sb); err != nil {
+				return err
+			}
+			printSandbox(sb)
+			return nil
+		},
+	}
+	f := cmd.Flags()
+	f.StringVar(&apiURL, "api-url", "", "override sandboxd base URL")
+	f.IntVar(&hours, "hours", 24, "push deadline to now + N hours")
+	f.StringVar(&deadline, "deadline", "", "absolute RFC3339 deadline (overrides --hours)")
+	return cmd
+}
+
+// newCeConvertCmd flips a cella between ephemeral and persistent.
+// Persistent → ephemeral requires --hours so the new lifetime is
+// explicit; the API rejects the request otherwise.
+func newCeConvertCmd() *cobra.Command {
+	var (
+		apiURL string
+		to     string
+		hours  int
+	)
+	cmd := &cobra.Command{
+		Use:   "convert <name|id> --to {ephemeral|persistent}",
+		Short: "Switch a cella between ephemeral and persistent.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if to != "ephemeral" && to != "persistent" {
+				return fmt.Errorf("--to must be ephemeral or persistent")
+			}
+			c, err := authedClient(apiURL)
+			if err != nil {
+				return err
+			}
+			body := map[string]any{"tier": to}
+			if to == "ephemeral" {
+				if hours <= 0 {
+					return fmt.Errorf("--hours is required when converting to ephemeral")
+				}
+				body["auto_delete_hours"] = hours
+			}
+			b, _ := json.Marshal(body)
+			var sb sandboxDTO
+			path := sbPath(args[0]) + "/convert"
+			if err := c.Do(cmd.Context(), http.MethodPost, path,
+				bytes.NewReader(b), "application/json", &sb); err != nil {
+				return err
+			}
+			printSandbox(sb)
+			return nil
+		},
+	}
+	f := cmd.Flags()
+	f.StringVar(&apiURL, "api-url", "", "override sandboxd base URL")
+	f.StringVar(&to, "to", "", "destination tier: ephemeral or persistent")
+	f.IntVar(&hours, "hours", 0, "auto-delete-hours; required when --to=ephemeral")
+	_ = cmd.MarkFlagRequired("to")
 	return cmd
 }
 
