@@ -246,6 +246,15 @@ func runDeviceFlow(ctx context.Context, opts deviceFlowOpts) error {
 			if body.AccessToken == "" {
 				return errors.New("token endpoint returned no access_token")
 			}
+			// Best-effort: trade the auth-issued token for a
+			// cella-issued bearer. Falls back to the auth token during
+			// the deprecation window so installs without the cella
+			// catalog keep working.
+			if cellaTok, err := exchangeForCellaToken(ctx, opts, body.AccessToken); err == nil && cellaTok != "" {
+				return saveAndVerify(ctx, opts.APIURL, cellaTok)
+			} else if err != nil {
+				fmt.Fprintf(os.Stderr, "  cella token exchange unavailable (%v); using auth-issued token\n", err)
+			}
 			return saveAndVerify(ctx, opts.APIURL, body.AccessToken)
 		case "authorization_pending":
 			continue
@@ -260,6 +269,79 @@ func runDeviceFlow(ctx context.Context, opts deviceFlowOpts) error {
 			return fmt.Errorf("device-code login failed: %s (%s)", body.Error, body.ErrorDescription)
 		}
 	}
+}
+
+// exchangeForCellaToken trades an auth-issued user JWT for a cella
+// bearer token. The CLI mints a short-TTL actor token at auth, then
+// exchanges it at cella's /v1/tokens/exchange. Either step may fail
+// (older auth without /actor-tokens, older cella without the token
+// catalog); the caller falls back to the auth token in that case.
+func exchangeForCellaToken(ctx context.Context, opts deviceFlowOpts, authToken string) (string, error) {
+	authBase := opts.AuthURL
+	if authBase == "" {
+		authBase = inferAuthURL(opts.APIURL)
+	}
+	authBase = strings.TrimRight(authBase, "/")
+	apiBase := strings.TrimRight(opts.APIURL, "/")
+	if apiBase == "" {
+		apiBase = "https://cella.latere.ai"
+	}
+
+	httpc := &http.Client{Timeout: 15 * time.Second}
+
+	// 1. Mint an actor token at auth.
+	actorAud := strings.TrimPrefix(strings.TrimPrefix(apiBase, "https://"), "http://")
+	body, _ := json.Marshal(map[string]any{"audience": actorAud, "ttl_seconds": 60})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, authBase+"/actor-tokens", strings.NewReader(string(body)))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+authToken)
+	resp, err := httpc.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<14))
+		return "", fmt.Errorf("actor-tokens %d: %s", resp.StatusCode, b)
+	}
+	var actor struct {
+		ActorToken string `json:"actor_token"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&actor); err != nil || actor.ActorToken == "" {
+		return "", fmt.Errorf("actor-tokens: empty response")
+	}
+
+	// 2. Exchange the actor token at cella.
+	hostname, _ := os.Hostname()
+	if hostname == "" {
+		hostname = "CLI"
+	}
+	body, _ = json.Marshal(map[string]any{"label": "CLI on " + hostname})
+	req2, err := http.NewRequestWithContext(ctx, http.MethodPost, apiBase+"/v1/tokens/exchange", strings.NewReader(string(body)))
+	if err != nil {
+		return "", err
+	}
+	req2.Header.Set("Content-Type", "application/json")
+	req2.Header.Set("Authorization", "Bearer "+actor.ActorToken)
+	resp2, err := httpc.Do(req2)
+	if err != nil {
+		return "", err
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode/100 != 2 {
+		b, _ := io.ReadAll(io.LimitReader(resp2.Body, 1<<14))
+		return "", fmt.Errorf("tokens/exchange %d: %s", resp2.StatusCode, b)
+	}
+	var out struct {
+		AccessToken string `json:"access_token"`
+	}
+	if err := json.NewDecoder(resp2.Body).Decode(&out); err != nil || out.AccessToken == "" {
+		return "", fmt.Errorf("tokens/exchange: empty response")
+	}
+	return out.AccessToken, nil
 }
 
 // inferAuthURL maps a sandboxd URL like https://cella.latere.ai to the
