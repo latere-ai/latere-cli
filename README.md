@@ -58,6 +58,14 @@ latere cella create --name demo --tier ephemeral
 latere cella exec demo -- sh -lc 'echo hello && pwd'
 ```
 
+Run a one-shot disposable command. The backend creates an ephemeral
+cella, runs the command, returns output and timing, then deletes the
+cella:
+
+```sh
+latere cella run --ephemeral --rm -- sh -lc 'echo hello && pwd'
+```
+
 Create a persistent workspace:
 
 ```sh
@@ -137,6 +145,13 @@ latere cella run <name|id> -- sh -lc 'sleep 30 && echo done'
 latere cella run <name|id> --follow -- sh -lc 'go test ./...'
 ```
 
+One-shot execution uses the backend's atomic disposable-run API:
+
+```sh
+latere cella run --ephemeral --rm -- sh -lc 'go test ./...'
+latere cella run --ephemeral --rm --timeout 900 -- sh -lc 'npm test'
+```
+
 Inspect output and status:
 
 ```sh
@@ -146,7 +161,8 @@ latere cella logs <name|id> <command_id> --follow
 latere cella wait <name|id> <command_id> --timeout 600
 ```
 
-`run` accepts repeatable `--env KEY=VALUE` and `--cwd /path`.
+`run` accepts repeatable `--env KEY=VALUE` and `--cwd /path`. One-shot
+runs also accept `--image`, `--disk`, `--timeout`, and `--json`.
 
 ## Files
 

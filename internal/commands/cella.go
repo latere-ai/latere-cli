@@ -52,6 +52,25 @@ type logsCursorDTO struct {
 	ExitCode   *int   `json:"exit_code,omitempty"`
 }
 
+type oneShotRunDTO struct {
+	RunID       string `json:"run_id"`
+	SandboxID   string `json:"sandbox_id"`
+	SandboxName string `json:"sandbox_name"`
+	State       string `json:"state"`
+	ExitCode    *int   `json:"exit_code,omitempty"`
+	Timing      struct {
+		CreateMS  int64 `json:"create_ms"`
+		ExecMS    int64 `json:"exec_ms"`
+		CleanupMS int64 `json:"cleanup_ms"`
+		TotalMS   int64 `json:"total_ms"`
+	} `json:"timing"`
+	Stdout       string `json:"stdout"`
+	Stderr       string `json:"stderr"`
+	Truncated    bool   `json:"truncated"`
+	Error        string `json:"error,omitempty"`
+	CleanupError string `json:"cleanup_error,omitempty"`
+}
+
 // ---- top-level ----
 
 // newCellaCmd is the canonical `latere cella …` command tree. The
@@ -331,15 +350,35 @@ func newCeDeleteCmd() *cobra.Command {
 
 func newCeRunCmd() *cobra.Command {
 	var (
-		apiURL  string
-		envFlag []string
-		cwd     string
-		follow  bool
+		apiURL       string
+		envFlag      []string
+		cwd          string
+		follow       bool
+		ephemeral    bool
+		rm           bool
+		image        string
+		diskGB       int
+		timeout      int
+		printJSONOut bool
 	)
 	cmd := &cobra.Command{
-		Use:   "run <name|id> -- <argv>...",
-		Short: "Start a command in the background; prints command_id (or follows logs with -f).",
-		Args:  cobra.MinimumNArgs(2),
+		Use:   "run [name|id] -- <argv>...",
+		Short: "Run a command in a cella, or one-shot in a disposable ephemeral cella.",
+		Args: func(cmd *cobra.Command, args []string) error {
+			if ephemeral || rm {
+				if !ephemeral || !rm {
+					return fmt.Errorf("--ephemeral and --rm must be used together for one-shot runs")
+				}
+				if len(args) == 0 {
+					return fmt.Errorf("missing argv after --")
+				}
+				return nil
+			}
+			if len(args) < 2 {
+				return fmt.Errorf("requires <name|id> -- <argv>... unless --ephemeral --rm is set")
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := authedClient(apiURL)
 			if err != nil {
@@ -348,6 +387,20 @@ func newCeRunCmd() *cobra.Command {
 			env, err := parseKV(envFlag)
 			if err != nil {
 				return err
+			}
+			if ephemeral && rm {
+				out, err := oneShotRun(cmd.Context(), c, args, env, cwd, image, diskGB, timeout)
+				if err != nil {
+					return err
+				}
+				if printJSONOut {
+					return printJSON(out)
+				}
+				printOneShotRun(out)
+				if out.ExitCode != nil {
+					os.Exit(*out.ExitCode)
+				}
+				return nil
 			}
 			if follow {
 				return runAndStream(cmd.Context(), c, args[0], args[1:], env, cwd)
@@ -365,6 +418,12 @@ func newCeRunCmd() *cobra.Command {
 	f.StringArrayVar(&envFlag, "env", nil, "KEY=VALUE; repeatable")
 	f.StringVar(&cwd, "cwd", "", "working dir inside the cella")
 	f.BoolVarP(&follow, "follow", "f", false, "stream logs and exit with the command's exit code")
+	f.BoolVar(&ephemeral, "ephemeral", false, "create a disposable one-shot ephemeral cella for this command")
+	f.BoolVar(&rm, "rm", false, "delete the one-shot cella after the command; required with --ephemeral")
+	f.StringVar(&image, "image", "", "one-shot image ref (default sandbox-base)")
+	f.IntVar(&diskGB, "disk", 0, "one-shot PVC size in GB (default 5)")
+	f.IntVar(&timeout, "timeout", 600, "one-shot command timeout in seconds")
+	f.BoolVar(&printJSONOut, "json", false, "print one-shot response as JSON")
 	return cmd
 }
 
@@ -748,6 +807,61 @@ func runAndStream(ctx context.Context, c *api.Client, sandbox string, argv []str
 	return streamLogs(ctx, c, sandbox, cd.CommandID, 0)
 }
 
+func oneShotRun(ctx context.Context, c *api.Client, argv []string, env map[string]string, cwd, image string, diskGB, timeout int) (oneShotRunDTO, error) {
+	body := map[string]any{"argv": argv}
+	if len(env) > 0 {
+		body["env"] = env
+	}
+	if cwd != "" {
+		body["cwd"] = cwd
+	}
+	if image != "" {
+		body["image"] = image
+	}
+	if diskGB > 0 {
+		body["disk_gb"] = diskGB
+	}
+	if timeout > 0 {
+		body["timeout_seconds"] = timeout
+	}
+	if c.HTTP != nil {
+		effective := timeout
+		if effective <= 0 {
+			effective = 600
+		}
+		c.HTTP.Timeout = time.Duration(effective+180) * time.Second
+	}
+	var out oneShotRunDTO
+	err := c.PostJSON(ctx, "/v1/one-shot-runs", body, &out)
+	return out, err
+}
+
+func printOneShotRun(out oneShotRunDTO) {
+	if out.Stdout != "" {
+		fmt.Print(out.Stdout)
+	}
+	if out.Stderr != "" {
+		fmt.Fprint(os.Stderr, out.Stderr)
+	}
+	fmt.Fprintf(os.Stderr, "✓ sandbox created  %s  ·  %s\n", out.SandboxName, humanDurationMS(out.Timing.CreateMS))
+	if out.ExitCode != nil {
+		fmt.Fprintf(os.Stderr, "✓ command exited %d  ·  %s\n", *out.ExitCode, humanDurationMS(out.Timing.ExecMS))
+	} else {
+		fmt.Fprintf(os.Stderr, "✓ command %s  ·  %s\n", out.State, humanDurationMS(out.Timing.ExecMS))
+	}
+	if out.CleanupError != "" {
+		fmt.Fprintf(os.Stderr, "✗ sandbox cleanup failed  ·  %s\n", out.CleanupError)
+	} else {
+		fmt.Fprintf(os.Stderr, "✓ sandbox deleted  ·  total %s\n", humanDurationMS(out.Timing.TotalMS))
+	}
+	if out.Truncated {
+		fmt.Fprintln(os.Stderr, "output truncated")
+	}
+	if out.Error != "" {
+		fmt.Fprintf(os.Stderr, "%s\n", out.Error)
+	}
+}
+
 // parseKV turns ["KEY=VALUE", ...] into a map.
 func parseKV(items []string) (map[string]string, error) {
 	if len(items) == 0 {
@@ -808,4 +922,14 @@ func humanAge(t time.Time) string {
 	default:
 		return fmt.Sprintf("%dd", int(d.Hours()/24))
 	}
+}
+
+func humanDurationMS(ms int64) string {
+	if ms < 1000 {
+		return fmt.Sprintf("%d ms", ms)
+	}
+	if ms < 10_000 {
+		return fmt.Sprintf("%.1f s", float64(ms)/1000)
+	}
+	return fmt.Sprintf("%d s", ms/1000)
 }
