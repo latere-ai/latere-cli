@@ -290,7 +290,8 @@ func exchangeForCellaToken(ctx context.Context, opts deviceFlowOpts, authToken s
 	httpc := &http.Client{Timeout: 15 * time.Second}
 
 	// 1. Mint an actor token at auth.
-	actorAud := strings.TrimPrefix(strings.TrimPrefix(apiBase, "https://"), "http://")
+	// Sandboxd validates auth-issued actor tokens against SANDBOXD_AUDIENCE.
+	actorAud := "sandboxd"
 	body, _ := json.Marshal(map[string]any{"audience": actorAud, "ttl_seconds": 60})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, authBase+"/actor-tokens", strings.NewReader(string(body)))
 	if err != nil {
@@ -366,7 +367,6 @@ func inferAuthURL(apiURL string) string {
 // silence unused import warnings on older toolchains where bufio/io were
 // only used in pre-device-code code paths.
 var _ = bufio.NewReader
-
 
 func newAuthWhoamiCmd() *cobra.Command {
 	var apiURL string
