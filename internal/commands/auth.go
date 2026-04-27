@@ -65,6 +65,8 @@ func newAuthLoginCmd() *cobra.Command {
 		authURL  string
 		clientID string
 		scopes   string
+		personal bool
+		orgID    string
 	)
 	cmd := &cobra.Command{
 		Use:   "login",
@@ -73,15 +75,22 @@ func newAuthLoginCmd() *cobra.Command {
 
 By default, login starts the OAuth2 device-code flow against
 auth.latere.ai: it prints a short user code and a URL, you visit the
-URL in any browser to approve, and the CLI then polls until the
-approval lands. The resulting access token is written to
-~/.config/latere/token.json with 0600 perms; the MCP server
-(sandbox-mcp) reads the same file.
+URL in any browser to approve, choose the Personal or Organization
+context for the token, and the CLI then polls until the approval lands.
+The resulting access token is written to ~/.config/latere/token.json
+with 0600 perms; the MCP server (sandbox-mcp) reads the same file.
+
+Use --personal or --org-id to preselect the token context from the
+terminal. Re-run login with a different context to switch which cellas
+the CLI can list and operate.
 
 For unattended setups (CI, scripts), pass --token to skip the device
 flow and store an access token directly.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
+			if personal && strings.TrimSpace(orgID) != "" {
+				return errors.New("--personal and --org-id are mutually exclusive")
+			}
 
 			// Token-paste fast path: --token wins, or stdin pipe falls
 			// back to it. The device flow only kicks in for an
@@ -104,6 +113,8 @@ flow and store an access token directly.`,
 				APIURL:   apiURL,
 				ClientID: clientID,
 				Scopes:   scopes,
+				OrgID:    strings.TrimSpace(orgID),
+				OrgIDSet: personal || strings.TrimSpace(orgID) != "",
 			})
 		},
 	}
@@ -114,6 +125,8 @@ flow and store an access token directly.`,
 	f.StringVar(&clientID, "client-id", "latere-cli", "OAuth client_id used for the device-code request")
 	f.StringVar(&scopes, "scopes", "openid email profile read:sandbox write:sandbox exec:sandbox",
 		"space-delimited scope list")
+	f.BoolVar(&personal, "personal", false, "issue the CLI token for personal cellas")
+	f.StringVar(&orgID, "org-id", "", "issue the CLI token for this organization id")
 	return cmd
 }
 
@@ -143,6 +156,8 @@ func saveAndVerify(ctx context.Context, apiURL, token string) error {
 
 type deviceFlowOpts struct {
 	AuthURL, APIURL, ClientID, Scopes string
+	OrgID                             string
+	OrgIDSet                          bool
 }
 
 type deviceCodeResp struct {
@@ -175,6 +190,9 @@ func runDeviceFlow(ctx context.Context, opts deviceFlowOpts) error {
 	form.Set("client_id", opts.ClientID)
 	if opts.Scopes != "" {
 		form.Set("scope", opts.Scopes)
+	}
+	if opts.OrgIDSet {
+		form.Set("org_id", opts.OrgID)
 	}
 	httpc := &http.Client{Timeout: 30 * time.Second}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
@@ -401,7 +419,10 @@ func newAuthWhoamiCmd() *cobra.Command {
 			}
 			fmt.Printf("principal:     %s\n", info.PrincipalType)
 			if info.OrgID != nil && *info.OrgID != "" {
+				fmt.Printf("context:       org\n")
 				fmt.Printf("org_id:        %s\n", *info.OrgID)
+			} else {
+				fmt.Printf("context:       personal\n")
 			}
 			if info.ClientID != "" {
 				fmt.Printf("client_id:     %s\n", info.ClientID)
