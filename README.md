@@ -180,6 +180,12 @@ tar -cf - ./src | latere cella import <name|id> --dest /workspace
 
 # Import from a tar file
 latere cella import <name|id> --input payload.tar --dest /workspace
+
+# Import one regular file
+latere cella import <name|id> --input data.jsonl --dest /workspace
+
+# Import a zip archive
+latere cella import <name|id> --input payload.zip --dest /workspace
 ```
 
 ## MCP

@@ -1,6 +1,8 @@
 package commands
 
 import (
+	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -11,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -547,20 +550,29 @@ func newCeExportCmd() *cobra.Command {
 
 func newCeImportCmd() *cobra.Command {
 	var (
-		apiURL string
-		dest   string
-		input  string
+		apiURL  string
+		dest    string
+		input   string
+		timeout time.Duration
 	)
 	cmd := &cobra.Command{
 		Use:   "import <name|id>",
-		Short: "Upload a tar into the cella workspace (reads stdin or --input).",
+		Short: "Upload files into the cella workspace (reads stdin or --input).",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := authedClient(apiURL)
 			if err != nil {
 				return err
 			}
-			var src io.Reader = os.Stdin
+			if c.HTTP != nil {
+				c.HTTP.Timeout = timeout
+			}
+			var (
+				src          io.Reader = os.Stdin
+				srcFile      *os.File
+				formFilename = "import.tar"
+				inputKind    = importInputTar
+			)
 			if input != "" && input != "-" {
 				f, err := os.Open(input)
 				if err != nil {
@@ -568,24 +580,44 @@ func newCeImportCmd() *cobra.Command {
 				}
 				defer f.Close()
 				src = f
+				srcFile = f
+				formFilename = filepath.Base(input)
+				inputKind, err = classifyImportInput(input, f)
+				if err != nil {
+					return err
+				}
 			}
 			pr, pw := io.Pipe()
 			mw := multipart.NewWriter(pw)
 			go func() {
-				defer pw.Close()
 				if dest != "" {
-					_ = mw.WriteField("dest", dest)
+					if err := mw.WriteField("dest", dest); err != nil {
+						_ = pw.CloseWithError(err)
+						return
+					}
 				}
-				fw, err := mw.CreateFormFile("tarball", "import.tar")
+				fw, err := mw.CreateFormFile("tarball", formFilename)
 				if err != nil {
 					_ = pw.CloseWithError(err)
 					return
 				}
-				if _, err := io.Copy(fw, src); err != nil {
+				switch inputKind {
+				case importInputRegularFile:
+					err = writeSingleFileTar(fw, input, srcFile)
+				case importInputZip:
+					err = writeZipAsTar(fw, input, srcFile)
+				default:
+					_, err = io.Copy(fw, src)
+				}
+				if err != nil {
 					_ = pw.CloseWithError(err)
 					return
 				}
-				_ = mw.Close()
+				if err := mw.Close(); err != nil {
+					_ = pw.CloseWithError(err)
+					return
+				}
+				_ = pw.Close()
 			}()
 			path := sbPath(args[0]) + "/files/import"
 			var resp struct {
@@ -603,8 +635,145 @@ func newCeImportCmd() *cobra.Command {
 	f := cmd.Flags()
 	f.StringVar(&apiURL, "api-url", "", "override sandboxd base URL")
 	f.StringVar(&dest, "dest", "", "destination dir in the sandbox; default /workspace")
-	f.StringVarP(&input, "input", "i", "-", "input tar path (- for stdin)")
+	f.StringVarP(&input, "input", "i", "-", "input path; tar archives are extracted, regular files are copied")
+	f.DurationVar(&timeout, "timeout", 30*time.Minute, "HTTP timeout covering upload and extraction (0 disables)")
 	return cmd
+}
+
+type importInputKind int
+
+const (
+	importInputTar importInputKind = iota
+	importInputRegularFile
+	importInputZip
+)
+
+func classifyImportInput(name string, f *os.File) (importInputKind, error) {
+	info, err := f.Stat()
+	if err != nil {
+		return importInputTar, err
+	}
+	if info.IsDir() {
+		return importInputTar, fmt.Errorf("input must be a file, got directory: %s", name)
+	}
+	if hasZipExtension(name) {
+		return importInputZip, nil
+	}
+	if hasTarExtension(name) {
+		return importInputTar, nil
+	}
+	kind, err := sniffImportInput(f)
+	if err != nil {
+		return importInputTar, err
+	}
+	return kind, nil
+}
+
+func hasTarExtension(name string) bool {
+	name = strings.ToLower(name)
+	for _, suffix := range []string{".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz", ".tbz2", ".tar.xz", ".txz"} {
+		if strings.HasSuffix(name, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasZipExtension(name string) bool {
+	return strings.HasSuffix(strings.ToLower(name), ".zip")
+}
+
+func sniffImportInput(f *os.File) (importInputKind, error) {
+	var block [512]byte
+	n, err := io.ReadFull(f, block[:])
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
+		return importInputTar, err
+	}
+	if _, seekErr := f.Seek(0, io.SeekStart); seekErr != nil {
+		return importInputTar, seekErr
+	}
+	if n >= 4 && string(block[:2]) == "PK" &&
+		(block[2] == 0x03 || block[2] == 0x05 || block[2] == 0x07) &&
+		(block[3] == 0x04 || block[3] == 0x06 || block[3] == 0x08) {
+		return importInputZip, nil
+	}
+	if n < len(block) {
+		return importInputRegularFile, nil
+	}
+	if string(block[257:262]) == "ustar" {
+		return importInputTar, nil
+	}
+	return importInputRegularFile, nil
+}
+
+func writeSingleFileTar(dst io.Writer, name string, f *os.File) error {
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	tw := tar.NewWriter(dst)
+	hdr, err := tar.FileInfoHeader(info, "")
+	if err != nil {
+		return err
+	}
+	hdr.Name = filepath.Base(name)
+	if err := tw.WriteHeader(hdr); err != nil {
+		return err
+	}
+	if _, err := io.Copy(tw, f); err != nil {
+		return err
+	}
+	return tw.Close()
+}
+
+func writeZipAsTar(dst io.Writer, name string, f *os.File) error {
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	zr, err := zip.NewReader(f, info.Size())
+	if err != nil {
+		return fmt.Errorf("read zip %s: %w", name, err)
+	}
+	tw := tar.NewWriter(dst)
+	for _, zf := range zr.File {
+		if !safeArchivePath(zf.Name) {
+			return fmt.Errorf("zip entry has unsafe path: %s", zf.Name)
+		}
+		hdr, err := tar.FileInfoHeader(zf.FileInfo(), "")
+		if err != nil {
+			return err
+		}
+		hdr.Name = strings.TrimPrefix(zf.Name, "./")
+		if err := tw.WriteHeader(hdr); err != nil {
+			return err
+		}
+		if zf.FileInfo().IsDir() {
+			continue
+		}
+		rc, err := zf.Open()
+		if err != nil {
+			return err
+		}
+		_, copyErr := io.Copy(tw, rc)
+		closeErr := rc.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+	}
+	return tw.Close()
+}
+
+func safeArchivePath(name string) bool {
+	name = strings.TrimPrefix(name, "./")
+	return name != "" && !filepath.IsAbs(name) && !strings.Contains(name, "\x00") &&
+		name != "." && !strings.HasPrefix(name, "../") && !strings.Contains(name, "/../")
 }
 
 // ---- extend / convert ----
