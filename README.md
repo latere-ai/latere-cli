@@ -56,6 +56,7 @@ Create an ephemeral cella and run a command:
 ```sh
 latere cella create --name demo --tier ephemeral
 latere cella exec demo -- sh -lc 'echo hello && pwd'
+latere cella shell demo
 ```
 
 Run a one-shot disposable command. The backend creates an ephemeral
@@ -126,11 +127,16 @@ latere cella convert <name|id> --to ephemeral --hours 12
 
 ## Commands and logs
 
+Interactive shell opens a long-lived PTY WebSocket, matching the dashboard terminal protocol:
+
+```sh
+latere cella shell <name|id>
+```
+
 Foreground execution streams output and exits with the command's status:
 
 ```sh
 latere cella exec <name|id> -- sh -lc 'go test ./...'
-latere exec <name|id> -- sh -lc 'go test ./...'
 ```
 
 Background execution prints a command id:

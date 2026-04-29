@@ -22,7 +22,6 @@ func NewRoot(version string) *cobra.Command {
 
 	root.AddCommand(newAuthCmd())
 	root.AddCommand(newCellaCmd())
-	root.AddCommand(newExecCmd())
 	return root
 }
 

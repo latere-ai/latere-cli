@@ -101,6 +101,7 @@ window; tier 'persistent' stays until you delete it.`,
 		newCeStopCmd(),
 		newCeDeleteCmd(),
 		newCeExecCmd(),
+		newCeShellCmd(),
 		newCeRunCmd(),
 		newCeLogsCmd(),
 		newCeWaitCmd(),
@@ -110,15 +111,6 @@ window; tier 'persistent' stays until you delete it.`,
 		newCeConvertCmd(),
 		newCeMcpCmd(),
 	)
-	return cmd
-}
-
-// newExecCmd is the top-level `latere exec` shortcut. The same
-// behavior is also wired in under `latere cella exec` via
-// newCeExecCmd, so both forms work.
-func newExecCmd() *cobra.Command {
-	cmd := newCeExecCmd()
-	cmd.Use = "exec <name|id> -- <cmd>..."
 	return cmd
 }
 
