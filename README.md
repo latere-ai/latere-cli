@@ -197,6 +197,9 @@ latere cella import <name|id> --input payload.zip --dest /workspace
 ## MCP
 
 `latere cella mcp` runs a stdio MCP server using the same token file as the CLI.
+By default it exposes a focused coding-agent surface over existing Cella sandboxes:
+`Sandboxes`, `Read`, `Write`, `Edit`, `Bash`, `Monitor`, `Glob`, `Grep`, `Upload`,
+and `Download`.
 
 Example MCP config:
 
@@ -211,12 +214,37 @@ Example MCP config:
 }
 ```
 
-Current MCP tool surface:
+Alias sandboxes at startup when an MCP host should work across more than one target:
 
-- `cella_create`, `cella_list`, `cella_get`
-- `cella_start`, `cella_stop`, `cella_extend`, `cella_convert`, `cella_delete`
-- `cella_run`, `cella_wait`, `cella_logs`, `cella_kill`
-- `cella_export`, `cella_import`
+```json
+{
+  "mcpServers": {
+    "latere-cella": {
+      "command": "latere",
+      "args": ["cella", "mcp", "--sandbox", "frontend=my-frontend", "--sandbox", "backend=sbx_..."]
+    }
+  }
+}
+```
+
+Every action tool takes a `sandbox` selector. The selector can be a configured
+alias, a sandbox id, or a sandbox slug. File paths are relative to the selected
+sandbox's backend-resolved working directory; the MCP server does not assume
+`/workspace`.
+
+Lifecycle and command-management tools are opt-in:
+
+```sh
+latere cella mcp --surface=management
+latere cella mcp --surface=all
+```
+
+Management tools use the same PascalCase naming style as the agent tools:
+
+- `CreateSandbox`, `ListSandboxes`, `GetSandbox`
+- `StartSandbox`, `StopSandbox`, `ExtendSandbox`, `ConvertSandbox`, `DeleteSandbox`
+- `RunCommand`, `WaitCommand`, `CommandLogs`, `KillCommand`
+- `ExportFiles`, `ImportFiles`
 
 ## Configuration
 
