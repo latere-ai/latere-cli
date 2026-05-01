@@ -177,8 +177,9 @@ latere cella logs <name|id> <command_id> --follow
 latere cella wait <name|id> <command_id> --timeout 600
 ```
 
-`run` accepts repeatable `--env KEY=VALUE` and `--cwd /path`. One-shot
-runs also accept `--image`, `--disk`, `--timeout`, `--detach`, and `--json`.
+`run` accepts repeatable `--env KEY=VALUE` for non-secret configuration and
+`--cwd /path`. One-shot runs also accept `--image`, `--disk`, `--timeout`,
+`--detach`, and `--json`.
 
 ## Files
 
@@ -241,6 +242,9 @@ Every action tool takes a `sandbox` selector. The selector can be a configured
 alias, a sandbox id, or a sandbox slug. File paths are relative to the selected
 sandbox's backend-resolved working directory; the MCP server does not assume
 `/workspace`.
+
+Tool `env` fields are literal non-secret variables. Credentials should come
+from the Cella trust-plane catalog configured for the selected sandbox.
 
 Lifecycle and command-management tools are opt-in:
 

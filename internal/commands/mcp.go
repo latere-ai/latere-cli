@@ -55,6 +55,9 @@ be an alias configured with --sandbox, a sandbox id, or a slug.
 The legacy lifecycle-heavy tool surface is still available with
 --surface=management.
 
+Env fields are literal non-secret environment variables. Credentials should
+come from the Cella trust-plane catalog configured for the selected sandbox.
+
 The token at ~/.config/latere/token.json (written by 'latere auth login')
 is used for every call. A missing token starts the server anyway so the
 auth failure surfaces on first tool use rather than at boot.`,
@@ -230,7 +233,7 @@ type mcpCreateResult struct {
 type mcpRunArgs struct {
 	Sandbox string            `json:"sandbox" mcp:"sandbox id or slug"`
 	Argv    []string          `json:"argv"`
-	Env     map[string]string `json:"env,omitempty"`
+	Env     map[string]string `json:"env,omitempty" mcp:"literal non-secret environment variables"`
 	Cwd     string            `json:"cwd,omitempty"`
 }
 type mcpRunResult struct {
@@ -350,7 +353,7 @@ type mcpBashArgs struct {
 	Command        string            `json:"command" mcp:"shell command to run inside the sandbox"`
 	Cwd            string            `json:"cwd,omitempty" mcp:"working directory relative to the sandbox workdir"`
 	TimeoutSeconds int               `json:"timeout_seconds,omitempty"`
-	Env            map[string]string `json:"env,omitempty"`
+	Env            map[string]string `json:"env,omitempty" mcp:"literal non-secret environment variables"`
 	Background     bool              `json:"background,omitempty"`
 	MaxOutputBytes int               `json:"max_output_bytes,omitempty"`
 }

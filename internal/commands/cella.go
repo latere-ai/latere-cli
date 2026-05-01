@@ -205,7 +205,7 @@ func newCeCreateCmd() *cobra.Command {
 	f.IntVar(&autoStop, "auto-stop-minutes", -1, "idle timeout (default 15; 0 disables)")
 	f.IntVar(&autoDeleteHours, "auto-delete-hours", 0, "ephemeral wall-clock lifetime")
 	f.StringVar(&ttl, "ttl", "", "Go duration TTL alternative to --auto-delete-hours")
-	f.StringArrayVar(&envFlag, "env", nil, "KEY=VALUE; repeatable")
+	f.StringArrayVar(&envFlag, "env", nil, "non-secret KEY=VALUE; repeatable")
 	f.StringVar(&policy, "policy", "", "named NetworkPolicy")
 	f.StringVar(&apiURL, "api-url", "", "override sandboxd base URL")
 	return cmd
@@ -426,7 +426,7 @@ func newCeRunCmd() *cobra.Command {
 	}
 	f := cmd.Flags()
 	f.StringVar(&apiURL, "api-url", "", "override sandboxd base URL")
-	f.StringArrayVar(&envFlag, "env", nil, "KEY=VALUE; repeatable")
+	f.StringArrayVar(&envFlag, "env", nil, "non-secret KEY=VALUE; repeatable")
 	f.StringVar(&cwd, "cwd", "", "working dir inside the cella")
 	f.BoolVarP(&follow, "follow", "f", false, "stream logs and exit with the command's exit code")
 	f.BoolVar(&detach, "detach", false, "start a disposable one-shot run and return its run id immediately")
