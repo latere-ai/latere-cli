@@ -245,9 +245,19 @@ Alias sandboxes at startup when an MCP host should work across more than one tar
 ```
 
 Every action tool takes a `sandbox` selector. The selector can be a configured
-alias, a sandbox id, or a sandbox slug. File paths are relative to the selected
-sandbox's backend-resolved working directory; the MCP server does not assume
-`/workspace`.
+alias, a sandbox id, or a sandbox slug. Tool inputs accept paths relative to the
+selected sandbox's backend-resolved working directory (`Sandboxes` returns it
+as `workdir`). The MCP server resolves the absolute container path before
+calling the API and surfaces it back in tool results, so callers never need to
+assume `/workspace` themselves.
+
+`Bash` returns a single combined `output` field (stdout and stderr merged in
+the order the runtime emitted them); `Monitor` events use a `combined` stream
+label for the same reason.
+
+`Upload` rejects archives that would overwrite an existing file unless the
+caller passes `overwrite=true`. `Download` caps the returned tar at 50 MiB —
+narrow `paths` for large workspaces or use the management `ExportFiles` tool.
 
 Tool `env` fields are literal non-secret variables. Credentials should come
 from the Cella trust-plane catalog configured for the selected sandbox.

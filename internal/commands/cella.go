@@ -40,7 +40,13 @@ type sandboxDTO struct {
 	MemoryMB        int               `json:"memory_mb,omitempty"`
 	Deadline        time.Time         `json:"deadline,omitzero"`
 	Annotations     map[string]string `json:"annotations,omitempty"`
+	Workdir         string            `json:"workdir,omitempty"`
 }
+
+// fallbackWorkdir is the path the MCP/CLI assume when a sandbox DTO
+// arrives without a workdir field (older sandboxd before the workdir
+// contract shipped).
+const fallbackWorkdir = "/workspace"
 
 type commandDTO struct {
 	CommandID string    `json:"command_id"`

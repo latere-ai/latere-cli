@@ -468,11 +468,12 @@ func (m *mcpTools) agentSandboxes(ctx context.Context, _ *mcp.CallToolRequest, a
 		p += "?" + e
 	}
 	var rows []struct {
-		ID     string `json:"id"`
-		Name   string `json:"name,omitempty"`
-		State  string `json:"state"`
-		Tier   string `json:"tier,omitempty"`
-		DiskGB int    `json:"disk_gb,omitempty"`
+		ID      string `json:"id"`
+		Name    string `json:"name,omitempty"`
+		State   string `json:"state"`
+		Tier    string `json:"tier,omitempty"`
+		DiskGB  int    `json:"disk_gb,omitempty"`
+		Workdir string `json:"workdir,omitempty"`
 	}
 	if err := m.c.GetJSON(ctx, p, &rows); err != nil {
 		return nil, mcpAgentSandboxesResult{}, err
@@ -482,79 +483,102 @@ func (m *mcpTools) agentSandboxes(ctx context.Context, _ *mcp.CallToolRequest, a
 		if !a.IncludeStopped && row.State == "stopped" {
 			continue
 		}
+		wd := row.Workdir
+		if wd == "" {
+			wd = fallbackWorkdir
+		}
 		out.Sandboxes = append(out.Sandboxes, mcpAgentSandbox{
-			Alias:  m.aliasFor(row.ID, row.Name),
-			ID:     row.ID,
-			Name:   row.Name,
-			State:  row.State,
-			Tier:   row.Tier,
-			DiskGB: row.DiskGB,
+			Alias:   m.aliasFor(row.ID, row.Name),
+			ID:      row.ID,
+			Name:    row.Name,
+			State:   row.State,
+			Tier:    row.Tier,
+			DiskGB:  row.DiskGB,
+			Workdir: wd,
 		})
 	}
 	return mcpText("%d sandboxes", len(out.Sandboxes)), out, nil
 }
 
 func (m *mcpTools) agentRead(ctx context.Context, _ *mcp.CallToolRequest, a mcpReadArgs) (*mcp.CallToolResult, mcpReadResult, error) {
-	sandbox, err := m.ensureSandbox(ctx, a.Sandbox)
+	sandbox, workdir, err := m.ensureSandbox(ctx, a.Sandbox)
 	if err != nil {
 		return nil, mcpReadResult{}, err
 	}
-	content, total, truncated, err := m.readTextFile(ctx, sandbox, a.Path, a.Offset, a.Limit)
+	rel, err := safeToolPath(a.Path)
+	if err != nil {
+		return nil, mcpReadResult{}, err
+	}
+	abs := absUnderWorkdir(workdir, rel)
+	content, total, truncated, err := m.readTextFile(ctx, sandbox, workdir, rel, a.Offset, a.Limit)
 	if err != nil {
 		return nil, mcpReadResult{}, err
 	}
 	out := mcpReadResult{
 		Sandbox:   sandbox,
-		Path:      a.Path,
+		Path:      abs,
 		Bytes:     total,
 		Truncated: truncated,
 		Content:   content,
 	}
-	return mcpText("read %d bytes from %s", len(content), a.Path), out, nil
+	return mcpText("read %d bytes from %s", len(content), abs), out, nil
 }
 
 func (m *mcpTools) agentWrite(ctx context.Context, _ *mcp.CallToolRequest, a mcpWriteArgs) (*mcp.CallToolResult, mcpWriteResult, error) {
-	sandbox, err := m.ensureSandbox(ctx, a.Sandbox)
+	sandbox, workdir, err := m.ensureSandbox(ctx, a.Sandbox)
 	if err != nil {
 		return nil, mcpWriteResult{}, err
 	}
+	rel, err := safeToolPath(a.Path)
+	if err != nil {
+		return nil, mcpWriteResult{}, err
+	}
+	abs := absUnderWorkdir(workdir, rel)
 	if a.CreateOnly {
-		if _, _, _, err := m.readTextFile(ctx, sandbox, a.Path, 0, 1); err == nil {
-			return nil, mcpWriteResult{}, fmt.Errorf("refusing to overwrite existing file %q", a.Path)
+		if _, _, _, err := m.readTextFile(ctx, sandbox, workdir, rel, 0, 1); err == nil {
+			return nil, mcpWriteResult{}, fmt.Errorf("refusing to overwrite existing file %q", abs)
 		}
 	}
-	tarBytes, err := tarSingleFile(a.Path, []byte(a.Content), a.Mode)
+	tarBytes, err := tarSingleFile(rel, []byte(a.Content), a.Mode)
 	if err != nil {
 		return nil, mcpWriteResult{}, err
 	}
-	if _, err := m.importTar(ctx, sandbox, "", tarBytes); err != nil {
+	if _, err := m.importTar(ctx, sandbox, workdir, tarBytes); err != nil {
 		return nil, mcpWriteResult{}, err
 	}
-	out := mcpWriteResult{Sandbox: sandbox, Path: a.Path, Bytes: len(a.Content)}
-	return mcpText("wrote %d bytes to %s", len(a.Content), a.Path), out, nil
+	out := mcpWriteResult{Sandbox: sandbox, Path: abs, Bytes: len(a.Content)}
+	return mcpText("wrote %d bytes to %s", len(a.Content), abs), out, nil
 }
 
 func (m *mcpTools) agentEdit(ctx context.Context, _ *mcp.CallToolRequest, a mcpEditArgs) (*mcp.CallToolResult, mcpEditResult, error) {
-	sandbox, err := m.ensureSandbox(ctx, a.Sandbox)
+	sandbox, workdir, err := m.ensureSandbox(ctx, a.Sandbox)
 	if err != nil {
 		return nil, mcpEditResult{}, err
 	}
-	content, _, truncated, err := m.readTextFile(ctx, sandbox, a.Path, 0, 5<<20)
+	if a.Old == "" {
+		return nil, mcpEditResult{}, errors.New("old must be non-empty")
+	}
+	rel, err := safeToolPath(a.Path)
+	if err != nil {
+		return nil, mcpEditResult{}, err
+	}
+	abs := absUnderWorkdir(workdir, rel)
+	content, _, truncated, err := m.readTextFile(ctx, sandbox, workdir, rel, 0, 5<<20)
 	if err != nil {
 		return nil, mcpEditResult{}, err
 	}
 	if truncated {
-		return nil, mcpEditResult{}, fmt.Errorf("file too large for Edit: %s", a.Path)
+		return nil, mcpEditResult{}, fmt.Errorf("file too large for Edit: %s", abs)
 	}
 	count := strings.Count(content, a.Old)
-	if a.Old == "" {
-		return nil, mcpEditResult{}, errors.New("old must be non-empty")
-	}
 	if count == 0 {
-		return nil, mcpEditResult{}, fmt.Errorf("old text not found in %s", a.Path)
+		return nil, mcpEditResult{}, fmt.Errorf("old text not found in %s\n%s",
+			abs, formatEditHint(content, a.Old))
 	}
 	if !a.ReplaceAll && count != 1 {
-		return nil, mcpEditResult{}, fmt.Errorf("old text matched %d times in %s; set replace_all to edit all matches", count, a.Path)
+		return nil, mcpEditResult{}, fmt.Errorf(
+			"old text matched %d times in %s; set replace_all or extend old with surrounding context\n%s",
+			count, abs, formatEditMatches(content, a.Old))
 	}
 	next := strings.Replace(content, a.Old, a.New, 1)
 	replacements := 1
@@ -562,29 +586,30 @@ func (m *mcpTools) agentEdit(ctx context.Context, _ *mcp.CallToolRequest, a mcpE
 		next = strings.ReplaceAll(content, a.Old, a.New)
 		replacements = count
 	}
-	tarBytes, err := tarSingleFile(a.Path, []byte(next), "0644")
+	tarBytes, err := tarSingleFile(rel, []byte(next), "0644")
 	if err != nil {
 		return nil, mcpEditResult{}, err
 	}
-	if _, err := m.importTar(ctx, sandbox, "", tarBytes); err != nil {
+	if _, err := m.importTar(ctx, sandbox, workdir, tarBytes); err != nil {
 		return nil, mcpEditResult{}, err
 	}
-	out := mcpEditResult{Sandbox: sandbox, Path: a.Path, Replacements: replacements}
-	return mcpText("edited %s (%d replacements)", a.Path, replacements), out, nil
+	out := mcpEditResult{Sandbox: sandbox, Path: abs, Replacements: replacements}
+	return mcpText("edited %s (%d replacements)", abs, replacements), out, nil
 }
 
 func (m *mcpTools) agentBash(ctx context.Context, _ *mcp.CallToolRequest, a mcpBashArgs) (*mcp.CallToolResult, mcpBashResult, error) {
-	sandbox, err := m.ensureSandbox(ctx, a.Sandbox)
+	sandbox, workdir, err := m.ensureSandbox(ctx, a.Sandbox)
 	if err != nil {
 		return nil, mcpBashResult{}, err
 	}
 	if strings.TrimSpace(a.Command) == "" {
 		return nil, mcpBashResult{}, errors.New("command is required")
 	}
-	cwd, err := safeToolDir(a.Cwd)
+	relCwd, err := safeToolDir(a.Cwd)
 	if err != nil {
 		return nil, mcpBashResult{}, err
 	}
+	cwd := absUnderWorkdir(workdir, relCwd)
 	cd, err := startCommand(ctx, m.c, sandbox, []string{"sh", "-lc", a.Command}, a.Env, cwd, a.CredentialCatalog)
 	if err != nil {
 		return nil, mcpBashResult{}, err
@@ -611,7 +636,7 @@ func (m *mcpTools) agentBash(ctx context.Context, _ *mcp.CallToolRequest, a mcpB
 }
 
 func (m *mcpTools) agentMonitor(ctx context.Context, _ *mcp.CallToolRequest, a mcpMonitorArgs) (*mcp.CallToolResult, mcpMonitorResult, error) {
-	sandbox, err := m.ensureSandbox(ctx, a.Sandbox)
+	sandbox, _, err := m.ensureSandbox(ctx, a.Sandbox)
 	if err != nil {
 		return nil, mcpMonitorResult{}, err
 	}
@@ -664,7 +689,7 @@ func (m *mcpTools) agentMonitor(ctx context.Context, _ *mcp.CallToolRequest, a m
 }
 
 func (m *mcpTools) agentGlob(ctx context.Context, _ *mcp.CallToolRequest, a mcpGlobArgs) (*mcp.CallToolResult, mcpGlobResult, error) {
-	sandbox, err := m.ensureSandbox(ctx, a.Sandbox)
+	sandbox, workdir, err := m.ensureSandbox(ctx, a.Sandbox)
 	if err != nil {
 		return nil, mcpGlobResult{}, err
 	}
@@ -672,13 +697,13 @@ func (m *mcpTools) agentGlob(ctx context.Context, _ *mcp.CallToolRequest, a mcpG
 	if limit <= 0 {
 		limit = 500
 	}
-	root, err := safeToolDir(a.Path)
+	relRoot, err := safeToolDir(a.Path)
 	if err != nil {
 		return nil, mcpGlobResult{}, err
 	}
-	root = defaultStr(root, ".")
+	root := absUnderWorkdir(workdir, relRoot)
 	cmd := "find " + shQuote(root) + " -type f"
-	run, err := m.runShell(ctx, sandbox, cmd, "", 30*time.Second, 2<<20)
+	run, err := m.runShell(ctx, sandbox, cmd, workdir, 30*time.Second, 2<<20)
 	if err != nil {
 		return nil, mcpGlobResult{}, err
 	}
@@ -687,8 +712,14 @@ func (m *mcpTools) agentGlob(ctx context.Context, _ *mcp.CallToolRequest, a mcpG
 		return nil, mcpGlobResult{}, err
 	}
 	out := mcpGlobResult{Sandbox: sandbox}
+	prefix := workdir + "/"
 	for _, line := range strings.Split(run.Output, "\n") {
-		line = strings.TrimPrefix(strings.TrimSpace(line), "./")
+		line = strings.TrimSpace(line)
+		// `find <abs-root>` returns absolute paths; surface them
+		// relative to workdir so the caller can compose them with
+		// other tool args without re-rooting.
+		line = strings.TrimPrefix(line, prefix)
+		line = strings.TrimPrefix(line, "./")
 		if line == "" {
 			continue
 		}
@@ -704,7 +735,7 @@ func (m *mcpTools) agentGlob(ctx context.Context, _ *mcp.CallToolRequest, a mcpG
 }
 
 func (m *mcpTools) agentGrep(ctx context.Context, _ *mcp.CallToolRequest, a mcpGrepArgs) (*mcp.CallToolResult, mcpGrepResult, error) {
-	sandbox, err := m.ensureSandbox(ctx, a.Sandbox)
+	sandbox, workdir, err := m.ensureSandbox(ctx, a.Sandbox)
 	if err != nil {
 		return nil, mcpGrepResult{}, err
 	}
@@ -716,21 +747,22 @@ func (m *mcpTools) agentGrep(ctx context.Context, _ *mcp.CallToolRequest, a mcpG
 	if a.IgnoreCase {
 		flags += "i"
 	}
-	root, err := safeToolDir(a.Path)
+	relRoot, err := safeToolDir(a.Path)
 	if err != nil {
 		return nil, mcpGrepResult{}, err
 	}
-	root = defaultStr(root, ".")
+	root := absUnderWorkdir(workdir, relRoot)
 	parts := []string{"grep", flags}
 	if a.Glob != "" {
 		parts = append(parts, "--include="+shQuote(a.Glob))
 	}
 	parts = append(parts, "--", shQuote(a.Pattern), shQuote(root))
-	run, err := m.runShell(ctx, sandbox, strings.Join(parts, " "), "", 30*time.Second, 2<<20)
+	run, err := m.runShell(ctx, sandbox, strings.Join(parts, " "), workdir, 30*time.Second, 2<<20)
 	if err != nil {
 		return nil, mcpGrepResult{}, err
 	}
 	out := mcpGrepResult{Sandbox: sandbox}
+	prefix := workdir + "/"
 	for _, line := range strings.Split(run.Output, "\n") {
 		if line == "" {
 			continue
@@ -739,6 +771,7 @@ func (m *mcpTools) agentGrep(ctx context.Context, _ *mcp.CallToolRequest, a mcpG
 		if match.Path == "" {
 			continue
 		}
+		match.Path = strings.TrimPrefix(match.Path, prefix)
 		if len(out.Matches) >= limit {
 			out.Truncated = true
 			break
@@ -748,31 +781,67 @@ func (m *mcpTools) agentGrep(ctx context.Context, _ *mcp.CallToolRequest, a mcpG
 	return mcpText("%d matches", len(out.Matches)), out, nil
 }
 
+// maxAgentDownloadBytes caps the raw tar size returned to the MCP
+// caller before base64 encoding. The MCP framing has no streaming
+// affordance, so a multi-hundred-MiB response would balloon the
+// stdio buffer and stall the host. When the cap is exceeded the
+// caller must narrow `paths` (or use the management ExportFiles tool
+// with a real artifact handle once that lands).
+const maxAgentDownloadBytes = 50 << 20
+
 func (m *mcpTools) agentUpload(ctx context.Context, _ *mcp.CallToolRequest, a mcpUploadArgs) (*mcp.CallToolResult, mcpUploadResult, error) {
-	sandbox, err := m.ensureSandbox(ctx, a.Sandbox)
+	sandbox, workdir, err := m.ensureSandbox(ctx, a.Sandbox)
 	if err != nil {
 		return nil, mcpUploadResult{}, err
 	}
+	relDest, err := safeToolDir(a.Dest)
+	if err != nil {
+		return nil, mcpUploadResult{}, err
+	}
+	dest := absUnderWorkdir(workdir, relDest)
 	tarBytes, err := base64.StdEncoding.DecodeString(a.TarBase64)
 	if err != nil {
 		return nil, mcpUploadResult{}, fmt.Errorf("decode tar_base64: %w", err)
 	}
-	resp, err := m.importTar(ctx, sandbox, a.Dest, tarBytes)
+	if !a.Overwrite {
+		if err := m.preflightUploadOverwrite(ctx, sandbox, workdir, relDest, tarBytes); err != nil {
+			return nil, mcpUploadResult{}, err
+		}
+	}
+	resp, err := m.importTar(ctx, sandbox, dest, tarBytes)
 	if err != nil {
 		return nil, mcpUploadResult{}, err
 	}
-	out := mcpUploadResult{Sandbox: sandbox, Dest: resp.Dest, Bytes: resp.Bytes}
-	return mcpText("uploaded %d bytes", resp.Bytes), out, nil
+	out := mcpUploadResult{Sandbox: sandbox, Dest: dest, Bytes: resp.Bytes}
+	return mcpText("uploaded %d bytes to %s", resp.Bytes, dest), out, nil
 }
 
 func (m *mcpTools) agentDownload(ctx context.Context, _ *mcp.CallToolRequest, a mcpDownloadArgs) (*mcp.CallToolResult, mcpDownloadResult, error) {
-	sandbox, err := m.ensureSandbox(ctx, a.Sandbox)
+	sandbox, workdir, err := m.ensureSandbox(ctx, a.Sandbox)
 	if err != nil {
 		return nil, mcpDownloadResult{}, err
 	}
-	tarBytes, err := m.exportTar(ctx, sandbox, a.SrcDir, a.Paths)
+	relSrc, err := safeToolDir(a.SrcDir)
 	if err != nil {
 		return nil, mcpDownloadResult{}, err
+	}
+	srcDir := absUnderWorkdir(workdir, relSrc)
+	cleanPaths := make([]string, 0, len(a.Paths))
+	for _, p := range a.Paths {
+		clean, err := safeToolPath(p)
+		if err != nil {
+			return nil, mcpDownloadResult{}, err
+		}
+		cleanPaths = append(cleanPaths, clean)
+	}
+	tarBytes, err := m.exportTar(ctx, sandbox, srcDir, cleanPaths)
+	if err != nil {
+		return nil, mcpDownloadResult{}, err
+	}
+	if len(tarBytes) > maxAgentDownloadBytes {
+		return nil, mcpDownloadResult{}, fmt.Errorf(
+			"download exceeds %d byte cap (got %d); narrow `paths` to the files you need",
+			maxAgentDownloadBytes, len(tarBytes))
 	}
 	out := mcpDownloadResult{
 		Sandbox:   sandbox,
@@ -1108,27 +1177,48 @@ func (m *mcpTools) resolveSandbox(selector string) (string, error) {
 	return selector, nil
 }
 
-func (m *mcpTools) ensureSandbox(ctx context.Context, selector string) (string, error) {
+// ensureSandbox resolves the selector, auto-starts the sandbox if
+// allowed, and returns the canonical id plus the resolved workdir.
+// Sandboxes served by older sandboxd versions that omit workdir fall
+// back to fallbackWorkdir so the MCP keeps working through the
+// rollout window.
+func (m *mcpTools) ensureSandbox(ctx context.Context, selector string) (string, string, error) {
 	sandbox, err := m.resolveSandbox(selector)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	var sb sandboxDTO
 	if err := m.c.GetJSON(ctx, sbPath(sandbox), &sb); err != nil {
-		return "", err
+		return "", "", err
 	}
 	if sb.State == "stopped" {
 		if !m.autoStart {
-			return "", fmt.Errorf("sandbox %q is stopped and auto-start is disabled", selector)
+			return "", "", fmt.Errorf("sandbox %q is stopped and auto-start is disabled", selector)
 		}
 		if _, _, err := m.lifecycleVerb(ctx, sandbox, "start"); err != nil {
-			return "", err
+			return "", "", err
 		}
 	}
-	if sb.ID != "" {
-		return sb.ID, nil
+	id := sb.ID
+	if id == "" {
+		id = sandbox
 	}
-	return sandbox, nil
+	wd := sb.Workdir
+	if wd == "" {
+		wd = fallbackWorkdir
+	}
+	return id, wd, nil
+}
+
+// absUnderWorkdir joins a validated relative path with the resolved
+// workdir to produce the absolute container path used in API calls and
+// surfaced to the MCP caller. relPath must already have passed through
+// safeToolPath / safeToolDir.
+func absUnderWorkdir(workdir, relPath string) string {
+	if relPath == "" {
+		return workdir
+	}
+	return path.Join(workdir, relPath)
 }
 
 func safeToolPath(p string) (string, error) {
@@ -1164,8 +1254,8 @@ func safeToolDir(p string) (string, error) {
 	return clean, nil
 }
 
-func (m *mcpTools) readTextFile(ctx context.Context, sandbox, file string, offset, limit int) (string, int, bool, error) {
-	file, err := safeToolPath(file)
+func (m *mcpTools) readTextFile(ctx context.Context, sandbox, workdir, file string, offset, limit int) (string, int, bool, error) {
+	rel, err := safeToolPath(file)
 	if err != nil {
 		return "", 0, false, err
 	}
@@ -1178,7 +1268,7 @@ func (m *mcpTools) readTextFile(ctx context.Context, sandbox, file string, offse
 	if limit > 5<<20 {
 		return "", 0, false, errors.New("limit must be <= 5242880")
 	}
-	tarBytes, err := m.exportTar(ctx, sandbox, "", []string{file})
+	tarBytes, err := m.exportTar(ctx, sandbox, workdir, []string{rel})
 	if err != nil {
 		return "", 0, false, err
 	}
@@ -1202,7 +1292,7 @@ func (m *mcpTools) readTextFile(ctx context.Context, sandbox, file string, offse
 			return "", 0, false, fmt.Errorf("file too large for Read: %s", file)
 		}
 		if !utf8.Valid(body) {
-			return "", len(body), false, fmt.Errorf("file is not valid UTF-8 text: %s", file)
+			return "", len(body), false, fmt.Errorf("file is not valid UTF-8 text: %s", rel)
 		}
 		total := len(body)
 		if offset > total {
@@ -1214,7 +1304,7 @@ func (m *mcpTools) readTextFile(ctx context.Context, sandbox, file string, offse
 		}
 		return string(body[offset:end]), total, end < total, nil
 	}
-	return "", 0, false, fmt.Errorf("file not found in export: %s", file)
+	return "", 0, false, fmt.Errorf("file not found in export: %s", rel)
 }
 
 func tarSingleFile(file string, content []byte, mode string) ([]byte, error) {
@@ -1248,21 +1338,14 @@ func tarSingleFile(file string, content []byte, mode string) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func (m *mcpTools) exportTar(ctx context.Context, sandbox, srcDir string, paths []string) ([]byte, error) {
-	var err error
-	srcDir, err = safeToolDir(srcDir)
-	if err != nil {
-		return nil, err
+// exportTar runs the API export with an absolute src_dir already
+// resolved against the sandbox workdir. paths must already be relative
+// to that src_dir; safeToolPath callers feed it directly.
+func (m *mcpTools) exportTar(ctx context.Context, sandbox, srcDirAbs string, paths []string) ([]byte, error) {
+	if srcDirAbs == "" || !path.IsAbs(srcDirAbs) {
+		return nil, fmt.Errorf("internal: src_dir must be absolute, got %q", srcDirAbs)
 	}
-	cleanPaths := make([]string, 0, len(paths))
-	for _, p := range paths {
-		clean, err := safeToolPath(p)
-		if err != nil {
-			return nil, err
-		}
-		cleanPaths = append(cleanPaths, clean)
-	}
-	body := map[string]any{"src_dir": srcDir, "paths": cleanPaths}
+	body := map[string]any{"src_dir": srcDirAbs, "paths": paths}
 	b, _ := json.Marshal(body)
 	resp, err := m.c.DoRaw(ctx, http.MethodPost, sbPath(sandbox)+"/files/export",
 		bytes.NewReader(b), "application/json")
@@ -1273,16 +1356,16 @@ func (m *mcpTools) exportTar(ctx context.Context, sandbox, srcDir string, paths 
 	return io.ReadAll(resp.Body)
 }
 
-func (m *mcpTools) importTar(ctx context.Context, sandbox, dest string, tarBytes []byte) (mcpImportResult, error) {
-	dest, err := safeToolDir(dest)
-	if err != nil {
-		return mcpImportResult{}, err
+// importTar posts the multipart form. destAbs must be absolute (it is
+// what the API endpoint enforces server-side). The archive's entries
+// stay relative to destAbs.
+func (m *mcpTools) importTar(ctx context.Context, sandbox, destAbs string, tarBytes []byte) (mcpImportResult, error) {
+	if destAbs == "" || !path.IsAbs(destAbs) {
+		return mcpImportResult{}, fmt.Errorf("internal: dest must be absolute, got %q", destAbs)
 	}
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
-	if dest != "" {
-		_ = mw.WriteField("dest", dest)
-	}
+	_ = mw.WriteField("dest", destAbs)
 	fw, err := mw.CreateFormFile("tarball", "import.tar")
 	if err != nil {
 		return mcpImportResult{}, err
@@ -1349,8 +1432,11 @@ func (m *mcpTools) collectCommand(ctx context.Context, sandbox, cmdID string, ti
 	}
 }
 
-func (m *mcpTools) runShell(ctx context.Context, sandbox, command, cwd string, timeout time.Duration, maxBytes int) (mcpBashResult, error) {
-	cd, err := startCommand(ctx, m.c, sandbox, []string{"sh", "-lc", command}, nil, cwd, nil)
+// runShell runs an internal helper command with cwd already resolved
+// to an absolute container path. Callers feed it the sandbox workdir
+// (or workdir/sub) so we never depend on the runtime's default cwd.
+func (m *mcpTools) runShell(ctx context.Context, sandbox, command, cwdAbs string, timeout time.Duration, maxBytes int) (mcpBashResult, error) {
+	cd, err := startCommand(ctx, m.c, sandbox, []string{"sh", "-lc", command}, nil, cwdAbs, nil)
 	if err != nil {
 		return mcpBashResult{}, err
 	}
@@ -1425,4 +1511,130 @@ func mcpText(format string, args ...any) *mcp.CallToolResult {
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf(format, args...)}},
 	}
+}
+
+// formatEditMatches returns a short snippet for each occurrence of old
+// in content so an Edit caller can disambiguate by extending old. Only
+// the first few matches are shown to keep the error compact.
+func formatEditMatches(content, old string) string {
+	const maxMatches = 5
+	const ctx = 40
+	var b strings.Builder
+	b.WriteString("matches:")
+	idx := 0
+	shown := 0
+	for shown < maxMatches {
+		i := strings.Index(content[idx:], old)
+		if i < 0 {
+			break
+		}
+		hit := idx + i
+		start := hit - ctx
+		if start < 0 {
+			start = 0
+		}
+		end := hit + len(old) + ctx
+		if end > len(content) {
+			end = len(content)
+		}
+		line := lineNumber(content, hit)
+		fmt.Fprintf(&b, "\n  L%d: %s", line, snippetEscape(content[start:end]))
+		shown++
+		idx = hit + len(old)
+		if idx >= len(content) {
+			break
+		}
+	}
+	return b.String()
+}
+
+// formatEditHint is shown when old is not found at all. It surfaces a
+// short head-of-file snippet so the agent can spot whitespace or
+// encoding mismatches without re-reading the file.
+func formatEditHint(content, old string) string {
+	preview := content
+	if len(preview) > 200 {
+		preview = preview[:200] + "…"
+	}
+	return fmt.Sprintf("file head:\n  %s\nold (escaped): %s",
+		snippetEscape(preview), snippetEscape(old))
+}
+
+func lineNumber(s string, offset int) int {
+	if offset > len(s) {
+		offset = len(s)
+	}
+	return strings.Count(s[:offset], "\n") + 1
+}
+
+func snippetEscape(s string) string {
+	r := strings.NewReplacer("\n", "\\n", "\t", "\\t", "\r", "\\r")
+	return r.Replace(s)
+}
+
+// preflightUploadOverwrite walks the upload archive's tar entries,
+// resolves each one against destAbs, and probes the sandbox for an
+// existing file. The probe export uses a single API call covering
+// every candidate path so the round-trip is one request even for
+// multi-file uploads. When any candidate already exists the upload is
+// rejected — overwrite=true bypasses this check.
+func (m *mcpTools) preflightUploadOverwrite(ctx context.Context, sandbox, workdir, relDest string, tarBytes []byte) error {
+	tr := tar.NewReader(bytes.NewReader(tarBytes))
+	probePaths := []string{}
+	rels := []string{}
+	for {
+		hdr, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("read upload tar: %w", err)
+		}
+		if hdr.Typeflag != tar.TypeReg {
+			continue
+		}
+		rel := hdr.Name
+		if relDest != "" {
+			rel = path.Join(relDest, hdr.Name)
+		}
+		rel = path.Clean(rel)
+		if path.IsAbs(rel) || strings.HasPrefix(rel, "../") {
+			// The server-side validator will also reject this; surface
+			// the same error early so we don't hide the real cause.
+			return fmt.Errorf("upload entry escapes dest: %s", hdr.Name)
+		}
+		probePaths = append(probePaths, rel)
+		rels = append(rels, rel)
+	}
+	if len(probePaths) == 0 {
+		return nil
+	}
+	tarOut, err := m.exportTar(ctx, sandbox, workdir, probePaths)
+	if err != nil {
+		// A 4xx here means tar refused — typically because no candidate
+		// exists yet, which is exactly what we want.
+		return nil
+	}
+	existing := map[string]bool{}
+	pr := tar.NewReader(bytes.NewReader(tarOut))
+	for {
+		hdr, err := pr.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			break
+		}
+		if hdr.Typeflag != tar.TypeReg {
+			continue
+		}
+		existing[path.Clean(hdr.Name)] = true
+	}
+	for _, rel := range rels {
+		if existing[rel] {
+			return fmt.Errorf("upload would overwrite existing file %q; pass overwrite=true",
+				absUnderWorkdir(workdir, rel))
+		}
+	}
+	return nil
 }

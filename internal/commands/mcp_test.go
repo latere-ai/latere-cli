@@ -11,6 +11,8 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -73,10 +75,10 @@ func TestParseGrepLine(t *testing.T) {
 
 func TestMCPAgentTools(t *testing.T) {
 	fake := newFakeMCPAPI(t)
-	fake.sandboxes["demo"] = sandboxDTO{ID: "sbx_demo", Name: "demo", State: "stopped", Tier: "ephemeral", DiskGB: 5}
+	fake.sandboxes["demo"] = sandboxDTO{ID: "sbx_demo", Name: "demo", State: "stopped", Tier: "ephemeral", DiskGB: 5, Workdir: "/workspace"}
 	fake.sandboxes["sbx_demo"] = fake.sandboxes["demo"]
-	fake.files["hello.txt"] = []byte("hello world\n")
-	fake.files["src/main.go"] = []byte("package main\n")
+	fake.files["/workspace/hello.txt"] = []byte("hello world\n")
+	fake.files["/workspace/src/main.go"] = []byte("package main\n")
 	defer fake.server.Close()
 
 	mt := &mcpTools{
@@ -112,11 +114,13 @@ func TestMCPAgentTools(t *testing.T) {
 		t.Fatalf("unexpected read/start state: read=%#v startCount=%d", read, fake.startCount)
 	}
 
-	if _, _, err := mt.agentWrite(ctx, nil, mcpWriteArgs{Sandbox: "frontend", Path: "new.txt", Content: "new\n"}); err != nil {
+	if _, w, err := mt.agentWrite(ctx, nil, mcpWriteArgs{Sandbox: "frontend", Path: "new.txt", Content: "new\n"}); err != nil {
 		t.Fatalf("agentWrite returned error: %v", err)
+	} else if w.Path != "/workspace/new.txt" {
+		t.Fatalf("agentWrite Path = %q, want /workspace/new.txt", w.Path)
 	}
-	if string(fake.files["new.txt"]) != "new\n" {
-		t.Fatalf("new.txt = %q", fake.files["new.txt"])
+	if string(fake.files["/workspace/new.txt"]) != "new\n" {
+		t.Fatalf("new.txt = %q", fake.files["/workspace/new.txt"])
 	}
 	if _, _, err := mt.agentWrite(ctx, nil, mcpWriteArgs{Sandbox: "frontend", Path: "new.txt", Content: "blocked", CreateOnly: true}); err == nil {
 		t.Fatal("agentWrite create_only overwrote existing file")
@@ -126,8 +130,11 @@ func TestMCPAgentTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("agentEdit returned error: %v", err)
 	}
-	if edit.Replacements != 1 || string(fake.files["hello.txt"]) != "hello cella\n" {
-		t.Fatalf("unexpected edit: %#v file=%q", edit, fake.files["hello.txt"])
+	if edit.Replacements != 1 || string(fake.files["/workspace/hello.txt"]) != "hello cella\n" {
+		t.Fatalf("unexpected edit: %#v file=%q", edit, fake.files["/workspace/hello.txt"])
+	}
+	if edit.Path != "/workspace/hello.txt" {
+		t.Fatalf("agentEdit Path = %q, want /workspace/hello.txt", edit.Path)
 	}
 
 	_, bash, err := mt.agentBash(ctx, nil, mcpBashArgs{Sandbox: "frontend", Command: "echo done", Cwd: ".", TimeoutSeconds: 1})
@@ -136,6 +143,9 @@ func TestMCPAgentTools(t *testing.T) {
 	}
 	if bash.Output != "done\n" || bash.ExitCode == nil || *bash.ExitCode != 0 {
 		t.Fatalf("unexpected bash result: %#v", bash)
+	}
+	if fake.lastCmdCwd != "/workspace" {
+		t.Fatalf("agentBash sent cwd=%q, want /workspace", fake.lastCmdCwd)
 	}
 
 	_, background, err := mt.agentBash(ctx, nil, mcpBashArgs{Sandbox: "frontend", Command: "sleep 1", Background: true})
@@ -171,8 +181,15 @@ func TestMCPAgentTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("agentUpload returned error: %v", err)
 	}
-	if upload.Dest != "inbox" || string(fake.files["inbox/uploaded.txt"]) != "payload\n" {
+	if upload.Dest != "/workspace/inbox" || string(fake.files["/workspace/inbox/uploaded.txt"]) != "payload\n" {
 		t.Fatalf("unexpected upload result: %#v files=%#v", upload, fake.files)
+	}
+	// Re-uploading the same archive without overwrite must fail.
+	if _, _, err := mt.agentUpload(ctx, nil, mcpUploadArgs{Sandbox: "frontend", Dest: "inbox", TarBase64: base64.StdEncoding.EncodeToString(payload)}); err == nil {
+		t.Fatal("agentUpload overwrote existing file with overwrite=false")
+	}
+	if _, _, err := mt.agentUpload(ctx, nil, mcpUploadArgs{Sandbox: "frontend", Dest: "inbox", Overwrite: true, TarBase64: base64.StdEncoding.EncodeToString(payload)}); err != nil {
+		t.Fatalf("agentUpload overwrite=true returned error: %v", err)
 	}
 
 	_, download, err := mt.agentDownload(ctx, nil, mcpDownloadArgs{Sandbox: "frontend", Paths: []string{"hello.txt"}})
@@ -184,10 +201,62 @@ func TestMCPAgentTools(t *testing.T) {
 	}
 }
 
+// TestMCPWorkdirRouting locks down the contract that file/shell tools
+// resolve paths under the resolved sandbox workdir, regardless of what
+// the agent passes as a relative input. The fake server stores files
+// under their absolute keys; if any tool slipped relative paths past
+// the workdir join, this test would not see the file at all.
+func TestMCPWorkdirRouting(t *testing.T) {
+	fake := newFakeMCPAPI(t)
+	fake.sandboxes["demo"] = sandboxDTO{ID: "demo", Name: "demo", State: "running", Tier: "ephemeral", Workdir: "/srv/agent"}
+	fake.files["/srv/agent/notes.txt"] = []byte("hi\n")
+	defer fake.server.Close()
+
+	mt := &mcpTools{
+		c:         &api.Client{BaseURL: fake.server.URL, HTTP: fake.server.Client()},
+		autoStart: true,
+	}
+	ctx := context.Background()
+
+	_, read, err := mt.agentRead(ctx, nil, mcpReadArgs{Sandbox: "demo", Path: "notes.txt"})
+	if err != nil {
+		t.Fatalf("agentRead under custom workdir failed: %v", err)
+	}
+	if read.Path != "/srv/agent/notes.txt" || read.Content != "hi\n" {
+		t.Fatalf("read = %#v", read)
+	}
+
+	if _, _, err := mt.agentBash(ctx, nil, mcpBashArgs{Sandbox: "demo", Command: "echo done"}); err != nil {
+		t.Fatalf("agentBash under custom workdir failed: %v", err)
+	}
+	if fake.lastCmdCwd != "/srv/agent" {
+		t.Fatalf("agentBash sent cwd=%q, want /srv/agent", fake.lastCmdCwd)
+	}
+}
+
+// TestMCPDownloadCap exercises the agent download cap. We seed the fake
+// to return more bytes than the cap allows and assert the tool refuses
+// to base64 the response.
+func TestMCPDownloadCap(t *testing.T) {
+	fake := newFakeMCPAPI(t)
+	fake.sandboxes["demo"] = sandboxDTO{ID: "demo", Name: "demo", State: "running", Tier: "ephemeral", Workdir: "/workspace"}
+	// Build a single big file (twice the cap) under the workdir.
+	big := bytes.Repeat([]byte("a"), maxAgentDownloadBytes+1)
+	fake.files["/workspace/huge.bin"] = big
+	defer fake.server.Close()
+
+	mt := &mcpTools{c: &api.Client{BaseURL: fake.server.URL, HTTP: fake.server.Client()}}
+	ctx := context.Background()
+	_, _, err := mt.agentDownload(ctx, nil, mcpDownloadArgs{Sandbox: "demo", Paths: []string{"huge.bin"}})
+	if err == nil || !strings.Contains(err.Error(), "cap") {
+		t.Fatalf("agentDownload over cap = %v, want cap error", err)
+	}
+}
+
 func TestMCPManagementTools(t *testing.T) {
 	fake := newFakeMCPAPI(t)
-	fake.sandboxes["demo"] = sandboxDTO{ID: "demo", Name: "demo", State: "running", Tier: "ephemeral"}
-	fake.files["artifact.txt"] = []byte("artifact\n")
+	fake.sandboxes["demo"] = sandboxDTO{ID: "demo", Name: "demo", State: "running", Tier: "ephemeral", Workdir: "/workspace"}
+	fake.files["/workspace/artifact.txt"] = []byte("artifact\n")
 	defer fake.server.Close()
 
 	mt := &mcpTools{c: &api.Client{BaseURL: fake.server.URL, HTTP: fake.server.Client()}}
@@ -270,17 +339,81 @@ func TestMCPToolRegistrationAndText(t *testing.T) {
 	if err := runMCPServer(context.Background(), &api.Client{}, mcpServerConfig{Surface: "bad"}); err == nil {
 		t.Fatal("runMCPServer accepted invalid surface")
 	}
+}
+
+// TestMCPRegistrationSurfaces enumerates the tools each surface
+// registers and asserts the visible name set matches exactly. Drift in
+// either direction (a forgotten tool, or a leaked management tool into
+// the agent surface) breaks this test.
+func TestMCPRegistrationSurfaces(t *testing.T) {
+	want := map[string][]string{
+		"agent": {
+			"Bash", "Download", "Edit", "Glob", "Grep", "Monitor",
+			"Read", "Sandboxes", "Upload", "Write",
+		},
+		"management": {
+			"CommandLogs", "ConvertSandbox", "CreateSandbox",
+			"DeleteSandbox", "ExportFiles", "ExtendSandbox",
+			"GetSandbox", "ImportFiles", "KillCommand",
+			"ListSandboxes", "RunCommand", "StartSandbox",
+			"StopSandbox", "WaitCommand",
+		},
+	}
+	wantAll := append(append([]string{}, want["agent"]...), want["management"]...)
+	sort.Strings(wantAll)
+	want["all"] = wantAll
+
+	for _, surface := range []string{"agent", "management", "all"} {
+		t.Run(surface, func(t *testing.T) {
+			got := registeredToolNames(t, surface)
+			if !reflect.DeepEqual(got, want[surface]) {
+				t.Fatalf("surface=%s tools = %v\nwant %v", surface, got, want[surface])
+			}
+		})
+	}
+}
+
+func registeredToolNames(t *testing.T, surface string) []string {
+	t.Helper()
 	srv := mcp.NewServer(&mcp.Implementation{Name: "test", Version: "test"}, nil)
-	registerAgentTools(srv, &mcpTools{})
-	registerManagementTools(srv, &mcpTools{})
+	mt := &mcpTools{}
+	if surface == "agent" || surface == "all" {
+		registerAgentTools(srv, mt)
+	}
+	if surface == "management" || surface == "all" {
+		registerManagementTools(srv, mt)
+	}
+	ctx := context.Background()
+	ct, st := mcp.NewInMemoryTransports()
+	ss, err := srv.Connect(ctx, st, nil)
+	if err != nil {
+		t.Fatalf("server connect: %v", err)
+	}
+	defer ss.Close()
+	cl := mcp.NewClient(&mcp.Implementation{Name: "client", Version: "test"}, nil)
+	cs, err := cl.Connect(ctx, ct, nil)
+	if err != nil {
+		t.Fatalf("client connect: %v", err)
+	}
+	defer cs.Close()
+	res, err := cs.ListTools(ctx, &mcp.ListToolsParams{})
+	if err != nil {
+		t.Fatalf("list tools: %v", err)
+	}
+	names := make([]string, 0, len(res.Tools))
+	for _, tool := range res.Tools {
+		names = append(names, tool.Name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func TestMCPErrorPaths(t *testing.T) {
 	fake := newFakeMCPAPI(t)
-	fake.sandboxes["demo"] = sandboxDTO{ID: "demo", Name: "demo", State: "stopped", Tier: "ephemeral"}
-	fake.files["hello.txt"] = []byte("hello world\n")
-	fake.files["multi.txt"] = []byte("x x\n")
-	fake.files["binary.bin"] = []byte{0xff, 0xfe}
+	fake.sandboxes["demo"] = sandboxDTO{ID: "demo", Name: "demo", State: "stopped", Tier: "ephemeral", Workdir: "/workspace"}
+	fake.files["/workspace/hello.txt"] = []byte("hello world\n")
+	fake.files["/workspace/multi.txt"] = []byte("x x\n")
+	fake.files["/workspace/binary.bin"] = []byte{0xff, 0xfe}
 	defer fake.server.Close()
 
 	mt := &mcpTools{c: &api.Client{BaseURL: fake.server.URL, HTTP: fake.server.Client()}}
@@ -289,7 +422,7 @@ func TestMCPErrorPaths(t *testing.T) {
 	if _, err := mt.resolveSandbox(""); err == nil {
 		t.Fatal("resolveSandbox accepted empty selector")
 	}
-	if _, err := mt.ensureSandbox(ctx, "demo"); err == nil {
+	if _, _, err := mt.ensureSandbox(ctx, "demo"); err == nil {
 		t.Fatal("ensureSandbox auto-started with autoStart disabled")
 	}
 	mt.autoStart = true
@@ -300,13 +433,13 @@ func TestMCPErrorPaths(t *testing.T) {
 	if _, _, err := mt.agentRead(ctx, nil, mcpReadArgs{Sandbox: "demo", Path: "binary.bin"}); err == nil {
 		t.Fatal("agentRead accepted binary file")
 	}
-	if _, _, _, err := mt.readTextFile(ctx, "demo", "hello.txt", -1, 1); err == nil {
+	if _, _, _, err := mt.readTextFile(ctx, "demo", "/workspace", "hello.txt", -1, 1); err == nil {
 		t.Fatal("readTextFile accepted negative offset")
 	}
-	if _, _, _, err := mt.readTextFile(ctx, "demo", "hello.txt", 0, 5<<20+1); err == nil {
+	if _, _, _, err := mt.readTextFile(ctx, "demo", "/workspace", "hello.txt", 0, 5<<20+1); err == nil {
 		t.Fatal("readTextFile accepted overlarge limit")
 	}
-	if _, _, _, err := mt.readTextFile(ctx, "demo", "missing.txt", 0, 1); err == nil {
+	if _, _, _, err := mt.readTextFile(ctx, "demo", "/workspace", "missing.txt", 0, 1); err == nil {
 		t.Fatal("readTextFile accepted missing file")
 	}
 
@@ -390,6 +523,7 @@ type fakeMCPAPI struct {
 	logs       map[string]logsCursorDTO
 	startCount int
 	nextID     int
+	lastCmdCwd string
 }
 
 func newFakeMCPAPI(t *testing.T) *fakeMCPAPI {
@@ -503,18 +637,21 @@ func (f *fakeMCPAPI) handleCommands(w http.ResponseWriter, r *http.Request, sand
 	if len(parts) == 2 && r.Method == http.MethodPost {
 		var req struct {
 			Argv []string `json:"argv"`
+			Cwd  string   `json:"cwd"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&req)
+		f.lastCmdCwd = req.Cwd
 		f.nextID++
 		id := "cmd-" + string(rune('0'+f.nextID))
 		exit := 0
 		cmd := strings.Join(req.Argv, " ")
 		output := "done\n"
 		if strings.Contains(cmd, "find ") {
-			output = "hello.txt\nsrc/main.go\n"
+			// `find /workspace -type f` returns absolute paths.
+			output = "/workspace/hello.txt\n/workspace/src/main.go\n"
 		}
 		if strings.Contains(cmd, "grep ") {
-			output = "src/main.go:1:package main\n"
+			output = "/workspace/src/main.go:1:package main\n"
 		}
 		f.commands[id] = commandDTO{CommandID: id, Phase: "exited", ExitCode: &exit}
 		f.logs[id] = logsCursorDTO{Bytes: output, NextCursor: int64(len(output)), Phase: "exited", ExitCode: &exit}
@@ -566,18 +703,27 @@ func (f *fakeMCPAPI) handleFiles(w http.ResponseWriter, r *http.Request, parts [
 	switch parts[2] {
 	case "export":
 		var req struct {
-			Paths []string `json:"paths"`
+			SrcDir string   `json:"src_dir"`
+			Paths  []string `json:"paths"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&req)
+		srcDir := req.SrcDir
+		if srcDir == "" {
+			srcDir = "/workspace"
+		}
 		files := map[string]string{}
 		if len(req.Paths) == 0 {
 			for name, body := range f.files {
-				files[name] = string(body)
+				rel := strings.TrimPrefix(name, srcDir+"/")
+				if rel != name {
+					files[rel] = string(body)
+				}
 			}
 		}
-		for _, name := range req.Paths {
-			if body, ok := f.files[name]; ok {
-				files[name] = string(body)
+		for _, rel := range req.Paths {
+			abs := path.Join(srcDir, rel)
+			if body, ok := f.files[abs]; ok {
+				files[rel] = string(body)
 			}
 		}
 		w.Header().Set("Content-Type", "application/x-tar")
@@ -588,6 +734,9 @@ func (f *fakeMCPAPI) handleFiles(w http.ResponseWriter, r *http.Request, parts [
 			return
 		}
 		dest := r.FormValue("dest")
+		if dest == "" {
+			dest = "/workspace"
+		}
 		file, _, err := r.FormFile("tarball")
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -620,10 +769,7 @@ func (f *fakeMCPAPI) importTar(r io.Reader, dest string) (string, int64) {
 		if err != nil {
 			f.t.Fatalf("read import body: %v", err)
 		}
-		name := hdr.Name
-		if dest != "" {
-			name = path.Join(dest, name)
-		}
+		name := path.Join(dest, hdr.Name)
 		f.files[name] = body
 		imported = append(imported, name)
 		bytesWritten += int64(len(body))
