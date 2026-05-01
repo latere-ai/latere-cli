@@ -106,6 +106,7 @@ latere cella create \
   --auto-delete-hours 24 \
   --ttl 12h \
   --env GOFLAGS=-count=1 \
+  --credential source-control \
   --policy default
 ```
 
@@ -177,9 +178,14 @@ latere cella logs <name|id> <command_id> --follow
 latere cella wait <name|id> <command_id> --timeout 600
 ```
 
-`run` accepts repeatable `--env KEY=VALUE` for non-secret configuration and
-`--cwd /path`. One-shot runs also accept `--image`, `--disk`, `--timeout`,
-`--detach`, and `--json`.
+`create` and `run` accept repeatable `--credential <catalog-key>` to attach
+client trust-plane credentials by catalog key. `--env KEY=VALUE` is only for
+non-secret configuration. `run` also accepts `--cwd /path`; one-shot runs also
+accept `--image`, `--disk`, `--timeout`, `--detach`, and `--json`.
+
+```sh
+latere cella run demo --credential llm-primary -- sh -lc 'curl http://127.0.0.1:8888/upstreams/llm-primary/v1/models'
+```
 
 ## Files
 

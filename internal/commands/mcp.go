@@ -132,7 +132,7 @@ func registerAgentTools(srv *mcp.Server, mt *mcpTools) {
 	}, mt.agentEdit)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "Bash",
-		Description: "Run a shell command inside a selected Cella sandbox, never on the MCP host.",
+		Description: "Run a shell command inside a selected Cella sandbox, never on the MCP host. Use credential_catalog for trust-plane credentials; env is only for non-secret values.",
 	}, mt.agentBash)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "Monitor",
@@ -159,7 +159,7 @@ func registerAgentTools(srv *mcp.Server, mt *mcpTools) {
 func registerManagementTools(srv *mcp.Server, mt *mcpTools) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "CreateSandbox",
-		Description: "Create a new Cella sandbox. Returns its id and slug.",
+		Description: "Create a new Cella sandbox. Returns its id and slug. Attach credentials by catalog key, not by secret value.",
 	}, mt.create)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "ListSandboxes",
@@ -187,7 +187,7 @@ func registerManagementTools(srv *mcp.Server, mt *mcpTools) {
 	}, mt.convert)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "RunCommand",
-		Description: "Start a command in the background; returns command_id immediately.",
+		Description: "Start a command in the background; returns command_id immediately. Use credential_catalog for trust-plane credentials; env is only for non-secret values.",
 	}, mt.run)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "WaitCommand",
@@ -218,11 +218,12 @@ func registerManagementTools(srv *mcp.Server, mt *mcpTools) {
 // ---- tool args / results ----
 
 type mcpCreateArgs struct {
-	Image           string `json:"image" mcp:"container image, e.g. ghcr.io/latere-ai/sandbox-base:main"`
-	Tier            string `json:"tier,omitempty" mcp:"ephemeral (default) or persistent"`
-	DiskGB          int    `json:"disk_gb,omitempty"`
-	Name            string `json:"name,omitempty" mcp:"optional human slug"`
-	AutoDeleteHours int    `json:"auto_delete_hours,omitempty"`
+	Image             string   `json:"image" mcp:"container image, e.g. ghcr.io/latere-ai/sandbox-base:main"`
+	Tier              string   `json:"tier,omitempty" mcp:"ephemeral (default) or persistent"`
+	DiskGB            int      `json:"disk_gb,omitempty"`
+	Name              string   `json:"name,omitempty" mcp:"optional human slug"`
+	AutoDeleteHours   int      `json:"auto_delete_hours,omitempty"`
+	CredentialCatalog []string `json:"credential_catalog,omitempty" mcp:"trust-plane catalog keys to attach; not secret values"`
 }
 type mcpCreateResult struct {
 	ID    string `json:"id"`
@@ -231,10 +232,11 @@ type mcpCreateResult struct {
 }
 
 type mcpRunArgs struct {
-	Sandbox string            `json:"sandbox" mcp:"sandbox id or slug"`
-	Argv    []string          `json:"argv"`
-	Env     map[string]string `json:"env,omitempty" mcp:"literal non-secret environment variables"`
-	Cwd     string            `json:"cwd,omitempty"`
+	Sandbox           string            `json:"sandbox" mcp:"sandbox id or slug"`
+	Argv              []string          `json:"argv"`
+	Env               map[string]string `json:"env,omitempty" mcp:"literal non-secret environment variables"`
+	Cwd               string            `json:"cwd,omitempty"`
+	CredentialCatalog []string          `json:"credential_catalog,omitempty" mcp:"trust-plane catalog keys to use for this command; not secret values"`
 }
 type mcpRunResult struct {
 	CommandID string `json:"command_id"`
@@ -349,13 +351,14 @@ type mcpEditResult struct {
 }
 
 type mcpBashArgs struct {
-	Sandbox        string            `json:"sandbox" mcp:"sandbox alias, id, or slug"`
-	Command        string            `json:"command" mcp:"shell command to run inside the sandbox"`
-	Cwd            string            `json:"cwd,omitempty" mcp:"working directory relative to the sandbox workdir"`
-	TimeoutSeconds int               `json:"timeout_seconds,omitempty"`
-	Env            map[string]string `json:"env,omitempty" mcp:"literal non-secret environment variables"`
-	Background     bool              `json:"background,omitempty"`
-	MaxOutputBytes int               `json:"max_output_bytes,omitempty"`
+	Sandbox           string            `json:"sandbox" mcp:"sandbox alias, id, or slug"`
+	Command           string            `json:"command" mcp:"shell command to run inside the sandbox"`
+	Cwd               string            `json:"cwd,omitempty" mcp:"working directory relative to the sandbox workdir"`
+	TimeoutSeconds    int               `json:"timeout_seconds,omitempty"`
+	Env               map[string]string `json:"env,omitempty" mcp:"literal non-secret environment variables"`
+	CredentialCatalog []string          `json:"credential_catalog,omitempty" mcp:"trust-plane catalog keys to use for this command; not secret values"`
+	Background        bool              `json:"background,omitempty"`
+	MaxOutputBytes    int               `json:"max_output_bytes,omitempty"`
 }
 type mcpBashResult struct {
 	Sandbox    string `json:"sandbox"`
@@ -580,7 +583,7 @@ func (m *mcpTools) agentBash(ctx context.Context, _ *mcp.CallToolRequest, a mcpB
 	if err != nil {
 		return nil, mcpBashResult{}, err
 	}
-	cd, err := startCommand(ctx, m.c, sandbox, []string{"sh", "-lc", a.Command}, a.Env, cwd)
+	cd, err := startCommand(ctx, m.c, sandbox, []string{"sh", "-lc", a.Command}, a.Env, cwd, a.CredentialCatalog)
 	if err != nil {
 		return nil, mcpBashResult{}, err
 	}
@@ -782,6 +785,9 @@ func (m *mcpTools) create(ctx context.Context, _ *mcp.CallToolRequest, a mcpCrea
 		"image": a.Image, "tier": a.Tier, "disk_gb": a.DiskGB,
 		"name": a.Name, "auto_delete_hours": a.AutoDeleteHours,
 	}
+	if len(a.CredentialCatalog) > 0 {
+		body["credential_catalog"] = a.CredentialCatalog
+	}
 	var resp struct {
 		ID    string `json:"id"`
 		Name  string `json:"name"`
@@ -797,6 +803,9 @@ func (m *mcpTools) create(ctx context.Context, _ *mcp.CallToolRequest, a mcpCrea
 func (m *mcpTools) run(ctx context.Context, _ *mcp.CallToolRequest, a mcpRunArgs) (*mcp.CallToolResult, mcpRunResult, error) {
 	body := map[string]any{
 		"argv": a.Argv, "env": a.Env, "cwd": a.Cwd, "detach": true,
+	}
+	if len(a.CredentialCatalog) > 0 {
+		body["credential_catalog"] = a.CredentialCatalog
 	}
 	var resp struct {
 		CommandID string `json:"command_id"`
@@ -1333,7 +1342,7 @@ func (m *mcpTools) collectCommand(ctx context.Context, sandbox, cmdID string, ti
 }
 
 func (m *mcpTools) runShell(ctx context.Context, sandbox, command, cwd string, timeout time.Duration, maxBytes int) (mcpBashResult, error) {
-	cd, err := startCommand(ctx, m.c, sandbox, []string{"sh", "-lc", command}, nil, cwd)
+	cd, err := startCommand(ctx, m.c, sandbox, []string{"sh", "-lc", command}, nil, cwd, nil)
 	if err != nil {
 		return mcpBashResult{}, err
 	}

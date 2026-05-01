@@ -130,7 +130,7 @@ func newCeExecCmd() *cobra.Command {
 			}
 			sandbox := args[0]
 			argv := args[1:]
-			return runAndStream(cmd.Context(), c, sandbox, argv, nil, "")
+			return runAndStream(cmd.Context(), c, sandbox, argv, nil, "", nil)
 		},
 	}
 	cmd.Flags().StringVar(&apiURL, "api-url", "", "override cella base URL")
@@ -149,6 +149,7 @@ func newCeCreateCmd() *cobra.Command {
 		autoDeleteHours int
 		ttl             string
 		envFlag         []string
+		credentialFlag  []string
 		policy          string
 		apiURL          string
 	)
@@ -186,6 +187,9 @@ func newCeCreateCmd() *cobra.Command {
 			if len(env) > 0 {
 				body["env"] = env
 			}
+			if len(credentialFlag) > 0 {
+				body["credential_catalog"] = credentialFlag
+			}
 			if policy != "" {
 				body["policy"] = policy
 			}
@@ -206,6 +210,7 @@ func newCeCreateCmd() *cobra.Command {
 	f.IntVar(&autoDeleteHours, "auto-delete-hours", 0, "ephemeral wall-clock lifetime")
 	f.StringVar(&ttl, "ttl", "", "Go duration TTL alternative to --auto-delete-hours")
 	f.StringArrayVar(&envFlag, "env", nil, "non-secret KEY=VALUE; repeatable")
+	f.StringArrayVar(&credentialFlag, "credential", nil, "trust-plane catalog key to attach; repeatable")
 	f.StringVar(&policy, "policy", "", "named NetworkPolicy")
 	f.StringVar(&apiURL, "api-url", "", "override sandboxd base URL")
 	return cmd
@@ -346,17 +351,18 @@ func newCeDeleteCmd() *cobra.Command {
 
 func newCeRunCmd() *cobra.Command {
 	var (
-		apiURL       string
-		envFlag      []string
-		cwd          string
-		follow       bool
-		detach       bool
-		ephemeral    bool
-		rm           bool
-		image        string
-		diskGB       int
-		timeout      int
-		printJSONOut bool
+		apiURL         string
+		envFlag        []string
+		credentialFlag []string
+		cwd            string
+		follow         bool
+		detach         bool
+		ephemeral      bool
+		rm             bool
+		image          string
+		diskGB         int
+		timeout        int
+		printJSONOut   bool
 	)
 	cmd := &cobra.Command{
 		Use:   "run [name|id] -- <argv>...",
@@ -390,7 +396,7 @@ func newCeRunCmd() *cobra.Command {
 			}
 			if ephemeral && rm {
 				if detach {
-					out, err := oneShotRunDetached(cmd.Context(), c, args, env, cwd, image, diskGB, timeout)
+					out, err := oneShotRunDetached(cmd.Context(), c, args, env, cwd, image, diskGB, timeout, credentialFlag)
 					if err != nil {
 						return err
 					}
@@ -400,7 +406,7 @@ func newCeRunCmd() *cobra.Command {
 					printStartedDetachedOneShotRun(out)
 					return nil
 				}
-				out, err := oneShotRun(cmd.Context(), c, args, env, cwd, image, diskGB, timeout)
+				out, err := oneShotRun(cmd.Context(), c, args, env, cwd, image, diskGB, timeout, credentialFlag)
 				if err != nil {
 					return err
 				}
@@ -414,9 +420,9 @@ func newCeRunCmd() *cobra.Command {
 				return nil
 			}
 			if follow {
-				return runAndStream(cmd.Context(), c, args[0], args[1:], env, cwd)
+				return runAndStream(cmd.Context(), c, args[0], args[1:], env, cwd, credentialFlag)
 			}
-			cd, err := startCommand(cmd.Context(), c, args[0], args[1:], env, cwd)
+			cd, err := startCommand(cmd.Context(), c, args[0], args[1:], env, cwd, credentialFlag)
 			if err != nil {
 				return err
 			}
@@ -427,6 +433,7 @@ func newCeRunCmd() *cobra.Command {
 	f := cmd.Flags()
 	f.StringVar(&apiURL, "api-url", "", "override sandboxd base URL")
 	f.StringArrayVar(&envFlag, "env", nil, "non-secret KEY=VALUE; repeatable")
+	f.StringArrayVar(&credentialFlag, "credential", nil, "trust-plane catalog key to use for this command; repeatable")
 	f.StringVar(&cwd, "cwd", "", "working dir inside the cella")
 	f.BoolVarP(&follow, "follow", "f", false, "stream logs and exit with the command's exit code")
 	f.BoolVar(&detach, "detach", false, "start a disposable one-shot run and return its run id immediately")
@@ -1002,7 +1009,7 @@ func runPath(runID string) string {
 	return "/v1/one-shot-runs/" + url.PathEscape(runID)
 }
 
-func startCommand(ctx context.Context, c *api.Client, sandbox string, argv []string, env map[string]string, cwd string) (commandDTO, error) {
+func startCommand(ctx context.Context, c *api.Client, sandbox string, argv []string, env map[string]string, cwd string, credentialCatalog []string) (commandDTO, error) {
 	body := map[string]any{
 		"argv":   argv,
 		"detach": true,
@@ -1012,6 +1019,9 @@ func startCommand(ctx context.Context, c *api.Client, sandbox string, argv []str
 	}
 	if cwd != "" {
 		body["cwd"] = cwd
+	}
+	if len(credentialCatalog) > 0 {
+		body["credential_catalog"] = credentialCatalog
 	}
 	var cd commandDTO
 	err := c.PostJSON(ctx, sbPath(sandbox)+"/commands", body, &cd)
@@ -1107,15 +1117,15 @@ func streamOneShotRunLogs(ctx context.Context, c *api.Client, runID string, curs
 // runAndStream is the foreground equivalent: start a detached command
 // then tail its logs until exit. Used by `latere exec` and
 // `latere sandbox run --follow`.
-func runAndStream(ctx context.Context, c *api.Client, sandbox string, argv []string, env map[string]string, cwd string) error {
-	cd, err := startCommand(ctx, c, sandbox, argv, env, cwd)
+func runAndStream(ctx context.Context, c *api.Client, sandbox string, argv []string, env map[string]string, cwd string, credentialCatalog []string) error {
+	cd, err := startCommand(ctx, c, sandbox, argv, env, cwd, credentialCatalog)
 	if err != nil {
 		return err
 	}
 	return streamLogs(ctx, c, sandbox, cd.CommandID, 0)
 }
 
-func oneShotRun(ctx context.Context, c *api.Client, argv []string, env map[string]string, cwd, image string, diskGB, timeout int) (oneShotRunDTO, error) {
+func oneShotRun(ctx context.Context, c *api.Client, argv []string, env map[string]string, cwd, image string, diskGB, timeout int, credentialCatalog []string) (oneShotRunDTO, error) {
 	body := map[string]any{"argv": argv}
 	if len(env) > 0 {
 		body["env"] = env
@@ -1131,6 +1141,9 @@ func oneShotRun(ctx context.Context, c *api.Client, argv []string, env map[strin
 	}
 	if timeout > 0 {
 		body["timeout_seconds"] = timeout
+	}
+	if len(credentialCatalog) > 0 {
+		body["credential_catalog"] = credentialCatalog
 	}
 	if c.HTTP != nil {
 		effective := timeout
@@ -1144,7 +1157,7 @@ func oneShotRun(ctx context.Context, c *api.Client, argv []string, env map[strin
 	return out, err
 }
 
-func oneShotRunDetached(ctx context.Context, c *api.Client, argv []string, env map[string]string, cwd, image string, diskGB, timeout int) (oneShotRunDTO, error) {
+func oneShotRunDetached(ctx context.Context, c *api.Client, argv []string, env map[string]string, cwd, image string, diskGB, timeout int, credentialCatalog []string) (oneShotRunDTO, error) {
 	body := map[string]any{"argv": argv}
 	if len(env) > 0 {
 		body["env"] = env
@@ -1160,6 +1173,9 @@ func oneShotRunDetached(ctx context.Context, c *api.Client, argv []string, env m
 	}
 	if timeout > 0 {
 		body["timeout_seconds"] = timeout
+	}
+	if len(credentialCatalog) > 0 {
+		body["credential_catalog"] = credentialCatalog
 	}
 	var out oneShotRunDTO
 	err := c.PostJSON(ctx, "/v1/one-shot-runs?detach=true", body, &out)
