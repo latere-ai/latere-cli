@@ -56,11 +56,12 @@ type logsCursorDTO struct {
 }
 
 type oneShotRunDTO struct {
-	RunID       string `json:"run_id"`
-	SandboxID   string `json:"sandbox_id"`
-	SandboxName string `json:"sandbox_name"`
-	State       string `json:"state"`
-	ExitCode    *int   `json:"exit_code,omitempty"`
+	RunID       string            `json:"run_id"`
+	SandboxID   string            `json:"sandbox_id"`
+	SandboxName string            `json:"sandbox_name"`
+	State       string            `json:"state"`
+	ExitCode    *int              `json:"exit_code,omitempty"`
+	Links       map[string]string `json:"links,omitempty"`
 	Timing      struct {
 		CreateMS  int64 `json:"create_ms"`
 		ExecMS    int64 `json:"exec_ms"`
@@ -349,6 +350,7 @@ func newCeRunCmd() *cobra.Command {
 		envFlag      []string
 		cwd          string
 		follow       bool
+		detach       bool
 		ephemeral    bool
 		rm           bool
 		image        string
@@ -369,6 +371,9 @@ func newCeRunCmd() *cobra.Command {
 				}
 				return nil
 			}
+			if detach {
+				return fmt.Errorf("--detach requires --ephemeral --rm")
+			}
 			if len(args) < 2 {
 				return fmt.Errorf("requires <name|id> -- <argv>... unless --ephemeral --rm is set")
 			}
@@ -384,6 +389,17 @@ func newCeRunCmd() *cobra.Command {
 				return err
 			}
 			if ephemeral && rm {
+				if detach {
+					out, err := oneShotRunDetached(cmd.Context(), c, args, env, cwd, image, diskGB, timeout)
+					if err != nil {
+						return err
+					}
+					if printJSONOut {
+						return printJSON(out)
+					}
+					printStartedDetachedOneShotRun(out)
+					return nil
+				}
 				out, err := oneShotRun(cmd.Context(), c, args, env, cwd, image, diskGB, timeout)
 				if err != nil {
 					return err
@@ -413,12 +429,115 @@ func newCeRunCmd() *cobra.Command {
 	f.StringArrayVar(&envFlag, "env", nil, "KEY=VALUE; repeatable")
 	f.StringVar(&cwd, "cwd", "", "working dir inside the cella")
 	f.BoolVarP(&follow, "follow", "f", false, "stream logs and exit with the command's exit code")
+	f.BoolVar(&detach, "detach", false, "start a disposable one-shot run and return its run id immediately")
 	f.BoolVar(&ephemeral, "ephemeral", false, "create a disposable one-shot ephemeral cella for this command")
 	f.BoolVar(&rm, "rm", false, "delete the one-shot cella after the command; required with --ephemeral")
 	f.StringVar(&image, "image", "", "one-shot image ref (default sandbox-base)")
 	f.IntVar(&diskGB, "disk", 0, "one-shot PVC size in GB (default 5)")
 	f.IntVar(&timeout, "timeout", 600, "one-shot command timeout in seconds")
 	f.BoolVar(&printJSONOut, "json", false, "print one-shot response as JSON")
+	cmd.AddCommand(
+		newCeRunStatusCmd(),
+		newCeRunLogsCmd(),
+		newCeRunCancelCmd(),
+	)
+	return cmd
+}
+
+func newCeRunStatusCmd() *cobra.Command {
+	var (
+		apiURL       string
+		printJSONOut bool
+	)
+	cmd := &cobra.Command{
+		Use:   "status <run_id>",
+		Short: "Get a detached one-shot run status.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := authedClient(apiURL)
+			if err != nil {
+				return err
+			}
+			out, err := oneShotRunStatus(cmd.Context(), c, args[0])
+			if err != nil {
+				return err
+			}
+			if printJSONOut {
+				return printJSON(out)
+			}
+			printDetachedOneShotRun(out)
+			if out.ExitCode != nil {
+				fmt.Fprintf(os.Stderr, "exit_code=%d\n", *out.ExitCode)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&apiURL, "api-url", "", "override sandboxd base URL")
+	cmd.Flags().BoolVar(&printJSONOut, "json", false, "print response as JSON")
+	return cmd
+}
+
+func newCeRunLogsCmd() *cobra.Command {
+	var (
+		apiURL string
+		cursor int64
+		follow bool
+	)
+	cmd := &cobra.Command{
+		Use:   "logs <run_id>",
+		Short: "Read or follow detached one-shot run logs.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := authedClient(apiURL)
+			if err != nil {
+				return err
+			}
+			if follow {
+				return streamOneShotRunLogs(cmd.Context(), c, args[0], cursor)
+			}
+			out, err := fetchOneShotRunLogs(cmd.Context(), c, args[0], cursor)
+			if err != nil {
+				return err
+			}
+			fmt.Print(out.Bytes)
+			fmt.Fprintf(os.Stderr, "[cursor=%d state=%s]\n", out.NextCursor, out.Phase)
+			return nil
+		},
+	}
+	f := cmd.Flags()
+	f.StringVar(&apiURL, "api-url", "", "override sandboxd base URL")
+	f.Int64Var(&cursor, "cursor", 0, "byte offset to start from")
+	f.BoolVarP(&follow, "follow", "f", false, "stream until the run exits")
+	return cmd
+}
+
+func newCeRunCancelCmd() *cobra.Command {
+	var (
+		apiURL       string
+		printJSONOut bool
+	)
+	cmd := &cobra.Command{
+		Use:   "cancel <run_id>",
+		Short: "Cancel a detached one-shot run.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := authedClient(apiURL)
+			if err != nil {
+				return err
+			}
+			out, err := oneShotRunCancel(cmd.Context(), c, args[0])
+			if err != nil {
+				return err
+			}
+			if printJSONOut {
+				return printJSON(out)
+			}
+			printDetachedOneShotRun(out)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&apiURL, "api-url", "", "override sandboxd base URL")
+	cmd.Flags().BoolVar(&printJSONOut, "json", false, "print response as JSON")
 	return cmd
 }
 
@@ -879,6 +998,10 @@ func sbPath(idOrName string) string {
 	return "/v1/sandboxes/" + url.PathEscape(idOrName)
 }
 
+func runPath(runID string) string {
+	return "/v1/one-shot-runs/" + url.PathEscape(runID)
+}
+
 func startCommand(ctx context.Context, c *api.Client, sandbox string, argv []string, env map[string]string, cwd string) (commandDTO, error) {
 	body := map[string]any{
 		"argv":   argv,
@@ -957,6 +1080,30 @@ func streamLogs(ctx context.Context, c *api.Client, sandbox, cmdID string, curso
 	}
 }
 
+func streamOneShotRunLogs(ctx context.Context, c *api.Client, runID string, cursor int64) error {
+	for {
+		out, err := fetchOneShotRunLogs(ctx, c, runID, cursor)
+		if err != nil {
+			return err
+		}
+		if out.Bytes != "" {
+			fmt.Print(out.Bytes)
+		}
+		cursor = out.NextCursor
+		if out.Phase != "creating" && out.Phase != "running" {
+			if out.ExitCode != nil {
+				os.Exit(*out.ExitCode)
+			}
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+}
+
 // runAndStream is the foreground equivalent: start a detached command
 // then tail its logs until exit. Used by `latere exec` and
 // `latere sandbox run --follow`.
@@ -995,6 +1142,71 @@ func oneShotRun(ctx context.Context, c *api.Client, argv []string, env map[strin
 	var out oneShotRunDTO
 	err := c.PostJSON(ctx, "/v1/one-shot-runs", body, &out)
 	return out, err
+}
+
+func oneShotRunDetached(ctx context.Context, c *api.Client, argv []string, env map[string]string, cwd, image string, diskGB, timeout int) (oneShotRunDTO, error) {
+	body := map[string]any{"argv": argv}
+	if len(env) > 0 {
+		body["env"] = env
+	}
+	if cwd != "" {
+		body["cwd"] = cwd
+	}
+	if image != "" {
+		body["image"] = image
+	}
+	if diskGB > 0 {
+		body["disk_gb"] = diskGB
+	}
+	if timeout > 0 {
+		body["timeout_seconds"] = timeout
+	}
+	var out oneShotRunDTO
+	err := c.PostJSON(ctx, "/v1/one-shot-runs?detach=true", body, &out)
+	return out, err
+}
+
+func oneShotRunStatus(ctx context.Context, c *api.Client, runID string) (oneShotRunDTO, error) {
+	var out oneShotRunDTO
+	err := c.GetJSON(ctx, runPath(runID), &out)
+	return out, err
+}
+
+func oneShotRunCancel(ctx context.Context, c *api.Client, runID string) (oneShotRunDTO, error) {
+	var out oneShotRunDTO
+	err := c.Do(ctx, http.MethodDelete, runPath(runID), nil, "", &out)
+	return out, err
+}
+
+func fetchOneShotRunLogs(ctx context.Context, c *api.Client, runID string, cursor int64) (logsCursorDTO, error) {
+	q := url.Values{}
+	q.Set("cursor", strconv.FormatInt(cursor, 10))
+	q.Set("stream", "false")
+	path := runPath(runID) + "/logs?" + q.Encode()
+	var out logsCursorDTO
+	err := c.GetJSON(ctx, path, &out)
+	return out, err
+}
+
+func printDetachedOneShotRun(out oneShotRunDTO) {
+	fmt.Fprintf(os.Stderr, "run_id=%s state=%s", out.RunID, out.State)
+	if out.SandboxName != "" {
+		fmt.Fprintf(os.Stderr, " sandbox=%s", out.SandboxName)
+	}
+	if out.Timing.TotalMS > 0 {
+		fmt.Fprintf(os.Stderr, " total=%s", humanDurationMS(out.Timing.TotalMS))
+	}
+	fmt.Fprintln(os.Stderr)
+	if out.Links != nil {
+		if logs := out.Links["logs"]; logs != "" {
+			fmt.Fprintf(os.Stderr, "logs=%s\n", logs)
+		}
+	}
+}
+
+func printStartedDetachedOneShotRun(out oneShotRunDTO) {
+	fmt.Println(out.RunID)
+	printDetachedOneShotRun(out)
 }
 
 func printOneShotRun(out oneShotRunDTO) {

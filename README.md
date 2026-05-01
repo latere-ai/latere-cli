@@ -158,6 +158,16 @@ latere cella run --ephemeral --rm -- sh -lc 'go test ./...'
 latere cella run --ephemeral --rm --timeout 900 -- sh -lc 'npm test'
 ```
 
+Detached one-shot execution returns immediately with a run id. The
+backend keeps the result and log tail for later inspection:
+
+```sh
+RUN=$(latere cella run --ephemeral --rm --detach -- sh -lc 'sleep 30 && echo done')
+latere cella run status "$RUN"
+latere cella run logs "$RUN" --follow
+latere cella run cancel "$RUN"
+```
+
 Inspect output and status:
 
 ```sh
@@ -168,7 +178,7 @@ latere cella wait <name|id> <command_id> --timeout 600
 ```
 
 `run` accepts repeatable `--env KEY=VALUE` and `--cwd /path`. One-shot
-runs also accept `--image`, `--disk`, `--timeout`, and `--json`.
+runs also accept `--image`, `--disk`, `--timeout`, `--detach`, and `--json`.
 
 ## Files
 
