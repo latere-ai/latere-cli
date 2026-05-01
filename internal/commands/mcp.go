@@ -159,7 +159,7 @@ func registerAgentTools(srv *mcp.Server, mt *mcpTools) {
 func registerManagementTools(srv *mcp.Server, mt *mcpTools) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "CreateSandbox",
-		Description: "Create a new Cella sandbox. Returns its id and slug. Attach credentials by catalog key, not by secret value.",
+		Description: "Create a new Cella sandbox. Returns its id and slug. Attach credentials by catalog key, not by secret value. cpu and memory accept Kubernetes quantities, for example 1.5, 1500m, or 4Gi.",
 	}, mt.create)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "ListSandboxes",
