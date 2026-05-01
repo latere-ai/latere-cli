@@ -232,6 +232,21 @@ func TestMCPWorkdirRouting(t *testing.T) {
 	if fake.lastCmdCwd != "/srv/agent" {
 		t.Fatalf("agentBash sent cwd=%q, want /srv/agent", fake.lastCmdCwd)
 	}
+	// Verify the export wire body carried an absolute src_dir rooted at
+	// the sandbox workdir, not a relative path or the empty default.
+	if fake.lastExportDir != "/srv/agent" {
+		t.Fatalf("export src_dir on wire = %q, want /srv/agent", fake.lastExportDir)
+	}
+
+	if _, _, err := mt.agentWrite(ctx, nil, mcpWriteArgs{Sandbox: "demo", Path: "out.txt", Content: "x"}); err != nil {
+		t.Fatalf("agentWrite under custom workdir failed: %v", err)
+	}
+	if fake.lastImportDest != "/srv/agent" {
+		t.Fatalf("import dest on wire = %q, want /srv/agent", fake.lastImportDest)
+	}
+	if string(fake.files["/srv/agent/out.txt"]) != "x" {
+		t.Fatalf("agentWrite did not land under custom workdir: files=%#v", fake.files)
+	}
 }
 
 // TestMCPDownloadCap exercises the agent download cap. We seed the fake
@@ -521,9 +536,11 @@ type fakeMCPAPI struct {
 	files      map[string][]byte
 	commands   map[string]commandDTO
 	logs       map[string]logsCursorDTO
-	startCount int
-	nextID     int
-	lastCmdCwd string
+	startCount     int
+	nextID         int
+	lastCmdCwd     string
+	lastImportDest string
+	lastExportDir  string
 }
 
 func newFakeMCPAPI(t *testing.T) *fakeMCPAPI {
@@ -711,6 +728,7 @@ func (f *fakeMCPAPI) handleFiles(w http.ResponseWriter, r *http.Request, parts [
 		if srcDir == "" {
 			srcDir = "/workspace"
 		}
+		f.lastExportDir = req.SrcDir
 		files := map[string]string{}
 		if len(req.Paths) == 0 {
 			for name, body := range f.files {
@@ -737,6 +755,7 @@ func (f *fakeMCPAPI) handleFiles(w http.ResponseWriter, r *http.Request, parts [
 		if dest == "" {
 			dest = "/workspace"
 		}
+		f.lastImportDest = r.FormValue("dest")
 		file, _, err := r.FormFile("tarball")
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
