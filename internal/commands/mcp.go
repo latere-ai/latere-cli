@@ -132,11 +132,11 @@ func registerAgentTools(srv *mcp.Server, mt *mcpTools) {
 	}, mt.agentEdit)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "Bash",
-		Description: "Run a shell command inside a selected Cella sandbox, never on the MCP host. Use credential_catalog for trust-plane credentials; env is only for non-secret values.",
+		Description: "Run a shell command inside a selected Cella sandbox, never on the MCP host. Returns a single combined `output` field with stdout and stderr merged in emission order. Use credential_catalog for trust-plane credentials; env is only for non-secret values.",
 	}, mt.agentBash)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "Monitor",
-		Description: "Read new output from a background command in a selected Cella sandbox.",
+		Description: "Read new output from a background command in a selected Cella sandbox. Events use a `combined` stream label because the runtime merges stdout and stderr.",
 	}, mt.agentMonitor)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "Glob",
