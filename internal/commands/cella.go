@@ -36,6 +36,8 @@ type sandboxDTO struct {
 	LastActivityAt  time.Time         `json:"last_activity_at,omitzero"`
 	AutoStopMinutes int               `json:"auto_stop_minutes,omitempty"`
 	DiskGB          int               `json:"disk_gb,omitempty"`
+	CPUMilli        int               `json:"cpu_milli,omitempty"`
+	MemoryMB        int               `json:"memory_mb,omitempty"`
 	Deadline        time.Time         `json:"deadline,omitzero"`
 	Annotations     map[string]string `json:"annotations,omitempty"`
 }
@@ -145,6 +147,8 @@ func newCeCreateCmd() *cobra.Command {
 		name            string
 		tier            string
 		diskGB          int
+		cpu             string
+		memory          string
 		autoStop        int
 		autoDeleteHours int
 		ttl             string
@@ -174,6 +178,12 @@ func newCeCreateCmd() *cobra.Command {
 			}
 			if diskGB > 0 {
 				body["disk_gb"] = diskGB
+			}
+			if cpu != "" {
+				body["cpu"] = cpu
+			}
+			if memory != "" {
+				body["memory"] = memory
 			}
 			if autoStop >= 0 && cmd.Flags().Changed("auto-stop-minutes") {
 				body["auto_stop_minutes"] = autoStop
@@ -206,6 +216,8 @@ func newCeCreateCmd() *cobra.Command {
 	f.StringVar(&name, "name", "", "human slug; server generates one if omitted")
 	f.StringVar(&tier, "tier", "", "ephemeral|persistent (default ephemeral)")
 	f.IntVar(&diskGB, "disk", 0, "PVC size in GB (default 5)")
+	f.StringVar(&cpu, "cpu", "", "CPU limit as a Kubernetes quantity, e.g. 1.5 or 1500m (default plan/account default)")
+	f.StringVar(&memory, "memory", "", "memory limit as a Kubernetes quantity, e.g. 4Gi or 2048Mi (default plan/account default)")
 	f.IntVar(&autoStop, "auto-stop-minutes", -1, "idle timeout (default 15; 0 disables)")
 	f.IntVar(&autoDeleteHours, "auto-delete-hours", 0, "ephemeral wall-clock lifetime")
 	f.StringVar(&ttl, "ttl", "", "Go duration TTL alternative to --auto-delete-hours")
@@ -361,6 +373,8 @@ func newCeRunCmd() *cobra.Command {
 		rm             bool
 		image          string
 		diskGB         int
+		cpu            string
+		memory         string
 		timeout        int
 		printJSONOut   bool
 	)
@@ -396,7 +410,7 @@ func newCeRunCmd() *cobra.Command {
 			}
 			if ephemeral && rm {
 				if detach {
-					out, err := oneShotRunDetached(cmd.Context(), c, args, env, cwd, image, diskGB, timeout, credentialFlag)
+					out, err := oneShotRunDetached(cmd.Context(), c, args, env, cwd, image, diskGB, cpu, memory, timeout, credentialFlag)
 					if err != nil {
 						return err
 					}
@@ -406,7 +420,7 @@ func newCeRunCmd() *cobra.Command {
 					printStartedDetachedOneShotRun(out)
 					return nil
 				}
-				out, err := oneShotRun(cmd.Context(), c, args, env, cwd, image, diskGB, timeout, credentialFlag)
+				out, err := oneShotRun(cmd.Context(), c, args, env, cwd, image, diskGB, cpu, memory, timeout, credentialFlag)
 				if err != nil {
 					return err
 				}
@@ -441,6 +455,8 @@ func newCeRunCmd() *cobra.Command {
 	f.BoolVar(&rm, "rm", false, "delete the one-shot cella after the command; required with --ephemeral")
 	f.StringVar(&image, "image", "", "one-shot image ref (default sandbox-base)")
 	f.IntVar(&diskGB, "disk", 0, "one-shot PVC size in GB (default 5)")
+	f.StringVar(&cpu, "cpu", "", "one-shot CPU limit as a Kubernetes quantity, e.g. 1.5 or 1500m")
+	f.StringVar(&memory, "memory", "", "one-shot memory limit as a Kubernetes quantity, e.g. 4Gi or 2048Mi")
 	f.IntVar(&timeout, "timeout", 600, "one-shot command timeout in seconds")
 	f.BoolVar(&printJSONOut, "json", false, "print one-shot response as JSON")
 	cmd.AddCommand(
@@ -1125,7 +1141,7 @@ func runAndStream(ctx context.Context, c *api.Client, sandbox string, argv []str
 	return streamLogs(ctx, c, sandbox, cd.CommandID, 0)
 }
 
-func oneShotRun(ctx context.Context, c *api.Client, argv []string, env map[string]string, cwd, image string, diskGB, timeout int, credentialCatalog []string) (oneShotRunDTO, error) {
+func oneShotRunBody(argv []string, env map[string]string, cwd, image string, diskGB int, cpu, memory string, timeout int, credentialCatalog []string) map[string]any {
 	body := map[string]any{"argv": argv}
 	if len(env) > 0 {
 		body["env"] = env
@@ -1139,12 +1155,23 @@ func oneShotRun(ctx context.Context, c *api.Client, argv []string, env map[strin
 	if diskGB > 0 {
 		body["disk_gb"] = diskGB
 	}
+	if cpu != "" {
+		body["cpu"] = cpu
+	}
+	if memory != "" {
+		body["memory"] = memory
+	}
 	if timeout > 0 {
 		body["timeout_seconds"] = timeout
 	}
 	if len(credentialCatalog) > 0 {
 		body["credential_catalog"] = credentialCatalog
 	}
+	return body
+}
+
+func oneShotRun(ctx context.Context, c *api.Client, argv []string, env map[string]string, cwd, image string, diskGB int, cpu, memory string, timeout int, credentialCatalog []string) (oneShotRunDTO, error) {
+	body := oneShotRunBody(argv, env, cwd, image, diskGB, cpu, memory, timeout, credentialCatalog)
 	if c.HTTP != nil {
 		effective := timeout
 		if effective <= 0 {
@@ -1157,26 +1184,8 @@ func oneShotRun(ctx context.Context, c *api.Client, argv []string, env map[strin
 	return out, err
 }
 
-func oneShotRunDetached(ctx context.Context, c *api.Client, argv []string, env map[string]string, cwd, image string, diskGB, timeout int, credentialCatalog []string) (oneShotRunDTO, error) {
-	body := map[string]any{"argv": argv}
-	if len(env) > 0 {
-		body["env"] = env
-	}
-	if cwd != "" {
-		body["cwd"] = cwd
-	}
-	if image != "" {
-		body["image"] = image
-	}
-	if diskGB > 0 {
-		body["disk_gb"] = diskGB
-	}
-	if timeout > 0 {
-		body["timeout_seconds"] = timeout
-	}
-	if len(credentialCatalog) > 0 {
-		body["credential_catalog"] = credentialCatalog
-	}
+func oneShotRunDetached(ctx context.Context, c *api.Client, argv []string, env map[string]string, cwd, image string, diskGB int, cpu, memory string, timeout int, credentialCatalog []string) (oneShotRunDTO, error) {
+	body := oneShotRunBody(argv, env, cwd, image, diskGB, cpu, memory, timeout, credentialCatalog)
 	var out oneShotRunDTO
 	err := c.PostJSON(ctx, "/v1/one-shot-runs?detach=true", body, &out)
 	return out, err
@@ -1279,7 +1288,27 @@ func printJSON(v any) error {
 }
 
 func printSandbox(s sandboxDTO) {
+	if size := sandboxResourceSummary(s); size != "" {
+		fmt.Printf("%s  %s  %s  %s\n", nameOrDash(s.Name), s.ID, s.State, size)
+		return
+	}
 	fmt.Printf("%s  %s  %s\n", nameOrDash(s.Name), s.ID, s.State)
+}
+
+// sandboxResourceSummary renders the cpu_milli / memory_mb fields
+// the server populates from the canonical annotations. Empty when
+// neither has been reported yet (older sandboxd build or sandbox
+// still creating).
+func sandboxResourceSummary(s sandboxDTO) string {
+	switch {
+	case s.CPUMilli > 0 && s.MemoryMB > 0:
+		return fmt.Sprintf("cpu=%dm memory=%dMi", s.CPUMilli, s.MemoryMB)
+	case s.CPUMilli > 0:
+		return fmt.Sprintf("cpu=%dm", s.CPUMilli)
+	case s.MemoryMB > 0:
+		return fmt.Sprintf("memory=%dMi", s.MemoryMB)
+	}
+	return ""
 }
 
 func nameOrDash(s string) string {

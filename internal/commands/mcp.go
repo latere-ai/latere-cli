@@ -221,6 +221,8 @@ type mcpCreateArgs struct {
 	Image             string   `json:"image" mcp:"container image, e.g. ghcr.io/latere-ai/sandbox-base:main"`
 	Tier              string   `json:"tier,omitempty" mcp:"ephemeral (default) or persistent"`
 	DiskGB            int      `json:"disk_gb,omitempty"`
+	CPU               string   `json:"cpu,omitempty" mcp:"CPU limit as a Kubernetes quantity, e.g. 1.5 or 1500m"`
+	Memory            string   `json:"memory,omitempty" mcp:"memory limit as a Kubernetes quantity, e.g. 4Gi or 2048Mi"`
 	Name              string   `json:"name,omitempty" mcp:"optional human slug"`
 	AutoDeleteHours   int      `json:"auto_delete_hours,omitempty"`
 	CredentialCatalog []string `json:"credential_catalog,omitempty" mcp:"trust-plane catalog keys to attach; not secret values"`
@@ -784,6 +786,12 @@ func (m *mcpTools) create(ctx context.Context, _ *mcp.CallToolRequest, a mcpCrea
 	body := map[string]any{
 		"image": a.Image, "tier": a.Tier, "disk_gb": a.DiskGB,
 		"name": a.Name, "auto_delete_hours": a.AutoDeleteHours,
+	}
+	if a.CPU != "" {
+		body["cpu"] = a.CPU
+	}
+	if a.Memory != "" {
+		body["memory"] = a.Memory
 	}
 	if len(a.CredentialCatalog) > 0 {
 		body["credential_catalog"] = a.CredentialCatalog
