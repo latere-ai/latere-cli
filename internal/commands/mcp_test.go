@@ -462,13 +462,13 @@ func registeredToolNames(t *testing.T, surface string) []string {
 	if err != nil {
 		t.Fatalf("server connect: %v", err)
 	}
-	defer ss.Close()
+	defer func() { _ = ss.Close() }()
 	cl := mcp.NewClient(&mcp.Implementation{Name: "client", Version: "test"}, nil)
 	cs, err := cl.Connect(ctx, ct, nil)
 	if err != nil {
 		t.Fatalf("client connect: %v", err)
 	}
-	defer cs.Close()
+	defer func() { _ = cs.Close() }()
 	res, err := cs.ListTools(ctx, &mcp.ListToolsParams{})
 	if err != nil {
 		t.Fatalf("list tools: %v", err)
@@ -819,7 +819,7 @@ func (f *fakeMCPAPI) handleFiles(w http.ResponseWriter, r *http.Request, parts [
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		defer file.Close()
+		defer func() { _ = file.Close() }()
 		imported, bytesWritten := f.importTar(file, dest)
 		writeJSON(f.t, w, mcpImportResult{Imported: imported, Bytes: bytesWritten, Dest: dest})
 	default:

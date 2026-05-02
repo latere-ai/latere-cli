@@ -1,8 +1,6 @@
 package commands
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
 )
 
@@ -23,12 +21,4 @@ func NewRoot(version string) *cobra.Command {
 	root.AddCommand(newAuthCmd())
 	root.AddCommand(newCellaCmd())
 	return root
-}
-
-// notImplemented is the standard stub body for commands whose backing API is
-// not live yet. Keeps the CLI surface honest while scaffolding lands first.
-func notImplemented(name string) func(cmd *cobra.Command, args []string) error {
-	return func(cmd *cobra.Command, args []string) error {
-		return fmt.Errorf("%s: not implemented yet. Track progress at https://latere.ai", name)
-	}
 }

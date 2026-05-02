@@ -171,7 +171,7 @@ func (c *Client) Do(ctx context.Context, method, path string, body io.Reader, co
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode/100 != 2 {
 		return parseAPIError(resp)
 	}
@@ -194,7 +194,7 @@ func (c *Client) DoRaw(ctx context.Context, method, path string, body io.Reader,
 		return nil, err
 	}
 	if resp.StatusCode/100 != 2 {
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		return nil, parseAPIError(resp)
 	}
 	return resp, nil

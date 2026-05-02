@@ -73,7 +73,7 @@ func runCellaImportE2E(t *testing.T, inputName string, wantEntries []archiveEntr
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer file.Close()
+		defer func() { _ = file.Close() }()
 		tr := tar.NewReader(file)
 		hdr, err := tr.Next()
 		if err != nil {
@@ -133,7 +133,7 @@ func writeZipFixture(path string, entries []archiveEntry) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	zw := zip.NewWriter(f)
 	for _, entry := range entries {
 		w, err := zw.Create(entry.Name)

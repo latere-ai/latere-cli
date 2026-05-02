@@ -79,7 +79,7 @@ func attachShell(ctx context.Context, c *api.Client, sandbox, session string) (i
 	conn, resp, err := dialer.DialContext(ctx, wsURL, header)
 	if err != nil {
 		if resp != nil && resp.Body != nil {
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<14))
 			if msg := strings.TrimSpace(string(b)); msg != "" {
 				return 0, fmt.Errorf("open PTY websocket: %w: %s", err, msg)
@@ -87,7 +87,7 @@ func attachShell(ctx context.Context, c *api.Client, sandbox, session string) (i
 		}
 		return 0, fmt.Errorf("open PTY websocket: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	stdinFD := int(os.Stdin.Fd())
 	stdoutFD := int(os.Stdout.Fd())
@@ -96,7 +96,7 @@ func attachShell(ctx context.Context, c *api.Client, sandbox, session string) (i
 		if err != nil {
 			return 0, fmt.Errorf("set terminal raw mode: %w", err)
 		}
-		defer term.Restore(stdinFD, oldState)
+		defer func() { _ = term.Restore(stdinFD, oldState) }()
 	}
 
 	var writeMu sync.Mutex

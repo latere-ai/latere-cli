@@ -205,7 +205,7 @@ func runDeviceFlow(ctx context.Context, opts deviceFlowOpts) error {
 	if err != nil {
 		return fmt.Errorf("device/code: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode/100 != 2 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<14))
 		return fmt.Errorf("device/code %d: %s", resp.StatusCode, b)
@@ -321,7 +321,7 @@ func exchangeForCellaToken(ctx context.Context, opts deviceFlowOpts, authToken s
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode/100 != 2 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<14))
 		return "", fmt.Errorf("actor-tokens %d: %s", resp.StatusCode, b)
@@ -349,7 +349,7 @@ func exchangeForCellaToken(ctx context.Context, opts deviceFlowOpts, authToken s
 	if err != nil {
 		return "", err
 	}
-	defer resp2.Body.Close()
+	defer func() { _ = resp2.Body.Close() }()
 	if resp2.StatusCode/100 != 2 {
 		b, _ := io.ReadAll(io.LimitReader(resp2.Body, 1<<14))
 		return "", fmt.Errorf("tokens/exchange %d: %s", resp2.StatusCode, b)

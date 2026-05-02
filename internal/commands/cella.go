@@ -255,9 +255,9 @@ func newCeListCmd() *cobra.Command {
 				return printJSON(sbs)
 			}
 			tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-			fmt.Fprintln(tw, "NAME\tID\tSTATE\tTIER\tDISK\tCREATED")
+			_, _ = fmt.Fprintln(tw, "NAME\tID\tSTATE\tTIER\tDISK\tCREATED")
 			for _, s := range sbs {
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%dGi\t%s\n",
+				_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%dGi\t%s\n",
 					nameOrDash(s.Name), s.ID, s.State, defaultStr(s.Tier, "-"),
 					s.DiskGB, humanAge(s.CreatedAt))
 			}
@@ -667,14 +667,14 @@ func newCeExportCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			var w io.Writer = os.Stdout
 			if out != "" && out != "-" {
 				f, err := os.Create(out)
 				if err != nil {
 					return err
 				}
-				defer f.Close()
+				defer func() { _ = f.Close() }()
 				w = f
 			}
 			_, err = io.Copy(w, resp.Body)
@@ -718,7 +718,7 @@ func newCeImportCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				defer f.Close()
+				defer func() { _ = f.Close() }()
 				src = f
 				srcFile = f
 				formFilename = filepath.Base(input)

@@ -952,7 +952,7 @@ func (m *mcpTools) export(ctx context.Context, _ *mcp.CallToolRequest, a mcpExpo
 	if err != nil {
 		return nil, mcpExportResult{}, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	tarBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, mcpExportResult{}, err
@@ -981,7 +981,7 @@ func (m *mcpTools) imp(ctx context.Context, _ *mcp.CallToolRequest, a mcpImportA
 	if _, err := fw.Write(tarBytes); err != nil {
 		return nil, mcpImportResult{}, err
 	}
-	mw.Close()
+	_ = mw.Close()
 
 	var resp mcpImportResult
 	path := "/v1/sandboxes/" + url.PathEscape(a.Sandbox) + "/files/import"
@@ -1352,7 +1352,7 @@ func (m *mcpTools) exportTar(ctx context.Context, sandbox, srcDirAbs string, pat
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	return io.ReadAll(resp.Body)
 }
 
