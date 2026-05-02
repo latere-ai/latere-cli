@@ -14,20 +14,19 @@ import (
 	"github.com/latere-ai/latere-cli/internal/api"
 )
 
-// Cross-repo regression coverage for sandbox spec 66 against the CLI
-// surface. Three things matter:
+// Regression coverage for the credential_catalog wire shape:
 //
 //   1. Every sandboxd write the CLI / MCP makes that can carry a
-//      credential reference uses `credential_catalog`, not a literal
+//      credential reference uses `credential_catalog`, never a literal
 //      `secret_env` map.
 //   2. Empty selection omits the field so the server sees the legacy
 //      "attach full client catalog" default rather than an explicit
 //      empty-attach.
-//   3. The MCP tool argument schemas advertise the field as "trust-plane
-//      catalog keys; not secret values" so an agent host cannot
-//      misinterpret the field as a place for plaintext credentials.
+//   3. The MCP tool argument schemas advertise the field as
+//      "trust-plane catalog keys; not secret values" so an agent host
+//      cannot misinterpret it as a place for plaintext credentials.
 
-func TestSpec66_CLIBuildersUseCredentialCatalogNotSecretEnv(t *testing.T) {
+func TestCredentialCatalog_BuildersUseCatalogNotSecretEnv(t *testing.T) {
 	cases := []struct {
 		name string
 		body map[string]any
@@ -53,7 +52,7 @@ func TestSpec66_CLIBuildersUseCredentialCatalogNotSecretEnv(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, ok := tc.body["secret_env"]; ok {
-				t.Fatal("body emits secret_env; spec 50 removed it and spec 66 forbids reintroduction")
+				t.Fatal("body emits secret_env; the field was removed and must not return")
 			}
 			if reflect.DeepEqual(tc.body["credential_catalog"], []string{}) {
 				t.Fatal("empty selection should omit credential_catalog (sends nil), not encode []")
@@ -73,7 +72,7 @@ func TestSpec66_CLIBuildersUseCredentialCatalogNotSecretEnv(t *testing.T) {
 	}
 }
 
-func TestSpec66_StartCommandSendsCredentialCatalog(t *testing.T) {
+func TestCredentialCatalog_StartCommandSendsArrayOnTheWire(t *testing.T) {
 	var lastBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasSuffix(r.URL.Path, "/commands") {
@@ -100,7 +99,7 @@ func TestSpec66_StartCommandSendsCredentialCatalog(t *testing.T) {
 	}
 
 	// No selection: field must be omitted entirely so the server uses
-	// the spec-50 default of attaching the full client catalog.
+	// the default of attaching the full client catalog.
 	lastBody = nil
 	if _, err := startCommand(context.Background(), c, "sb-x",
 		[]string{"echo", "hi"}, nil, "", nil); err != nil {
@@ -111,7 +110,7 @@ func TestSpec66_StartCommandSendsCredentialCatalog(t *testing.T) {
 	}
 }
 
-func TestSpec66_MCPCreateAndRunSendCredentialCatalog(t *testing.T) {
+func TestCredentialCatalog_MCPCreateAndRunForwardSelection(t *testing.T) {
 	var paths []string
 	var bodies []map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -160,7 +159,7 @@ func TestSpec66_MCPCreateAndRunSendCredentialCatalog(t *testing.T) {
 	}
 }
 
-func TestSpec66_MCPSchemasDescribeCatalogAsNonSecret(t *testing.T) {
+func TestCredentialCatalog_MCPSchemasDescribeFieldAsNonSecret(t *testing.T) {
 	for _, want := range []string{
 		`mcp:"trust-plane catalog keys to attach; not secret values"`,
 		`mcp:"trust-plane catalog keys to use for this command; not secret values"`,
@@ -179,14 +178,9 @@ func TestSpec66_MCPSchemasDescribeCatalogAsNonSecret(t *testing.T) {
 func mcpSourceContains(t *testing.T, needle string) bool {
 	t.Helper()
 	const path = "mcp.go"
-	b, err := readSourceFile(path)
+	b, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return strings.Contains(string(b), needle)
-}
-
-func readSourceFile(name string) ([]byte, error) {
-	// Tests run from the package dir, so a relative read suffices.
-	return os.ReadFile(name)
 }
