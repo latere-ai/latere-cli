@@ -249,6 +249,64 @@ func TestMCPWorkdirRouting(t *testing.T) {
 	}
 }
 
+// TestMCPUploadRejectsMaliciousTar covers the CLI-side preflight that
+// refuses archive entries which would escape the resolved dest. The
+// server-side sanitizer is tested separately (sandbox internal/api);
+// this nails down that the CLI fails fast before sending the bytes.
+func TestMCPUploadRejectsMaliciousTar(t *testing.T) {
+	fake := newFakeMCPAPI(t)
+	fake.sandboxes["demo"] = sandboxDTO{ID: "demo", Name: "demo", State: "running", Tier: "ephemeral", Workdir: "/workspace"}
+	defer fake.server.Close()
+
+	mt := &mcpTools{c: &api.Client{BaseURL: fake.server.URL, HTTP: fake.server.Client()}}
+	ctx := context.Background()
+
+	cases := map[string]map[string]string{
+		"absolute":      {"/etc/passwd": "x"},
+		"parent_escape": {"../escape": "x"},
+	}
+	for name, files := range cases {
+		t.Run(name, func(t *testing.T) {
+			payload := tarFiles(t, files)
+			_, _, err := mt.agentUpload(ctx, nil, mcpUploadArgs{
+				Sandbox:   "demo",
+				Dest:      "inbox",
+				TarBase64: base64.StdEncoding.EncodeToString(payload),
+			})
+			if err == nil {
+				t.Fatalf("agentUpload accepted %s entry", name)
+			}
+			if !strings.Contains(err.Error(), "escape") {
+				t.Fatalf("error %q does not mention escape", err)
+			}
+		})
+	}
+}
+
+// TestMCPEditAmbiguityHasSnippets locks the new structured-edit error
+// shape from spec 63: ambiguous matches must surface a line number and
+// a short snippet for each occurrence so callers can extend `old`.
+func TestMCPEditAmbiguityHasSnippets(t *testing.T) {
+	fake := newFakeMCPAPI(t)
+	fake.sandboxes["demo"] = sandboxDTO{ID: "demo", Name: "demo", State: "running", Tier: "ephemeral", Workdir: "/workspace"}
+	fake.files["/workspace/multi.txt"] = []byte("alpha foo bar\nbeta foo baz\n")
+	defer fake.server.Close()
+
+	mt := &mcpTools{c: &api.Client{BaseURL: fake.server.URL, HTTP: fake.server.Client()}}
+	ctx := context.Background()
+
+	_, _, err := mt.agentEdit(ctx, nil, mcpEditArgs{Sandbox: "demo", Path: "multi.txt", Old: "foo", New: "qux"})
+	if err == nil {
+		t.Fatal("agentEdit accepted ambiguous replacement")
+	}
+	msg := err.Error()
+	for _, want := range []string{"matches:", "L1:", "L2:", "alpha", "beta"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error message missing %q: %s", want, msg)
+		}
+	}
+}
+
 // TestMCPDownloadCap exercises the agent download cap. We seed the fake
 // to return more bytes than the cap allows and assert the tool refuses
 // to base64 the response.

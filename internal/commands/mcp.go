@@ -1593,16 +1593,22 @@ func (m *mcpTools) preflightUploadOverwrite(ctx context.Context, sandbox, workdi
 		if hdr.Typeflag != tar.TypeReg {
 			continue
 		}
-		rel := hdr.Name
-		if relDest != "" {
-			rel = path.Join(relDest, hdr.Name)
+		// Validate the raw entry name before joining: path.Join("dst",
+		// "/etc/passwd") drops the leading slash and path.Join("dst",
+		// "../etc") walks up out of dst, both of which would slip past
+		// a post-join IsAbs / HasPrefix check.
+		name := strings.ReplaceAll(hdr.Name, "\\", "/")
+		if name == "" {
+			return fmt.Errorf("upload entry has empty name")
 		}
-		rel = path.Clean(rel)
-		if path.IsAbs(rel) || strings.HasPrefix(rel, "../") {
-			// The server-side validator will also reject this; surface
-			// the same error early so we don't hide the real cause.
-			return fmt.Errorf("upload entry escapes dest: %s", hdr.Name)
+		if strings.HasPrefix(name, "/") || path.IsAbs(name) {
+			return fmt.Errorf("upload entry escapes dest (absolute name): %s", hdr.Name)
 		}
+		clean := path.Clean(name)
+		if clean == ".." || strings.HasPrefix(clean, "../") || strings.Contains(clean, "/../") {
+			return fmt.Errorf("upload entry escapes dest (parent traversal): %s", hdr.Name)
+		}
+		rel := path.Join(relDest, clean)
 		probePaths = append(probePaths, rel)
 		rels = append(rels, rel)
 	}
