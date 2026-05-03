@@ -218,7 +218,7 @@ func newCeCreateCmd() *cobra.Command {
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&image, "image", "ghcr.io/latere-ai/sandbox-base:main", "container image")
+	f.StringVar(&image, "image", "ghcr.io/latere-ai/sandbox-base:latest", "container image")
 	f.StringVar(&name, "name", "", "human slug; server generates one if omitted")
 	f.StringVar(&tier, "tier", "", "ephemeral|persistent (default ephemeral)")
 	f.IntVar(&diskGB, "disk", 0, "PVC size in GB (default 5)")

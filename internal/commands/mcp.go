@@ -218,7 +218,7 @@ func registerManagementTools(srv *mcp.Server, mt *mcpTools) {
 // ---- tool args / results ----
 
 type mcpCreateArgs struct {
-	Image             string   `json:"image" mcp:"container image, e.g. ghcr.io/latere-ai/sandbox-base:main"`
+	Image             string   `json:"image" mcp:"container image, e.g. ghcr.io/latere-ai/sandbox-base:latest"`
 	Tier              string   `json:"tier,omitempty" mcp:"ephemeral (default) or persistent"`
 	DiskGB            int      `json:"disk_gb,omitempty"`
 	CPU               string   `json:"cpu,omitempty" mcp:"CPU limit as a Kubernetes quantity, e.g. 1.5 or 1500m"`
