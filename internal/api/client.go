@@ -153,6 +153,11 @@ type APIError struct {
 }
 
 func (e *APIError) Error() string {
+	if e.Code == "policy_sidecar_required" {
+		return "cannot create cella: the selected policy requires Cella's credential sidecar, but the server has no complete sidecar configuration for this CLI token.\n" +
+			"This is not a local command syntax problem. Re-run `latere auth login` with the latest CLI, then retry. If it still fails, ask your Latere admin/support to configure the CLI sidecar client or choose a policy that does not require a sidecar.\n" +
+			"server code: policy_sidecar_required"
+	}
 	if e.Code != "" {
 		return fmt.Sprintf("%s: %s", e.Code, e.Message)
 	}
