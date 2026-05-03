@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,88 @@ import (
 
 	"github.com/latere-ai/latere-cli/internal/api"
 )
+
+func TestRunDeviceFlowOpensVerificationURL(t *testing.T) {
+	var opened string
+	origOpenBrowser := openBrowser
+	defer func() { openBrowser = origOpenBrowser }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	openBrowser = func(rawURL string) error {
+		opened = rawURL
+		cancel()
+		return nil
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/device/code":
+			_, _ = w.Write([]byte(`{
+				"device_code":"dev-1",
+				"user_code":"ABCD-EFGH",
+				"verification_uri":"https://auth.example/device",
+				"verification_uri_complete":"https://auth.example/device?user_code=ABCD-EFGH",
+				"expires_in":600,
+				"interval":5
+			}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	err := runDeviceFlow(ctx, deviceFlowOpts{
+		AuthURL:  srv.URL,
+		ClientID: "latere-cli",
+		Scopes:   "read:sandbox",
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("runDeviceFlow err = %v, want context.Canceled", err)
+	}
+	const want = "https://auth.example/device?user_code=ABCD-EFGH"
+	if opened != want {
+		t.Fatalf("opened URL = %q, want %q", opened, want)
+	}
+}
+
+func TestRunDeviceFlowNoBrowserSkipsOpen(t *testing.T) {
+	origOpenBrowser := openBrowser
+	defer func() { openBrowser = origOpenBrowser }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	openBrowser = func(rawURL string) error {
+		t.Fatalf("openBrowser called with %q", rawURL)
+		return nil
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/device/code":
+			cancel()
+			_, _ = w.Write([]byte(`{
+				"device_code":"dev-1",
+				"user_code":"ABCD-EFGH",
+				"verification_uri":"https://auth.example/device",
+				"verification_uri_complete":"https://auth.example/device?user_code=ABCD-EFGH",
+				"expires_in":600,
+				"interval":5
+			}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	err := runDeviceFlow(ctx, deviceFlowOpts{
+		AuthURL:   srv.URL,
+		ClientID:  "latere-cli",
+		Scopes:    "read:sandbox",
+		NoBrowser: true,
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("runDeviceFlow err = %v, want context.Canceled", err)
+	}
+}
 
 func TestExchangeForCellaTokenFallsBackToDirectExchangeOnActorAudienceMismatch(t *testing.T) {
 	authSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

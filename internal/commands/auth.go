@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 
@@ -61,13 +63,14 @@ Useful for piping into shell tools without depending on jq:
 
 func newAuthLoginCmd() *cobra.Command {
 	var (
-		token    string
-		apiURL   string
-		authURL  string
-		clientID string
-		scopes   string
-		personal bool
-		orgID    string
+		token     string
+		apiURL    string
+		authURL   string
+		clientID  string
+		scopes    string
+		personal  bool
+		orgID     string
+		noBrowser bool
 	)
 	cmd := &cobra.Command{
 		Use:   "login",
@@ -110,12 +113,13 @@ flow and store an access token directly.`,
 			}
 
 			return runDeviceFlow(ctx, deviceFlowOpts{
-				AuthURL:  authURL,
-				APIURL:   apiURL,
-				ClientID: clientID,
-				Scopes:   scopes,
-				OrgID:    strings.TrimSpace(orgID),
-				OrgIDSet: personal || strings.TrimSpace(orgID) != "",
+				AuthURL:   authURL,
+				APIURL:    apiURL,
+				ClientID:  clientID,
+				Scopes:    scopes,
+				OrgID:     strings.TrimSpace(orgID),
+				OrgIDSet:  personal || strings.TrimSpace(orgID) != "",
+				NoBrowser: noBrowser,
 			})
 		},
 	}
@@ -128,6 +132,7 @@ flow and store an access token directly.`,
 		"space-delimited scope list")
 	f.BoolVar(&personal, "personal", false, "issue the CLI token for personal cellas")
 	f.StringVar(&orgID, "org-id", "", "issue the CLI token for this organization id")
+	f.BoolVar(&noBrowser, "no-browser", false, "print the device URL without opening a browser")
 	return cmd
 }
 
@@ -159,6 +164,7 @@ type deviceFlowOpts struct {
 	AuthURL, APIURL, ClientID, Scopes string
 	OrgID                             string
 	OrgIDSet                          bool
+	NoBrowser                         bool
 }
 
 type deviceCodeResp struct {
@@ -224,6 +230,13 @@ func runDeviceFlow(ctx context.Context, opts deviceFlowOpts) error {
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintf(os.Stderr, "  To sign in, open this URL:\n\n      %s\n\n", verify)
 	fmt.Fprintf(os.Stderr, "  And confirm the code:\n\n      %s\n\n", dc.UserCode)
+	if !opts.NoBrowser && verify != "" {
+		if err := openBrowser(verify); err != nil {
+			fmt.Fprintf(os.Stderr, "  Could not open browser automatically: %v\n", err)
+		} else {
+			fmt.Fprintln(os.Stderr, "  Opened browser for confirmation.")
+		}
+	}
 	fmt.Fprintln(os.Stderr, "  Waiting for approval...")
 
 	// 3. Poll /token until terminal status.
@@ -287,6 +300,27 @@ func runDeviceFlow(ctx context.Context, opts deviceFlowOpts) error {
 		default:
 			return fmt.Errorf("device-code login failed: %s (%s)", body.Error, body.ErrorDescription)
 		}
+	}
+}
+
+var openBrowser = func(rawURL string) error {
+	name, args, err := browserCommand(rawURL)
+	if err != nil {
+		return err
+	}
+	return exec.Command(name, args...).Start()
+}
+
+func browserCommand(rawURL string) (string, []string, error) {
+	switch runtime.GOOS {
+	case "darwin":
+		return "open", []string{rawURL}, nil
+	case "windows":
+		return "rundll32", []string{"url.dll,FileProtocolHandler", rawURL}, nil
+	case "linux":
+		return "xdg-open", []string{rawURL}, nil
+	default:
+		return "", nil, fmt.Errorf("unsupported platform %s", runtime.GOOS)
 	}
 }
 
