@@ -3,6 +3,7 @@ package commands
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -290,10 +291,14 @@ func runDeviceFlow(ctx context.Context, opts deviceFlowOpts) error {
 }
 
 // exchangeForCellaToken trades an auth-issued user JWT for a cella
-// bearer token. The CLI mints a short-TTL actor token at auth, then
-// exchanges it at cella's /v1/tokens/exchange. Either step may fail
-// (older auth without /actor-tokens, older cella without the token
-// catalog); the caller falls back to the auth token in that case.
+// bearer token. The preferred path mints a short-TTL actor token at
+// auth, then exchanges it at cella's /v1/tokens/exchange.
+//
+// Some deployed auth versions stamp device-code tokens with sandboxd's
+// audience, then reject those same tokens on /actor-tokens because the
+// auth middleware expects the auth issuer as audience. In that case the
+// device token is still accepted by sandboxd, so use it directly for the
+// cella exchange instead of persisting the short-lived auth token.
 func exchangeForCellaToken(ctx context.Context, opts deviceFlowOpts, authToken string) (string, error) {
 	authBase := opts.AuthURL
 	if authBase == "" {
@@ -324,6 +329,9 @@ func exchangeForCellaToken(ctx context.Context, opts deviceFlowOpts, authToken s
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode/100 != 2 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<14))
+		if resp.StatusCode == http.StatusUnauthorized && strings.Contains(string(b), "audience mismatch") {
+			return exchangeAtCella(ctx, httpc, apiBase, authToken)
+		}
 		return "", fmt.Errorf("actor-tokens %d: %s", resp.StatusCode, b)
 	}
 	var actor struct {
@@ -334,17 +342,21 @@ func exchangeForCellaToken(ctx context.Context, opts deviceFlowOpts, authToken s
 	}
 
 	// 2. Exchange the actor token at cella.
+	return exchangeAtCella(ctx, httpc, apiBase, actor.ActorToken)
+}
+
+func exchangeAtCella(ctx context.Context, httpc *http.Client, apiBase, bearer string) (string, error) {
 	hostname, _ := os.Hostname()
 	if hostname == "" {
 		hostname = "CLI"
 	}
-	body, _ = json.Marshal(map[string]any{"label": "CLI on " + hostname})
+	body, _ := json.Marshal(map[string]any{"label": "CLI on " + hostname})
 	req2, err := http.NewRequestWithContext(ctx, http.MethodPost, apiBase+"/v1/tokens/exchange", strings.NewReader(string(body)))
 	if err != nil {
 		return "", err
 	}
 	req2.Header.Set("Content-Type", "application/json")
-	req2.Header.Set("Authorization", "Bearer "+actor.ActorToken)
+	req2.Header.Set("Authorization", "Bearer "+bearer)
 	resp2, err := httpc.Do(req2)
 	if err != nil {
 		return "", err
@@ -410,31 +422,135 @@ func newAuthWhoamiCmd() *cobra.Command {
 				Scopes        []string `json:"scopes"`
 				ClientID      string   `json:"client_id,omitempty"`
 			}
-			if err := req.GetJSON(cmd.Context(), "/tokeninfo", &info); err != nil {
+			if err := req.GetJSON(cmd.Context(), "/tokeninfo", &info); err == nil {
+				printPrincipal(principalInfo{
+					Sub:           info.Sub,
+					Email:         deref(info.Email),
+					PrincipalType: info.PrincipalType,
+					OrgID:         deref(info.OrgID),
+					Scopes:        info.Scopes,
+					ClientID:      info.ClientID,
+				})
+				return nil
+			} else {
+				var apiErr *api.APIError
+				if !errors.As(err, &apiErr) || apiErr.Status != http.StatusUnauthorized {
+					return err
+				}
+			}
+
+			// Auth cannot introspect cella-issued tokens, and current
+			// auth deployments also reject sandbox-audience device
+			// tokens on /tokeninfo. Confirm sandboxd accepts the bearer,
+			// then print the identity claims embedded in the JWT.
+			var ignored any
+			if err := c.GetJSON(cmd.Context(), "/v1/sandboxes", &ignored); err != nil {
 				return err
 			}
-			fmt.Printf("sub:           %s\n", info.Sub)
-			if info.Email != nil && *info.Email != "" {
-				fmt.Printf("email:         %s\n", *info.Email)
+			local, err := principalFromJWT(c.Token)
+			if err != nil {
+				return err
 			}
-			fmt.Printf("principal:     %s\n", info.PrincipalType)
-			if info.OrgID != nil && *info.OrgID != "" {
-				fmt.Printf("context:       org\n")
-				fmt.Printf("org_id:        %s\n", *info.OrgID)
-			} else {
-				fmt.Printf("context:       personal\n")
-			}
-			if info.ClientID != "" {
-				fmt.Printf("client_id:     %s\n", info.ClientID)
-			}
-			if len(info.Scopes) > 0 {
-				fmt.Printf("scopes:        %s\n", strings.Join(info.Scopes, " "))
-			}
+			printPrincipal(local)
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&apiURL, "api-url", "", "override sandboxd base URL")
 	return cmd
+}
+
+type principalInfo struct {
+	Sub           string
+	Email         string
+	PrincipalType string
+	OrgID         string
+	Scopes        []string
+	ClientID      string
+}
+
+func printPrincipal(info principalInfo) {
+	fmt.Printf("sub:           %s\n", info.Sub)
+	if info.Email != "" {
+		fmt.Printf("email:         %s\n", info.Email)
+	}
+	fmt.Printf("principal:     %s\n", info.PrincipalType)
+	if info.OrgID != "" {
+		fmt.Printf("context:       org\n")
+		fmt.Printf("org_id:        %s\n", info.OrgID)
+	} else {
+		fmt.Printf("context:       personal\n")
+	}
+	if info.ClientID != "" {
+		fmt.Printf("client_id:     %s\n", info.ClientID)
+	}
+	if len(info.Scopes) > 0 {
+		fmt.Printf("scopes:        %s\n", strings.Join(info.Scopes, " "))
+	}
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+func principalFromJWT(raw string) (principalInfo, error) {
+	parts := strings.Split(raw, ".")
+	if len(parts) < 2 {
+		return principalInfo{}, errors.New("saved token is not a JWT")
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return principalInfo{}, fmt.Errorf("decode token payload: %w", err)
+	}
+	var claims map[string]any
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return principalInfo{}, fmt.Errorf("parse token payload: %w", err)
+	}
+	info := principalInfo{
+		Sub:           stringClaim(claims, "sub"),
+		Email:         stringClaim(claims, "email"),
+		PrincipalType: stringClaim(claims, "principal_type"),
+		OrgID:         stringClaim(claims, "org_id"),
+		Scopes:        scopesClaim(claims),
+		ClientID:      stringClaim(claims, "client_id"),
+	}
+	if info.Sub == "" {
+		return principalInfo{}, errors.New("saved token is missing sub")
+	}
+	if info.PrincipalType == "" {
+		info.PrincipalType = "user"
+	}
+	return info, nil
+}
+
+func stringClaim(claims map[string]any, key string) string {
+	v, _ := claims[key].(string)
+	return v
+}
+
+func scopesClaim(claims map[string]any) []string {
+	if scope, _ := claims["scope"].(string); scope != "" {
+		return strings.Fields(scope)
+	}
+	raw, ok := claims["scp"]
+	if !ok {
+		return nil
+	}
+	switch v := raw.(type) {
+	case string:
+		return strings.Fields(v)
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok && s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	return nil
 }
 
 func newAuthLogoutCmd() *cobra.Command {
