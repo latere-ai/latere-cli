@@ -91,7 +91,7 @@ func TestHelpIncludesUserExamples(t *testing.T) {
 			want: []string{
 				"List Cella policy profiles visible to the current token.",
 				"latere cella create --policy <name>",
-				"choose a selectable policy where SIDECAR is \"no\"",
+				"choose a selectable policy where sidecar is \"no\"",
 			},
 		},
 		{

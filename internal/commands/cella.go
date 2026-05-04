@@ -16,7 +16,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"text/tabwriter"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -303,14 +302,12 @@ cellas returned by the backend, including warm-pool cellas.`,
 			if jsonF {
 				return printJSON(sbs)
 			}
-			tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-			_, _ = fmt.Fprintln(tw, "NAME\tID\tSTATE\tTIER\tDISK\tCREATED")
-			for _, s := range sbs {
-				_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%dGi\t%s\n",
-					nameOrDash(s.Name), s.ID, s.State, defaultStr(s.Tier, "-"),
-					s.DiskGB, humanAge(s.CreatedAt))
+			if len(sbs) == 0 {
+				fmt.Fprintln(os.Stdout, "No cellas are visible to this token.")
+				return nil
 			}
-			return tw.Flush()
+			printSandboxList(sbs)
+			return nil
 		},
 	}
 	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
@@ -338,7 +335,7 @@ Use a selectable policy with:
   latere cella create --policy <name>
 
 If create fails because the selected policy requires the sidecar, list
-policies and choose a selectable policy where SIDECAR is "no", or ask
+policies and choose a selectable policy where sidecar is "no", or ask
 an admin to configure the sidecar client for your token.`,
 		Example: `  latere cella policy
   latere cella policy list
@@ -391,20 +388,19 @@ func runPolicyList(ctx context.Context, apiURL string, jsonF bool) error {
 }
 
 func printPolicies(policies []policyDTO) {
-	tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-	_, _ = fmt.Fprintln(tw, "NAME\tDEFAULT\tSELECTABLE\tSIDECAR\tCAPABILITY\tSOURCE\tDESCRIPTION")
-	for _, p := range policies {
-		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			p.Name,
-			yesNo(p.IsDefault),
-			yesNo(p.Selectable),
-			yesNo(p.SidecarRequired),
-			defaultStr(p.CapabilityProfile, "-"),
-			defaultStr(p.AssignmentSource, "-"),
-			oneLine(defaultStr(p.Description, p.Label)),
-		)
+	for i, p := range policies {
+		if i > 0 {
+			fmt.Fprintln(os.Stdout)
+		}
+		printWrappedField("policy", p.Name)
+		printWrappedField("label", p.Label)
+		printWrappedField("default", yesNo(p.IsDefault))
+		printWrappedField("selectable", yesNo(p.Selectable))
+		printWrappedField("sidecar", yesNo(p.SidecarRequired))
+		printWrappedField("capability", defaultStr(p.CapabilityProfile, "-"))
+		printWrappedField("source", defaultStr(p.AssignmentSource, "-"))
+		printWrappedField("description", defaultStr(p.Description, "-"))
 	}
-	_ = tw.Flush()
 }
 
 func newCeGetCmd() *cobra.Command {
@@ -1515,12 +1511,35 @@ func printJSON(v any) error {
 	return enc.Encode(v)
 }
 
-func printSandbox(s sandboxDTO) {
-	if size := sandboxResourceSummary(s); size != "" {
-		fmt.Printf("%s  %s  %s  %s\n", nameOrDash(s.Name), s.ID, s.State, size)
-		return
+func printSandboxList(sbs []sandboxDTO) {
+	for i, s := range sbs {
+		if i > 0 {
+			fmt.Fprintln(os.Stdout)
+		}
+		printSandbox(s)
 	}
-	fmt.Printf("%s  %s  %s\n", nameOrDash(s.Name), s.ID, s.State)
+}
+
+func printSandbox(s sandboxDTO) {
+	printWrappedField("cella", nameOrDash(s.Name))
+	printWrappedField("id", s.ID)
+	printWrappedField("state", s.State)
+	printWrappedField("tier", defaultStr(s.Tier, "-"))
+	if s.DiskGB > 0 {
+		printWrappedField("disk", fmt.Sprintf("%dGi", s.DiskGB))
+	}
+	if size := sandboxResourceSummary(s); size != "" {
+		printWrappedField("resources", size)
+	}
+	if !s.CreatedAt.IsZero() {
+		printWrappedField("created", humanAge(s.CreatedAt)+" ago")
+	}
+	if !s.Deadline.IsZero() {
+		printWrappedField("deadline", s.Deadline.Format(time.RFC3339))
+	}
+	if s.Workdir != "" {
+		printWrappedField("workdir", s.Workdir)
+	}
 }
 
 // sandboxResourceSummary renders the cpu_milli / memory_mb fields
@@ -1558,6 +1577,50 @@ func yesNo(v bool) string {
 		return "yes"
 	}
 	return "no"
+}
+
+func printWrappedField(label, value string) {
+	value = oneLine(value)
+	if value == "" {
+		return
+	}
+	const (
+		labelWidth = 12
+		maxWidth   = 88
+	)
+	prefix := fmt.Sprintf("%-*s", labelWidth, label+":")
+	lines := wrapText(value, maxWidth-labelWidth)
+	if len(lines) == 0 {
+		fmt.Fprintln(os.Stdout, prefix)
+		return
+	}
+	fmt.Fprintln(os.Stdout, prefix+lines[0])
+	indent := strings.Repeat(" ", labelWidth)
+	for _, line := range lines[1:] {
+		fmt.Fprintln(os.Stdout, indent+line)
+	}
+}
+
+func wrapText(s string, width int) []string {
+	words := strings.Fields(s)
+	if len(words) == 0 {
+		return nil
+	}
+	if width <= 0 {
+		width = 76
+	}
+	var lines []string
+	line := words[0]
+	for _, word := range words[1:] {
+		if len(line)+1+len(word) > width {
+			lines = append(lines, line)
+			line = word
+			continue
+		}
+		line += " " + word
+	}
+	lines = append(lines, line)
+	return lines
 }
 
 func oneLine(s string) string {

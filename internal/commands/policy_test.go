@@ -57,19 +57,21 @@ func TestPolicyListPrintsCreateGuidanceFields(t *testing.T) {
 		t.Fatalf("Authorization = %q, want bearer token", authz)
 	}
 	for _, want := range []string{
-		"NAME",
-		"DEFAULT",
-		"SELECTABLE",
-		"SIDECAR",
+		"policy:     agent-default",
+		"default:    yes",
+		"selectable: yes",
+		"sidecar:    yes",
 		"agent-default",
-		"yes",
 		"restricted-network",
 		"restricted-no-network",
-		"client",
+		"source:     client",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("policy list output missing %q:\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "NAME") || strings.Contains(out, "\t") {
+		t.Fatalf("policy list should be pure text, not a wide table:\n%s", out)
 	}
 }
 
@@ -93,6 +95,45 @@ func TestPolicyListEmptyExplainsNextStep(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("empty policy output missing %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestSandboxListPrintsReadableRecords(t *testing.T) {
+	out := capturePolicyStdout(t, func() {
+		printSandboxList([]sandboxDTO{
+			{
+				ID:       "sb-019dc976-2b28-7c55-8778-bf7d5ae6c58d",
+				Name:     "workspace-1",
+				State:    "stopped",
+				Tier:     "persistent",
+				DiskGB:   5,
+				CPUMilli: 1000,
+				MemoryMB: 2048,
+			},
+			{
+				ID:     "sb-019dc976-2b28-7c55-8778-warm-pool",
+				Name:   "warm-pool",
+				State:  "running",
+				Tier:   "ephemeral",
+				DiskGB: 5,
+			},
+		})
+	})
+
+	for _, want := range []string{
+		"cella:      workspace-1",
+		"id:         sb-019dc976-2b28-7c55-8778-bf7d5ae6c58d",
+		"state:      stopped",
+		"tier:       persistent",
+		"resources:  cpu=1000m memory=2048Mi",
+		"\n\ncella:      warm-pool",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("sandbox list output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "NAME") || strings.Contains(out, "\t") {
+		t.Fatalf("sandbox list should be pure text, not a wide table:\n%s", out)
 	}
 }
 

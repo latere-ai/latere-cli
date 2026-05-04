@@ -19,7 +19,7 @@ func TestAPIErrorPolicySidecarRequiredIsActionable(t *testing.T) {
 		"latere auth login",
 		"latere cella policy list",
 		"latere cella create --policy <name>",
-		"SIDECAR is `no`",
+		"sidecar is `no`",
 		"server code: policy_sidecar_required",
 	} {
 		if !strings.Contains(err, want) {
