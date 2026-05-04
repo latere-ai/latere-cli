@@ -43,6 +43,20 @@ type sandboxDTO struct {
 	Workdir         string            `json:"workdir,omitempty"`
 }
 
+type policyDTO struct {
+	Name               string    `json:"name"`
+	Label              string    `json:"label"`
+	Description        string    `json:"description"`
+	CapabilityProfile  string    `json:"capability_profile"`
+	SidecarRequired    bool      `json:"sidecar_required"`
+	IsDefault          bool      `json:"is_default"`
+	Selectable         bool      `json:"selectable"`
+	AssignmentSource   string    `json:"assignment_source"`
+	NetworkEgressFQDNs []string  `json:"network_egress_fqdns,omitempty"`
+	CreatedAt          time.Time `json:"created_at,omitzero"`
+	UpdatedAt          time.Time `json:"updated_at,omitzero"`
+}
+
 // fallbackWorkdir is the path the MCP/CLI assume when a sandbox DTO
 // arrives without a workdir field (older sandboxd before the workdir
 // contract shipped).
@@ -94,13 +108,14 @@ func newCellaCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "cella",
 		Aliases: []string{"sandbox"},
-		Short:   "Manage cellas (create, list, rename, start, stop, delete, run).",
+		Short:   "Manage cellas (create, list, policy, start, stop, delete, run).",
 		Long: `Manage Cella sandboxes — per-user compute environments at cella.latere.ai.
 
 Each cella is a PVC-backed workspace plus a Pod for compute. Tier
 'ephemeral' auto-stops on idle and auto-deletes after a wall-clock
 window; tier 'persistent' stays until you delete it.`,
 		Example: `  latere cella list
+  latere cella policy list
   latere cella create --name dev --tier persistent --disk 10
   latere cella shell dev
   latere cella run dev -- python train.py
@@ -114,6 +129,7 @@ window; tier 'persistent' stays until you delete it.`,
 		newCeStartCmd(),
 		newCeStopCmd(),
 		newCeDeleteCmd(),
+		newCePolicyCmd(),
 		newCeExecCmd(),
 		newCeShellCmd(),
 		newCeRunCmd(),
@@ -185,6 +201,7 @@ image and account defaults for disk, CPU, memory, idle timeout, and
 policy. Use --tier persistent for a workspace that survives until
 explicitly deleted.`,
 		Example: `  latere cella create
+  latere cella policy list
   latere cella create --name dev --tier persistent --disk 10
   latere cella create --name gpu-test --cpu 2 --memory 8Gi
   latere cella create --name app --env NODE_ENV=development --credential github
@@ -299,6 +316,95 @@ cellas returned by the backend, including warm-pool cellas.`,
 	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
 	cmd.Flags().BoolVar(&jsonF, "json", false, "JSON output")
 	return cmd
+}
+
+func newCePolicyCmd() *cobra.Command {
+	var (
+		apiURL string
+		jsonF  bool
+	)
+	cmd := &cobra.Command{
+		Use:     "policy",
+		Aliases: []string{"policies"},
+		Short:   "List policy profiles available for new cellas.",
+		Long: `List Cella policy profiles visible to the current token.
+
+Policies control runtime capabilities such as network shape, workspace
+layout, and whether Cella's credential sidecar is required. The default
+policy is used when 'latere cella create' is run without --policy.
+
+Use a selectable policy with:
+
+  latere cella create --policy <name>
+
+If create fails because the selected policy requires the sidecar, list
+policies and choose a selectable policy where SIDECAR is "no", or ask
+an admin to configure the sidecar client for your token.`,
+		Example: `  latere cella policy
+  latere cella policy list
+  latere cella policies --json
+  latere cella create --policy restricted-network`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runPolicyList(cmd.Context(), apiURL, jsonF)
+		},
+	}
+	f := cmd.Flags()
+	f.StringVar(&apiURL, "api-url", "", "override Cella API base URL")
+	f.BoolVar(&jsonF, "json", false, "JSON output")
+
+	list := &cobra.Command{
+		Use:   "list",
+		Short: "List policy profiles available for new cellas.",
+		Long:  cmd.Long,
+		Example: `  latere cella policy list
+  latere cella policy list --json
+  latere cella create --policy restricted-network`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runPolicyList(cmd.Context(), apiURL, jsonF)
+		},
+	}
+	list.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
+	list.Flags().BoolVar(&jsonF, "json", false, "JSON output")
+	cmd.AddCommand(list)
+	return cmd
+}
+
+func runPolicyList(ctx context.Context, apiURL string, jsonF bool) error {
+	c, err := authedClient(apiURL)
+	if err != nil {
+		return err
+	}
+	var policies []policyDTO
+	if err := c.GetJSON(ctx, "/v1/policies", &policies); err != nil {
+		return err
+	}
+	if jsonF {
+		return printJSON(policies)
+	}
+	if len(policies) == 0 {
+		fmt.Fprintln(os.Stdout, "No policy profiles are visible to this token.")
+		fmt.Fprintln(os.Stdout, "Ask your Latere admin to assign a selectable policy, then retry `latere cella create --policy <name>`.")
+		return nil
+	}
+	printPolicies(policies)
+	return nil
+}
+
+func printPolicies(policies []policyDTO) {
+	tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+	_, _ = fmt.Fprintln(tw, "NAME\tDEFAULT\tSELECTABLE\tSIDECAR\tCAPABILITY\tSOURCE\tDESCRIPTION")
+	for _, p := range policies {
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			p.Name,
+			yesNo(p.IsDefault),
+			yesNo(p.Selectable),
+			yesNo(p.SidecarRequired),
+			defaultStr(p.CapabilityProfile, "-"),
+			defaultStr(p.AssignmentSource, "-"),
+			oneLine(defaultStr(p.Description, p.Label)),
+		)
+	}
+	_ = tw.Flush()
 }
 
 func newCeGetCmd() *cobra.Command {
@@ -1445,6 +1551,17 @@ func defaultStr(s, fallback string) string {
 		return fallback
 	}
 	return s
+}
+
+func yesNo(v bool) string {
+	if v {
+		return "yes"
+	}
+	return "no"
+}
+
+func oneLine(s string) string {
+	return strings.Join(strings.Fields(s), " ")
 }
 
 func humanAge(t time.Time) string {

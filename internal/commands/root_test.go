@@ -79,9 +79,19 @@ func TestHelpIncludesUserExamples(t *testing.T) {
 			args: []string{"cella", "create", "--help"},
 			want: []string{
 				"Create a Cella workspace.",
+				"latere cella policy list",
 				"latere cella create --name dev --tier persistent --disk 10",
 				"idle timeout in minutes; omit for account default, 0 disables",
 				"named network policy",
+			},
+		},
+		{
+			name: "cella policy",
+			args: []string{"cella", "policy", "--help"},
+			want: []string{
+				"List Cella policy profiles visible to the current token.",
+				"latere cella create --policy <name>",
+				"choose a selectable policy where SIDECAR is \"no\"",
 			},
 		},
 		{

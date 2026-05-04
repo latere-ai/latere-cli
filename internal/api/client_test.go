@@ -17,6 +17,9 @@ func TestAPIErrorPolicySidecarRequiredIsActionable(t *testing.T) {
 		"server has no complete sidecar configuration for this CLI token",
 		"not a local command syntax problem",
 		"latere auth login",
+		"latere cella policy list",
+		"latere cella create --policy <name>",
+		"SIDECAR is `no`",
 		"server code: policy_sidecar_required",
 	} {
 		if !strings.Contains(err, want) {
