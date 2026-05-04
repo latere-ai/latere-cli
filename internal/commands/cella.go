@@ -100,6 +100,11 @@ func newCellaCmd() *cobra.Command {
 Each cella is a PVC-backed workspace plus a Pod for compute. Tier
 'ephemeral' auto-stops on idle and auto-deletes after a wall-clock
 window; tier 'persistent' stays until you delete it.`,
+		Example: `  latere cella list
+  latere cella create --name dev --tier persistent --disk 10
+  latere cella shell dev
+  latere cella run dev -- python train.py
+  latere cella export dev src -o workspace.tar`,
 	}
 	cmd.AddCommand(
 		newCeCreateCmd(),
@@ -130,7 +135,14 @@ func newCeExecCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "exec <name|id> -- <cmd>...",
 		Short: "Run a command synchronously inside a cella (streams logs to stdout).",
-		Args:  cobra.MinimumNArgs(2),
+		Long: `Run a command synchronously inside an existing cella.
+
+Stdout and stderr are streamed to your terminal. The CLI exits with
+the remote command's exit code when the command finishes.`,
+		Example: `  latere cella exec dev -- uname -a
+  latere cella exec dev -- python -m pytest
+  latere cella exec sb-019dc976-2b28-7c55-8778-bf7d5ae6c58d -- env`,
+		Args: cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := authedClient(apiURL)
 			if err != nil {
@@ -141,7 +153,7 @@ func newCeExecCmd() *cobra.Command {
 			return runAndStream(cmd.Context(), c, sandbox, argv, nil, "", nil)
 		},
 	}
-	cmd.Flags().StringVar(&apiURL, "api-url", "", "override cella base URL")
+	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
 	return cmd
 }
 
@@ -166,6 +178,17 @@ func newCeCreateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create a cella.",
+		Long: `Create a Cella workspace.
+
+By default this creates an ephemeral cella using the standard base
+image and account defaults for disk, CPU, memory, idle timeout, and
+policy. Use --tier persistent for a workspace that survives until
+explicitly deleted.`,
+		Example: `  latere cella create
+  latere cella create --name dev --tier persistent --disk 10
+  latere cella create --name gpu-test --cpu 2 --memory 8Gi
+  latere cella create --name app --env NODE_ENV=development --credential github
+  latere cella create --policy default-sidecar`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := authedClient(apiURL)
 			if err != nil {
@@ -174,6 +197,9 @@ func newCeCreateCmd() *cobra.Command {
 			env, err := parseKV(envFlag)
 			if err != nil {
 				return err
+			}
+			if cmd.Flags().Changed("auto-stop-minutes") && autoStop < 0 {
+				return fmt.Errorf("--auto-stop-minutes must be 0 or greater")
 			}
 			body := map[string]any{
 				"image": image,
@@ -191,7 +217,7 @@ func newCeCreateCmd() *cobra.Command {
 			if memory != "" {
 				body["memory"] = memory
 			}
-			if autoStop >= 0 && cmd.Flags().Changed("auto-stop-minutes") {
+			if cmd.Flags().Changed("auto-stop-minutes") {
 				body["auto_stop_minutes"] = autoStop
 			}
 			if autoDeleteHours > 0 {
@@ -224,13 +250,13 @@ func newCeCreateCmd() *cobra.Command {
 	f.IntVar(&diskGB, "disk", 0, "PVC size in GB (default 5)")
 	f.StringVar(&cpu, "cpu", "", "CPU limit as a Kubernetes quantity, e.g. 1.5 or 1500m (default plan/account default)")
 	f.StringVar(&memory, "memory", "", "memory limit as a Kubernetes quantity, e.g. 4Gi or 2048Mi (default plan/account default)")
-	f.IntVar(&autoStop, "auto-stop-minutes", -1, "idle timeout (default 15; 0 disables)")
+	f.IntVar(&autoStop, "auto-stop-minutes", 0, "idle timeout in minutes; omit for account default, 0 disables")
 	f.IntVar(&autoDeleteHours, "auto-delete-hours", 0, "ephemeral wall-clock lifetime")
 	f.StringVar(&ttl, "ttl", "", "Go duration TTL alternative to --auto-delete-hours")
 	f.StringArrayVar(&envFlag, "env", nil, "non-secret KEY=VALUE; repeatable")
 	f.StringArrayVar(&credentialFlag, "credential", nil, "trust-plane catalog key to attach; repeatable")
-	f.StringVar(&policy, "policy", "", "named NetworkPolicy")
-	f.StringVar(&apiURL, "api-url", "", "override sandboxd base URL")
+	f.StringVar(&policy, "policy", "", "named network policy")
+	f.StringVar(&apiURL, "api-url", "", "override Cella API base URL")
 	return cmd
 }
 
@@ -242,6 +268,12 @@ func newCeListCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List your cellas.",
+		Long: `List cellas available to the current token.
+
+Regular users see their own cellas. Superadmin tokens can see all
+cellas returned by the backend, including warm-pool cellas.`,
+		Example: `  latere cella list
+  latere cella list --json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := authedClient(apiURL)
 			if err != nil {
@@ -264,7 +296,7 @@ func newCeListCmd() *cobra.Command {
 			return tw.Flush()
 		},
 	}
-	cmd.Flags().StringVar(&apiURL, "api-url", "", "override sandboxd base URL")
+	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
 	cmd.Flags().BoolVar(&jsonF, "json", false, "JSON output")
 	return cmd
 }
@@ -274,7 +306,10 @@ func newCeGetCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "get <name|id>",
 		Short: "Get a cella by name or id.",
-		Args:  cobra.ExactArgs(1),
+		Long:  "Fetch one cella by slug or id and print the full JSON response.",
+		Example: `  latere cella get dev
+  latere cella get sb-019dc976-2b28-7c55-8778-bf7d5ae6c58d`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := authedClient(apiURL)
 			if err != nil {
@@ -287,7 +322,7 @@ func newCeGetCmd() *cobra.Command {
 			return printJSON(sb)
 		},
 	}
-	cmd.Flags().StringVar(&apiURL, "api-url", "", "override sandboxd base URL")
+	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
 	return cmd
 }
 
@@ -296,7 +331,10 @@ func newCeRenameCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "rename <name|id> <new-name>",
 		Short: "Rename a cella.",
-		Args:  cobra.ExactArgs(2),
+		Long:  "Rename a cella slug while keeping the same underlying workspace and id.",
+		Example: `  latere cella rename workspace-1 dev
+  latere cella rename sb-019dc976-2b28-7c55-8778-bf7d5ae6c58d dev`,
+		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := authedClient(apiURL)
 			if err != nil {
@@ -312,19 +350,22 @@ func newCeRenameCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&apiURL, "api-url", "", "override sandboxd base URL")
+	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
 	return cmd
 }
 
-func newCeStartCmd() *cobra.Command { return simpleAction("start", "Start a stopped sandbox.") }
-func newCeStopCmd() *cobra.Command  { return simpleAction("stop", "Stop a running sandbox.") }
+func newCeStartCmd() *cobra.Command { return simpleAction("start", "Start a stopped cella.") }
+func newCeStopCmd() *cobra.Command  { return simpleAction("stop", "Stop a running cella.") }
 
 func simpleAction(verb, short string) *cobra.Command {
 	var apiURL string
 	cmd := &cobra.Command{
 		Use:   verb + " <name|id>",
 		Short: short,
-		Args:  cobra.ExactArgs(1),
+		Long:  fmt.Sprintf("%s a cella by slug or id.", strings.Title(verb)),
+		Example: fmt.Sprintf(`  latere cella %s dev
+  latere cella %s sb-019dc976-2b28-7c55-8778-bf7d5ae6c58d`, verb, verb),
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := authedClient(apiURL)
 			if err != nil {
@@ -339,7 +380,7 @@ func simpleAction(verb, short string) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&apiURL, "api-url", "", "override sandboxd base URL")
+	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
 	return cmd
 }
 
@@ -348,7 +389,13 @@ func newCeDeleteCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "delete <name|id>",
 		Short: "Delete a cella (workspace contents are lost).",
-		Args:  cobra.ExactArgs(1),
+		Long: `Delete a cella and its workspace data.
+
+This removes the backing workspace. Export files first if you need to
+keep them.`,
+		Example: `  latere cella export dev -o dev.tar
+  latere cella delete dev`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := authedClient(apiURL)
 			if err != nil {
@@ -361,7 +408,7 @@ func newCeDeleteCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&apiURL, "api-url", "", "override sandboxd base URL")
+	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
 	return cmd
 }
 
@@ -387,6 +434,20 @@ func newCeRunCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "run [name|id] -- <argv>...",
 		Short: "Run a command in a cella, or one-shot in a disposable ephemeral cella.",
+		Long: `Run commands in Cella.
+
+With a cella name or id, the command runs in that existing workspace.
+By default the command starts in the background and prints a command id;
+use --follow to stream logs and exit with the remote exit code.
+
+With --ephemeral --rm, Cella creates a disposable workspace for this
+single command and removes it when the command finishes. Add --detach
+to start that one-shot run and return immediately with a run id.`,
+		Example: `  latere cella run dev -- python train.py
+  latere cella run dev --follow -- make test
+  latere cella run dev --env DEBUG=1 --cwd /workspace/app -- npm test
+  latere cella run --ephemeral --rm -- python -c 'print("hello")'
+  latere cella run --ephemeral --rm --detach -- make benchmark`,
 		Args: func(cmd *cobra.Command, args []string) error {
 			if ephemeral || rm {
 				if !ephemeral || !rm {
@@ -451,7 +512,7 @@ func newCeRunCmd() *cobra.Command {
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&apiURL, "api-url", "", "override sandboxd base URL")
+	f.StringVar(&apiURL, "api-url", "", "override Cella API base URL")
 	f.StringArrayVar(&envFlag, "env", nil, "non-secret KEY=VALUE; repeatable")
 	f.StringArrayVar(&credentialFlag, "credential", nil, "trust-plane catalog key to use for this command; repeatable")
 	f.StringVar(&cwd, "cwd", "", "working dir inside the cella")
@@ -459,7 +520,7 @@ func newCeRunCmd() *cobra.Command {
 	f.BoolVar(&detach, "detach", false, "start a disposable one-shot run and return its run id immediately")
 	f.BoolVar(&ephemeral, "ephemeral", false, "create a disposable one-shot ephemeral cella for this command")
 	f.BoolVar(&rm, "rm", false, "delete the one-shot cella after the command; required with --ephemeral")
-	f.StringVar(&image, "image", "", "one-shot image ref (default sandbox-base)")
+	f.StringVar(&image, "image", "", "one-shot image ref (default Cella base image)")
 	f.IntVar(&diskGB, "disk", 0, "one-shot PVC size in GB (default 5)")
 	f.StringVar(&cpu, "cpu", "", "one-shot CPU limit as a Kubernetes quantity, e.g. 1.5 or 1500m")
 	f.StringVar(&memory, "memory", "", "one-shot memory limit as a Kubernetes quantity, e.g. 4Gi or 2048Mi")
@@ -481,7 +542,10 @@ func newCeRunStatusCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "status <run_id>",
 		Short: "Get a detached one-shot run status.",
-		Args:  cobra.ExactArgs(1),
+		Long:  "Show the current phase, output summary, and exit code for a detached one-shot run.",
+		Example: `  latere cella run status run_123
+  latere cella run status run_123 --json`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := authedClient(apiURL)
 			if err != nil {
@@ -501,7 +565,7 @@ func newCeRunStatusCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&apiURL, "api-url", "", "override sandboxd base URL")
+	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
 	cmd.Flags().BoolVar(&printJSONOut, "json", false, "print response as JSON")
 	return cmd
 }
@@ -515,7 +579,14 @@ func newCeRunLogsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "logs <run_id>",
 		Short: "Read or follow detached one-shot run logs.",
-		Args:  cobra.ExactArgs(1),
+		Long: `Read logs from a detached one-shot run.
+
+Use --cursor to resume from a byte offset printed by a previous logs
+call. Use --follow to keep streaming until the run exits.`,
+		Example: `  latere cella run logs run_123
+  latere cella run logs run_123 --cursor 2048
+  latere cella run logs run_123 --follow`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := authedClient(apiURL)
 			if err != nil {
@@ -534,7 +605,7 @@ func newCeRunLogsCmd() *cobra.Command {
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&apiURL, "api-url", "", "override sandboxd base URL")
+	f.StringVar(&apiURL, "api-url", "", "override Cella API base URL")
 	f.Int64Var(&cursor, "cursor", 0, "byte offset to start from")
 	f.BoolVarP(&follow, "follow", "f", false, "stream until the run exits")
 	return cmd
@@ -548,7 +619,10 @@ func newCeRunCancelCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "cancel <run_id>",
 		Short: "Cancel a detached one-shot run.",
-		Args:  cobra.ExactArgs(1),
+		Long:  "Request cancellation for a detached one-shot run and print the updated run status.",
+		Example: `  latere cella run cancel run_123
+  latere cella run cancel run_123 --json`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := authedClient(apiURL)
 			if err != nil {
@@ -565,7 +639,7 @@ func newCeRunCancelCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&apiURL, "api-url", "", "override sandboxd base URL")
+	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
 	cmd.Flags().BoolVar(&printJSONOut, "json", false, "print response as JSON")
 	return cmd
 }
@@ -579,7 +653,16 @@ func newCeLogsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "logs <name|id> <command_id>",
 		Short: "Read or follow command logs.",
-		Args:  cobra.ExactArgs(2),
+		Long: `Read logs from a command previously started in an existing cella.
+
+Use the command id printed by 'latere cella run <name|id> -- <argv>...'.
+Use --cursor to resume from a byte offset, or --follow to stream until
+the command exits.`,
+		Example: `  latere cella run dev -- make test
+  latere cella logs dev cmd_123
+  latere cella logs dev cmd_123 --cursor 4096
+  latere cella logs dev cmd_123 --follow`,
+		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := authedClient(apiURL)
 			if err != nil {
@@ -598,7 +681,7 @@ func newCeLogsCmd() *cobra.Command {
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&apiURL, "api-url", "", "override sandboxd base URL")
+	f.StringVar(&apiURL, "api-url", "", "override Cella API base URL")
 	f.Int64Var(&cursor, "cursor", 0, "byte offset to start from")
 	f.BoolVarP(&follow, "follow", "f", false, "stream until command exits")
 	return cmd
@@ -612,7 +695,11 @@ func newCeWaitCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "wait <name|id> <command_id>",
 		Short: "Poll a command until it terminates or --timeout passes.",
-		Args:  cobra.ExactArgs(2),
+		Long:  "Wait for a background command in an existing cella and exit with the remote exit code when available.",
+		Example: `  latere cella run dev -- make test
+  latere cella wait dev cmd_123
+  latere cella wait dev cmd_123 --timeout 1200`,
+		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := authedClient(apiURL)
 			if err != nil {
@@ -631,7 +718,7 @@ func newCeWaitCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&apiURL, "api-url", "", "override sandboxd base URL")
+	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
 	cmd.Flags().IntVar(&secs, "timeout", 600, "max poll seconds")
 	return cmd
 }
@@ -647,7 +734,14 @@ func newCeExportCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "export <name|id> [paths...]",
 		Short: "Stream a tar of files from the cella workspace.",
-		Args:  cobra.MinimumNArgs(1),
+		Long: `Export files from a Cella workspace as a tar stream.
+
+By default paths are resolved under /workspace and the tar is written
+to stdout. Pass --output to write the archive to a local file.`,
+		Example: `  latere cella export dev -o workspace.tar
+  latere cella export dev src package.json -o app.tar
+  latere cella export dev --src-dir /workspace/results logs -o results.tar`,
+		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := authedClient(apiURL)
 			if err != nil {
@@ -682,7 +776,7 @@ func newCeExportCmd() *cobra.Command {
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&apiURL, "api-url", "", "override sandboxd base URL")
+	f.StringVar(&apiURL, "api-url", "", "override Cella API base URL")
 	f.StringVar(&srcDir, "src-dir", "", "directory inside the cella; default /workspace")
 	f.StringVarP(&out, "output", "o", "-", "output tar path (- for stdout)")
 	return cmd
@@ -698,7 +792,15 @@ func newCeImportCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "import <name|id>",
 		Short: "Upload files into the cella workspace (reads stdin or --input).",
-		Args:  cobra.ExactArgs(1),
+		Long: `Import files into a Cella workspace.
+
+Tar archives are extracted. Zip archives are converted to tar before
+upload. A regular file is copied as a single file into the destination
+directory.`,
+		Example: `  latere cella import dev --input workspace.tar
+  latere cella import dev --input app.zip --dest /workspace/app
+  tar -cf - src package.json | latere cella import dev --dest /workspace/app`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := authedClient(apiURL)
 			if err != nil {
@@ -773,8 +875,8 @@ func newCeImportCmd() *cobra.Command {
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&apiURL, "api-url", "", "override sandboxd base URL")
-	f.StringVar(&dest, "dest", "", "destination dir in the sandbox; default /workspace")
+	f.StringVar(&apiURL, "api-url", "", "override Cella API base URL")
+	f.StringVar(&dest, "dest", "", "destination dir in the cella; default /workspace")
 	f.StringVarP(&input, "input", "i", "-", "input path; tar archives are extracted, regular files are copied")
 	f.DurationVar(&timeout, "timeout", 30*time.Minute, "HTTP timeout covering upload and extraction (0 disables)")
 	return cmd
@@ -929,7 +1031,14 @@ func newCeExtendCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "extend <name|id>",
 		Short: "Push the auto-delete deadline of an ephemeral cella forward.",
-		Args:  cobra.ExactArgs(1),
+		Long: `Extend an ephemeral cella's auto-delete deadline.
+
+Persistent cellas do not have an auto-delete deadline, so this command
+only applies to ephemeral cellas.`,
+		Example: `  latere cella extend dev
+  latere cella extend dev --hours 72
+  latere cella extend dev --deadline 2026-05-05T18:00:00Z`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := authedClient(apiURL)
 			if err != nil {
@@ -960,7 +1069,7 @@ func newCeExtendCmd() *cobra.Command {
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&apiURL, "api-url", "", "override sandboxd base URL")
+	f.StringVar(&apiURL, "api-url", "", "override Cella API base URL")
 	f.IntVar(&hours, "hours", 24, "push deadline to now + N hours")
 	f.StringVar(&deadline, "deadline", "", "absolute RFC3339 deadline (overrides --hours)")
 	return cmd
@@ -978,7 +1087,14 @@ func newCeConvertCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "convert <name|id> --to {ephemeral|persistent}",
 		Short: "Switch a cella between ephemeral and persistent.",
-		Args:  cobra.ExactArgs(1),
+		Long: `Convert a cella between ephemeral and persistent tiers.
+
+Converting to persistent removes the auto-delete deadline. Converting
+to ephemeral requires --hours so the new auto-delete deadline is
+explicit.`,
+		Example: `  latere cella convert dev --to persistent
+  latere cella convert dev --to ephemeral --hours 48`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if to != "ephemeral" && to != "persistent" {
 				return fmt.Errorf("--to must be ephemeral or persistent")
@@ -1006,7 +1122,7 @@ func newCeConvertCmd() *cobra.Command {
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&apiURL, "api-url", "", "override sandboxd base URL")
+	f.StringVar(&apiURL, "api-url", "", "override Cella API base URL")
 	f.StringVar(&to, "to", "", "destination tier: ephemeral or persistent")
 	f.IntVar(&hours, "hours", 0, "auto-delete-hours; required when --to=ephemeral")
 	_ = cmd.MarkFlagRequired("to")
@@ -1247,7 +1363,7 @@ func printOneShotRun(out oneShotRunDTO) {
 	if out.Stderr != "" {
 		fmt.Fprint(os.Stderr, out.Stderr)
 	}
-	fmt.Fprintf(os.Stderr, "✓ sandbox created  %s  ·  %s\n", out.SandboxName, humanDurationMS(out.Timing.CreateMS))
+	fmt.Fprintf(os.Stderr, "✓ cella created  %s  ·  %s\n", out.SandboxName, humanDurationMS(out.Timing.CreateMS))
 	if out.ExitCode != nil {
 		fmt.Fprintf(os.Stderr, "✓ command exited %d  ·  %s\n", *out.ExitCode, humanDurationMS(out.Timing.ExecMS))
 	} else {
@@ -1256,7 +1372,7 @@ func printOneShotRun(out oneShotRunDTO) {
 	if out.CleanupError != "" {
 		fmt.Fprintf(os.Stderr, "✗ sandbox cleanup failed  ·  %s\n", out.CleanupError)
 	} else {
-		fmt.Fprintf(os.Stderr, "✓ sandbox deleted  ·  total %s\n", humanDurationMS(out.Timing.TotalMS))
+		fmt.Fprintf(os.Stderr, "✓ cella deleted  ·  total %s\n", humanDurationMS(out.Timing.TotalMS))
 	}
 	if out.Truncated {
 		fmt.Fprintln(os.Stderr, "output truncated")

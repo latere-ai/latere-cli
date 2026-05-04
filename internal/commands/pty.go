@@ -39,7 +39,15 @@ func newCeShellCmd() *cobra.Command {
 		Use:     "shell <name|id>",
 		Aliases: []string{"attach"},
 		Short:   "Open an interactive PTY shell inside a cella.",
-		Args:    cobra.ExactArgs(1),
+		Long: `Open an interactive shell inside a running cella.
+
+If the cella is stopped, start it first with 'latere cella start'.
+The alias 'attach' is kept for users who prefer terminal attachment
+language.`,
+		Example: `  latere cella shell dev
+  latere cella attach dev
+  latere cella shell sb-019dc976-2b28-7c55-8778-bf7d5ae6c58d`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := authedClient(apiURL)
 			if err != nil {
@@ -56,7 +64,7 @@ func newCeShellCmd() *cobra.Command {
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&apiURL, "api-url", "", "override cella base URL")
+	f.StringVar(&apiURL, "api-url", "", "override Cella API base URL")
 	f.StringVar(&session, "session", "", "session id for the PTY attachment; generated if omitted")
 	return cmd
 }

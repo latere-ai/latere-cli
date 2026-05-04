@@ -61,6 +61,9 @@ come from the Cella trust-plane catalog configured for the selected sandbox.
 The token at ~/.config/latere/token.json (written by 'latere auth login')
 is used for every call. A missing token starts the server anyway so the
 auth failure surfaces on first tool use rather than at boot.`,
+		Example: `  latere cella mcp
+  latere cella mcp --sandbox dev=workspace-1
+  latere cella mcp --surface all --sandbox prod=sb-019dc976-2b28-7c55-8778-bf7d5ae6c58d`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := api.NewClient(apiURL)
 			aliases, err := parseSandboxAliases(sandboxes)
@@ -74,7 +77,7 @@ auth failure surfaces on first tool use rather than at boot.`,
 			})
 		},
 	}
-	cmd.Flags().StringVar(&apiURL, "api-url", "", "override cella base URL")
+	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
 	cmd.Flags().StringVar(&surface, "surface", "agent", "MCP tool surface: agent, management, or all")
 	cmd.Flags().StringArrayVar(&sandboxes, "sandbox", nil, "sandbox alias mapping alias=id-or-slug; repeatable")
 	cmd.Flags().BoolVar(&autoStart, "auto-start", true, "auto-start stopped sandboxes selected by agent tools")

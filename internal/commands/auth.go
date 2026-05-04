@@ -25,6 +25,14 @@ func newAuthCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "auth",
 		Short: "Authenticate against auth.latere.ai.",
+		Long: `Authenticate the CLI against auth.latere.ai.
+
+Login stores a bearer token at ~/.config/latere/token.json. The same
+token is used by Cella commands and by the Cella MCP server.`,
+		Example: `  latere auth login
+  latere auth whoami
+  latere auth print-token
+  latere auth logout`,
 	}
 	cmd.AddCommand(newAuthLoginCmd())
 	cmd.AddCommand(newAuthWhoamiCmd())
@@ -47,6 +55,8 @@ Useful for piping into shell tools without depending on jq:
 
     TOKEN=$(latere auth print-token)
     curl -H "Authorization: Bearer $TOKEN" https://cella.latere.ai/v1/sandboxes`,
+		Example: `  TOKEN=$(latere auth print-token)
+  curl -H "Authorization: Bearer $TOKEN" https://cella.latere.ai/v1/sandboxes`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			tok, err := api.LoadToken("")
 			if err != nil {
@@ -82,7 +92,7 @@ auth.latere.ai: it prints a short user code and a URL, you visit the
 URL in any browser to approve, choose the Personal or Organization
 context for the token, and the CLI then polls until the approval lands.
 The resulting access token is written to ~/.config/latere/token.json
-with 0600 perms; the MCP server (sandbox-mcp) reads the same file.
+with 0600 perms; the Cella MCP server reads the same file.
 
 Use --personal or --org-id to preselect the token context from the
 terminal. Re-run login with a different context to switch which cellas
@@ -90,6 +100,11 @@ the CLI can list and operate.
 
 For unattended setups (CI, scripts), pass --token to skip the device
 flow and store an access token directly.`,
+		Example: `  latere auth login
+  latere auth login --personal
+  latere auth login --org-id org_123
+  latere auth login --no-browser
+  latere auth login --token "$LATERE_TOKEN"`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			if personal && strings.TrimSpace(orgID) != "" {
@@ -125,7 +140,7 @@ flow and store an access token directly.`,
 	}
 	f := cmd.Flags()
 	f.StringVar(&token, "token", "", "skip device flow; store an access token directly")
-	f.StringVar(&apiURL, "api-url", "", "override sandboxd base URL (default https://cella.latere.ai)")
+	f.StringVar(&apiURL, "api-url", "", "override Cella API base URL (default https://cella.latere.ai)")
 	f.StringVar(&authURL, "auth-url", "", "override auth base URL (default https://auth.latere.ai)")
 	f.StringVar(&clientID, "client-id", "latere-cli", "OAuth client_id used for the device-code request")
 	f.StringVar(&scopes, "scopes", "openid email profile read:sandbox write:sandbox exec:sandbox attach:sandbox",
@@ -152,7 +167,7 @@ func saveAndVerify(ctx context.Context, apiURL, token string) error {
 	var ignored any
 	if err := c.GetJSON(verifyCtx, "/v1/sandboxes", &ignored); err != nil {
 		_ = api.ClearToken("")
-		return fmt.Errorf("token rejected by sandboxd: %w", err)
+		return fmt.Errorf("token rejected by Cella API: %w", err)
 	}
 	fmt.Fprintf(os.Stderr, "Logged in. Token saved to %s\n", api.TokenPath())
 	return nil
@@ -437,6 +452,13 @@ func newAuthWhoamiCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "whoami",
 		Short: "Print the current principal.",
+		Long: `Print the principal and token context currently used by the CLI.
+
+For auth-issued tokens this asks auth.latere.ai for token information.
+For Cella-issued tokens, it first confirms the token is accepted by
+Cella, then prints the identity claims embedded in the saved JWT.`,
+		Example: `  latere auth whoami
+  latere auth whoami --api-url https://cella.latere.ai`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := api.NewClient(apiURL)
 			if err := c.MustRequireAuth(); err != nil {
@@ -489,7 +511,7 @@ func newAuthWhoamiCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&apiURL, "api-url", "", "override sandboxd base URL")
+	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
 	return cmd
 }
 
@@ -591,6 +613,9 @@ func newAuthLogoutCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "logout",
 		Short: "Clear ~/.config/latere/token.json.",
+		Long:  "Clear the saved Latere CLI token from ~/.config/latere/token.json.",
+		Example: `  latere auth logout
+  latere auth login`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := api.ClearToken(""); err != nil {
 				return err
