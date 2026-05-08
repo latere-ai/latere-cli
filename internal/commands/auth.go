@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/oauth2"
+	"latere.ai/x/pkg/oidc"
 
 	"github.com/latere-ai/latere-cli/internal/api"
 )
@@ -182,24 +184,11 @@ type deviceFlowOpts struct {
 	NoBrowser                         bool
 }
 
-type deviceCodeResp struct {
-	DeviceCode              string `json:"device_code"`
-	UserCode                string `json:"user_code"`
-	VerificationURI         string `json:"verification_uri"`
-	VerificationURIComplete string `json:"verification_uri_complete"`
-	ExpiresIn               int    `json:"expires_in"`
-	Interval                int    `json:"interval"`
-}
-
-type tokenResp struct {
-	AccessToken      string `json:"access_token"`
-	TokenType        string `json:"token_type"`
-	ExpiresIn        int    `json:"expires_in"`
-	Scope            string `json:"scope"`
-	Error            string `json:"error,omitempty"`
-	ErrorDescription string `json:"error_description,omitempty"`
-}
-
+// runDeviceFlow drives the RFC 8628 device-code flow against
+// auth.latere.ai. The HTTP plumbing (initiate, poll, RFC 8628 error
+// handling) is delegated to pkg/oidc; this function owns the CLI-side
+// concerns: rendering the user code, opening a browser, and exchanging
+// the resulting auth-issued token for a Cella-scoped one.
 func runDeviceFlow(ctx context.Context, opts deviceFlowOpts) error {
 	authBase := opts.AuthURL
 	if authBase == "" {
@@ -207,44 +196,37 @@ func runDeviceFlow(ctx context.Context, opts deviceFlowOpts) error {
 	}
 	authBase = strings.TrimRight(authBase, "/")
 
-	// 1. Initiate.
-	form := url.Values{}
-	form.Set("client_id", opts.ClientID)
-	if opts.Scopes != "" {
-		form.Set("scope", opts.Scopes)
+	client := oidc.New(oidc.Config{
+		AuthURL:  authBase,
+		ClientID: opts.ClientID,
+		Scopes:   strings.Fields(opts.Scopes),
+	})
+	if client == nil {
+		return errors.New("oidc: missing AuthURL or ClientID")
 	}
+
+	extra := url.Values{}
 	if opts.OrgIDSet {
-		form.Set("org_id", opts.OrgID)
+		// Forward the present-but-possibly-empty value. Auth reads
+		// `?org_id=` (explicit empty) as "personal context" — silently
+		// dropping it would turn --personal into a no-op.
+		extra["org_id"] = []string{opts.OrgID}
 	}
-	httpc := &http.Client{Timeout: 30 * time.Second}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		authBase+"/device/code", strings.NewReader(form.Encode()))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	resp, err := httpc.Do(req)
+
+	// 1. Initiate.
+	da, err := client.DeviceAuth(ctx, extra)
 	if err != nil {
 		return fmt.Errorf("device/code: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode/100 != 2 {
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<14))
-		return fmt.Errorf("device/code %d: %s", resp.StatusCode, b)
-	}
-	var dc deviceCodeResp
-	if err := json.NewDecoder(resp.Body).Decode(&dc); err != nil {
-		return fmt.Errorf("device/code decode: %w", err)
-	}
 
 	// 2. Surface the user code.
-	verify := dc.VerificationURIComplete
+	verify := da.VerificationURIComplete
 	if verify == "" {
-		verify = dc.VerificationURI
+		verify = da.VerificationURI
 	}
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintf(os.Stderr, "  To sign in, open this URL:\n\n      %s\n\n", verify)
-	fmt.Fprintf(os.Stderr, "  And confirm the code:\n\n      %s\n\n", dc.UserCode)
+	fmt.Fprintf(os.Stderr, "  And confirm the code:\n\n      %s\n\n", da.UserCode)
 	if !opts.NoBrowser && verify != "" {
 		if err := openBrowser(verify); err != nil {
 			fmt.Fprintf(os.Stderr, "  Could not open browser automatically: %v\n", err)
@@ -254,68 +236,36 @@ func runDeviceFlow(ctx context.Context, opts deviceFlowOpts) error {
 	}
 	fmt.Fprintln(os.Stderr, "  Waiting for approval...")
 
-	// 3. Poll /token until terminal status.
-	interval := time.Duration(dc.Interval) * time.Second
-	if interval <= 0 {
-		interval = 5 * time.Second
-	}
-	deadline := time.Now().Add(time.Duration(dc.ExpiresIn) * time.Second)
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(interval):
-		}
-		if time.Now().After(deadline) {
-			return errors.New("device code expired before approval")
-		}
-
-		tform := url.Values{}
-		tform.Set("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
-		tform.Set("device_code", dc.DeviceCode)
-		tform.Set("client_id", opts.ClientID)
-		treq, err := http.NewRequestWithContext(ctx, http.MethodPost,
-			authBase+"/token", strings.NewReader(tform.Encode()))
-		if err != nil {
-			return err
-		}
-		treq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		tresp, err := httpc.Do(treq)
-		if err != nil {
-			return fmt.Errorf("token poll: %w", err)
-		}
-		var body tokenResp
-		_ = json.NewDecoder(tresp.Body).Decode(&body)
-		_ = tresp.Body.Close()
-
-		switch body.Error {
-		case "":
-			if body.AccessToken == "" {
-				return errors.New("token endpoint returned no access_token")
+	// 3. Poll /token until terminal status. pkg/oidc honours RFC 8628
+	// slow_down / authorization_pending; map the terminal errors back
+	// to the CLI's user-facing strings.
+	tok, err := client.DeviceAccessToken(ctx, da)
+	if err != nil {
+		var rerr *oauth2.RetrieveError
+		if errors.As(err, &rerr) {
+			switch rerr.ErrorCode {
+			case "expired_token":
+				return errors.New("device code expired before approval")
+			case "access_denied":
+				return errors.New("user denied the request")
 			}
-			// Best-effort: trade the auth-issued token for a
-			// cella-issued bearer. Falls back to the auth token during
-			// the deprecation window so installs without the cella
-			// catalog keep working.
-			if cellaTok, err := exchangeForCellaToken(ctx, opts, body.AccessToken); err == nil && cellaTok != "" {
-				return saveAndVerify(ctx, opts.APIURL, cellaTok)
-			} else if err != nil {
-				fmt.Fprintf(os.Stderr, "  cella token exchange unavailable (%v); using auth-issued token\n", err)
-			}
-			return saveAndVerify(ctx, opts.APIURL, body.AccessToken)
-		case "authorization_pending":
-			continue
-		case "slow_down":
-			interval += 5 * time.Second
-			continue
-		case "expired_token":
-			return errors.New("device code expired before approval")
-		case "access_denied":
-			return errors.New("user denied the request")
-		default:
-			return fmt.Errorf("device-code login failed: %s (%s)", body.Error, body.ErrorDescription)
+			return fmt.Errorf("device-code login failed: %s (%s)", rerr.ErrorCode, rerr.ErrorDescription)
 		}
+		return fmt.Errorf("device-code login failed: %w", err)
 	}
+	if tok.AccessToken == "" {
+		return errors.New("token endpoint returned no access_token")
+	}
+
+	// Best-effort: trade the auth-issued token for a cella-issued
+	// bearer. Falls back to the auth token during the deprecation
+	// window so installs without the cella catalog keep working.
+	if cellaTok, err := exchangeForCellaToken(ctx, opts, tok.AccessToken); err == nil && cellaTok != "" {
+		return saveAndVerify(ctx, opts.APIURL, cellaTok)
+	} else if err != nil {
+		fmt.Fprintf(os.Stderr, "  cella token exchange unavailable (%v); using auth-issued token\n", err)
+	}
+	return saveAndVerify(ctx, opts.APIURL, tok.AccessToken)
 }
 
 var openBrowser = func(rawURL string) error {
