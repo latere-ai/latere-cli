@@ -25,9 +25,14 @@ need install
 if command -v curl >/dev/null 2>&1; then
   fetch() { curl -fsSL "$1"; }
   fetch_to() { curl -fsSL -o "$2" "$1"; }
+  # Emit the Location target of the releases/latest redirect (single hop, HEAD).
+  latest_redirect() { curl -fsSI "https://github.com/${REPO}/releases/latest"; }
 elif command -v wget >/dev/null 2>&1; then
   fetch() { wget -qO- "$1"; }
   fetch_to() { wget -qO "$2" "$1"; }
+  # GNU wget: -S prints response headers; busybox wget lacks --max-redirect and
+  # will fall through to the pin-a-version hint, which is an acceptable degrade.
+  latest_redirect() { wget -S --max-redirect=0 -O /dev/null "https://github.com/${REPO}/releases/latest" 2>&1; }
 else
   err "need curl or wget"
 fi
@@ -47,8 +52,12 @@ case "$arch" in
 esac
 
 if [ "$VERSION" = "latest" ]; then
-  VERSION="$(fetch "https://api.github.com/repos/${REPO}/releases/latest" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
-  [ -n "$VERSION" ] || err "could not resolve latest release (maybe none published yet)"
+  # Resolve "latest" via the github.com releases redirect, not api.github.com.
+  # The API caps unauthenticated callers at 60 req/hour per IP; behind shared
+  # carrier-grade NAT (common in China) that budget is exhausted by others and
+  # GitHub answers 403, leaving VERSION empty. The web redirect has no such cap.
+  VERSION="$(latest_redirect | tr -d '\r' | awk 'tolower($1)=="location:"{print $2}' | sed -n 's@.*/releases/tag/@@p' | head -n1)"
+  [ -n "$VERSION" ] || err "could not resolve latest release (pin a version: ... | sh -s -- vX.Y.Z)"
 fi
 VERSION_STRIPPED="${VERSION#v}"
 

@@ -25,6 +25,8 @@ go install github.com/latere-ai/latere-cli/cmd/latere@latest
 
 Release binaries are attached to GitHub releases for Linux, macOS, and Windows on amd64 and arm64.
 
+The installer resolves the latest version from the GitHub releases redirect rather than the rate-limited GitHub API, so it works from networks behind shared NAT. If version resolution still fails (restricted network or proxy), pin a version explicitly with the `sh -s -- vX.Y.Z` form above.
+
 ## Sign in
 
 ```sh
