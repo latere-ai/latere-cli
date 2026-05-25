@@ -318,3 +318,113 @@ func TestToposRequiresAuth(t *testing.T) {
 		t.Errorf("error doesn't mention auth login: %v", err)
 	}
 }
+
+// TestToposAgentsCreatePostsBody verifies 'latere topos agents create'
+// POSTs the agent body to /v1/agents and prints the created agent.
+func TestToposAgentsCreatePostsBody(t *testing.T) {
+	const bearerToken = "create-token"
+
+	var gotMethod, gotPath string
+	var gotBody createAgentRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": "agent_new1", "display_name": gotBody.DisplayName, "kind": gotBody.Kind,
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("TOPOS_API_URL", srv.URL)
+	t.Setenv("LATERE_TOKEN_FILE", writeTokenFile(t, t.TempDir(), bearerToken))
+
+	output, execErr := captureStdout(func() error {
+		root := NewRoot("test")
+		root.SetErr(&strings.Builder{})
+		root.SetArgs([]string{"topos", "agents", "create", "--name", "Build Bot", "--kind", "worker"})
+		return root.Execute()
+	})
+	if execErr != nil {
+		t.Fatalf("Execute: %v", execErr)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/v1/agents" {
+		t.Fatalf("request = %s %s, want POST /v1/agents", gotMethod, gotPath)
+	}
+	if gotBody.DisplayName != "Build Bot" || gotBody.Kind != "worker" {
+		t.Fatalf("posted body = %+v", gotBody)
+	}
+	if !strings.Contains(output, "agent_new1") {
+		t.Fatalf("output missing created id:\n%s", output)
+	}
+}
+
+// TestToposAgentsCreateRequiresNameAndKind verifies the client-side guard.
+func TestToposAgentsCreateRequiresNameAndKind(t *testing.T) {
+	t.Setenv("LATERE_TOKEN_FILE", writeTokenFile(t, t.TempDir(), "tok"))
+	root := NewRoot("test")
+	root.SetErr(&strings.Builder{})
+	root.SetOut(&strings.Builder{})
+	root.SetArgs([]string{"topos", "agents", "create", "--name", "OnlyName"})
+	if err := root.Execute(); err == nil {
+		t.Fatal("create without --kind = nil error, want a required-flag error")
+	}
+}
+
+// TestToposSessionCreatePostsPrompt verifies 'latere topos session create
+// <id>' POSTs the prompt to the agent's session endpoint and prints the
+// run result.
+func TestToposSessionCreatePostsPrompt(t *testing.T) {
+	const bearerToken = "run-token"
+
+	var gotPath string
+	var gotBody sessionCreateRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"session_id": "sess_abc", "sandbox_id": "sb_1",
+			"output": "Task completed", "stop_reason": "end_turn", "tool_calls": 2,
+			"usage": map[string]any{"input_tokens": 10, "output_tokens": 5},
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("TOPOS_API_URL", srv.URL)
+	t.Setenv("LATERE_TOKEN_FILE", writeTokenFile(t, t.TempDir(), bearerToken))
+
+	output, execErr := captureStdout(func() error {
+		root := NewRoot("test")
+		root.SetErr(&strings.Builder{})
+		root.SetArgs([]string{"topos", "session", "create", "agent_01hxy", "--prompt", "list files"})
+		return root.Execute()
+	})
+	if execErr != nil {
+		t.Fatalf("Execute: %v", execErr)
+	}
+	if gotPath != "/v1/agents/agent_01hxy/sessions" {
+		t.Fatalf("request path = %q, want /v1/agents/agent_01hxy/sessions", gotPath)
+	}
+	if gotBody.Prompt != "list files" {
+		t.Fatalf("posted prompt = %q", gotBody.Prompt)
+	}
+	for _, want := range []string{"sess_abc", "end_turn", "Task completed"} {
+		if !strings.Contains(output, want) {
+			t.Errorf("output missing %q:\n%s", want, output)
+		}
+	}
+}
+
+// TestToposSessionCreateRequiresPrompt verifies the client-side guard.
+func TestToposSessionCreateRequiresPrompt(t *testing.T) {
+	t.Setenv("LATERE_TOKEN_FILE", writeTokenFile(t, t.TempDir(), "tok"))
+	root := NewRoot("test")
+	root.SetErr(&strings.Builder{})
+	root.SetOut(&strings.Builder{})
+	root.SetArgs([]string{"topos", "session", "create", "agent_01hxy"})
+	if err := root.Execute(); err == nil {
+		t.Fatal("session create without --prompt = nil error, want a required error")
+	}
+}
