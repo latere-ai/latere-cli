@@ -1,6 +1,6 @@
 # latere
 
-Command-line interface for the Latere product family. Today it primarily drives [Cella](https://cella.latere.ai): named sandboxes that can be ephemeral enough to throw away or persistent enough to keep.
+Command-line interface for the Latere product family — one binary for [Cella](https://cella.latere.ai) sandboxes and [Lux](https://lux.latere.ai) model access.
 
 ## Install
 
@@ -33,298 +33,33 @@ The installer resolves the latest version from the GitHub releases redirect rath
 latere auth login
 ```
 
-`latere auth login` starts the OAuth2 device-code flow against `auth.latere.ai`. It prints a URL and user code, waits for browser approval, then saves the token to `~/.config/latere/token.json`.
-
-Useful auth commands:
+`latere auth login` starts the OAuth2 device-code flow against `auth.latere.ai`. It prints a URL and user code, waits for browser approval, then saves the token to `~/.config/latere/token.json`. One sign-in unlocks every product below.
 
 ```sh
 latere auth whoami
 latere auth print-token
 latere auth logout
-```
 
-For CI or dashboard-minted tokens:
-
-```sh
+# CI or dashboard-minted tokens
 latere auth login --token <token>
 ```
 
-During device-code login, the CLI attempts to exchange the auth-issued token for a Cella-issued bearer token. If exchange is temporarily unavailable during a rollout, it falls back to the auth token.
+| Setting | Purpose |
+|---------|---------|
+| `--auth-url` | Override the auth URL for `latere auth login`. |
+| `LATERE_TOKEN_FILE` | Token file path, default `~/.config/latere/token.json`. |
 
-## Quickstart
+## Products
 
-Create an ephemeral cella and run a command:
+| Product | What it does | Guide |
+|---------|--------------|-------|
+| **Cella** | Named sandboxes (ephemeral or persistent): create, exec, shell, logs, file transfer, MCP server. | [docs/cella.md](docs/cella.md) |
+| **Lux** | Call language models on your identity, no key to allocate: discovery, SDK enablement, chat, usage. | [docs/lux.md](docs/lux.md) |
 
 ```sh
 latere cella create --name demo --tier ephemeral
-latere cella exec demo -- sh -lc 'echo hello && pwd'
-latere cella shell demo
-```
-
-Run a one-shot disposable command. The backend creates an ephemeral
-cella, runs the command, returns output and timing, then deletes the
-cella:
-
-```sh
-latere cella run --ephemeral --rm -- sh -lc 'echo hello && pwd'
-```
-
-Create a persistent workspace:
-
-```sh
-latere cella create --name work --tier persistent --disk 10
-latere cella stop work
-latere cella start work
-```
-
-Run a background job and follow logs:
-
-```sh
-CMD=$(latere cella run demo -- sh -lc 'sleep 5 && echo done')
-latere cella logs demo "$CMD" --follow
-```
-
-## Cella lifecycle
-
-```sh
-latere cella create
-latere cella list
-latere cella get <name|id>
-latere cella rename <name|id> <new-name>
-latere cella start <name|id>
-latere cella stop <name|id>
-latere cella delete <name|id>
-```
-
-Create flags:
-
-```sh
-latere cella create \
-  --name work \
-  --image ghcr.io/latere-ai/sandbox-base:main \
-  --tier persistent \
-  --disk 10 \
-  --auto-stop-minutes 30 \
-  --auto-delete-hours 24 \
-  --ttl 12h \
-  --env GOFLAGS=-count=1 \
-  --credential source-control \
-  --policy default
-```
-
-Tier changes:
-
-```sh
-# Push an ephemeral cella's delete deadline forward
-latere cella extend <name|id> --hours 24
-latere cella extend <name|id> --deadline 2026-04-27T12:00:00Z
-
-# Keep the workspace until explicit delete
-latere cella convert <name|id> --to persistent
-
-# Return to a disposable lifetime
-latere cella convert <name|id> --to ephemeral --hours 12
-```
-
-`latere sandbox ...` remains as an alias for older scripts, but new usage should prefer `latere cella ...`.
-
-## Commands and logs
-
-Interactive shell opens a long-lived PTY WebSocket, matching the dashboard terminal protocol:
-
-```sh
-latere cella shell <name|id>
-```
-
-Foreground execution streams output and exits with the command's status:
-
-```sh
-latere cella exec <name|id> -- sh -lc 'go test ./...'
-```
-
-Background execution prints a command id:
-
-```sh
-latere cella run <name|id> -- sh -lc 'sleep 30 && echo done'
-```
-
-`run --follow` starts the command, streams logs, and exits with the command's status:
-
-```sh
-latere cella run <name|id> --follow -- sh -lc 'go test ./...'
-```
-
-One-shot execution uses the backend's atomic disposable-run API:
-
-```sh
-latere cella run --ephemeral --rm -- sh -lc 'go test ./...'
-latere cella run --ephemeral --rm --timeout 900 -- sh -lc 'npm test'
-```
-
-Detached one-shot execution returns immediately with a run id. The
-backend keeps the result and log tail for later inspection:
-
-```sh
-RUN=$(latere cella run --ephemeral --rm --detach -- sh -lc 'sleep 30 && echo done')
-latere cella run status "$RUN"
-latere cella run logs "$RUN" --follow
-latere cella run cancel "$RUN"
-```
-
-Inspect output and status:
-
-```sh
-latere cella logs <name|id> <command_id>
-latere cella logs <name|id> <command_id> --cursor 1024
-latere cella logs <name|id> <command_id> --follow
-latere cella wait <name|id> <command_id> --timeout 600
-```
-
-`create` and `run` accept repeatable `--credential <catalog-key>` to attach
-client trust-plane credentials by catalog key. `--env KEY=VALUE` is only for
-non-secret configuration. `run` also accepts `--cwd /path`; one-shot runs also
-accept `--image`, `--disk`, `--timeout`, `--detach`, and `--json`.
-
-```sh
-latere cella run demo --credential llm-primary -- sh -lc 'curl http://127.0.0.1:8888/upstreams/llm-primary/v1/models'
-```
-
-## Files
-
-Cella file transfer uses tar streams:
-
-```sh
-# Export selected paths from /workspace
-latere cella export <name|id> ./dist -o dist.tar
-
-# Export from another directory
-latere cella export <name|id> --src-dir /workspace ./dist -o dist.tar
-
-# Import from stdin
-tar -cf - ./src | latere cella import <name|id> --dest /workspace
-
-# Import from a tar file
-latere cella import <name|id> --input payload.tar --dest /workspace
-
-# Import one regular file
-latere cella import <name|id> --input data.jsonl --dest /workspace
-
-# Import a zip archive
-latere cella import <name|id> --input payload.zip --dest /workspace
-```
-
-## MCP
-
-`latere cella mcp` runs a stdio MCP server using the same token file as the CLI.
-By default it exposes a focused coding-agent surface over existing Cella sandboxes:
-`Sandboxes`, `Read`, `Write`, `Edit`, `Bash`, `Monitor`, `Glob`, `Grep`, `Upload`,
-and `Download`.
-
-Example MCP config:
-
-```json
-{
-  "mcpServers": {
-    "latere-cella": {
-      "command": "latere",
-      "args": ["cella", "mcp"]
-    }
-  }
-}
-```
-
-Alias sandboxes at startup when an MCP host should work across more than one target:
-
-```json
-{
-  "mcpServers": {
-    "latere-cella": {
-      "command": "latere",
-      "args": ["cella", "mcp", "--sandbox", "frontend=my-frontend", "--sandbox", "backend=sbx_..."]
-    }
-  }
-}
-```
-
-Every action tool takes a `sandbox` selector. The selector can be a configured
-alias, a sandbox id, or a sandbox slug. Tool inputs accept paths relative to the
-selected sandbox's backend-resolved working directory (`Sandboxes` returns it
-as `workdir`). The MCP server resolves the absolute container path before
-calling the API and surfaces it back in tool results, so callers never need to
-assume `/workspace` themselves.
-
-`Bash` returns a single combined `output` field (stdout and stderr merged in
-the order the runtime emitted them); `Monitor` events use a `combined` stream
-label for the same reason.
-
-`Upload` rejects archives that would overwrite an existing file unless the
-caller passes `overwrite=true`. `Download` caps the returned tar at 50 MiB —
-narrow `paths` for large workspaces or use the management `ExportFiles` tool.
-
-Tool `env` fields are literal non-secret variables. Credentials should come
-from the Cella trust-plane catalog configured for the selected sandbox.
-
-Lifecycle and command-management tools are opt-in:
-
-```sh
-latere cella mcp --surface=management
-latere cella mcp --surface=all
-```
-
-Management tools use the same PascalCase naming style as the agent tools:
-
-- `CreateSandbox`, `ListSandboxes`, `GetSandbox`
-- `StartSandbox`, `StopSandbox`, `ExtendSandbox`, `ConvertSandbox`, `DeleteSandbox`
-- `RunCommand`, `WaitCommand`, `CommandLogs`, `KillCommand`
-- `ExportFiles`, `ImportFiles`
-
-## Models (Lux)
-
-`latere lux` calls language models through [Lux](https://lux.latere.ai), the Latere model gateway. You do not allocate or manage an API key: the CLI presents your Latere identity (your `latere auth login`), and usage is tracked on that identity. Inside a Cella sandbox that is allowed to reach Lux, the sandbox's own token is used automatically.
-
-Discover what is available:
-
-```sh
-latere lux models
-latere lux providers
-latere lux rates
-```
-
-Point a stock SDK at Lux — no key to paste:
-
-```sh
-eval "$(latere lux env --provider openai)"
-# now a normal OpenAI SDK call is routed through Lux, billed to your identity
-```
-
-`--provider` accepts `openai`, `openrouter`, or `anthropic`. The exported token lasts your sign-in session; re-run the command when it expires.
-
-Send a one-shot prompt without leaving the terminal:
-
-```sh
 latere lux chat --model openai/gpt-4o-mini "Say hi"
-latere lux chat --provider anthropic --model claude-sonnet-4-6 "Say hi"
 ```
-
-See your spend and access:
-
-```sh
-latere lux usage
-latere lux access show
-```
-
-Free models work with no setup. A paid model needs your access profile bound to a provider key — `latere lux access set --model <m> --provider <p> --provider-key <id>` (or ask your Latere admin to enable one for you).
-
-## Configuration
-
-| Setting | Purpose |
-|---------|---------|
-| `--api-url` | Override the Cella API URL for a command. |
-| `--auth-url` | Override the auth URL for `latere auth login`. |
-| `SANDBOX_API_URL` | Default Cella API URL. |
-| `LATERE_TOKEN_FILE` | Token file path, default `~/.config/latere/token.json`. |
-| `--lux-url` / `LUX_API_URL` | Override the Lux base URL for `latere lux`. |
-| `LATERE_LUX_TOKEN` | Present this bearer to Lux instead of your login (e.g. a service token). |
 
 ## Development
 
