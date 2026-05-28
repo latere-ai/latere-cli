@@ -278,6 +278,43 @@ Management tools use the same PascalCase naming style as the agent tools:
 - `RunCommand`, `WaitCommand`, `CommandLogs`, `KillCommand`
 - `ExportFiles`, `ImportFiles`
 
+## Models (Lux)
+
+`latere lux` calls language models through [Lux](https://lux.latere.ai), the Latere model gateway. You do not allocate or manage an API key: the CLI presents your Latere identity (your `latere auth login`), and usage is tracked on that identity. Inside a Cella sandbox that is allowed to reach Lux, the sandbox's own token is used automatically.
+
+Discover what is available:
+
+```sh
+latere lux models
+latere lux providers
+latere lux rates
+```
+
+Point a stock SDK at Lux — no key to paste:
+
+```sh
+eval "$(latere lux env --provider openai)"
+# now a normal OpenAI SDK call is routed through Lux, billed to your identity
+```
+
+`--provider` accepts `openai`, `openrouter`, or `anthropic`. The exported token lasts your sign-in session; re-run the command when it expires.
+
+Send a one-shot prompt without leaving the terminal:
+
+```sh
+latere lux chat --model openai/gpt-4o-mini "Say hi"
+latere lux chat --provider anthropic --model claude-sonnet-4-6 "Say hi"
+```
+
+See your spend and access:
+
+```sh
+latere lux usage
+latere lux access show
+```
+
+Free models work with no setup. A paid model needs your access profile bound to a provider key — `latere lux access set --model <m> --provider <p> --provider-key <id>` (or ask your Latere admin to enable one for you).
+
 ## Configuration
 
 | Setting | Purpose |
@@ -286,6 +323,8 @@ Management tools use the same PascalCase naming style as the agent tools:
 | `--auth-url` | Override the auth URL for `latere auth login`. |
 | `SANDBOX_API_URL` | Default Cella API URL. |
 | `LATERE_TOKEN_FILE` | Token file path, default `~/.config/latere/token.json`. |
+| `--lux-url` / `LUX_API_URL` | Override the Lux base URL for `latere lux`. |
+| `LATERE_LUX_TOKEN` | Present this bearer to Lux instead of your login (e.g. a service token). |
 
 ## Development
 
