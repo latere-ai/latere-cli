@@ -38,6 +38,7 @@ load it from your shell startup files.`,
 	root.AddCommand(newAuthCmd())
 	root.AddCommand(newCellaCmd())
 	root.AddCommand(newToposCmd())
+	root.AddCommand(newLuxCmd())
 	root.AddCommand(newCompletionCmd(root))
 	return root
 }

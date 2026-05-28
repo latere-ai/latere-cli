@@ -64,10 +64,26 @@ func NewClient(apiURL string) *Client {
 
 // ---- token storage ----
 
-// TokenPath returns the canonical path to token.json. Callers can
-// override with LATERE_TOKEN_FILE for testing.
+// TokenPath returns the canonical path to token.json (the Cella-issued
+// bearer used by `latere cella`/`whoami` and the MCP server). Callers
+// can override with LATERE_TOKEN_FILE for testing.
 func TokenPath() string {
-	if v := os.Getenv("LATERE_TOKEN_FILE"); v != "" {
+	return tokenFilePath("LATERE_TOKEN_FILE", "token.json")
+}
+
+// AuthTokenPath returns the path to auth-token.json — the retained
+// auth.latere.ai root token (access + refresh) used to mint short-lived
+// Lux actor tokens. Kept separate from token.json because the two have
+// different issuers and lifecycles; clobbering one must never disturb
+// the other. Override with LATERE_AUTH_TOKEN_FILE for testing.
+func AuthTokenPath() string {
+	return tokenFilePath("LATERE_AUTH_TOKEN_FILE", "auth-token.json")
+}
+
+// tokenFilePath resolves a token file: the env override wins, otherwise
+// $XDG_CONFIG_HOME/latere/<name> (falling back to ~/.config).
+func tokenFilePath(envVar, name string) string {
+	if v := os.Getenv(envVar); v != "" {
 		return v
 	}
 	dir := os.Getenv("XDG_CONFIG_HOME")
@@ -78,7 +94,7 @@ func TokenPath() string {
 		}
 		dir = filepath.Join(home, ".config")
 	}
-	return filepath.Join(dir, "latere", "token.json")
+	return filepath.Join(dir, "latere", name)
 }
 
 // ErrNoToken means the file does not exist (the user hasn't logged in).
@@ -126,6 +142,35 @@ func SaveToken(path string, t Token) error {
 	// is best-effort cross-platform protection.
 	_ = runtime.GOOS // silence unused on platforms without chmod semantics
 	return os.WriteFile(path, b, 0o600)
+}
+
+// LoadAuthToken reads the retained auth.latere.ai root token. Returns
+// ErrNoToken when the file is absent (login never ran, or ran via the
+// --token paste path which produces no auth root token).
+func LoadAuthToken() (Token, error) {
+	p := AuthTokenPath()
+	if p == "" {
+		return Token{}, ErrNoToken
+	}
+	return LoadToken(p)
+}
+
+// SaveAuthToken persists the auth.latere.ai root token (0600).
+func SaveAuthToken(t Token) error {
+	p := AuthTokenPath()
+	if p == "" {
+		return errors.New("cannot determine auth token path")
+	}
+	return SaveToken(p, t)
+}
+
+// ClearAuthToken deletes auth-token.json. Idempotent.
+func ClearAuthToken() error {
+	p := AuthTokenPath()
+	if p == "" {
+		return nil
+	}
+	return ClearToken(p)
 }
 
 // ClearToken deletes token.json. Idempotent.

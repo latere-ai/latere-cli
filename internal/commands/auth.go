@@ -145,7 +145,7 @@ flow and store an access token directly.`,
 	f.StringVar(&apiURL, "api-url", "", "override Cella API base URL (default https://cella.latere.ai)")
 	f.StringVar(&authURL, "auth-url", "", "override auth base URL (default https://auth.latere.ai)")
 	f.StringVar(&clientID, "client-id", "latere-cli", "OAuth client_id used for the device-code request")
-	f.StringVar(&scopes, "scopes", "openid email profile read:sandbox write:sandbox exec:sandbox attach:sandbox",
+	f.StringVar(&scopes, "scopes", "openid email profile offline_access read:sandbox write:sandbox exec:sandbox attach:sandbox llm.read llm.invoke",
 		"space-delimited scope list")
 	f.BoolVar(&personal, "personal", false, "issue the CLI token for personal cellas")
 	f.StringVar(&orgID, "org-id", "", "issue the CLI token for this organization id")
@@ -257,6 +257,22 @@ func runDeviceFlow(ctx context.Context, opts deviceFlowOpts) error {
 		return errors.New("token endpoint returned no access_token")
 	}
 
+	// Retain the auth.latere.ai root token (access + refresh) so the
+	// `latere lux` commands can mint short-lived aud=lux.latere.ai actor
+	// tokens and refresh when it expires. Persist BEFORE the cella
+	// exchange so retention survives an exchange failure. Kept in a
+	// separate file from the cella token.json; best-effort because lux
+	// access is additive and must not block a successful login.
+	if err := api.SaveAuthToken(api.Token{
+		AccessToken:  tok.AccessToken,
+		RefreshToken: tok.RefreshToken,
+		TokenType:    "Bearer",
+		ExpiresAt:    tok.Expiry,
+		IssuedAt:     time.Now().UTC(),
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "  warning: could not save auth token for lux (%v); `latere lux` may require re-login\n", err)
+	}
+
 	// Best-effort: trade the auth-issued token for a cella-issued
 	// bearer. Falls back to the auth token during the deprecation
 	// window so installs without the cella catalog keep working.
@@ -313,14 +329,41 @@ func exchangeForCellaToken(ctx context.Context, opts deviceFlowOpts, authToken s
 
 	// 1. Mint an actor token at auth.
 	// Sandboxd validates auth-issued actor tokens against SANDBOXD_AUDIENCE.
-	actorAud := "sandboxd"
-	body, _ := json.Marshal(map[string]any{"audience": actorAud, "ttl_seconds": 60})
+	actorToken, err := mintActorToken(ctx, httpc, authBase, authToken, "sandboxd", 60)
+	if err != nil {
+		// Some deployed auth versions stamp device-code tokens with
+		// sandboxd's audience, then reject those tokens on /actor-tokens
+		// (audience mismatch). The device token is still accepted by
+		// sandboxd, so fall back to exchanging it directly.
+		if errors.Is(err, errActorAudienceMismatch) {
+			return exchangeAtCella(ctx, httpc, apiBase, authToken)
+		}
+		return "", err
+	}
+
+	// 2. Exchange the actor token at cella.
+	return exchangeAtCella(ctx, httpc, apiBase, actorToken)
+}
+
+// errActorAudienceMismatch signals the legacy auth behaviour where a
+// device token stamped with sandboxd's audience is rejected on
+// /actor-tokens; callers fall back to using the device token directly.
+var errActorAudienceMismatch = errors.New("actor-tokens: audience mismatch")
+
+// mintActorToken POSTs {authBase}/actor-tokens with the given audience
+// and TTL, presenting bearer, and returns the minted actor_token. The
+// actor token inherits the bearer's scopes and is issued by auth, so it
+// is accepted by any service that trusts the auth issuer (sandboxd for
+// audience "sandboxd", Lux for "lux.latere.ai" — Lux does not check the
+// audience but the short TTL bounds a leaked export).
+func mintActorToken(ctx context.Context, httpc *http.Client, authBase, bearer, audience string, ttlSeconds int) (string, error) {
+	body, _ := json.Marshal(map[string]any{"audience": audience, "ttl_seconds": ttlSeconds})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, authBase+"/actor-tokens", strings.NewReader(string(body)))
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+authToken)
+	req.Header.Set("Authorization", "Bearer "+bearer)
 	resp, err := httpc.Do(req)
 	if err != nil {
 		return "", err
@@ -329,7 +372,7 @@ func exchangeForCellaToken(ctx context.Context, opts deviceFlowOpts, authToken s
 	if resp.StatusCode/100 != 2 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<14))
 		if resp.StatusCode == http.StatusUnauthorized && strings.Contains(string(b), "audience mismatch") {
-			return exchangeAtCella(ctx, httpc, apiBase, authToken)
+			return "", errActorAudienceMismatch
 		}
 		return "", fmt.Errorf("actor-tokens %d: %s", resp.StatusCode, b)
 	}
@@ -339,9 +382,7 @@ func exchangeForCellaToken(ctx context.Context, opts deviceFlowOpts, authToken s
 	if err := json.NewDecoder(resp.Body).Decode(&actor); err != nil || actor.ActorToken == "" {
 		return "", fmt.Errorf("actor-tokens: empty response")
 	}
-
-	// 2. Exchange the actor token at cella.
-	return exchangeAtCella(ctx, httpc, apiBase, actor.ActorToken)
+	return actor.ActorToken, nil
 }
 
 func exchangeAtCella(ctx context.Context, httpc *http.Client, apiBase, bearer string) (string, error) {
@@ -568,6 +609,10 @@ func newAuthLogoutCmd() *cobra.Command {
   latere auth login`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := api.ClearToken(""); err != nil {
+				return err
+			}
+			// Also drop the retained auth root token used for lux.
+			if err := api.ClearAuthToken(); err != nil {
 				return err
 			}
 			fmt.Fprintln(os.Stderr, "Logged out.")
