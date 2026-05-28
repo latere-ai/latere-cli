@@ -203,8 +203,8 @@ identity as the bearer — no key allocation.
     eval "$(latere lux env --provider openai)"
 
 Then a normal OpenAI SDK call is routed through Lux and billed to your
-identity. The printed token is a short-lived actor token, so prefer
-re-running this over saving the value.
+identity. The printed token is your identity token; it lasts the login
+session — re-run this when it expires.
 
 Supported: openai, openrouter (OpenAI SDK; the credential is sent as a
 bearer), and anthropic (via ANTHROPIC_AUTH_TOKEN, the SDK's bearer knob;
@@ -222,7 +222,7 @@ has no bearer path; use 'latere lux chat' or an OpenRouter route.`,
 				return fmt.Errorf("`lux env` does not support %q (its SDK has no bearer path); use `lux chat` or --provider openrouter", provider)
 			}
 			base := strings.TrimRight(resolveLuxURL(*luxURL), "/")
-			bearer, err := luxBearer(cmd.Context(), *token, *luxURL, *authURL)
+			bearer, err := luxIdentityBearer(cmd.Context(), *token, *luxURL, *authURL)
 			if err != nil {
 				return err
 			}
@@ -238,16 +238,16 @@ has no bearer path; use 'latere lux chat' or an OpenRouter route.`,
 func newLuxTokenCmd(luxURL, authURL, token *string) *cobra.Command {
 	return &cobra.Command{
 		Use:   "token",
-		Short: "Print a short-lived Lux bearer token to stdout.",
-		Long: `Print the bearer the CLI would present to Lux (a short-lived actor
-token minted from your identity, or a sandbox token when running inside
-a sandbox). Useful for scripting:
+		Short: "Print a Lux identity bearer token to stdout.",
+		Long: `Print the identity bearer the CLI presents to Lux (your auth identity
+token, or a sandbox token when running inside a sandbox). It lasts the
+login session. Useful for scripting:
 
     TOKEN=$(latere lux token)
     curl -H "Authorization: Bearer $TOKEN" https://lux.latere.ai/lux/v1/models`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			bearer, err := luxBearer(cmd.Context(), *token, *luxURL, *authURL)
+			bearer, err := luxIdentityBearer(cmd.Context(), *token, *luxURL, *authURL)
 			if err != nil {
 				return err
 			}
@@ -516,54 +516,86 @@ func resolveLuxURL(flagURL string) string {
 	return "https://lux.latere.ai"
 }
 
-// luxBearer returns the bearer to present to Lux. Resolution order:
-//  1. an explicit --token flag,
-//  2. the LATERE_LUX_TOKEN env var,
-//  3. a sandbox service-identity token at /run/cella/sandbox-token/token,
-//  4. mint: load the retained auth token, refresh if expired, then mint
-//     a short-lived aud=lux.latere.ai actor token.
-//
-// Steps 1-3 are presented verbatim (Lux validates them); only step 4
-// needs a prior `latere auth login`.
-func luxBearer(ctx context.Context, tokenFlag, luxURL, authURLFlag string) (string, error) {
+// passthroughToken returns a caller-supplied bearer and true when one is
+// available: an explicit --token, then LATERE_LUX_TOKEN, then a sandbox
+// service-identity token at /run/cella/sandbox-token/token. These are
+// presented to Lux verbatim (Lux validates them). When none is present,
+// the bearer is derived from the retained auth login.
+func passthroughToken(tokenFlag string) (string, bool) {
 	if t := strings.TrimSpace(tokenFlag); t != "" {
-		return t, nil
+		return t, true
 	}
 	if t := strings.TrimSpace(os.Getenv("LATERE_LUX_TOKEN")); t != "" {
-		return t, nil
+		return t, true
 	}
 	if b, err := os.ReadFile(sandboxTokenFile); err == nil {
 		if t := strings.TrimSpace(string(b)); t != "" {
-			return t, nil
+			return t, true
 		}
 	}
+	return "", false
+}
 
+// authIdentityToken loads the retained auth.latere.ai root token,
+// refreshing it when expired, and returns the access token plus the
+// resolved auth base. This token IS the caller's identity bearer; Lux
+// accepts it directly (it validates the auth issuer and does not check
+// the audience).
+func authIdentityToken(ctx context.Context, luxURL, authURLFlag string) (access, authBase string, err error) {
 	authTok, err := api.LoadAuthToken()
 	if err != nil {
 		if errors.Is(err, api.ErrNoToken) {
-			return "", errors.New("not signed in for Lux; run `latere auth login` (it grants the llm.* scopes Lux needs)")
+			return "", "", errors.New("not signed in for Lux; run `latere auth login` (it grants the llm.* scopes Lux needs)")
 		}
-		return "", err
+		return "", "", err
 	}
-	authBase := authURLFlag
+	authBase = authURLFlag
 	if authBase == "" {
 		authBase = inferAuthURL(resolveLuxURL(luxURL))
 	}
 	authBase = strings.TrimRight(authBase, "/")
 
-	access := authTok.AccessToken
+	access = authTok.AccessToken
 	// Refresh when the token is known to be expired (or within a small
 	// skew). A zero ExpiresAt means "unknown"; skip refresh and let the
-	// mint surface a re-login error if it is in fact expired.
+	// downstream call surface a re-login error if it is in fact expired.
 	if authTok.RefreshToken != "" && !authTok.ExpiresAt.IsZero() &&
 		time.Now().After(authTok.ExpiresAt.Add(-60*time.Second)) {
 		refreshed, rerr := refreshAuthToken(ctx, authBase, authTok.RefreshToken)
 		if rerr != nil {
-			return "", fmt.Errorf("auth token expired and refresh failed (%v); run `latere auth login`", rerr)
+			return "", "", fmt.Errorf("auth token expired and refresh failed (%v); run `latere auth login`", rerr)
 		}
 		access = refreshed.AccessToken
 	}
+	return access, authBase, nil
+}
 
+// luxIdentityBearer returns the identity bearer handed to an external SDK
+// by `lux env` / `lux token`: a passthrough token, or the retained auth
+// identity token (refreshed). It is the longest-lived bearer the CLI
+// emits — it lasts the auth token's lifetime so an SDK session survives
+// (re-run to refresh), unlike a 5-minute actor token.
+func luxIdentityBearer(ctx context.Context, tokenFlag, luxURL, authURL string) (string, error) {
+	if t, ok := passthroughToken(tokenFlag); ok {
+		return t, nil
+	}
+	access, _, err := authIdentityToken(ctx, luxURL, authURL)
+	return access, err
+}
+
+// luxBearer returns a short-lived bearer for a single CLI-initiated call
+// (chat, discovery, usage, access): a passthrough token, or a freshly
+// minted aud=lux.latere.ai actor token (≤5 min, audience-bound — the
+// call completes in seconds, so the short TTL costs nothing and bounds a
+// leaked value).
+func luxBearer(ctx context.Context, tokenFlag, luxURL, authURL string) (string, error) {
+	if t, ok := passthroughToken(tokenFlag); ok {
+		return t, nil
+	}
+	access, authBase, err := authIdentityToken(ctx, luxURL, authURL)
+	if err != nil {
+		return "", err
+	}
 	httpc := &http.Client{Timeout: 15 * time.Second}
 	bearer, err := mintActorToken(ctx, httpc, authBase, access, "lux.latere.ai", 300)
 	if err != nil {

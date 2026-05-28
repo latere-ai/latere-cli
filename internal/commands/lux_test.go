@@ -222,6 +222,51 @@ func TestLuxBearerRefreshesThenMints(t *testing.T) {
 	}
 }
 
+func TestLuxIdentityBearerReturnsRootToken(t *testing.T) {
+	isolateBearer(t)
+	// A server that fails any call proves env/token do NOT mint an actor
+	// token: the identity bearer is the root token itself.
+	authSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("identity bearer must not call auth (%s); it returns the root token", r.URL.Path)
+		http.Error(w, "no", http.StatusInternalServerError)
+	}))
+	defer authSrv.Close()
+	writeAuthTokenFile(t, "root-access", "root-refresh", time.Now().Add(time.Hour))
+
+	got, err := luxIdentityBearer(t.Context(), "", "", authSrv.URL)
+	if err != nil {
+		t.Fatalf("luxIdentityBearer: %v", err)
+	}
+	if got != "root-access" {
+		t.Errorf("identity bearer = %q, want the root access token", got)
+	}
+}
+
+func TestLuxIdentityBearerRefreshesWhenExpired(t *testing.T) {
+	isolateBearer(t)
+	authSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/token" {
+			t.Errorf("unexpected call %s (should refresh only, not mint)", r.URL.Path)
+			http.Error(w, "no", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token": "root-new", "token_type": "Bearer", "expires_in": 3600,
+		})
+	}))
+	defer authSrv.Close()
+	writeAuthTokenFile(t, "root-old", "root-refresh", time.Now().Add(-time.Hour))
+
+	got, err := luxIdentityBearer(t.Context(), "", "", authSrv.URL)
+	if err != nil {
+		t.Fatalf("luxIdentityBearer: %v", err)
+	}
+	if got != "root-new" {
+		t.Errorf("identity bearer = %q, want refreshed root-new", got)
+	}
+}
+
 // ---- scope preflight ----
 
 func TestEnsureLuxScope(t *testing.T) {
