@@ -44,6 +44,15 @@ latere auth logout
 latere auth login --token <token>
 ```
 
+### Switching the active organization
+
+```sh
+latere auth org switch <org-uuid>   # scope the saved token to <org-uuid>
+latere auth org switch --personal   # scope the saved token to the personal context
+```
+
+`org switch` uses the auth service's refresh-token grant: no device-code re-prompt, the saved refresh token is exchanged for a new access token scoped to the chosen org. The on-disk token file is rewritten in place.
+
 | Setting | Purpose |
 |---------|---------|
 | `--auth-url` | Override the auth URL for `latere auth login`. |
