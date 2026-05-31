@@ -18,6 +18,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"golang.org/x/oauth2"
+	"latere.ai/x/pkg/authkit"
 	"latere.ai/x/pkg/oidc"
 
 	"github.com/latere-ai/latere-cli/internal/api"
@@ -184,11 +185,55 @@ type deviceFlowOpts struct {
 	NoBrowser                         bool
 }
 
+// captureStore is a TokenStore whose Save also retains the saved token
+// in-memory so the caller can do post-flow work (Cella exchange) without
+// re-reading from disk. Wraps authkit.FileTokenStore at the auth-token
+// path so the saved on-disk format stays compatible with the rest of the
+// CLI's token plumbing.
+type captureStore struct {
+	disk *authkit.FileTokenStore
+	last *oauth2.Token
+}
+
+func newAuthTokenStore() (*captureStore, error) {
+	p := api.AuthTokenPath()
+	if p == "" {
+		return nil, errors.New("cannot determine auth token path")
+	}
+	disk, err := authkit.NewFileTokenStore(p)
+	if err != nil {
+		return nil, err
+	}
+	return &captureStore{disk: disk}, nil
+}
+
+func (s *captureStore) Save(t *oauth2.Token) error {
+	if t == nil {
+		return errors.New("nil token")
+	}
+	s.last = t
+	// Persist in the api.Token shape so `latere lux` (which reads via
+	// api.LoadAuthToken) finds the auth-issued root token where it
+	// expects it. Best-effort: a write failure is reported via a
+	// non-fatal warning above; lux access is additive.
+	if err := api.SaveAuthToken(api.Token{
+		AccessToken:  t.AccessToken,
+		RefreshToken: t.RefreshToken,
+		TokenType:    "Bearer",
+		ExpiresAt:    t.Expiry,
+		IssuedAt:     time.Now().UTC(),
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "  warning: could not save auth token for lux (%v); `latere lux` may require re-login\n", err)
+	}
+	return nil
+}
+
+func (s *captureStore) Load() (*oauth2.Token, error) { return s.disk.Load() }
+func (s *captureStore) Clear() error                 { return s.disk.Clear() }
+
 // runDeviceFlow drives the RFC 8628 device-code flow against
-// auth.latere.ai. The HTTP plumbing (initiate, poll, RFC 8628 error
-// handling) is delegated to pkg/oidc; this function owns the CLI-side
-// concerns: rendering the user code, opening a browser, and exchanging
-// the resulting auth-issued token for a Cella-scoped one.
+// auth.latere.ai via pkg/authkit.DeviceCodeClient, then trades the
+// resulting auth-issued token for a Cella-scoped one.
 func runDeviceFlow(ctx context.Context, opts deviceFlowOpts) error {
 	authBase := opts.AuthURL
 	if authBase == "" {
@@ -205,6 +250,11 @@ func runDeviceFlow(ctx context.Context, opts deviceFlowOpts) error {
 		return errors.New("oidc: missing AuthURL or ClientID")
 	}
 
+	store, err := newAuthTokenStore()
+	if err != nil {
+		return err
+	}
+
 	extra := url.Values{}
 	if opts.OrgIDSet {
 		// Forward the present-but-possibly-empty value. Auth reads
@@ -213,34 +263,18 @@ func runDeviceFlow(ctx context.Context, opts deviceFlowOpts) error {
 		extra["org_id"] = []string{opts.OrgID}
 	}
 
-	// 1. Initiate.
-	da, err := client.DeviceAuth(ctx, extra)
-	if err != nil {
-		return fmt.Errorf("device/code: %w", err)
+	dcc := authkit.NewDeviceCodeClient(client, store)
+	dcc.Output = os.Stderr
+	dcc.ExtraParams = extra
+	if opts.NoBrowser {
+		dcc.OpenBrowser = func(string) error { return nil }
+	} else {
+		dcc.OpenBrowser = openBrowser
 	}
 
-	// 2. Surface the user code.
-	verify := da.VerificationURIComplete
-	if verify == "" {
-		verify = da.VerificationURI
-	}
-	fmt.Fprintln(os.Stderr)
-	fmt.Fprintf(os.Stderr, "  To sign in, open this URL:\n\n      %s\n\n", verify)
-	fmt.Fprintf(os.Stderr, "  And confirm the code:\n\n      %s\n\n", da.UserCode)
-	if !opts.NoBrowser && verify != "" {
-		if err := openBrowser(verify); err != nil {
-			fmt.Fprintf(os.Stderr, "  Could not open browser automatically: %v\n", err)
-		} else {
-			fmt.Fprintln(os.Stderr, "  Opened browser for confirmation.")
-		}
-	}
-	fmt.Fprintln(os.Stderr, "  Waiting for approval...")
-
-	// 3. Poll /token until terminal status. pkg/oidc honours RFC 8628
-	// slow_down / authorization_pending; map the terminal errors back
-	// to the CLI's user-facing strings.
-	tok, err := client.DeviceAccessToken(ctx, da)
-	if err != nil {
+	if err := dcc.Login(ctx); err != nil {
+		// Surface terminal RFC 8628 errors with the CLI's user-facing
+		// strings; everything else passes through with authkit's wrap.
 		var rerr *oauth2.RetrieveError
 		if errors.As(err, &rerr) {
 			switch rerr.ErrorCode {
@@ -251,26 +285,12 @@ func runDeviceFlow(ctx context.Context, opts deviceFlowOpts) error {
 			}
 			return fmt.Errorf("device-code login failed: %s (%s)", rerr.ErrorCode, rerr.ErrorDescription)
 		}
-		return fmt.Errorf("device-code login failed: %w", err)
-	}
-	if tok.AccessToken == "" {
-		return errors.New("token endpoint returned no access_token")
+		return err
 	}
 
-	// Retain the auth.latere.ai root token (access + refresh) so the
-	// `latere lux` commands can mint short-lived aud=lux.latere.ai actor
-	// tokens and refresh when it expires. Persist BEFORE the cella
-	// exchange so retention survives an exchange failure. Kept in a
-	// separate file from the cella token.json; best-effort because lux
-	// access is additive and must not block a successful login.
-	if err := api.SaveAuthToken(api.Token{
-		AccessToken:  tok.AccessToken,
-		RefreshToken: tok.RefreshToken,
-		TokenType:    "Bearer",
-		ExpiresAt:    tok.Expiry,
-		IssuedAt:     time.Now().UTC(),
-	}); err != nil {
-		fmt.Fprintf(os.Stderr, "  warning: could not save auth token for lux (%v); `latere lux` may require re-login\n", err)
+	tok := store.last
+	if tok == nil || tok.AccessToken == "" {
+		return errors.New("token endpoint returned no access_token")
 	}
 
 	// Best-effort: trade the auth-issued token for a cella-issued
