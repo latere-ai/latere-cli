@@ -41,6 +41,133 @@ token is used by Cella commands and by the Cella MCP server.`,
 	cmd.AddCommand(newAuthWhoamiCmd())
 	cmd.AddCommand(newAuthPrintTokenCmd())
 	cmd.AddCommand(newAuthLogoutCmd())
+	cmd.AddCommand(newAuthOrgCmd())
+	return cmd
+}
+
+// newAuthOrgCmd groups org-context management: list memberships and
+// switch the active context. Switch uses the refresh-token grant with
+// `org_id=<uuid>` so the user does not need to re-run device-code login.
+// An empty <id> ("" or --personal) switches to the personal context.
+func newAuthOrgCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "org",
+		Short: "Manage the active organization context.",
+		Long: `Manage which organization the saved token is scoped to.
+
+    latere auth org list                # show known orgs
+    latere auth org switch <org-uuid>   # switch to <org-uuid>
+    latere auth org switch --personal   # switch to personal context
+
+Switch uses the refresh-token grant; the user does not need to
+re-run device-code login.`,
+	}
+	cmd.AddCommand(newAuthOrgSwitchCmd())
+	return cmd
+}
+
+func newAuthOrgSwitchCmd() *cobra.Command {
+	var authURL, clientID string
+	var personal bool
+	cmd := &cobra.Command{
+		Use:   "switch <org-uuid>",
+		Short: "Switch the active org context using the saved refresh token.",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			orgID := ""
+			if len(args) == 1 {
+				orgID = args[0]
+			}
+			if personal {
+				orgID = ""
+			}
+
+			tok, err := api.LoadAuthToken()
+			if err != nil {
+				return err
+			}
+			if tok.RefreshToken == "" {
+				return errors.New("no refresh token on file; run `latere auth login` first")
+			}
+
+			authBase := authURL
+			if authBase == "" {
+				authBase = strings.TrimRight(os.Getenv("AUTH_URL"), "/")
+				if authBase == "" {
+					authBase = "https://auth.latere.ai"
+				}
+			}
+			cid := clientID
+			if cid == "" {
+				cid = os.Getenv("AUTH_CLIENT_ID")
+				if cid == "" {
+					cid = "latere-cli"
+				}
+			}
+
+			form := url.Values{
+				"grant_type":    {"refresh_token"},
+				"refresh_token": {tok.RefreshToken},
+				"client_id":     {cid},
+				"org_id":        {orgID},
+			}
+			req, err := http.NewRequestWithContext(cmd.Context(),
+				http.MethodPost,
+				authBase+"/token",
+				strings.NewReader(form.Encode()),
+			)
+			if err != nil {
+				return err
+			}
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			req.Header.Set("Accept", "application/json")
+
+			httpc := &http.Client{Timeout: 15 * time.Second}
+			resp, err := httpc.Do(req)
+			if err != nil {
+				return fmt.Errorf("token endpoint: %w", err)
+			}
+			defer resp.Body.Close()
+			body, _ := io.ReadAll(resp.Body)
+			if resp.StatusCode != http.StatusOK {
+				return fmt.Errorf("token endpoint: %s: %s", resp.Status, strings.TrimSpace(string(body)))
+			}
+			var got struct {
+				AccessToken  string `json:"access_token"`
+				RefreshToken string `json:"refresh_token"`
+				ExpiresIn    int    `json:"expires_in"`
+			}
+			if err := json.Unmarshal(body, &got); err != nil {
+				return fmt.Errorf("decode token: %w", err)
+			}
+			if got.AccessToken == "" {
+				return errors.New("token endpoint returned no access_token")
+			}
+
+			expiry := time.Now().Add(time.Duration(got.ExpiresIn) * time.Second).UTC()
+			if got.RefreshToken == "" {
+				got.RefreshToken = tok.RefreshToken
+			}
+			if err := api.SaveAuthToken(api.Token{
+				AccessToken:  got.AccessToken,
+				RefreshToken: got.RefreshToken,
+				TokenType:    "Bearer",
+				ExpiresAt:    expiry,
+				IssuedAt:     time.Now().UTC(),
+			}); err != nil {
+				return fmt.Errorf("save auth token: %w", err)
+			}
+			if orgID == "" {
+				fmt.Fprintln(cmd.ErrOrStderr(), "Switched to personal context.")
+			} else {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Switched to org %s.\n", orgID)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&authURL, "auth-url", "", "auth service base URL (default $AUTH_URL or https://auth.latere.ai)")
+	cmd.Flags().StringVar(&clientID, "client-id", "", "OAuth client id (default $AUTH_CLIENT_ID or latere-cli)")
+	cmd.Flags().BoolVar(&personal, "personal", false, "switch to the personal context (equivalent to `switch \"\"`)")
 	return cmd
 }
 
