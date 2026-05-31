@@ -90,7 +90,8 @@ func TestPolicyListEmptyExplainsNextStep(t *testing.T) {
 
 	for _, want := range []string{
 		"No policy profiles are visible",
-		"latere cella create --policy <name>",
+		"latere cella apply",
+		"spec.policy",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("empty policy output missing %q:\n%s", want, out)

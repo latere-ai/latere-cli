@@ -4,13 +4,29 @@
 
 ## Quickstart
 
-Create an ephemeral cella and run a command:
+Describe a Cella in a YAML file and apply it:
 
 ```sh
-latere cella create --name demo --tier ephemeral
+cat > sandbox.yaml <<'YAML'
+apiVersion: cella.latere.ai/v1            # Schema version.
+kind: Sandbox
+metadata:
+  name: demo                              # Optional.
+spec:
+  image: ghcr.io/latere-ai/sandbox-base:latest
+  tier: ephemeral                         # Or "persistent" to keep it.
+  lifecycle:
+    autoStop: 15m
+YAML
+
+latere cella apply -f sandbox.yaml
 latere cella exec demo -- sh -lc 'echo hello && pwd'
 latere cella shell demo
 ```
+
+The same YAML works in the dashboard's YAML tab and over the
+public API with `Content-Type: application/yaml`. Full field
+reference: <https://cella.latere.ai/docs/cella/manifest>.
 
 Run a one-shot disposable command. The backend creates an ephemeral
 cella, runs the command, returns output and timing, then deletes the
@@ -18,14 +34,6 @@ cella:
 
 ```sh
 latere cella run --ephemeral --rm -- sh -lc 'echo hello && pwd'
-```
-
-Create a persistent workspace:
-
-```sh
-latere cella create --name work --tier persistent --disk 10
-latere cella stop work
-latere cella start work
 ```
 
 Run a background job and follow logs:
@@ -38,29 +46,13 @@ latere cella logs demo "$CMD" --follow
 ## Lifecycle
 
 ```sh
-latere cella create
+latere cella apply -f sandbox.yaml
 latere cella list
 latere cella get <name|id>
 latere cella rename <name|id> <new-name>
 latere cella start <name|id>
 latere cella stop <name|id>
 latere cella delete <name|id>
-```
-
-Create flags:
-
-```sh
-latere cella create \
-  --name work \
-  --image ghcr.io/latere-ai/sandbox-base:main \
-  --tier persistent \
-  --disk 10 \
-  --auto-stop-minutes 30 \
-  --auto-delete-hours 24 \
-  --ttl 12h \
-  --env GOFLAGS=-count=1 \
-  --credential source-control \
-  --policy default
 ```
 
 Tier changes:

@@ -115,13 +115,13 @@ Each cella is a PVC-backed workspace plus a Pod for compute. Tier
 window; tier 'persistent' stays until you delete it.`,
 		Example: `  latere cella list
   latere cella policy list
-  latere cella create --name dev --tier persistent --disk 10
+  latere cella apply -f sandbox.yaml
   latere cella shell dev
   latere cella run dev -- python train.py
   latere cella export dev src -o workspace.tar`,
 	}
 	cmd.AddCommand(
-		newCeCreateCmd(),
+		newCeApplyCmd(),
 		newCeListCmd(),
 		newCeGetCmd(),
 		newCeRenameCmd(),
@@ -172,108 +172,93 @@ the remote command's exit code when the command finishes.`,
 	return cmd
 }
 
-// ---- create / list / get / rename / start / stop / delete ----
+// ---- apply / list / get / rename / start / stop / delete ----
 
-func newCeCreateCmd() *cobra.Command {
+// newCeApplyCmd registers `latere cella apply -f <file>`. Reads the
+// SandboxManifest from disk and POSTs the raw bytes to
+// /v1/sandboxes with Content-Type: application/yaml. The server is
+// the authoritative validator, so the CLI does no schema work.
+// "-" reads the manifest from stdin.
+func newCeApplyCmd() *cobra.Command {
 	var (
-		image           string
-		name            string
-		tier            string
-		diskGB          int
-		cpu             string
-		memory          string
-		autoStop        int
-		autoDeleteHours int
-		ttl             string
-		envFlag         []string
-		credentialFlag  []string
-		policy          string
-		apiURL          string
+		file   string
+		apiURL string
 	)
 	cmd := &cobra.Command{
-		Use:   "create",
-		Short: "Create a cella.",
-		Long: `Create a Cella workspace.
+		Use:   "apply",
+		Short: "Create a cella from a Sandbox Manifest file.",
+		Long: `Create a Cella from a declarative Sandbox Manifest.
 
-By default this creates an ephemeral cella using the standard base
-image and account defaults for disk, CPU, memory, idle timeout, and
-policy. Use --tier persistent for a workspace that survives until
-explicitly deleted.`,
-		Example: `  latere cella create
-  latere cella policy list
-  latere cella create --name dev --tier persistent --disk 10
-  latere cella create --name gpu-test --cpu 2 --memory 8Gi
-  latere cella create --name app --env NODE_ENV=development --credential github
-  latere cella create --policy default-sidecar`,
+The same YAML accepted by the dashboard's YAML tab and the
+public API. Defaults hit the warm pool, so a Manifest like the
+one below starts in around 300 ms:
+
+  apiVersion: cella.latere.ai/v1        # Schema version.
+  kind: Sandbox
+  metadata:
+    name: dev                           # Optional. Server picks one if omitted.
+  spec:
+    image: ghcr.io/latere-ai/sandbox-base:latest
+    tier: ephemeral                     # Or "persistent" to keep the workspace.
+    lifecycle:
+      autoStop: 15m                     # Stop the compute after this much idle.
+
+Full field reference: https://cella.latere.ai/docs/cella/manifest`,
+		Example: `  latere cella apply -f sandbox.yaml
+  cat sandbox.yaml | latere cella apply -f -`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if strings.TrimSpace(file) == "" {
+				return fmt.Errorf("-f is required (path to a Sandbox Manifest, or - for stdin)")
+			}
+			body, err := readManifestBody(file)
+			if err != nil {
+				return err
+			}
 			c, err := authedClient(apiURL)
 			if err != nil {
 				return err
 			}
-			env, err := parseKV(envFlag)
-			if err != nil {
-				return err
-			}
-			if cmd.Flags().Changed("auto-stop-minutes") && autoStop < 0 {
-				return fmt.Errorf("--auto-stop-minutes must be 0 or greater")
-			}
-			body := map[string]any{
-				"image": image,
-				"name":  name,
-			}
-			if tier != "" {
-				body["tier"] = tier
-			}
-			if diskGB > 0 {
-				body["disk_gb"] = diskGB
-			}
-			if cpu != "" {
-				body["cpu"] = cpu
-			}
-			if memory != "" {
-				body["memory"] = memory
-			}
-			if cmd.Flags().Changed("auto-stop-minutes") {
-				body["auto_stop_minutes"] = autoStop
-			}
-			if autoDeleteHours > 0 {
-				body["auto_delete_hours"] = autoDeleteHours
-			}
-			if ttl != "" {
-				body["ttl"] = ttl
-			}
-			if len(env) > 0 {
-				body["env"] = env
-			}
-			if len(credentialFlag) > 0 {
-				body["credential_catalog"] = credentialFlag
-			}
-			if policy != "" {
-				body["policy"] = policy
-			}
 			var sb sandboxDTO
-			if err := c.PostJSON(cmd.Context(), "/v1/sandboxes", body, &sb); err != nil {
+			if err := c.Do(cmd.Context(), http.MethodPost, "/v1/sandboxes",
+				bytes.NewReader(body), "application/yaml", &sb); err != nil {
 				return err
 			}
 			printSandbox(sb)
 			return nil
 		},
 	}
-	f := cmd.Flags()
-	f.StringVar(&image, "image", "ghcr.io/latere-ai/sandbox-base:latest", "container image")
-	f.StringVar(&name, "name", "", "human slug; server generates one if omitted")
-	f.StringVar(&tier, "tier", "", "ephemeral|persistent (default ephemeral)")
-	f.IntVar(&diskGB, "disk", 0, "PVC size in GB (default 1)")
-	f.StringVar(&cpu, "cpu", "", "CPU limit as a Kubernetes quantity, e.g. 1.5 or 1500m (default plan/account default)")
-	f.StringVar(&memory, "memory", "", "memory limit as a Kubernetes quantity, e.g. 4Gi or 2048Mi (default plan/account default)")
-	f.IntVar(&autoStop, "auto-stop-minutes", 0, "idle timeout in minutes; omit for account default, 0 disables")
-	f.IntVar(&autoDeleteHours, "auto-delete-hours", 0, "ephemeral wall-clock lifetime")
-	f.StringVar(&ttl, "ttl", "", "Go duration TTL alternative to --auto-delete-hours")
-	f.StringArrayVar(&envFlag, "env", nil, "non-secret KEY=VALUE; repeatable")
-	f.StringArrayVar(&credentialFlag, "credential", nil, "trust-plane catalog key to attach; repeatable")
-	f.StringVar(&policy, "policy", "", "named network policy")
-	f.StringVar(&apiURL, "api-url", "", "override Cella API base URL")
+	cmd.Flags().StringVarP(&file, "file", "f", "", "path to a Sandbox Manifest YAML file, or - for stdin")
+	_ = cmd.MarkFlagRequired("file")
+	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
 	return cmd
+}
+
+// readManifestBody reads the manifest from path or, if path is "-",
+// from stdin. Capped at 64 KiB to match the server's body limit.
+func readManifestBody(path string) ([]byte, error) {
+	const maxBytes = 64 << 10
+	var r io.Reader
+	if path == "-" {
+		r = os.Stdin
+	} else {
+		f, err := os.Open(path)
+		if err != nil {
+			return nil, fmt.Errorf("open manifest %q: %w", path, err)
+		}
+		defer func() { _ = f.Close() }()
+		r = f
+	}
+	body, err := io.ReadAll(io.LimitReader(r, maxBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read manifest: %w", err)
+	}
+	if len(body) > maxBytes {
+		return nil, fmt.Errorf("manifest exceeds %d byte limit", maxBytes)
+	}
+	if len(bytes.TrimSpace(body)) == 0 {
+		return nil, fmt.Errorf("manifest is empty")
+	}
+	return body, nil
 }
 
 func newCeListCmd() *cobra.Command {
@@ -328,19 +313,19 @@ func newCePolicyCmd() *cobra.Command {
 
 Policies control runtime capabilities such as network shape, workspace
 layout, and whether Cella's credential sidecar is required. The default
-policy is used when 'latere cella create' is run without --policy.
+policy is used when a Manifest's spec.policy is left empty.
 
-Use a selectable policy with:
+Use a selectable policy by setting it in your Manifest:
 
-  latere cella create --policy <name>
+  spec:
+    policy: restricted-network
 
 If create fails because the selected policy requires the sidecar, list
 policies and choose a selectable policy where sidecar is "no", or ask
 an admin to configure the sidecar client for your token.`,
 		Example: `  latere cella policy
   latere cella policy list
-  latere cella policies --json
-  latere cella create --policy restricted-network`,
+  latere cella policies --json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runPolicyList(cmd.Context(), apiURL, jsonF)
 		},
@@ -354,8 +339,7 @@ an admin to configure the sidecar client for your token.`,
 		Short: "List policy profiles available for new cellas.",
 		Long:  cmd.Long,
 		Example: `  latere cella policy list
-  latere cella policy list --json
-  latere cella create --policy restricted-network`,
+  latere cella policy list --json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runPolicyList(cmd.Context(), apiURL, jsonF)
 		},
@@ -380,7 +364,7 @@ func runPolicyList(ctx context.Context, apiURL string, jsonF bool) error {
 	}
 	if len(policies) == 0 {
 		fmt.Fprintln(os.Stdout, "No policy profiles are visible to this token.")
-		fmt.Fprintln(os.Stdout, "Ask your Latere admin to assign a selectable policy, then retry `latere cella create --policy <name>`.")
+		fmt.Fprintln(os.Stdout, "Ask your Latere admin to assign a selectable policy, then re-run `latere cella apply` with `spec.policy` set in your Manifest.")
 		return nil
 	}
 	printPolicies(policies)

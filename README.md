@@ -57,7 +57,7 @@ latere auth login --token <token>
 | **Lux** | Call language models on your identity, no key to allocate: discovery, SDK enablement, chat, usage. | [docs/lux.md](docs/lux.md) |
 
 ```sh
-latere cella create --name demo --tier ephemeral
+latere cella apply -f sandbox.yaml
 latere lux chat --model openai/gpt-4o-mini "Say hi"
 ```
 

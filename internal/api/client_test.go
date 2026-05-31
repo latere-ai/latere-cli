@@ -18,7 +18,7 @@ func TestAPIErrorPolicySidecarRequiredIsActionable(t *testing.T) {
 		"not a local command syntax problem",
 		"latere auth login",
 		"latere cella policy list",
-		"latere cella create --policy <name>",
+		"spec.policy",
 		"sidecar is `no`",
 		"server code: policy_sidecar_required",
 	} {

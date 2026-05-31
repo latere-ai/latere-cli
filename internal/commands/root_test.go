@@ -52,7 +52,7 @@ func TestHelpIncludesUserExamples(t *testing.T) {
 			args: []string{"--help"},
 			want: []string{
 				"latere auth login",
-				"latere cella create --name dev --tier persistent",
+				"latere cella apply -f sandbox.yaml",
 				"latere completion zsh",
 			},
 		},
@@ -75,14 +75,12 @@ func TestHelpIncludesUserExamples(t *testing.T) {
 			},
 		},
 		{
-			name: "cella create",
-			args: []string{"cella", "create", "--help"},
+			name: "cella apply",
+			args: []string{"cella", "apply", "--help"},
 			want: []string{
-				"Create a Cella workspace.",
-				"latere cella policy list",
-				"latere cella create --name dev --tier persistent --disk 10",
-				"idle timeout in minutes; omit for account default, 0 disables",
-				"named network policy",
+				"Create a Cella from a declarative Sandbox Manifest.",
+				"latere cella apply -f sandbox.yaml",
+				"Sandbox Manifest YAML file",
 			},
 		},
 		{
@@ -90,7 +88,6 @@ func TestHelpIncludesUserExamples(t *testing.T) {
 			args: []string{"cella", "policy", "--help"},
 			want: []string{
 				"List Cella policy profiles visible to the current token.",
-				"latere cella create --policy <name>",
 				"choose a selectable policy where sidecar is \"no\"",
 			},
 		},
@@ -124,9 +121,6 @@ func TestHelpIncludesUserExamples(t *testing.T) {
 				if !strings.Contains(got, want) {
 					t.Fatalf("help output missing %q\noutput:\n%s", want, got)
 				}
-			}
-			if tc.name == "cella create" && strings.Contains(got, "default -1") {
-				t.Fatalf("help output leaked internal auto-stop sentinel:\n%s", got)
 			}
 		})
 	}
