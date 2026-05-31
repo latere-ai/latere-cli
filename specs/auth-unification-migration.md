@@ -1,6 +1,6 @@
 ---
 title: latere-cli — Auth Unification Migration
-status: drafted
+status: in-progress
 depends_on:
   - "auth/specs/auth-unification.md"
   - "auth/specs/auth-unification/authkit-device-code-and-token-store.md"
