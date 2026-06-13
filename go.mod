@@ -3,7 +3,9 @@ module github.com/latere-ai/latere-cli
 go 1.26.1
 
 require (
+	github.com/coder/websocket v1.8.14
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
+	github.com/hashicorp/yamux v0.1.2
 	github.com/modelcontextprotocol/go-sdk v1.5.0
 	github.com/spf13/cobra v1.8.1
 	golang.org/x/oauth2 v0.36.0

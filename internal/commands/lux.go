@@ -17,6 +17,7 @@ import (
 	"latere.ai/x/pkg/oidc"
 
 	"github.com/latere-ai/latere-cli/internal/api"
+	"github.com/latere-ai/latere-cli/internal/tunnel"
 )
 
 // Lux is the Latere model gateway at lux.latere.ai. These commands let
@@ -79,6 +80,13 @@ func providerSpecs() map[string]providerSpec {
 			// so neither chat nor env is offered here.
 			name: "gemini",
 		},
+		"local": {
+			// Local runtimes tunneled in via `lux serve` (spec 18). They
+			// speak the openai-compat dialect, so the OpenAI SDK pointed at
+			// the /local/v1 route just works. No upstream key.
+			name: "local", chatPath: "/local/v1/chat/completions",
+			envBaseVar: "OPENAI_BASE_URL", envKeyVar: "OPENAI_API_KEY", envBaseURL: "/local/v1",
+		},
 	}
 }
 
@@ -128,7 +136,101 @@ access profile binding to a provider key — see 'latere lux access'.`,
 	cmd.AddCommand(newLuxChatCmd(&luxURL, &authURL, &token))
 	cmd.AddCommand(newLuxUsageCmd(&luxURL, &authURL, &token))
 	cmd.AddCommand(newLuxAccessCmd(&luxURL, &authURL, &token))
+	cmd.AddCommand(newLuxServeCmd(&luxURL, &authURL, &token))
 	return cmd
+}
+
+// ---- serve: expose a local model runtime through Lux ----
+
+func newLuxServeCmd(luxURL, authURL, token *string) *cobra.Command {
+	var runtime, upstream, models, share string
+	cmd := &cobra.Command{
+		Use:   "serve",
+		Short: "Expose a local model runtime (Ollama, vLLM, LM Studio, llama.cpp, MLX) through Lux.",
+		Long: `Open a reverse tunnel from this machine to Lux so your local models are
+callable through lux.latere.ai from anywhere, with your identity and the
+same gates and request log as any other Lux model (lux spec 18).
+
+This runs a long-lived outbound connection (no inbound port is opened) and
+forwards inbound requests only to the configured local runtime. Requires
+the llm.serve scope (run 'latere auth login' to refresh your scopes).
+
+Discoverable as local/<model> in 'latere lux models'. Call it by pointing
+an OpenAI-compatible SDK at <lux>/local/v1.`,
+		Example: `  latere lux serve
+  latere lux serve --runtime vllm
+  latere lux serve --upstream http://localhost:1234 --models llama3.1:8b
+  latere lux serve --share org`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			bearerFn := func(ctx context.Context) (string, error) {
+				return luxIdentityBearer(ctx, *token, *luxURL, *authURL)
+			}
+			// Resolve sharing scope: explicit flag wins; otherwise default
+			// to org when the identity carries an org claim (so connecting
+			// in an org exposes the models org-wide), else owner-private.
+			resolvedShare := share
+			if resolvedShare == "" || resolvedShare == "auto" {
+				if b, err := bearerFn(cmd.Context()); err == nil && bearerHasOrg(b) {
+					resolvedShare = "org"
+				} else {
+					resolvedShare = "owner"
+				}
+			}
+			scopeMsg := "private to you"
+			if resolvedShare == "org" {
+				scopeMsg = "shared with your whole org"
+			}
+			fmt.Fprintf(os.Stderr, "Sharing scope: %s.\n", scopeMsg)
+
+			return tunnel.Run(cmd.Context(), tunnel.Options{
+				LuxURL:      resolveLuxURL(*luxURL),
+				Bearer:      bearerFn,
+				Runtime:     runtime,
+				UpstreamURL: upstream,
+				Models:      splitCSV(models),
+				Share:       resolvedShare,
+				NodeID:      tunnel.NodeID(),
+				Out:         os.Stderr,
+			})
+		},
+	}
+	cmd.Flags().StringVar(&runtime, "runtime", "ollama", "local runtime: ollama, vllm, lmstudio, llamacpp, mlx, or openai-compat")
+	cmd.Flags().StringVar(&upstream, "upstream", "", "local runtime base URL (default per --runtime)")
+	cmd.Flags().StringVar(&models, "models", "", "comma-separated allowlist (default: all discovered models)")
+	cmd.Flags().StringVar(&share, "share", "auto", "who may call: owner, org, or auto (org if your identity has one)")
+	return cmd
+}
+
+// bearerHasOrg reports whether a JWT bearer carries a non-empty org_id
+// claim. A non-JWT (e.g. sandbox) token returns false.
+func bearerHasOrg(bearer string) bool {
+	parts := strings.Split(bearer, ".")
+	if len(parts) != 3 {
+		return false
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return false
+	}
+	var claims struct {
+		OrgID string `json:"org_id"`
+	}
+	if json.Unmarshal(payload, &claims) != nil {
+		return false
+	}
+	return strings.TrimSpace(claims.OrgID) != ""
+}
+
+// splitCSV splits a comma-separated list, trimming spaces and dropping
+// empties.
+func splitCSV(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if t := strings.TrimSpace(p); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 // ---- discovery: models / providers / rates ----
@@ -145,7 +247,7 @@ func newLuxCatalogCmd(name, path, what string, luxURL, authURL, token *string) *
 	cmd := &cobra.Command{
 		Use:   name,
 		Short: "List " + what + ".",
-		Long: fmt.Sprintf("List %s.\n\nReads %s with your identity. Requires the llm.read scope.", what, path),
+		Long:  fmt.Sprintf("List %s.\n\nReads %s with your identity. Requires the llm.read scope.", what, path),
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, bearer, err := luxClient(cmd.Context(), *luxURL, *authURL, *token)
@@ -611,7 +713,7 @@ func refreshAuthToken(ctx context.Context, authBase, refreshToken string) (api.T
 	client := oidc.New(oidc.Config{
 		AuthURL:  authBase,
 		ClientID: "latere-cli",
-		Scopes:   []string{"openid", "email", "profile", "offline_access", "llm.read", "llm.invoke"},
+		Scopes:   []string{"openid", "email", "profile", "offline_access", "llm.read", "llm.invoke", "llm.serve"},
 	})
 	if client == nil {
 		return api.Token{}, errors.New("oidc: missing AuthURL or ClientID")

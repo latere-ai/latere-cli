@@ -1,0 +1,60 @@
+package tunnel
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"io"
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/hashicorp/yamux"
+)
+
+// yamuxConfig mirrors the luxd side: keepalive on so a dead peer is
+// detected when idle, logging silenced.
+func yamuxConfig() *yamux.Config {
+	cfg := yamux.DefaultConfig()
+	cfg.EnableKeepAlive = true
+	cfg.KeepAliveInterval = 15 * time.Second
+	cfg.ConnectionWriteTimeout = 30 * time.Second
+	cfg.LogOutput = io.Discard
+	return cfg
+}
+
+// NodeID returns a stable per-machine node id, persisted under the latere
+// config dir so a reconnect reuses it and overwrites its own registry
+// member instead of creating a duplicate (spec 18). A random id is
+// generated and saved on first use.
+func NodeID() string {
+	p := nodeIDPath()
+	if p != "" {
+		if b, err := os.ReadFile(p); err == nil {
+			if s := string(b); len(s) > 0 {
+				return s
+			}
+		}
+	}
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err != nil {
+		return "node-unknown"
+	}
+	id := "node-" + hex.EncodeToString(buf)
+	if p != "" {
+		_ = os.MkdirAll(filepath.Dir(p), 0o700)
+		_ = os.WriteFile(p, []byte(id), 0o600)
+	}
+	return id
+}
+
+func nodeIDPath() string {
+	dir := os.Getenv("XDG_CONFIG_HOME")
+	if dir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return ""
+		}
+		dir = filepath.Join(home, ".config")
+	}
+	return filepath.Join(dir, "latere", "tunnel-node-id")
+}
