@@ -39,6 +39,19 @@ latere lux access show
 
 Free models work with no setup. A paid model needs your access profile bound to a provider key — `latere lux access set --model <m> --provider <p> --provider-key <id>` (or ask your Latere admin to enable one for you).
 
+## Serve a local model
+
+Expose a model running on your own machine (Ollama, vLLM, LM Studio, llama.cpp, Apple MLX) through Lux, so it is callable from anywhere as `local/<model>` with your identity:
+
+```sh
+latere lux serve                    # Ollama at localhost:11434 (default)
+latere lux serve --runtime vllm     # or lmstudio / llamacpp / mlx
+latere lux serve --upstream http://localhost:1234 --models llama3.1:8b
+latere lux serve --share org        # share with your whole org (default for org accounts)
+```
+
+`serve` opens a long-lived outbound tunnel (no inbound port) and forwards requests only to the configured local runtime. It needs the `llm.serve` scope — run `latere auth login` once to refresh your scopes. Call the model by pointing a stock SDK at the `/local/v1` route: `eval "$(latere lux env --provider local)"`. See the [Lux local-models guide](https://github.com/latere-ai/lux/blob/main/docs/lux/local-models.md).
+
 ## Configuration
 
 | Setting | Purpose |

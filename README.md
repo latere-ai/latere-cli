@@ -63,7 +63,7 @@ latere auth org switch --personal   # scope the saved token to the personal cont
 | Product | What it does | Guide |
 |---------|--------------|-------|
 | **Cella** | Named sandboxes (ephemeral or persistent): create, exec, shell, logs, file transfer, MCP server. | [docs/cella.md](docs/cella.md) |
-| **Lux** | Call language models on your identity, no key to allocate: discovery, SDK enablement, chat, usage. | [docs/lux.md](docs/lux.md) |
+| **Lux** | Call language models on your identity, no key to allocate: discovery, SDK enablement, chat, usage, and serving your own local models (Ollama/vLLM/LM Studio/llama.cpp/MLX) through Lux. | [docs/lux.md](docs/lux.md) |
 
 ```sh
 latere cella apply -f sandbox.yaml
