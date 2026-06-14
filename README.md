@@ -27,6 +27,21 @@ Release binaries are attached to GitHub releases for Linux, macOS, and Windows o
 
 The installer resolves the latest version from the GitHub releases redirect rather than the rate-limited GitHub API, so it works from networks behind shared NAT. If version resolution still fails (restricted network or proxy), pin a version explicitly with the `sh -s -- vX.Y.Z` form above.
 
+## Stay up to date
+
+`latere` checks for new releases at most once a day and prints a one-line notice when one is available. To update:
+
+```sh
+latere upgrade            # download and install the latest release
+latere upgrade --check    # report whether a newer release exists, without installing
+latere upgrade --auto on  # auto-upgrade on the next run when a new release is available
+latere upgrade --auto off # turn auto-upgrade back off
+```
+
+`upgrade` verifies the release checksum and replaces the running binary in place. If `latere` lives somewhere you cannot write (for example a system-wide `PREFIX=/usr/local` install), it tells you to re-run the installer instead. Auto-upgrade and the daily notice are skipped for `go install`/dev builds, in CI, and when output is not a terminal. Set `LATERE_NO_UPDATE_CHECK=1` to silence the check entirely.
+
+> Self-update is unavailable on Windows (the running binary is locked); download the latest archive from the [releases page](https://github.com/latere-ai/latere-cli/releases/latest) instead.
+
 ## Sign in
 
 ```sh
