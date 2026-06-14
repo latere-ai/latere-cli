@@ -2,6 +2,7 @@ package tunnel
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -172,7 +173,7 @@ func runSession(ctx context.Context, opts Options) error {
 
 	go heartbeatLoop(sessCtx, ctrl, opts)
 
-	srv := &forwarder{ctx: sessCtx, client: hc, upstream: strings.TrimRight(opts.UpstreamURL, "/")}
+	srv := &forwarder{ctx: sessCtx, client: hc, upstream: strings.TrimRight(opts.UpstreamURL, "/"), out: opts.Out}
 	for {
 		stream, err := sess.AcceptStream()
 		if err != nil {
@@ -212,6 +213,7 @@ type forwarder struct {
 	ctx      context.Context
 	client   *http.Client
 	upstream string
+	out      io.Writer // traffic log sink (status lines); nil disables logging
 }
 
 func (f *forwarder) handle(stream net.Conn) {
@@ -220,23 +222,71 @@ func (f *forwarder) handle(stream net.Conn) {
 	if err != nil {
 		return
 	}
-	target := f.upstream + req.URL.RequestURI()
-	out, err := http.NewRequestWithContext(f.ctx, req.Method, target, req.Body)
+
+	// Buffer the body so it can be both forwarded and peeked for the model
+	// id in the traffic log. Chat-completion bodies are small next to the
+	// model weights, so reading fully is cheap.
+	var body []byte
+	if req.Body != nil {
+		body, _ = io.ReadAll(req.Body)
+		_ = req.Body.Close()
+	}
+	model := peekModel(body)
+	path := req.URL.RequestURI()
+	started := time.Now()
+
+	target := f.upstream + path
+	out, err := http.NewRequestWithContext(f.ctx, req.Method, target, bytes.NewReader(body))
 	if err != nil {
 		writeError(stream, err)
+		f.logTraffic(req.Method, path, model, 0, time.Since(started), err)
 		return
 	}
 	out.Header = req.Header.Clone()
 	out.Header.Del("Connection")
-	out.ContentLength = req.ContentLength
+	out.ContentLength = int64(len(body))
 
 	resp, err := f.client.Do(out)
 	if err != nil {
 		writeError(stream, err)
+		f.logTraffic(req.Method, path, model, http.StatusBadGateway, time.Since(started), err)
 		return
 	}
 	defer resp.Body.Close()
 	_ = resp.Write(stream)
+	f.logTraffic(req.Method, path, model, resp.StatusCode, time.Since(started), nil)
+}
+
+// peekModel pulls the OpenAI-compatible "model" field out of a request body
+// for the traffic log; "" when absent or unparseable.
+func peekModel(body []byte) string {
+	if len(body) == 0 {
+		return ""
+	}
+	var m struct {
+		Model string `json:"model"`
+	}
+	_ = json.Unmarshal(body, &m)
+	return m.Model
+}
+
+// logTraffic prints one served-request line (method, path, model, status,
+// latency) to the serve command's status sink. No-op when out is nil.
+func (f *forwarder) logTraffic(method, path, model string, status int, dur time.Duration, err error) {
+	if f.out == nil {
+		return
+	}
+	if model == "" {
+		model = "-"
+	}
+	ts := time.Now().Format("15:04:05")
+	if err != nil {
+		fmt.Fprintf(f.out, "%s  %s %s  model=%s  error: %v  (%dms)\n",
+			ts, method, path, model, err, dur.Milliseconds())
+		return
+	}
+	fmt.Fprintf(f.out, "%s  %s %s  model=%s  %d  (%dms)\n",
+		ts, method, path, model, status, dur.Milliseconds())
 }
 
 func writeError(w io.Writer, err error) {

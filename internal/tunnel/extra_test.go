@@ -2,6 +2,7 @@ package tunnel
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -164,6 +165,42 @@ func TestForwarderForwardsToUpstream(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	if string(body) != "ok:/v1/chat/completions" {
 		t.Errorf("body = %q", body)
+	}
+}
+
+// A served request is logged with method, path, model, and status so the
+// operator can watch traffic while `latere lux serve` is running.
+func TestForwarderLogsTraffic(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(body), `"model":"gemma4:latest"`) {
+			t.Errorf("upstream body = %q, want the forwarded model body", body)
+		}
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer upstream.Close()
+
+	var logBuf bytes.Buffer
+	f := &forwarder{ctx: context.Background(), client: &http.Client{}, upstream: upstream.URL, out: &logBuf}
+	c1, c2 := net.Pipe()
+	done := make(chan struct{})
+	go func() { f.handle(c1); close(done) }()
+	req, _ := http.NewRequest(http.MethodPost, "http://x/v1/chat/completions", strings.NewReader(`{"model":"gemma4:latest"}`))
+	go func() { _ = req.Write(c2) }()
+	resp, err := http.ReadResponse(bufio.NewReader(c2), req)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	_, _ = io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	<-done // handle logs after the response is written
+
+	line := logBuf.String()
+	for _, want := range []string{"POST /v1/chat/completions", "model=gemma4:latest", "201"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("traffic log %q missing %q", line, want)
+		}
 	}
 }
 
