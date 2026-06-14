@@ -10,7 +10,7 @@ require (
 	github.com/spf13/cobra v1.8.1
 	golang.org/x/oauth2 v0.36.0
 	golang.org/x/term v0.41.0
-	latere.ai/x/pkg v0.17.4
+	latere.ai/x/pkg v0.19.1
 )
 
 require (
