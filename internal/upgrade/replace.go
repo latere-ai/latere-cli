@@ -14,6 +14,29 @@ func replaceSupported() bool {
 	return runtime.GOOS != "windows"
 }
 
+// selfReplaceWritable reports whether the directory holding the running
+// binary is writable, i.e. whether an in-place self-replacement could
+// succeed. Used to gate auto-upgrade so a system/Homebrew install (not
+// user-writable) silently falls back to a notice instead of failing on every
+// run.
+func selfReplaceWritable() bool {
+	exe, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+	f, err := os.CreateTemp(filepath.Dir(exe), ".latere-perm-*")
+	if err != nil {
+		return false
+	}
+	name := f.Name()
+	f.Close()
+	os.Remove(name)
+	return true
+}
+
 // replace swaps the running executable's file with newBin.
 func replace(newBin []byte) error {
 	exe, err := os.Executable()

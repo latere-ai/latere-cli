@@ -24,10 +24,10 @@ func disabled() bool {
 	return os.Getenv(envNoCheck) != "" || os.Getenv("CI") != ""
 }
 
-// stderrIsTerminal reports whether os.Stderr is an interactive terminal.
+// isTerminalStderr reports whether os.Stderr is an interactive terminal.
 // Notices and auto-upgrades are suppressed otherwise so piped/JSON consumers
-// and scripts are never disturbed.
-func stderrIsTerminal() bool {
+// and scripts are never disturbed. It is a var so tests can force the answer.
+var isTerminalStderr = func() bool {
 	return term.IsTerminal(int(os.Stderr.Fd()))
 }
 
@@ -43,6 +43,7 @@ func OnStart(current string, w io.Writer) {
 	if !isRelease(current) || disabled() {
 		return
 	}
+	now := time.Now()
 	st := loadState()
 	updateKnown := Newer(current, st.LatestVersion)
 
@@ -50,21 +51,27 @@ func OnStart(current string, w io.Writer) {
 		// performAutoUpgrade re-execs on success and does not return.
 		performAutoUpgrade(current, w)
 	}
-	if updateKnown && stderrIsTerminal() {
+	if updateKnown && isTerminalStderr() && st.shouldNotify(st.LatestVersion, now) {
 		printNotice(w, current, st.LatestVersion)
+		// Record the reminder so it repeats at most once per interval rather
+		// than on every command until the user upgrades.
+		st.NotifiedVersion = st.LatestVersion
+		st.NotifiedAt = now
+		_ = saveState(st)
 	}
-	if stale(st, time.Now()) {
+	if stale(st, now) {
 		go refresh()
 	}
 }
 
-// autoUpgradeWanted reports whether an auto-upgrade should run now: enabled in
-// config, supported on this platform, interactive, and not already inside a
-// post-upgrade re-exec.
+// autoUpgradeWanted reports whether an auto-upgrade should run now: on by
+// default (overridable), supported and writable on this platform, interactive,
+// and not already inside a post-upgrade re-exec.
 func autoUpgradeWanted() bool {
-	return LoadConfig().AutoUpgrade &&
+	return LoadConfig().AutoUpgradeEnabled() &&
 		replaceSupported() &&
-		stderrIsTerminal() &&
+		selfReplaceWritable() &&
+		isTerminalStderr() &&
 		os.Getenv(sentinelEnv) == ""
 }
 
@@ -78,18 +85,24 @@ func printNotice(w io.Writer, current, latest string) {
 // command. On any failure it prints a short note and returns so the current
 // command can still run.
 func performAutoUpgrade(current string, w io.Writer) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
-	tag, err := ResolveLatest(ctx, httpClient())
+	// Re-resolve with a tight timeout: this runs synchronously before the
+	// user's command, so a black-holed network must not stall it for long.
+	resolveCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	tag, err := ResolveLatest(resolveCtx, httpClient())
+	cancel()
 	if err != nil {
 		return // offline or rate-limited; stay on the current version silently
 	}
-	_ = saveState(checkState{CheckedAt: time.Now(), LatestVersion: tag})
+	now := time.Now()
+	st := loadState()
+	st.CheckedAt, st.LatestVersion = now, tag
+	_ = saveState(st)
 	if !Newer(current, tag) {
 		return // cache was stale; nothing to do
 	}
 	fmt.Fprintf(w, "Auto-upgrading latere %s -> %s...\n", display(current), display(tag))
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
 	bin, err := DownloadBinary(ctx, httpClient(), tag)
 	if err != nil {
 		fmt.Fprintf(w, "auto-upgrade failed: %v\n", err)
@@ -114,23 +127,39 @@ func refresh() {
 	if err != nil {
 		return
 	}
-	_ = saveState(checkState{CheckedAt: time.Now(), LatestVersion: tag})
+	st := loadState()
+	st.CheckedAt, st.LatestVersion = time.Now(), tag
+	_ = saveState(st)
 }
 
-// Run executes `latere upgrade`. With checkOnly it only reports; otherwise it
-// downloads and installs the latest release when the current build is behind.
-func Run(ctx context.Context, current string, checkOnly bool, out io.Writer) error {
-	tag, err := ResolveLatest(ctx, httpClient())
-	if err != nil {
-		return fmt.Errorf("check for updates: %w", err)
+// Run executes `latere upgrade`. An empty target means "the latest release";
+// a specific target (e.g. "v0.2.29") installs exactly that version, which is
+// how a user rolls back from a broken release. With checkOnly it only reports.
+func Run(ctx context.Context, current, target string, checkOnly bool, out io.Writer) error {
+	var tag string
+	if target != "" {
+		if !isRelease(target) {
+			return fmt.Errorf("invalid version %q; expected a release like v0.2.29", target)
+		}
+		tag = display(target)
+	} else {
+		var err error
+		tag, err = ResolveLatest(ctx, httpClient())
+		if err != nil {
+			return fmt.Errorf("check for updates: %w", err)
+		}
+		// Keep the notice cache in step with what the user just saw.
+		st := loadState()
+		st.CheckedAt, st.LatestVersion = time.Now(), tag
+		_ = saveState(st)
 	}
-	// Keep the notice cache in step with what the user just saw.
-	_ = saveState(checkState{CheckedAt: time.Now(), LatestVersion: tag})
 
-	// A non-release (dev) build is always treated as behind so an explicit
-	// `latere upgrade` on a local build still installs the published release.
-	outdated := Newer(current, tag) || !isRelease(current)
-	if !outdated {
+	// For the latest path, a non-release (dev) build is always treated as
+	// behind so an explicit `latere upgrade` on a local build still installs
+	// the published release. An explicit target is always installed (that is
+	// the whole point of a rollback).
+	atLatest := target == "" && isRelease(current) && !Newer(current, tag)
+	if atLatest {
 		fmt.Fprintf(out, "latere %s is already the latest release.\n", display(current))
 		return nil
 	}
@@ -140,17 +169,32 @@ func Run(ctx context.Context, current string, checkOnly bool, out io.Writer) err
 		return nil
 	}
 	if !replaceSupported() {
-		return fmt.Errorf("automatic upgrade is not supported on this platform; "+
-			"download the latest release from https://github.com/%s/releases/latest", repoSlug)
+		return fmt.Errorf("in-place upgrade is not supported on this platform; "+
+			"download latere %s from https://github.com/%s/releases", display(tag), repoSlug)
 	}
-	fmt.Fprintf(out, "Upgrading latere %s -> %s...\n", display(current), display(tag))
+	fmt.Fprintf(out, "%s latere %s...\n", installVerb(current, tag), display(tag))
 	bin, err := DownloadBinary(ctx, httpClient(), tag)
 	if err != nil {
-		return err
+		return fmt.Errorf("install latere %s: %w (does that release exist? see https://github.com/%s/releases)",
+			display(tag), err, repoSlug)
 	}
 	if err := replace(bin); err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "Upgraded to latere %s.\n", display(tag))
+	fmt.Fprintf(out, "Now on latere %s.\n", display(tag))
 	return nil
+}
+
+// installVerb describes the transition from current to tag for user output.
+func installVerb(current, tag string) string {
+	switch {
+	case !isRelease(current):
+		return "Installing"
+	case Newer(current, tag):
+		return "Upgrading to"
+	case Newer(tag, current):
+		return "Downgrading to"
+	default:
+		return "Reinstalling"
+	}
 }

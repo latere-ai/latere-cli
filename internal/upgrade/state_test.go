@@ -5,23 +5,32 @@ import (
 	"time"
 )
 
+func TestConfigDefaultsToAutoUpgradeOn(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	// No config file yet: auto-upgrade is on by default.
+	if c := LoadConfig(); !c.AutoUpgradeEnabled() {
+		t.Fatal("fresh config should default AutoUpgradeEnabled to true")
+	}
+}
+
 func TestConfigRoundTrip(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
-	if c := LoadConfig(); c.AutoUpgrade {
-		t.Fatal("fresh config should have AutoUpgrade=false")
-	}
-	if err := SaveConfig(Config{AutoUpgrade: true}); err != nil {
+	off := false
+	if err := SaveConfig(Config{AutoUpgrade: &off}); err != nil {
 		t.Fatalf("SaveConfig: %v", err)
 	}
-	if c := LoadConfig(); !c.AutoUpgrade {
-		t.Fatal("AutoUpgrade should persist as true")
+	if c := LoadConfig(); c.AutoUpgradeEnabled() {
+		t.Fatal("explicit off should persist as disabled")
 	}
-	if err := SaveConfig(Config{AutoUpgrade: false}); err != nil {
+
+	on := true
+	if err := SaveConfig(Config{AutoUpgrade: &on}); err != nil {
 		t.Fatalf("SaveConfig: %v", err)
 	}
-	if c := LoadConfig(); c.AutoUpgrade {
-		t.Fatal("AutoUpgrade should persist as false")
+	if c := LoadConfig(); !c.AutoUpgradeEnabled() {
+		t.Fatal("explicit on should persist as enabled")
 	}
 }
 

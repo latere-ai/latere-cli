@@ -30,8 +30,18 @@ func configDir() string {
 // Config is the user's persistent CLI configuration
 // (~/.config/latere/config.json). It is deliberately small and additive so
 // future settings can join without a migration.
+//
+// AutoUpgrade is a pointer so that "never set" (nil) is distinct from an
+// explicit false: auto-upgrade is on by default, and only an explicit
+// `latere upgrade --auto off` turns it off.
 type Config struct {
-	AutoUpgrade bool `json:"auto_upgrade"`
+	AutoUpgrade *bool `json:"auto_upgrade,omitempty"`
+}
+
+// AutoUpgradeEnabled reports the effective setting, defaulting to true when
+// the user has never chosen.
+func (c Config) AutoUpgradeEnabled() bool {
+	return c.AutoUpgrade == nil || *c.AutoUpgrade
 }
 
 func configPath() string {
@@ -73,10 +83,23 @@ func SaveConfig(c Config) error {
 	return writeFileAtomic(p, b, 0o600)
 }
 
-// checkState caches the result of the most recent release lookup.
+// checkState caches the result of the most recent release lookup and when the
+// user was last reminded, so the notice repeats at most once per interval per
+// version rather than on every command.
 type checkState struct {
-	CheckedAt     time.Time `json:"checked_at"`
-	LatestVersion string    `json:"latest_version"`
+	CheckedAt       time.Time `json:"checked_at"`
+	LatestVersion   string    `json:"latest_version"`
+	NotifiedVersion string    `json:"notified_version,omitempty"`
+	NotifiedAt      time.Time `json:"notified_at,omitzero"`
+}
+
+// shouldNotify reports whether to print the upgrade notice now: always for a
+// version not yet announced, otherwise at most once per checkInterval.
+func (s checkState) shouldNotify(latest string, now time.Time) bool {
+	if s.NotifiedVersion != latest {
+		return true
+	}
+	return now.Sub(s.NotifiedAt) >= checkInterval
 }
 
 func statePath() string {

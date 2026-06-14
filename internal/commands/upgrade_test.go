@@ -32,26 +32,26 @@ func TestSkipUpdateCheck(t *testing.T) {
 func TestUpgradeAutoTogglesConfig(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
-	out, err := executeForHelp(NewRoot("0.1.0"), "upgrade", "--auto", "on")
-	if err != nil {
-		t.Fatalf("upgrade --auto on: %v", err)
-	}
-	if !strings.Contains(out, "Auto-upgrade enabled") {
-		t.Errorf("output = %q, want enabled message", out)
-	}
-	if !upgrade.LoadConfig().AutoUpgrade {
-		t.Error("AutoUpgrade should be true after --auto on")
-	}
-
-	out, err = executeForHelp(NewRoot("0.1.0"), "upgrade", "--auto", "off")
+	out, err := executeForHelp(NewRoot("0.1.0"), "upgrade", "--auto", "off")
 	if err != nil {
 		t.Fatalf("upgrade --auto off: %v", err)
 	}
 	if !strings.Contains(out, "Auto-upgrade disabled") {
 		t.Errorf("output = %q, want disabled message", out)
 	}
-	if upgrade.LoadConfig().AutoUpgrade {
-		t.Error("AutoUpgrade should be false after --auto off")
+	if upgrade.LoadConfig().AutoUpgradeEnabled() {
+		t.Error("AutoUpgrade should be disabled after --auto off")
+	}
+
+	out, err = executeForHelp(NewRoot("0.1.0"), "upgrade", "--auto", "on")
+	if err != nil {
+		t.Fatalf("upgrade --auto on: %v", err)
+	}
+	if !strings.Contains(out, "Auto-upgrade enabled") {
+		t.Errorf("output = %q, want enabled message", out)
+	}
+	if !upgrade.LoadConfig().AutoUpgradeEnabled() {
+		t.Error("AutoUpgrade should be enabled after --auto on")
 	}
 }
 
@@ -72,9 +72,10 @@ func TestUpgradeHelp(t *testing.T) {
 		t.Fatalf("upgrade --help: %v", err)
 	}
 	for _, want := range []string{
-		"Upgrade latere to the latest release published on GitHub.",
+		"Install a latere release published on GitHub.",
+		"latere upgrade v0.2.29    # roll back to a specific release",
 		"latere upgrade --check",
-		"latere upgrade --auto on",
+		"latere upgrade --auto off",
 		"LATERE_NO_UPDATE_CHECK",
 	} {
 		if !strings.Contains(out, want) {
