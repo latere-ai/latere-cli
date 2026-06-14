@@ -3,6 +3,7 @@ package tunnel
 import (
 	"bufio"
 	"context"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -11,6 +12,37 @@ import (
 	"testing"
 	"time"
 )
+
+// TestRunFailsFastOnAuthError: a non-retryable bearer error (e.g. not signed
+// in) must return immediately, not enter the reconnect-with-backoff loop.
+func TestRunFailsFastOnAuthError(t *testing.T) {
+	local := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/tags" {
+			_, _ = w.Write([]byte(`{"models":[{"name":"m1"}]}`))
+		}
+	}))
+	defer local.Close()
+
+	authErr := errors.New("not signed in for Lux; run `latere auth login`")
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(context.Background(), Options{
+			LuxURL:      "http://127.0.0.1:1",
+			Bearer:      func(context.Context) (string, error) { return "", authErr },
+			Runtime:     RuntimeOllama,
+			UpstreamURL: local.URL,
+			Out:         io.Discard,
+		})
+	}()
+	select {
+	case err := <-done:
+		if !errors.Is(err, authErr) {
+			t.Errorf("Run err = %v, want the auth error surfaced", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Run did not fail fast on a non-retryable auth error (it looped)")
+	}
+}
 
 func TestDefaultURL(t *testing.T) {
 	cases := map[string]string{

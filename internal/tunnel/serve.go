@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -14,6 +15,19 @@ import (
 	"github.com/coder/websocket"
 	"github.com/hashicorp/yamux"
 )
+
+// fatalErr marks an error that reconnecting cannot fix (not signed in,
+// missing capability, or the tunnel feature disabled on the server). Run
+// surfaces it once and exits, instead of looping with backoff forever.
+type fatalErr struct{ err error }
+
+func (e fatalErr) Error() string { return e.err.Error() }
+func (e fatalErr) Unwrap() error { return e.err }
+func fatal(err error) error      { return fatalErr{err} }
+func isFatal(err error) bool {
+	var f fatalErr
+	return errors.As(err, &f)
+}
 
 // Descriptor is the handshake contract advertised to luxd (spec 18 Layer
 // 2). It must match latere-ai/lux internal/tunnel.Descriptor on the wire.
@@ -69,6 +83,12 @@ func Run(ctx context.Context, opts Options) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		// A non-retryable error (not signed in, missing llm.serve, feature
+		// disabled) returns immediately so the user sees one clear message
+		// instead of an endless reconnect loop.
+		if isFatal(err) {
+			return err
+		}
 		if err != nil {
 			fmt.Fprintf(opts.Out, "tunnel: disconnected (%v); reconnecting in %s\n", err, backoff)
 		}
@@ -96,15 +116,24 @@ func runSession(ctx context.Context, opts Options) error {
 
 	bearer, err := opts.Bearer(ctx)
 	if err != nil {
-		return err
+		// No usable identity (e.g. not signed in). Retrying will not help.
+		return fatal(err)
 	}
 
 	wsURL := toWS(opts.LuxURL) + "/lux/v1/tunnel"
-	c, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
+	c, resp, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
 		Subprotocols: []string{"lux.tunnel.v1"},
 		HTTPHeader:   http.Header{"Authorization": {"Bearer " + bearer}},
 	})
 	if err != nil {
+		if resp != nil {
+			switch resp.StatusCode {
+			case http.StatusNotFound:
+				return fatal(fmt.Errorf("the local-model tunnel is not enabled on %s yet. Ask your operator to turn it on (LUX_TUNNEL_ENABLED).", opts.LuxURL))
+			case http.StatusUnauthorized, http.StatusForbidden:
+				return fatal(fmt.Errorf("your login may not serve models here (it needs the llm.serve scope). Run `latere auth login` to refresh your scopes, then try again."))
+			}
+		}
 		return fmt.Errorf("dial %s: %w", wsURL, err)
 	}
 	defer c.CloseNow()
