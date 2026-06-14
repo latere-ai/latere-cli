@@ -3,6 +3,7 @@ package commands
 import (
 	"fmt"
 
+	"github.com/latere-ai/latere-cli/internal/upgrade"
 	"github.com/spf13/cobra"
 )
 
@@ -35,12 +36,37 @@ load it from your shell startup files.`,
 	root.SetVersionTemplate("latere {{.Version}}\n")
 	root.CompletionOptions.DisableDefaultCmd = true
 
+	// Passive release awareness: before any command (except the
+	// release-management ones), serve an update notice from the cached
+	// check and, if the user opted in, auto-upgrade. Best-effort and
+	// non-fatal — it never blocks the command being run.
+	root.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		if !skipUpdateCheck(cmd) {
+			upgrade.OnStart(version, cmd.ErrOrStderr())
+		}
+		return nil
+	}
+
 	root.AddCommand(newAuthCmd())
 	root.AddCommand(newCellaCmd())
 	root.AddCommand(newToposCmd())
 	root.AddCommand(newLuxCmd())
+	root.AddCommand(newUpgradeCmd(version))
 	root.AddCommand(newCompletionCmd(root))
 	return root
+}
+
+// skipUpdateCheck reports whether the passive update check should be skipped
+// for cmd. The upgrade command does its own checking; completion and help
+// output must stay clean and machine-parseable.
+func skipUpdateCheck(cmd *cobra.Command) bool {
+	for c := cmd; c != nil; c = c.Parent() {
+		switch c.Name() {
+		case "upgrade", "completion", "help", "__complete", "__completeNoDesc":
+			return true
+		}
+	}
+	return false
 }
 
 func newCompletionCmd(root *cobra.Command) *cobra.Command {
