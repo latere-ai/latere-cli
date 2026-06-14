@@ -1,6 +1,6 @@
 module github.com/latere-ai/latere-cli
 
-go 1.26.1
+go 1.26.4
 
 require (
 	github.com/coder/websocket v1.8.14
@@ -9,7 +9,7 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.5.0
 	github.com/spf13/cobra v1.8.1
 	golang.org/x/oauth2 v0.36.0
-	golang.org/x/term v0.41.0
+	golang.org/x/term v0.42.0
 	latere.ai/x/pkg v0.19.1
 )
 
@@ -20,6 +20,6 @@ require (
 	github.com/segmentio/encoding v0.5.4 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
-	golang.org/x/net v0.52.0 // indirect
-	golang.org/x/sys v0.42.0 // indirect
+	golang.org/x/net v0.53.0 // indirect
+	golang.org/x/sys v0.43.0 // indirect
 )
