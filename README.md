@@ -29,18 +29,21 @@ The installer resolves the latest version from the GitHub releases redirect rath
 
 ## Stay up to date
 
-`latere` checks for new releases at most once a day and prints a one-line notice when one is available. To update:
+`latere` keeps itself current. **Auto-upgrade is on by default**: it checks for new releases at most once a day, and the next time you run a command after a new release appears, it updates itself in place before running your command. You can also drive it manually:
 
 ```sh
-latere upgrade            # download and install the latest release
+latere upgrade            # install the latest release now
+latere upgrade v0.2.29    # install a specific release — this is how you roll back
 latere upgrade --check    # report whether a newer release exists, without installing
-latere upgrade --auto on  # auto-upgrade on the next run when a new release is available
-latere upgrade --auto off # turn auto-upgrade back off
+latere upgrade --auto off # turn auto-upgrade off
+latere upgrade --auto on  # turn it back on
 ```
 
-`upgrade` verifies the release checksum and replaces the running binary in place. If `latere` lives somewhere you cannot write (for example a system-wide `PREFIX=/usr/local` install), it tells you to re-run the installer instead. Auto-upgrade and the daily notice are skipped for `go install`/dev builds, in CI, and when output is not a terminal. Set `LATERE_NO_UPDATE_CHECK=1` to silence the check entirely.
+If an auto-upgraded release turns out to be broken, roll back with `latere upgrade <previous-version>` and optionally `latere upgrade --auto off` to stay put. Every install verifies the release archive's checksum before replacing the binary.
 
-> Self-update is unavailable on Windows (the running binary is locked); download the latest archive from the [releases page](https://github.com/latere-ai/latere-cli/releases/latest) instead.
+Auto-upgrade and the daily notice are skipped for `go install`/dev builds, in CI, when output is not a terminal, and when `latere` lives somewhere you cannot write (for example a system-wide `PREFIX=/usr/local` install) — there `latere upgrade` tells you to re-run the installer instead. Set `LATERE_NO_UPDATE_CHECK=1` to silence the check entirely.
+
+> Self-update is unavailable on Windows (the running binary is locked); download the archive you want from the [releases page](https://github.com/latere-ai/latere-cli/releases) instead.
 
 ## Sign in
 
