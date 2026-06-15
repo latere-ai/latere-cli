@@ -56,7 +56,7 @@ type policyDTO struct {
 	UpdatedAt          time.Time `json:"updated_at,omitzero"`
 }
 
-// fallbackWorkdir is the path the MCP/CLI assume when a sandbox DTO
+// fallbackWorkdir is the path the CLI assumes when a sandbox DTO
 // arrives without a workdir field (older sandboxd before the workdir
 // contract shipped).
 const fallbackWorkdir = "/workspace"
@@ -138,7 +138,6 @@ window; tier 'persistent' stays until you delete it.`,
 		newCeExportCmd(),
 		newCeExtendCmd(),
 		newCeConvertCmd(),
-		newCeMcpCmd(),
 	)
 	return cmd
 }

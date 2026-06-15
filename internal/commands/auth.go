@@ -31,7 +31,7 @@ func newAuthCmd() *cobra.Command {
 		Long: `Authenticate the CLI against auth.latere.ai.
 
 Login stores a bearer token at ~/.config/latere/token.json. The same
-token is used by Cella commands and by the Cella MCP server.`,
+token is used by Cella commands.`,
 		Example: `  latere auth login
   latere auth whoami
   latere auth print-token
@@ -222,7 +222,7 @@ auth.latere.ai: it prints a short user code and a URL, you visit the
 URL in any browser to approve, choose the Personal or Organization
 context for the token, and the CLI then polls until the approval lands.
 The resulting access token is written to ~/.config/latere/token.json
-with 0600 perms; the Cella MCP server reads the same file.
+with 0600 perms.
 
 Use --personal or --org-id to preselect the token context from the
 terminal. Re-run login with a different context to switch which cellas

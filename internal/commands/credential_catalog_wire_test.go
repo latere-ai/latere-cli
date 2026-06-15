@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -16,15 +15,12 @@ import (
 
 // Regression coverage for the credential_catalog wire shape:
 //
-//   1. Every sandboxd write the CLI / MCP makes that can carry a
-//      credential reference uses `credential_catalog`, never a literal
+//   1. Every sandboxd write the CLI makes that can carry a credential
+//      reference uses `credential_catalog`, never a literal
 //      `secret_env` map.
 //   2. Empty selection omits the field so the server sees the legacy
 //      "attach full client catalog" default rather than an explicit
 //      empty-attach.
-//   3. The MCP tool argument schemas advertise the field as
-//      "trust-plane catalog keys; not secret values" so an agent host
-//      cannot misinterpret it as a place for plaintext credentials.
 
 func TestCredentialCatalog_BuildersUseCatalogNotSecretEnv(t *testing.T) {
 	cases := []struct {
@@ -108,79 +104,4 @@ func TestCredentialCatalog_StartCommandSendsArrayOnTheWire(t *testing.T) {
 	if _, ok := lastBody["credential_catalog"]; ok {
 		t.Fatalf("empty selection emitted credential_catalog: %v", lastBody["credential_catalog"])
 	}
-}
-
-func TestCredentialCatalog_MCPCreateAndRunForwardSelection(t *testing.T) {
-	var paths []string
-	var bodies []map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		paths = append(paths, r.Method+" "+r.URL.Path)
-		raw, _ := io.ReadAll(r.Body)
-		var body map[string]any
-		_ = json.Unmarshal(raw, &body)
-		bodies = append(bodies, body)
-		switch {
-		case r.URL.Path == "/v1/sandboxes":
-			_, _ = w.Write([]byte(`{"id":"sb-1","name":"demo","state":"running"}`))
-		case strings.HasSuffix(r.URL.Path, "/commands"):
-			_, _ = w.Write([]byte(`{"command_id":"c-1","phase":"running"}`))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer srv.Close()
-	tools := &mcpTools{c: api.NewClient(srv.URL)}
-
-	_, _, err := tools.create(context.Background(), nil, mcpCreateArgs{
-		Image: "img", Tier: "ephemeral", DiskGB: 5,
-		CredentialCatalog: []string{"llm-primary"},
-	})
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	_, _, err = tools.run(context.Background(), nil, mcpRunArgs{
-		Sandbox: "sb-1", Argv: []string{"echo", "hi"},
-		CredentialCatalog: []string{"git-credentials"},
-	})
-	if err != nil {
-		t.Fatalf("run: %v", err)
-	}
-	if len(bodies) != 2 {
-		t.Fatalf("expected 2 server hits, got %d (%v)", len(bodies), paths)
-	}
-	for i, body := range bodies {
-		if _, ok := body["secret_env"]; ok {
-			t.Errorf("MCP request %d emitted secret_env: %s", i, paths[i])
-		}
-		got, _ := body["credential_catalog"].([]any)
-		if len(got) == 0 {
-			t.Errorf("MCP request %d missing credential_catalog: %s body=%+v", i, paths[i], body)
-		}
-	}
-}
-
-func TestCredentialCatalog_MCPSchemasDescribeFieldAsNonSecret(t *testing.T) {
-	for _, want := range []string{
-		`mcp:"trust-plane catalog keys to attach; not secret values"`,
-		`mcp:"trust-plane catalog keys to use for this command; not secret values"`,
-	} {
-		if !mcpSourceContains(t, want) {
-			t.Errorf("mcp.go schema text missing %q", want)
-		}
-	}
-}
-
-// mcpSourceContains is a tiny grep against the source so the schema
-// description text — which agents read at tool-discovery time — is
-// pinned to a wording that explicitly rejects "secret value" usage.
-// Reading the file is brittle but cheaper than parsing struct tags via
-// reflection because the `mcp:` tag is not a stdlib struct tag.
-func mcpSourceContains(t *testing.T, needle string) bool {
-	t.Helper()
-	const path = "mcp.go"
-	b, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
-	}
-	return strings.Contains(string(b), needle)
 }

@@ -1,8 +1,7 @@
 // Package api is the HTTP client every `latere sandbox …` command
 // shares. Uses the public sandboxd surface at cella.latere.ai. The
-// client carries a Bearer token loaded from ~/.config/latere/token.json
-// — same file the MCP server (cmd/sandbox-mcp in latere-ai/sandbox)
-// reads, so a single `latere auth login` unlocks both consumers.
+// client carries a Bearer token loaded from ~/.config/latere/token.json,
+// written by `latere auth login`.
 package api
 
 import (
@@ -65,8 +64,8 @@ func NewClient(apiURL string) *Client {
 // ---- token storage ----
 
 // TokenPath returns the canonical path to token.json (the Cella-issued
-// bearer used by `latere cella`/`whoami` and the MCP server). Callers
-// can override with LATERE_TOKEN_FILE for testing.
+// bearer used by `latere cella`/`whoami`). Callers can override with
+// LATERE_TOKEN_FILE for testing.
 func TokenPath() string {
 	return tokenFilePath("LATERE_TOKEN_FILE", "token.json")
 }
