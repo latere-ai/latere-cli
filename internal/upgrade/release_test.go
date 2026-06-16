@@ -150,10 +150,10 @@ func TestDownloadBinaryHonorsContextDeadline(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/"+repoSlug+"/releases/download/v9.9.9/"+asset, func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(delay)
-		w.Write(archive)
+		_, _ = w.Write(archive)
 	})
 	mux.HandleFunc("/"+repoSlug+"/releases/download/v9.9.9/checksums.txt", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, checksums)
+		_, _ = fmt.Fprint(w, checksums)
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
