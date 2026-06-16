@@ -497,10 +497,9 @@ func newLuxUsageCmd(luxURL, authURL, token *string) *cobra.Command {
 			if err := c.GetJSON(cmd.Context(), "/lux/v1/me/usage", &out); err != nil {
 				return wrapLuxErr(err)
 			}
-			if jsonF {
-				return printJSON(out)
-			}
-			return printJSON(out) // usage shape is backend-defined; pretty JSON is the stable view
+			// The usage shape is backend-defined; pretty JSON is the only
+			// stable view, so --json (kept for compatibility) is the default.
+			return printJSON(out)
 		},
 	}
 	cmd.Flags().BoolVar(&jsonF, "json", false, "JSON output")
