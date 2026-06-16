@@ -614,8 +614,8 @@ Cella, then prints the identity claims embedded in the saved JWT.`,
 			}
 			// sandboxd doesn't have /me; auth does. Hit auth's
 			// /tokeninfo (best-effort issuer URL inferred from the
-			// API URL by replacing cella → auth).
-			authURL := strings.Replace(c.BaseURL, "cella.", "auth.", 1)
+			// API URL by swapping the leading host label cella → auth).
+			authURL := inferAuthURL(c.BaseURL)
 			req := *c
 			req.BaseURL = authURL
 			var info struct {
@@ -636,12 +636,11 @@ Cella, then prints the identity claims embedded in the saved JWT.`,
 					ClientID:      info.ClientID,
 				})
 				return nil
-			} else {
-				var apiErr *api.APIError
-				if !errors.As(err, &apiErr) || apiErr.Status != http.StatusUnauthorized {
-					return err
-				}
 			}
+			// /tokeninfo is best-effort: it 401s on cella- and sandbox-issued
+			// tokens, and is unreachable when the inferred auth host does not
+			// resolve (custom or local --api-url). On any failure, fall back to
+			// verifying the bearer against sandboxd and printing the JWT claims.
 
 			// Auth cannot introspect cella-issued tokens, and current
 			// auth deployments also reject sandbox-audience device

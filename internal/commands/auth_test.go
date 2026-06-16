@@ -242,6 +242,31 @@ func TestAuthWhoamiFallsBackToVerifiedJWTClaims(t *testing.T) {
 	}
 }
 
+// TestInferAuthURL pins whoami's auth-host derivation. The old whoami used
+// strings.Replace(BaseURL, "cella.", "auth.", 1), which silently no-ops when
+// the host has no literal "cella." label, leaving /tokeninfo pointed at the
+// wrong same host. inferAuthURL swaps the leading label robustly.
+func TestInferAuthURL(t *testing.T) {
+	cases := map[string]string{
+		"":                          "https://auth.latere.ai",
+		"https://cella.latere.ai":   "https://auth.latere.ai",
+		"https://api.example.com":   "https://auth.example.com",
+		"http://cella.localhost:80": "http://auth.localhost:80",
+	}
+	for in, want := range cases {
+		if got := inferAuthURL(in); got != want {
+			t.Errorf("inferAuthURL(%q) = %q, want %q", in, got, want)
+		}
+	}
+
+	// The brittle strings.Replace would have left a non-cella host unchanged
+	// (the bug); inferAuthURL must not.
+	const nonCella = "https://api.example.com"
+	if old := strings.Replace(nonCella, "cella.", "auth.", 1); inferAuthURL(nonCella) == old {
+		t.Errorf("inferAuthURL(%q) still resolves to the same (wrong) host %q", nonCella, old)
+	}
+}
+
 func fakeJWT(t *testing.T, payload map[string]any) string {
 	t.Helper()
 	enc := func(v any) string {
