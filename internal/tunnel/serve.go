@@ -216,6 +216,14 @@ type forwarder struct {
 	out      io.Writer // traffic log sink (status lines); nil disables logging
 }
 
+// maxRequestBytes caps how much of an inbound request body the forwarder
+// buffers, matching the bounded reads elsewhere in this package
+// (discovery.go, release.go). It sits well above realistic
+// chat-completion request sizes; the body arrives from luxd, the trusted
+// intermediary, so this guards against a malformed or truncated read
+// rather than a hostile flood.
+const maxRequestBytes = 8 << 20 // 8 MiB
+
 func (f *forwarder) handle(stream net.Conn) {
 	defer stream.Close()
 	req, err := http.ReadRequest(bufio.NewReader(stream))
@@ -225,15 +233,23 @@ func (f *forwarder) handle(stream net.Conn) {
 
 	// Buffer the body so it can be both forwarded and peeked for the model
 	// id in the traffic log. Chat-completion bodies are small next to the
-	// model weights, so reading fully is cheap.
+	// model weights, so reading fully is cheap. Bound the read and surface a
+	// read error loudly: forwarding a silently truncated-but-self-consistent
+	// body (ContentLength = len(body)) would relay a corrupt request to the
+	// upstream instead of failing.
+	started := time.Now()
 	var body []byte
 	if req.Body != nil {
-		body, _ = io.ReadAll(req.Body)
+		body, err = io.ReadAll(io.LimitReader(req.Body, maxRequestBytes))
 		_ = req.Body.Close()
+		if err != nil {
+			writeError(stream, err)
+			f.logTraffic(req.Method, req.URL.RequestURI(), peekModel(body), 0, time.Since(started), err)
+			return
+		}
 	}
 	model := peekModel(body)
 	path := req.URL.RequestURI()
-	started := time.Now()
 
 	target := f.upstream + path
 	out, err := http.NewRequestWithContext(f.ctx, req.Method, target, bytes.NewReader(body))

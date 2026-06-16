@@ -2,9 +2,12 @@ package tunnel
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,6 +17,93 @@ import (
 	"github.com/coder/websocket"
 	"github.com/hashicorp/yamux"
 )
+
+// recordingRoundTripper fails the test if the forwarder ever dials the
+// upstream; it asserts a body read error stops the relay before forwarding.
+type recordingRoundTripper struct{ called bool }
+
+func (rt *recordingRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
+	rt.called = true
+	return nil, fmt.Errorf("upstream must not be called")
+}
+
+// truncatedConn is a net.Conn whose reads deliver a fixed request head plus a
+// partial body and then return an error, simulating a connection that drops
+// mid-body. Writes are captured so the test can read the forwarder's response.
+type truncatedConn struct {
+	read    *bytes.Reader
+	readErr error
+	written bytes.Buffer
+	done    chan struct{}
+}
+
+func (c *truncatedConn) Read(p []byte) (int, error) {
+	n, err := c.read.Read(p)
+	if err == io.EOF {
+		// Surface a short-read error instead of clean EOF: the body was
+		// declared longer than what arrived.
+		return n, c.readErr
+	}
+	return n, err
+}
+func (c *truncatedConn) Write(p []byte) (int, error) { return c.written.Write(p) }
+func (c *truncatedConn) Close() error {
+	select {
+	case <-c.done:
+	default:
+		close(c.done)
+	}
+	return nil
+}
+func (c *truncatedConn) LocalAddr() net.Addr              { return fakeAddr{} }
+func (c *truncatedConn) RemoteAddr() net.Addr             { return fakeAddr{} }
+func (c *truncatedConn) SetDeadline(time.Time) error      { return nil }
+func (c *truncatedConn) SetReadDeadline(time.Time) error  { return nil }
+func (c *truncatedConn) SetWriteDeadline(time.Time) error { return nil }
+
+type fakeAddr struct{}
+
+func (fakeAddr) Network() string { return "fake" }
+func (fakeAddr) String() string  { return "fake" }
+
+// TestForwarderRejectsTruncatedBody verifies that when the inbound request
+// body cannot be fully read (a short read against a larger declared
+// Content-Length), handle responds with a 502 local.unreachable error and
+// does not forward a silently truncated body to the upstream.
+func TestForwarderRejectsTruncatedBody(t *testing.T) {
+	// Declare 1000 body bytes but only deliver 4, then fail the read.
+	raw := "POST /v1/chat/completions HTTP/1.1\r\nHost: x\r\nContent-Length: 1000\r\n\r\n{\"m\""
+	conn := &truncatedConn{
+		read:    bytes.NewReader([]byte(raw)),
+		readErr: io.ErrUnexpectedEOF,
+		done:    make(chan struct{}),
+	}
+
+	rt := &recordingRoundTripper{}
+	f := &forwarder{
+		ctx:      context.Background(),
+		client:   &http.Client{Transport: rt},
+		upstream: "http://upstream.invalid",
+		out:      io.Discard,
+	}
+
+	f.handle(conn)
+
+	if rt.called {
+		t.Error("upstream was called with a truncated body; relay should have failed loudly instead")
+	}
+	resp, err := http.ReadResponse(bufio.NewReader(bytes.NewReader(conn.written.Bytes())), nil)
+	if err != nil {
+		t.Fatalf("read forwarder response: %v", err)
+	}
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Errorf("status = %d, want 502", resp.StatusCode)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(b), "local.unreachable") {
+		t.Errorf("body = %q, want a local.unreachable error", b)
+	}
+}
 
 func TestToWS(t *testing.T) {
 	cases := map[string]string{
