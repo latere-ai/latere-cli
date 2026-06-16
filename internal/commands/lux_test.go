@@ -16,6 +16,24 @@ import (
 // base64-decodes the payload for scope preflight, so a fake signature is
 // fine for client-side tests.
 
+func TestBearerHasOrg(t *testing.T) {
+	withOrg := fakeJWT(t, map[string]any{"sub": "u", "org_id": "org-123"})
+	if !bearerHasOrg(withOrg) {
+		t.Error("bearerHasOrg(JWT with org_id) = false, want true")
+	}
+	withoutOrg := fakeJWT(t, map[string]any{"sub": "u"})
+	if bearerHasOrg(withoutOrg) {
+		t.Error("bearerHasOrg(JWT without org_id) = true, want false")
+	}
+	blankOrg := fakeJWT(t, map[string]any{"sub": "u", "org_id": "  "})
+	if bearerHasOrg(blankOrg) {
+		t.Error("bearerHasOrg(JWT with blank org_id) = true, want false")
+	}
+	if bearerHasOrg("not-a-jwt") {
+		t.Error("bearerHasOrg(non-JWT) = true, want false")
+	}
+}
+
 // isolateBearer clears the ambient bearer sources (env + sandbox file)
 // so luxBearer's resolution is deterministic in tests.
 func isolateBearer(t *testing.T) {

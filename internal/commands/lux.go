@@ -204,21 +204,7 @@ an OpenAI-compatible SDK at <lux>/local/v1.`,
 // bearerHasOrg reports whether a JWT bearer carries a non-empty org_id
 // claim. A non-JWT (e.g. sandbox) token returns false.
 func bearerHasOrg(bearer string) bool {
-	parts := strings.Split(bearer, ".")
-	if len(parts) != 3 {
-		return false
-	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return false
-	}
-	var claims struct {
-		OrgID string `json:"org_id"`
-	}
-	if json.Unmarshal(payload, &claims) != nil {
-		return false
-	}
-	return strings.TrimSpace(claims.OrgID) != ""
+	return strings.TrimSpace(stringClaim(decodeJWTClaims(bearer), "org_id")) != ""
 }
 
 // splitCSV splits a comma-separated list, trimming spaces and dropping
