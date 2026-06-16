@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"bufio"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -595,10 +594,6 @@ func inferAuthURL(apiURL string) string {
 	}
 	return "https://auth.latere.ai"
 }
-
-// silence unused import warnings on older toolchains where bufio/io were
-// only used in pre-device-code code paths.
-var _ = bufio.NewReader
 
 func newAuthWhoamiCmd() *cobra.Command {
 	var apiURL string
