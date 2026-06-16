@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/hashicorp/yamux"
+
+	"github.com/latere-ai/latere-cli/internal/config"
 )
 
 // yamuxConfig mirrors the luxd side: keepalive on so a dead peer is
@@ -48,13 +50,5 @@ func NodeID() string {
 }
 
 func nodeIDPath() string {
-	dir := os.Getenv("XDG_CONFIG_HOME")
-	if dir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return ""
-		}
-		dir = filepath.Join(home, ".config")
-	}
-	return filepath.Join(dir, "latere", "tunnel-node-id")
+	return config.Path("tunnel-node-id")
 }

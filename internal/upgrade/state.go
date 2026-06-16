@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/latere-ai/latere-cli/internal/config"
 )
 
 // checkInterval is how often the CLI refreshes its view of the latest
@@ -16,15 +18,7 @@ const checkInterval = 24 * time.Hour
 // configDir resolves $XDG_CONFIG_HOME/latere (falling back to ~/.config/latere),
 // matching the token storage layout in internal/api.
 func configDir() string {
-	dir := os.Getenv("XDG_CONFIG_HOME")
-	if dir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return ""
-		}
-		dir = filepath.Join(home, ".config")
-	}
-	return filepath.Join(dir, "latere")
+	return config.Dir()
 }
 
 // Config is the user's persistent CLI configuration

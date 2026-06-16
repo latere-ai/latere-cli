@@ -18,6 +18,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/latere-ai/latere-cli/internal/config"
 )
 
 // DefaultAPIURL is overridden by SANDBOX_API_URL or --api-url.
@@ -85,15 +87,7 @@ func tokenFilePath(envVar, name string) string {
 	if v := os.Getenv(envVar); v != "" {
 		return v
 	}
-	dir := os.Getenv("XDG_CONFIG_HOME")
-	if dir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return ""
-		}
-		dir = filepath.Join(home, ".config")
-	}
-	return filepath.Join(dir, "latere", name)
+	return config.Path(name)
 }
 
 // ErrNoToken means the file does not exist (the user hasn't logged in).
