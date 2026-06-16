@@ -28,6 +28,18 @@ func httpClient() *http.Client {
 	return &http.Client{Timeout: 30 * time.Second}
 }
 
+// downloadClient is the client for the binary download. It deliberately
+// carries no tight end-to-end Timeout: http.Client.Timeout is end-to-end
+// (it also bounds reading the response body), so a 30s client timeout would
+// silently cap the caller's download context and make a normal-sized binary
+// download on a slow link fail as a spurious "timeout". The bounded context
+// the callers pass (performAutoUpgrade/Run) is the single source of truth for
+// the download deadline. A generous fallback guards against a future caller
+// that forgets to set one, so the process can never hang forever.
+func downloadClient() *http.Client {
+	return &http.Client{Timeout: 10 * time.Minute}
+}
+
 // ResolveLatest returns the newest published release tag (e.g. "v0.2.30") by
 // reading the redirect target of github.com/<repo>/releases/latest. See the
 // package doc for why this avoids api.github.com.
@@ -80,7 +92,7 @@ func assetName(tag string) string {
 // release checksums.txt, and returns the extracted latere binary.
 func DownloadBinary(ctx context.Context, client *http.Client, tag string) ([]byte, error) {
 	if client == nil {
-		client = httpClient()
+		client = downloadClient()
 	}
 	asset := assetName(tag)
 	base := githubBase + "/" + repoSlug + "/releases/download/" + tag + "/"

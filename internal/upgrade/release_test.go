@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"runtime"
 	"testing"
+	"time"
 )
 
 func TestChecksumFor(t *testing.T) {
@@ -118,6 +119,63 @@ func TestDownloadBinaryVerifiesChecksum(t *testing.T) {
 	got, err := DownloadBinary(context.Background(), srv.Client(), "v9.9.9")
 	if err != nil {
 		t.Fatalf("DownloadBinary: %v", err)
+	}
+	if string(got) != "NEW-BINARY" {
+		t.Errorf("DownloadBinary = %q, want NEW-BINARY", got)
+	}
+}
+
+// TestDownloadClientHasNoTightTimeout pins the fix for the bug where a 30s
+// http.Client.Timeout silently capped the caller's 120s download context.
+// http.Client.Timeout is end-to-end (it bounds reading the body too), so the
+// download client must not re-introduce a cap shorter than the download
+// context the callers grant. A regression that reset it to 30s would fail here.
+func TestDownloadClientHasNoTightTimeout(t *testing.T) {
+	if to := downloadClient().Timeout; to != 0 && to < 120*time.Second {
+		t.Errorf("downloadClient timeout = %s, want 0 or >= 120s so the bounded context governs the download", to)
+	}
+}
+
+// TestDownloadBinaryHonorsContextDeadline verifies the caller's context, not a
+// hardcoded client timeout, bounds the download: a slow server past the
+// context deadline makes DownloadBinary fail, and a short delay within the
+// deadline succeeds.
+func TestDownloadBinaryHonorsContextDeadline(t *testing.T) {
+	archive := makeTarGz(t, map[string]string{"latere": "NEW-BINARY"})
+	asset := assetName("v9.9.9")
+	sum := sha256.Sum256(archive)
+	checksums := fmt.Sprintf("%s  %s\n", hex.EncodeToString(sum[:]), asset)
+
+	var delay time.Duration
+	mux := http.NewServeMux()
+	mux.HandleFunc("/"+repoSlug+"/releases/download/v9.9.9/"+asset, func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(delay)
+		w.Write(archive)
+	})
+	mux.HandleFunc("/"+repoSlug+"/releases/download/v9.9.9/checksums.txt", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, checksums)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	old := githubBase
+	githubBase = srv.URL
+	defer func() { githubBase = old }()
+
+	// Server slower than the context deadline -> download fails on the context.
+	delay = 200 * time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := DownloadBinary(ctx, downloadClient(), "v9.9.9"); err == nil {
+		t.Fatal("expected download to fail when the context deadline elapses")
+	}
+
+	// Server within the deadline -> download succeeds via the bounded context.
+	delay = 0
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel2()
+	got, err := DownloadBinary(ctx2, downloadClient(), "v9.9.9")
+	if err != nil {
+		t.Fatalf("DownloadBinary within deadline: %v", err)
 	}
 	if string(got) != "NEW-BINARY" {
 		t.Errorf("DownloadBinary = %q, want NEW-BINARY", got)

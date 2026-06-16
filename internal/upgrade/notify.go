@@ -103,7 +103,7 @@ func performAutoUpgrade(current string, w io.Writer) {
 	fmt.Fprintf(w, "Auto-upgrading latere %s -> %s...\n", display(current), display(tag))
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
-	bin, err := DownloadBinary(ctx, httpClient(), tag)
+	bin, err := DownloadBinary(ctx, downloadClient(), tag)
 	if err != nil {
 		fmt.Fprintf(w, "auto-upgrade failed: %v\n", err)
 		return
@@ -173,7 +173,7 @@ func Run(ctx context.Context, current, target string, checkOnly bool, out io.Wri
 			"download latere %s from https://github.com/%s/releases", display(tag), repoSlug)
 	}
 	fmt.Fprintf(out, "%s latere %s...\n", installVerb(current, tag), display(tag))
-	bin, err := DownloadBinary(ctx, httpClient(), tag)
+	bin, err := DownloadBinary(ctx, downloadClient(), tag)
 	if err != nil {
 		return fmt.Errorf("install latere %s: %w (does that release exist? see https://github.com/%s/releases)",
 			display(tag), err, repoSlug)
