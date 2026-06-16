@@ -245,6 +245,7 @@ flow and store an access token directly.`,
 			// back to it. The device flow only kicks in for an
 			// interactive terminal with no --token.
 			if t := strings.TrimSpace(token); t != "" {
+				clearStaleAuthToken()
 				return saveAndVerify(ctx, apiURL, t)
 			}
 			if stat, _ := os.Stdin.Stat(); (stat.Mode() & os.ModeCharDevice) == 0 {
@@ -253,6 +254,7 @@ flow and store an access token directly.`,
 					return err
 				}
 				if t := strings.TrimSpace(b); t != "" {
+					clearStaleAuthToken()
 					return saveAndVerify(ctx, apiURL, t)
 				}
 			}
@@ -279,6 +281,19 @@ flow and store an access token directly.`,
 	f.StringVar(&orgID, "org-id", "", "issue the CLI token for this organization id")
 	f.BoolVar(&noBrowser, "no-browser", false, "print the device URL without opening a browser")
 	return cmd
+}
+
+// clearStaleAuthToken removes any retained auth.latere.ai root token before a
+// --token / stdin paste login. A pasted opaque token carries no refresh grant,
+// so a leftover auth-token.json from a prior login is never the right identity:
+// `latere lux` reads it via api.LoadAuthToken and would silently attribute cost
+// to the wrong principal. Clearing it makes lux fall back to the truthful
+// not-signed-in state. Best-effort: a failure must not block a valid Cella
+// login, so it is warned and ignored.
+func clearStaleAuthToken() {
+	if err := api.ClearAuthToken(); err != nil {
+		fmt.Fprintf(os.Stderr, "  warning: could not clear stale auth token for lux (%v); `latere lux` may use a previous identity\n", err)
+	}
 }
 
 // saveAndVerify stores the token and confirms it by listing sandboxes.

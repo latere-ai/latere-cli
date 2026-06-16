@@ -146,6 +146,50 @@ func TestExchangeForCellaTokenFallsBackToDirectExchangeOnActorAudienceMismatch(t
 	}
 }
 
+func TestAuthLoginTokenClearsStaleAuthToken(t *testing.T) {
+	tokenPath := filepath.Join(t.TempDir(), "token.json")
+	authTokenPath := filepath.Join(t.TempDir(), "auth-token.json")
+	t.Setenv("LATERE_TOKEN_FILE", tokenPath)
+	t.Setenv("LATERE_AUTH_TOKEN_FILE", authTokenPath)
+
+	// A prior login left an auth root token on disk that lux would reuse.
+	if err := api.SaveAuthToken(api.Token{AccessToken: "stale-auth-token", TokenType: "Bearer"}); err != nil {
+		t.Fatalf("seed auth token: %v", err)
+	}
+	if _, err := os.Stat(authTokenPath); err != nil {
+		t.Fatalf("auth token not seeded: %v", err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/sandboxes" {
+			_, _ = w.Write([]byte(`[]`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	cmd := newAuthLoginCmd()
+	cmd.SetArgs([]string{"--token", "pasted-cella-token", "--api-url", srv.URL})
+	if _, err := captureStdout(func() error { return cmd.Execute() }); err != nil {
+		t.Fatalf("login --token: %v", err)
+	}
+
+	// The stale auth-token.json must be gone so lux falls back to not-signed-in
+	// instead of attributing cost to the previous principal.
+	if _, err := os.Stat(authTokenPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("auth-token.json not cleared: stat err = %v", err)
+	}
+	// The pasted token is saved as the Cella token.
+	got, err := api.LoadToken(tokenPath)
+	if err != nil {
+		t.Fatalf("LoadToken: %v", err)
+	}
+	if got.AccessToken != "pasted-cella-token" {
+		t.Fatalf("cella token = %q, want pasted-cella-token", got.AccessToken)
+	}
+}
+
 func TestAuthWhoamiFallsBackToVerifiedJWTClaims(t *testing.T) {
 	token := fakeJWT(t, map[string]any{
 		"sub":            "user-123",
