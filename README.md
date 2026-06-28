@@ -83,6 +83,7 @@ latere auth org switch --personal   # scope the saved token to the personal cont
 | **Cella** | Named sandboxes (ephemeral or persistent): create, exec, shell, logs, file transfer. | [docs/cella.md](docs/cella.md) |
 | **Lux** | Call language models on your identity, no key to allocate: discovery, SDK enablement, chat, usage, and serving your own local models (Ollama/vLLM/LM Studio/llama.cpp/MLX) through Lux. | [docs/lux.md](docs/lux.md) |
 | **Agon** | Adversarial review of your latest Claude Code session: a proposer defends the diff, critics attack it through Lux, unresolved attacks surface. | [docs/agon.md](docs/agon.md) |
+| **Topos** | Remote coding-assistant sessions on the Latere agent platform: start an interactive session, detach and reattach with state intact, approve tool calls inline, or run one prompt headless with `-p`. | [docs/topos.md](docs/topos.md) |
 
 ```sh
 latere cella apply -f sandbox.yaml
