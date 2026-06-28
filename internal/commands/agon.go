@@ -182,6 +182,12 @@ func runAgon(ctx context.Context, cmd *cobra.Command, o *agonOpts) error {
 		return err
 	}
 	printAgonSummary(cmd, summary)
+	// Verdict in the exit code (matches cmd/agon): a completed debate with
+	// open attacks exits non-zero so it can gate CI/hooks, distinct from a
+	// command error. main maps this sentinel to exit 2.
+	if summary.Unresolved > 0 {
+		return &unresolvedError{n: summary.Unresolved}
+	}
 	return nil
 }
 

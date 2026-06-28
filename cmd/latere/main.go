@@ -2,7 +2,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/latere-ai/latere-cli/internal/commands"
@@ -14,7 +13,6 @@ var version = "dev"
 func main() {
 	root := commands.NewRoot(version)
 	if err := root.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		os.Exit(commands.HandleExitError(os.Stderr, err))
 	}
 }
