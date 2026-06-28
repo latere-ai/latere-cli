@@ -144,6 +144,9 @@ window; tier 'persistent' stays until you delete it.`,
 		newCeWriteCmd(),
 		newCeLsCmd(),
 		newCeUploadCmd(),
+		newCeMkdirCmd(),
+		newCeRmCmd(),
+		newCeMvCmd(),
 	)
 	return cmd
 }
@@ -1484,6 +1487,71 @@ func newCeUploadCmd() *cobra.Command {
 	f.StringVar(&apiURL, "api-url", "", "override Cella API base URL")
 	f.StringVar(&dest, "dest", "", "destination directory inside the cella; default /workspace")
 	f.DurationVar(&timeout, "timeout", 5*time.Minute, "upload timeout")
+	return cmd
+}
+
+// newCeMkdirCmd creates a directory inside the cella.
+func newCeMkdirCmd() *cobra.Command {
+	var apiURL string
+	cmd := &cobra.Command{
+		Use:     "mkdir <name|id> <path>",
+		Short:   "Create a directory inside the cella.",
+		Example: `  latere cella mkdir dev /workspace/build`,
+		Args:    cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := authedClient(apiURL)
+			if err != nil {
+				return err
+			}
+			b, _ := json.Marshal(map[string]any{"path": args[1]})
+			return c.Do(cmd.Context(), http.MethodPost, sbPath(args[0])+"/files/mkdir",
+				bytes.NewReader(b), "application/json", nil)
+		},
+	}
+	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
+	return cmd
+}
+
+// newCeRmCmd deletes a file or directory tree inside the cella.
+func newCeRmCmd() *cobra.Command {
+	var apiURL string
+	cmd := &cobra.Command{
+		Use:     "rm <name|id> <path>",
+		Short:   "Delete a file or directory (recursive) inside the cella.",
+		Example: `  latere cella rm dev /workspace/old`,
+		Args:    cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := authedClient(apiURL)
+			if err != nil {
+				return err
+			}
+			path := sbPath(args[0]) + "/files?path=" + url.QueryEscape(args[1])
+			return c.Do(cmd.Context(), http.MethodDelete, path, nil, "", nil)
+		},
+	}
+	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
+	return cmd
+}
+
+// newCeMvCmd renames or moves a file or directory inside the cella.
+func newCeMvCmd() *cobra.Command {
+	var apiURL string
+	cmd := &cobra.Command{
+		Use:     "mv <name|id> <from> <to>",
+		Short:   "Rename or move a file or directory inside the cella.",
+		Example: `  latere cella mv dev /workspace/a.txt /workspace/b.txt`,
+		Args:    cobra.ExactArgs(3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := authedClient(apiURL)
+			if err != nil {
+				return err
+			}
+			b, _ := json.Marshal(map[string]any{"from": args[1], "to": args[2]})
+			return c.Do(cmd.Context(), http.MethodPost, sbPath(args[0])+"/files/move",
+				bytes.NewReader(b), "application/json", nil)
+		},
+	}
+	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
 	return cmd
 }
 

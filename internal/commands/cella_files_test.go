@@ -26,6 +26,9 @@ func TestCeFileCommandUseStrings(t *testing.T) {
 		{newCeWriteCmd(), "write <name|id> <path>"},
 		{newCeLsCmd(), "ls <name|id> <path>"},
 		{newCeUploadCmd(), "upload <name|id> <src...> --dest D"},
+		{newCeMkdirCmd(), "mkdir <name|id> <path>"},
+		{newCeRmCmd(), "rm <name|id> <path>"},
+		{newCeMvCmd(), "mv <name|id> <from> <to>"},
 	}
 	for _, c := range cases {
 		if c.cmd.Use != c.want {
@@ -65,6 +68,28 @@ func TestCeWriteComposition(t *testing.T) {
 	dec, _ := base64.StdEncoding.DecodeString(sent.Content)
 	if string(dec) != "hi" {
 		t.Fatalf("content = %q", dec)
+	}
+}
+
+// rm issues a DELETE to the files path with the target as a query param.
+func TestCeRmComposition(t *testing.T) {
+	var gotMethod, gotPath, gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath, gotQuery = r.Method, r.URL.Path, r.URL.RawQuery
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	c := &api.Client{BaseURL: srv.URL, Token: "t", HTTP: srv.Client()}
+	path := sbPath("dev") + "/files?path=" + "%2Fworkspace%2Fold"
+	if err := c.Do(t.Context(), http.MethodDelete, path, nil, "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if gotMethod != http.MethodDelete || gotPath != "/v1/sandboxes/dev/files" {
+		t.Fatalf("method=%s path=%s", gotMethod, gotPath)
+	}
+	if !strings.Contains(gotQuery, "path=%2Fworkspace%2Fold") {
+		t.Fatalf("query=%s", gotQuery)
 	}
 }
 
