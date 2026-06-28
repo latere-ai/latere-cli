@@ -22,6 +22,7 @@ func TestAgonFlagDefaults(t *testing.T) {
 		{"max-rounds", "4"},
 		{"cost-cap", "50000"},
 		{"model", "claude-sonnet-4-6"},
+		{"proposer-timeout", "5m0s"},
 		{"session", ""},
 		{"state-dir", ""},
 	}

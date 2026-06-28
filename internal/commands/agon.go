@@ -35,6 +35,7 @@ type agonOpts struct {
 	maxRounds int
 	costCap   int
 	model     string
+	propTO    time.Duration
 	luxURL    string
 	authURL   string
 	token     string
@@ -76,6 +77,7 @@ directory; pass --session <id> to pick a specific one.`,
 	cmd.Flags().IntVar(&o.maxRounds, "max-rounds", 4, "per-fork internal-round cap")
 	cmd.Flags().IntVar(&o.costCap, "cost-cap", 50000, "soft token budget (proposer tokens; topos critics report no usage yet)")
 	cmd.Flags().StringVar(&o.model, "model", "claude-sonnet-4-6", "critic model, routed through Lux")
+	cmd.Flags().DurationVar(&o.propTO, "proposer-timeout", 5*time.Minute, "per-round deadline for the proposer's claude call (large sessions may need more)")
 	cmd.Flags().StringVar(&o.luxURL, "lux-url", "", "override Lux base URL (overrides LUX_API_URL)")
 	cmd.Flags().StringVar(&o.authURL, "auth-url", "", "override auth base URL (default derived from the Lux URL)")
 	cmd.Flags().StringVar(&o.token, "token", "", "present this bearer to Lux instead of minting one (e.g. a sandbox token)")
@@ -154,7 +156,7 @@ func runAgon(ctx context.Context, cmd *cobra.Command, o *agonOpts) error {
 		taskCtx = tr.FirstUser
 	}
 
-	proposer := claude.NewProposer(sessionID, cwd)
+	proposer := claude.NewProposer(sessionID, cwd, claude.WithProposerDeadline(o.propTO))
 	critics := atopos.NewCriticFactory(atopos.Config{
 		Model: xtopos.ModelOptions{
 			Kind:         xtopos.ModelLux,
