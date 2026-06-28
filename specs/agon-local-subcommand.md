@@ -208,9 +208,15 @@ For local Lux development (`LUX_STATELESS=1` + personal provider key), set
 `--lux-url http://localhost:<port>` (no `/anthropic` suffix; the command appends
 it), the same override pattern `latere lux` uses via `LUX_API_URL`.
 
-> Unverified: the topos→Lux→anthropic path has only run against a scripted
-> brain. Token, base URL, and wire format get their first live exercise in the
-> smoke below; run one real critic round before relying on it.
+> Verified live (2026-06-28, agon v0.1.3): `latere agon` against a real session
+> drove a round-1 critic through topos → Lux → `claude-sonnet-4-6` and parsed
+> three structured attacks. Confirmed in three steps: `lux env` returns an
+> identity bearer carrying `llm.invoke`; a direct `curl` to
+> `lux.latere.ai/anthropic/v1/messages` with `claude-sonnet-4-6` returned 200;
+> the full engine produced `attacks.jsonl` from the topos critic. Note: the
+> actor-token mint path (`lux models`) fails with "audience mismatch", but
+> `agon` uses the identity-bearer path (`luxIdentityBearer`), which is
+> unaffected.
 
 ## Sunset plan for `cmd/agon`
 
@@ -218,7 +224,12 @@ it), the same override pattern `latere lux` uses via `LUX_API_URL`.
 
 1. `latere agon` passes a real end-to-end smoke on a known session (proposer
    forks the Claude session, at least one topos critic completes a round via
-   Lux, summary is printed). This is the `latere agon` equivalent of spec 34.
+   Lux, debate terminates and prints a summary). This is the `latere agon`
+   equivalent of spec 34. **Status:** the topos-critic-via-Lux half is verified
+   (see the live note above). The first smoke's proposer round 2 hit the
+   hardcoded 5m deadline forking a large session; `--proposer-timeout` was added
+   and the smoke re-run with a larger budget to confirm a clean terminating
+   debate.
 2. Install docs updated: `latere auth login` + `latere agon` replaces `agon`.
 
 After both gates: delete `cmd/agon/`, remove the `agon` binary from the release
