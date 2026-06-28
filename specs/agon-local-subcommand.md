@@ -225,11 +225,14 @@ it), the same override pattern `latere lux` uses via `LUX_API_URL`.
 1. `latere agon` passes a real end-to-end smoke on a known session (proposer
    forks the Claude session, at least one topos critic completes a round via
    Lux, debate terminates and prints a summary). This is the `latere agon`
-   equivalent of spec 34. **Status:** the topos-critic-via-Lux half is verified
-   (see the live note above). The first smoke's proposer round 2 hit the
-   hardcoded 5m deadline forking a large session; `--proposer-timeout` was added
-   and the smoke re-run with a larger budget to confirm a clean terminating
-   debate.
+   equivalent of spec 34. **Status: PASSED** (2026-06-28, agon v0.1.3). A full
+   debate against a real session ran proposer fork + topos critic via Lux to a
+   `steady-state` termination with a written `summary.md`/`end.json`. Findings
+   along the way, each fixed: the first run's proposer round 2 hit the hardcoded
+   5m deadline forking a large session (added `--proposer-timeout`); a stale
+   identity token surfaced as a deep Lux 401 (added `ensureBearerFresh`
+   fast-fail); and the exit-code verdict was confirmed live (clean debate with 3
+   unresolved attacks exited 2, a command error exits 1).
 2. Install docs updated: `latere auth login` + `latere agon` replaces `agon`.
 
 After both gates: delete `cmd/agon/`, remove the `agon` binary from the release
