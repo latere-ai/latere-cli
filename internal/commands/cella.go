@@ -138,6 +138,7 @@ window; tier 'persistent' stays until you delete it.`,
 		newCeExportCmd(),
 		newCeExtendCmd(),
 		newCeConvertCmd(),
+		newCeResizeCmd(),
 	)
 	return cmd
 }
@@ -1211,6 +1212,49 @@ explicit.`,
 	f.StringVar(&to, "to", "", "destination tier: ephemeral or persistent")
 	f.IntVar(&hours, "hours", 0, "auto-delete-hours; required when --to=ephemeral")
 	_ = cmd.MarkFlagRequired("to")
+	return cmd
+}
+
+// newCeResizeCmd grows a persistent cella's workspace disk. Disk can only
+// grow, so the API rejects a size at or below the current one; ephemeral
+// cellas are rejected since they are short-lived.
+func newCeResizeCmd() *cobra.Command {
+	var (
+		apiURL string
+		diskGB int
+	)
+	cmd := &cobra.Command{
+		Use:   "resize <name|id> --disk-gb N",
+		Short: "Grow a persistent cella's workspace disk.",
+		Long: `Grow a persistent cella's workspace disk to N GiB.
+
+Disk can only grow: a size at or below the current one is rejected.
+Only persistent cellas can be resized.`,
+		Example: `  latere cella resize dev --disk-gb 50`,
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if diskGB <= 0 {
+				return fmt.Errorf("--disk-gb must be a positive size")
+			}
+			c, err := authedClient(apiURL)
+			if err != nil {
+				return err
+			}
+			b, _ := json.Marshal(map[string]any{"disk_gb": diskGB})
+			var sb sandboxDTO
+			path := sbPath(args[0]) + "/resize"
+			if err := c.Do(cmd.Context(), http.MethodPost, path,
+				bytes.NewReader(b), "application/json", &sb); err != nil {
+				return err
+			}
+			printSandbox(sb)
+			return nil
+		},
+	}
+	f := cmd.Flags()
+	f.StringVar(&apiURL, "api-url", "", "override Cella API base URL")
+	f.IntVar(&diskGB, "disk-gb", 0, "new workspace size in GiB; must exceed the current size")
+	_ = cmd.MarkFlagRequired("disk-gb")
 	return cmd
 }
 

@@ -328,9 +328,16 @@ func resolveToposURL(flagURL string) string {
 }
 
 // toposClient builds an authenticated API client pointed at the Topos
-// control plane.
+// control plane. For local development, TOPOS_TOKEN overrides the saved
+// token file with a static bearer, so a server running with
+// TOPOS_DEV_AUTH=true + TOPOS_DEV_TOKEN can be reached in one step
+// without `latere auth login` (which validates against the cloud auth
+// service and so rejects a local dev token).
 func toposClient(apiURL string) (*api.Client, error) {
 	c := api.NewClient(resolveToposURL(apiURL))
+	if v := os.Getenv("TOPOS_TOKEN"); v != "" {
+		c.Token = v
+	}
 	if err := c.MustRequireAuth(); err != nil {
 		return nil, err
 	}
