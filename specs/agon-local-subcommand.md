@@ -1,6 +1,6 @@
 ---
 title: latere agon local subcommand
-status: drafted
+status: implemented
 depends_on:
   - latere.ai/x/agon pkg/adversarial (spec 37)
   - latere.ai/x/agon pkg/adversarial/input (spec 40)
@@ -14,6 +14,7 @@ effort: medium
 created: 2026-06-28
 updated: 2026-06-28
 author: changkun
+shipped_in: latere.ai/x/agon v0.1.3
 dispatched_task_id: null
 ---
 
@@ -68,52 +69,77 @@ Lux inside the topos runner).
 
 | Flag | Default | Purpose |
 |---|---|---|
-| `--session` | `""` | Claude Code session ID to review; empty = most recent in dir |
+| `--session` | `""` | Claude Code session ID to review; empty = most recent under `--dir` |
 | `--dir` | `"."` | Working directory (git repo root and Claude session home) |
 | `--state-dir` | `""` | Where to write `.agon/sessions/`; empty = same as dir |
 | `--forks` | `1` | Critic fork count |
 | `--max-rounds` | `4` | Per-fork internal-round cap |
-| `--cost-cap` | `50000` | Soft token budget across all forks |
+| `--cost-cap` | `50000` | Soft token budget (proposer tokens; topos critics report no usage yet) |
 | `--model` | `"claude-sonnet-4-6"` | Critic model routed through Lux |
-| `--lux-url` | `"https://lux.latere.ai/anthropic"` | Lux base URL; override for local luxd dev |
+| `--lux-url` | `""` | Lux base URL; empty = `LUX_API_URL` or `https://lux.latere.ai` |
+| `--auth-url` | `""` | Auth base URL; empty = derived from the Lux URL |
+| `--token` | `""` | Present this bearer to Lux instead of minting one (e.g. a sandbox token) |
 
-**RunE sketch** (pseudocode, not literal implementation):
+**RunE sketch** (pseudocode, reflecting what shipped):
 
 ```
-token, err = api.LoadToken("")                    // shared bearer
-tr, err    = input.ReadTranscript(
-               input.LocateTranscript(home, cwd, sessionFlag, ""))
-diff, err  = input.Compute(ctx, input.DiffSpec{From:"HEAD", To:".", Cwd:cwd})
-if input.Trivial(diff, 0) { print "diff too small"; return }
+// 1. Identity bearer up front: validate Lux sign-in + preflight scope.
+//    agon.go lives in package commands, so it calls lux.go's helper directly.
+bearerFn = func(ctx) (string, error) {
+    return luxIdentityBearer(ctx, tokenFlag, luxURLFlag, authURLFlag)
+}
+bearer, err = bearerFn(ctx)                       // errors if not signed in
+ensureLuxScope(bearer, ["llm.invoke"], "...")     // friendly 403 preflight
 
-proposer  = claude.NewProposer(tr.SessionID, cwd)
+// 2. Resolve the session to fork (proposer needs a real --resume target).
+sessionID = sessionFlag
+if sessionID == "" {
+    sessionID, transcriptPath = mostRecentSession(home, cwd)  // local helper
+} else {
+    transcriptPath = input.LocateTranscript(home, cwd, sessionID, "")
+}
+
+// 3. Diff + gate (mirrors cmd/agon's clean-tree HEAD~1 fallback).
+diff = input.Compute(ctx, input.DiffSpec{From:"HEAD", To:".", Cwd:cwd})
+if diff.ChangedLines == 0 { try HEAD~1..HEAD fallback }
+if input.Trivial(diff, 0) { print "no substantive diff"; return nil }
+
+taskCtx = input.ReadTranscript(transcriptPath).FirstUser   // best-effort
+
+proposer  = claude.NewProposer(sessionID, cwd)             // local claude auth
 criticFac = topos.NewCriticFactory(topos.Config{
     Model: xtopos.ModelOptions{
         Kind:         xtopos.ModelLux,
         Provider:     "anthropic",
         Model:        modelFlag,
-        BaseURL:      luxURLFlag,
-        BearerSource: func(ctx) (string, error) { return token.AccessToken, nil },
+        BaseURL:      resolveLuxURL(luxURLFlag) + "/anthropic",
+        BearerSource: bearerFn,                   // re-fetched/refreshed per call
     },
 })
 
-summary, err = (&adversarial.Engine{
-    StateDir:    stateDir,
-    Cwd:         cwd,
-    ForkCount:   forksFlag,
-    Proposer:    proposer,
-    NewCritic:   criticFac,
-    MaxRounds:   maxRoundsFlag,
-    CostCap:     costCapFlag,
-    TaskContext:  extractedFirstUser,
-    DiffPatch:   diff.Patch,
-}).Run(ctx)
-
+summary = (&adversarial.Engine{ StateDir, Cwd, ForkCount, Proposer:proposer,
+    NewCritic:criticFac, MaxRounds, CostCap, TaskContext:taskCtx,
+    DiffPatch:diff.Patch }).Run(ctx)
 print summary
 ```
 
-The token is passed as a `BearerSource` closure (not a static `APIKey`) so that
-a token refresh, if added later, flows through without changing this code.
+**Token (corrected from the original draft).** The bearer handed to Lux is NOT
+the Cella `token.json` (`api.LoadToken`). It is the retained auth.latere.ai
+identity token (`auth-token.json`), which Lux accepts directly, obtained via
+lux.go's `luxIdentityBearer` (which also honors `--token` / `LATERE_LUX_TOKEN` /
+the sandbox token, and refreshes an expired auth token). `BearerSource` is the
+*identity* bearer, not a 5-minute actor token, because a debate makes many model
+calls and can outlive a short-lived token; passing the closure (not a string)
+means topos re-fetches and refreshes on each call. The proposer is unaffected:
+it forks the local Claude session under the developer's own claude auth.
+
+**Most-recent discovery lives here, not in the input package.** No importable
+helper resolves "newest session" (`cmd/agon` always receives its session ID
+from the stop hook). `mostRecentSession(home, cwd)` scans
+`~/.claude/projects/<input.EncodeCwd(cwd)>/*.jsonl` and picks the newest by
+mtime. (Edge: invoked from inside a live Claude session, "most recent" is the
+current session being forked, correct for the post-hoc terminal case but
+surprising from within a session.)
 
 ### `internal/commands/root.go`
 
@@ -126,48 +152,65 @@ root.AddCommand(newAgonCmd())
 ### `go.mod`
 
 ```
-require latere.ai/x/agon <current-tagged-version>
+require latere.ai/x/agon v0.1.3
+require latere.ai/x/topos v0.0.5  // direct: agon.go references xtopos.ModelOptions
 ```
 
-`latere.ai/x/agon` is published on the public Go proxy (same pattern as
-`latere.ai/x/topos v0.0.5` in agon's own `go.mod`). No replace directive.
-The indirect topos dependency is already satisfied transitively; `go mod tidy`
-promotes `latere.ai/x/topos` as indirect if it is not already direct.
+Both are published on the public Go proxy (same pattern as `latere.ai/x/topos`
+in agon's own `go.mod`). No replace directive. Adding the agon dependency also
+pulled cobra forward to v1.10.2 transitively. Shipped at agon tag `v0.1.3`
+(spec 39 + spec 40 land between `v0.1.2` and `v0.1.3`).
 
 ## Error handling
 
-- No bearer token (`api.ErrNoToken`): print `"not logged in; run latere auth login"` and return.
+- Not signed in for Lux (`luxIdentityBearer` error): the helper already returns
+  `"not signed in for Lux; run latere auth login ..."`; surfaced as-is.
+- Missing `llm.invoke` scope: `ensureLuxScope` returns a friendly, specific
+  error before any model call is spent (skipped for opaque non-JWT tokens).
 - Diff trivial (`input.Trivial(diff, 0)` → true): print `"no substantive diff to review"` and return nil (same fast path as `cmd/agon`).
-- No session found (`input.ErrTranscriptNotFound`): print a clear message suggesting `--session <id>`.
-- Lux auth failure (topos critic returns non-nil error): surface the underlying error as-is; it already carries the HTTP status.
+- No session found: `mostRecentSession` returns an actionable error (run a
+  session here, or pass `--session <id>`); the `--session` path wraps
+  `input.ErrTranscriptNotFound` with the same hint.
+- Lux invocation failure (topos critic returns non-nil error): surfaced as-is;
+  it carries the HTTP status.
 
 ## Testing strategy
 
 The `cmd/agon` suite is not duplicated here; the engine logic is tested in
-`latere.ai/x/agon`. Tests in `internal/commands/` should cover:
+`latere.ai/x/agon`. Shipped tests in `internal/commands/agon_test.go`:
 
-- **Flag parsing unit test**: `TestAgonFlagsDefaults` — build the command, parse
-  known flags, assert defaults match the table above. No I/O.
-- **Auth gate test**: command run with no token file → returns `api.ErrNoToken`
-  (already covered by the pattern in `internal/commands/auth_test.go`).
-- **Trivial-diff fast path**: supply a near-empty diff mock; assert the command
-  returns nil and prints the "no substantive diff" message without calling the
-  engine. Can be tested by injecting a small `DiffSpec` against an empty temp
-  git repo.
+- **`TestAgonFlagDefaults`**: builds the command and asserts each flag's default
+  matches the table above. No I/O.
+- **`TestMostRecentSessionPicksNewest`**: builds a fake
+  `~/.claude/projects/<encoded-cwd>/` tree and asserts the newest `.jsonl` by
+  mtime wins, its session ID is the basename, and non-`.jsonl` files are ignored.
+- **`TestMostRecentSessionNoSessions`**: a missing or transcript-empty project
+  dir returns a clear, actionable error.
 
-A real e2e smoke equivalent to spec 34 (`34-real-claude-end-to-end-smoke.md`)
-is the acceptance gate for sunsetting `cmd/agon` (see below).
+The auth gate and trivial-diff fast path are exercised by the live smoke rather
+than unit-mocked: both depend on real I/O (a signed-in bearer, a git tree) that
+is cheaper to cover end-to-end than to fake. A real e2e smoke equivalent to spec
+34 (`34-real-claude-end-to-end-smoke.md`) is the acceptance gate for sunsetting
+`cmd/agon` (see below).
 
 ## Lux routing detail
 
-topos's `ModelLux` kind routes the Anthropic-wire request through Lux. The CLI
-sets `BearerSource` to return the stored bearer from `token.json` on each call.
-Lux validates the bearer against the user's Latere identity and forwards the
-request to the configured provider; the API key stays in Lux, not in the CLI.
+topos's `ModelLux` kind routes the Anthropic-wire request through Lux. `agon.go`
+sets `BearerSource` to `luxIdentityBearer`, the same identity-bearer path
+`latere lux env` / `lux serve` use; it returns a passthrough token when one is
+configured, otherwise the refreshed auth.latere.ai identity token, which Lux
+accepts directly. `BaseURL` is `resolveLuxURL(--lux-url) + "/anthropic"`; the
+topos anthropic adapter appends `/v1/messages`, so requests land on Lux's
+`/anthropic/v1/messages` route as `Authorization: Bearer`. The provider key
+stays in Lux, never in the CLI.
 
 For local Lux development (`LUX_STATELESS=1` + personal provider key), set
-`--lux-url http://localhost:<port>/anthropic` — the same override pattern the
-`latere lux` command uses via `SANDBOX_API_URL`.
+`--lux-url http://localhost:<port>` (no `/anthropic` suffix; the command appends
+it), the same override pattern `latere lux` uses via `LUX_API_URL`.
+
+> Unverified: the topos→Lux→anthropic path has only run against a scripted
+> brain. Token, base URL, and wire format get their first live exercise in the
+> smoke below; run one real critic round before relying on it.
 
 ## Sunset plan for `cmd/agon`
 
