@@ -8,6 +8,7 @@ Active specs:
 
 ```
 specs/
+  agon-local-subcommand.md       (drafted — latere agon local Cobra subcommand; critics via Lux/topos)
   auth-unification-migration.md  (planned, leaf — adopts pkg/authkit DeviceCodeClient + FileTokenStore)
 ```
 
