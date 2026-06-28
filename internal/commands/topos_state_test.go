@@ -40,6 +40,11 @@ func TestSessionStateAssistantAndTools(t *testing.T) {
 		t.Fatalf("tool line = %q, want a bash ok line", last)
 	}
 
+	s.apply(ev("PostToolUseFailure", `{"tool_call":{"name":"bash"},"error":"denied by user"}`))
+	if last := s.lines[len(s.lines)-1]; !strings.Contains(last, "bash") || !strings.Contains(last, "denied") {
+		t.Fatalf("failure line = %q, want a denied/failed bash line", last)
+	}
+
 	s.apply(ev("Stop", `{}`))
 	if s.status != "ready" {
 		t.Fatalf("status after Stop = %q, want ready", s.status)

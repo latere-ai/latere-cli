@@ -59,6 +59,11 @@ func handlePrintEvent(fr attachFrame, out, errOut io.Writer) (bool, error) {
 			}
 			fmt.Fprintf(errOut, "· %s [%s]\n", p.ToolCall.Name, status) //nolint:errcheck
 		}
+	case "PostToolUseFailure":
+		var p postToolUseFailurePayload
+		if json.Unmarshal(fr.Payload, &p) == nil {
+			fmt.Fprintf(errOut, "· %s [denied/failed]\n", p.ToolCall.Name) //nolint:errcheck
+		}
 	case "RunError":
 		var p runErrorPayload
 		_ = json.Unmarshal(fr.Payload, &p)

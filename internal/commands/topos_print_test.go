@@ -30,6 +30,13 @@ func TestHandlePrintFrame(t *testing.T) {
 		t.Fatalf("stderr = %q, want a tool summary", errOut.String())
 	}
 
+	// PostToolUseFailure prints a denied/failed summary to stderr.
+	errOut.Reset()
+	_, _ = handlePrintFrame(ev("PostToolUseFailure", `{"tool_call":{"name":"bash"},"error":"denied"}`), &out, &errOut)
+	if !strings.Contains(errOut.String(), "bash [denied/failed]") {
+		t.Fatalf("stderr = %q, want a denied/failed summary", errOut.String())
+	}
+
 	// Stop ends the turn.
 	if done, _ := handlePrintFrame(ev("Stop", `{}`), &out, &errOut); !done {
 		t.Fatal("Stop should signal done")

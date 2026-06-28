@@ -69,6 +69,11 @@ type preToolUsePayload struct {
 	ToolCall toolCall `json:"tool_call"`
 }
 
+type postToolUseFailurePayload struct {
+	ToolCall toolCall `json:"tool_call"`
+	Error    string   `json:"error"`
+}
+
 type approvalRequestPayload struct {
 	DecisionID string          `json:"decision_id"`
 	ToolID     string          `json:"tool_id"`

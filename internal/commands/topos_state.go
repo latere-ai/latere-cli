@@ -86,6 +86,11 @@ func (s *sessionState) applyEvent(fr attachFrame) {
 			}
 			s.lines = append(s.lines, fmt.Sprintf("  %s [%s] %s", p.ToolCall.Name, mark, truncLine(p.Result.Content, 80)))
 		}
+	case "PostToolUseFailure":
+		var p postToolUseFailurePayload
+		if json.Unmarshal(fr.Payload, &p) == nil {
+			s.lines = append(s.lines, fmt.Sprintf("  %s [denied/failed] %s", p.ToolCall.Name, truncLine(p.Error, 80)))
+		}
 	case "ApprovalRequest":
 		var p approvalRequestPayload
 		if json.Unmarshal(fr.Payload, &p) == nil {
