@@ -109,6 +109,9 @@ func runAgon(ctx context.Context, cmd *cobra.Command, o *agonOpts) error {
 	if err := ensureLuxScope(bearer, []string{"llm.invoke"}, "run agon critics"); err != nil {
 		return err
 	}
+	if err := ensureBearerFresh(bearer); err != nil {
+		return err
+	}
 
 	// Locate the session to fork. The proposer needs a real Claude session
 	// ID; without one there is nothing to --resume.
@@ -187,6 +190,27 @@ func runAgon(ctx context.Context, cmd *cobra.Command, o *agonOpts) error {
 	// command error. main maps this sentinel to exit 2.
 	if summary.Unresolved > 0 {
 		return &unresolvedError{n: summary.Unresolved}
+	}
+	return nil
+}
+
+// ensureBearerFresh fails fast with an actionable message when the Lux
+// identity bearer is an expired JWT. ensureLuxScope decodes claims but does
+// not check expiry, and the auth identity token can be short-lived with no
+// refresh token; without this an expired token passes preflight and surfaces
+// later as a raw 401 from deep inside the topos critic. Opaque (non-JWT)
+// tokens and tokens without an exp claim are skipped: Lux stays the authority.
+func ensureBearerFresh(bearer string) error {
+	claims := decodeJWTClaims(bearer)
+	if claims == nil {
+		return nil
+	}
+	exp, ok := claims["exp"].(float64)
+	if !ok {
+		return nil
+	}
+	if time.Now().Unix() >= int64(exp) {
+		return fmt.Errorf("your Lux identity token has expired; run `latere auth login` and retry")
 	}
 	return nil
 }

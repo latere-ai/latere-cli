@@ -1,6 +1,8 @@
 package commands
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -8,6 +10,14 @@ import (
 
 	"latere.ai/x/agon/pkg/adversarial/input"
 )
+
+// jwtWithExp builds a minimal three-segment JWT whose payload carries the
+// given exp claim, so decodeJWTClaims parses it. The signature segment is a
+// placeholder (decodeJWTClaims never verifies it).
+func jwtWithExp(exp int64) string {
+	payload, _ := json.Marshal(map[string]any{"exp": exp})
+	return "h." + base64.RawURLEncoding.EncodeToString(payload) + ".s"
+}
 
 // TestAgonFlagDefaults pins the documented defaults so a careless flag
 // edit can't silently change the command's behavior.
@@ -35,6 +45,27 @@ func TestAgonFlagDefaults(t *testing.T) {
 		if f.DefValue != tc.want {
 			t.Errorf("--%s default = %q, want %q", tc.flag, f.DefValue, tc.want)
 		}
+	}
+}
+
+// TestEnsureBearerFresh covers the expiry preflight: an expired JWT errors,
+// a future one passes, and non-JWT / no-exp tokens are skipped (Lux stays the
+// authority).
+func TestEnsureBearerFresh(t *testing.T) {
+	now := time.Now().Unix()
+	if err := ensureBearerFresh(jwtWithExp(now - 60)); err == nil {
+		t.Error("expired token: want error, got nil")
+	}
+	if err := ensureBearerFresh(jwtWithExp(now + 3600)); err != nil {
+		t.Errorf("fresh token: want nil, got %v", err)
+	}
+	if err := ensureBearerFresh("opaque-not-a-jwt"); err != nil {
+		t.Errorf("opaque token: want nil (skip), got %v", err)
+	}
+	// JWT-shaped but no exp claim -> skip.
+	noExp := "h." + base64.RawURLEncoding.EncodeToString([]byte(`{"sub":"x"}`)) + ".s"
+	if err := ensureBearerFresh(noExp); err != nil {
+		t.Errorf("no-exp token: want nil (skip), got %v", err)
 	}
 }
 
