@@ -181,8 +181,9 @@ the remote command's exit code when the command finishes.`,
 // "-" reads the manifest from stdin.
 func newCeApplyCmd() *cobra.Command {
 	var (
-		file   string
-		apiURL string
+		file    string
+		apiURL  string
+		idemKey string
 	)
 	cmd := &cobra.Command{
 		Use:   "apply",
@@ -219,8 +220,12 @@ Full field reference: https://cella.latere.ai/docs/cella/manifest`,
 				return err
 			}
 			var sb sandboxDTO
-			if err := c.Do(cmd.Context(), http.MethodPost, "/v1/sandboxes",
-				bytes.NewReader(body), "application/yaml", &sb); err != nil {
+			var headers map[string]string
+			if idemKey != "" {
+				headers = map[string]string{"Idempotency-Key": idemKey}
+			}
+			if err := c.DoWithHeaders(cmd.Context(), http.MethodPost, "/v1/sandboxes",
+				bytes.NewReader(body), "application/yaml", headers, &sb); err != nil {
 				return err
 			}
 			printSandbox(sb)
@@ -230,6 +235,7 @@ Full field reference: https://cella.latere.ai/docs/cella/manifest`,
 	cmd.Flags().StringVarP(&file, "file", "f", "", "path to a Sandbox Manifest YAML file, or - for stdin")
 	_ = cmd.MarkFlagRequired("file")
 	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
+	cmd.Flags().StringVar(&idemKey, "idempotency-key", "", "dedup retried creates; same key + body replays the original result")
 	return cmd
 }
 

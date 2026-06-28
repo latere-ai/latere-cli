@@ -208,9 +208,17 @@ func (e *APIError) Error() string {
 // may be nil for endpoints that return no body (or the caller wants
 // raw).
 func (c *Client) Do(ctx context.Context, method, path string, body io.Reader, contentType string, out any) error {
+	return c.DoWithHeaders(ctx, method, path, body, contentType, nil, out)
+}
+
+// DoWithHeaders is Do with extra request headers (e.g. Idempotency-Key).
+func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body io.Reader, contentType string, headers map[string]string, out any) error {
 	req, err := c.req(ctx, method, path, body, contentType)
 	if err != nil {
 		return err
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
 	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
