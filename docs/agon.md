@@ -2,7 +2,7 @@
 
 `latere agon` runs an adversarial review of your most recent Claude Code session: it forks the session as a *proposer* that defends the change, runs *critics* against the working-tree diff, and surfaces the attacks that survive. Run `latere auth login` first (see the [main README](../README.md#sign-in)).
 
-It is the embedded successor to the standalone [`agon`](https://github.com/latere-ai/agon) binary. The proposer runs locally through your own `claude` CLI for full fidelity (it forks your real session with `claude --resume <id> --fork-session`), while the critics run through [Lux](https://lux.latere.ai), so critic model cost is tracked on your Latere identity and no provider key is needed locally.
+The proposer runs locally through your own `claude` CLI for full fidelity (it forks your real session with `claude --resume <id> --fork-session`), while the critics run through [Lux](https://lux.latere.ai), so critic model cost is tracked on your Latere identity and no provider key is needed locally.
 
 ## Prerequisites
 

@@ -220,7 +220,17 @@ it), the same override pattern `latere lux` uses via `LUX_API_URL`.
 
 ## Sunset plan for `cmd/agon`
 
-`cmd/agon` stays until:
+**Done (2026-06-28):** `latere agon` shipped in latere-cli v0.5.0 and the
+standalone `agon` CLI was sunset in agon `f6dd0f5` (removed `cmd/agon`,
+`internal/cli`, the `e2e/` binary suites, `.goreleaser.yaml`, the binary
+`release.yml`, and `install.sh`; agon is now the `pkg/adversarial` engine plus
+the agon-web landing site). The gates below were met first.
+
+Note: the auth refresh-token fix that removes `latere agon`'s 15-minute Lux
+token wall is a separate, still-pending change; the sunset proceeded ahead of it
+by explicit decision, accepting the interim re-login friction until it lands.
+
+`cmd/agon` stayed until:
 
 1. `latere agon` passes a real end-to-end smoke on a known session (proposer
    forks the Claude session, at least one topos critic completes a round via
