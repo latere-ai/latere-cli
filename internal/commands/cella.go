@@ -5,6 +5,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -139,6 +140,10 @@ window; tier 'persistent' stays until you delete it.`,
 		newCeExtendCmd(),
 		newCeConvertCmd(),
 		newCeResizeCmd(),
+		newCeCatCmd(),
+		newCeWriteCmd(),
+		newCeLsCmd(),
+		newCeUploadCmd(),
 	)
 	return cmd
 }
@@ -1261,6 +1266,224 @@ Only persistent cellas can be resized.`,
 	f.StringVar(&apiURL, "api-url", "", "override Cella API base URL")
 	f.IntVar(&diskGB, "disk-gb", 0, "new workspace size in GiB; must exceed the current size")
 	_ = cmd.MarkFlagRequired("disk-gb")
+	return cmd
+}
+
+// ---- granular file ops ----
+
+// newCeCatCmd streams a single file from the cella to stdout.
+func newCeCatCmd() *cobra.Command {
+	var apiURL string
+	cmd := &cobra.Command{
+		Use:     "cat <name|id> <path>",
+		Short:   "Stream a file from the cella to stdout.",
+		Example: `  latere cella cat dev /workspace/out.log`,
+		Args:    cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := authedClient(apiURL)
+			if err != nil {
+				return err
+			}
+			path := sbPath(args[0]) + "/files?path=" + url.QueryEscape(args[1]) + "&raw=true"
+			resp, err := c.DoRaw(cmd.Context(), http.MethodGet, path, nil, "")
+			if err != nil {
+				return err
+			}
+			defer func() { _ = resp.Body.Close() }()
+			_, err = io.Copy(os.Stdout, resp.Body)
+			return err
+		},
+	}
+	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
+	return cmd
+}
+
+// newCeWriteCmd writes a single file into the cella from --input or stdin.
+func newCeWriteCmd() *cobra.Command {
+	var (
+		apiURL string
+		input  string
+	)
+	cmd := &cobra.Command{
+		Use:   "write <name|id> <path>",
+		Short: "Write a file into the cella (reads stdin or --input).",
+		Example: `  echo hi | latere cella write dev /workspace/note.txt
+  latere cella write dev /workspace/app.tar -f app.tar`,
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var src io.Reader = os.Stdin
+			if input != "" && input != "-" {
+				f, err := os.Open(input)
+				if err != nil {
+					return err
+				}
+				defer func() { _ = f.Close() }()
+				src = f
+			}
+			content, err := io.ReadAll(src)
+			if err != nil {
+				return err
+			}
+			c, err := authedClient(apiURL)
+			if err != nil {
+				return err
+			}
+			b, _ := json.Marshal(map[string]any{
+				"path":    args[1],
+				"content": base64.StdEncoding.EncodeToString(content),
+			})
+			return c.Do(cmd.Context(), http.MethodPut, sbPath(args[0])+"/files",
+				bytes.NewReader(b), "application/json", nil)
+		},
+	}
+	f := cmd.Flags()
+	f.StringVar(&apiURL, "api-url", "", "override Cella API base URL")
+	f.StringVarP(&input, "input", "f", "", "read content from this file (- or empty for stdin)")
+	return cmd
+}
+
+// newCeLsCmd lists a directory inside the cella.
+func newCeLsCmd() *cobra.Command {
+	var apiURL string
+	cmd := &cobra.Command{
+		Use:     "ls <name|id> <path>",
+		Short:   "List a directory inside the cella.",
+		Example: `  latere cella ls dev /workspace`,
+		Args:    cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := authedClient(apiURL)
+			if err != nil {
+				return err
+			}
+			path := sbPath(args[0]) + "/files?path=" + url.QueryEscape(args[1]) + "&list=true"
+			var resp struct {
+				Entries []struct {
+					Name  string `json:"name"`
+					Size  int64  `json:"size"`
+					Mode  uint32 `json:"mode"`
+					IsDir bool   `json:"is_directory"`
+				} `json:"entries"`
+			}
+			if err := c.Do(cmd.Context(), http.MethodGet, path, nil, "", &resp); err != nil {
+				return err
+			}
+			for _, e := range resp.Entries {
+				name := e.Name
+				if e.IsDir {
+					name += "/"
+				}
+				fmt.Printf("%04o\t%d\t%s\n", e.Mode, e.Size, name)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
+	return cmd
+}
+
+// newCeUploadCmd streams files and folders into the cella, preserving folder
+// structure. Each file is sent as a multipart part whose form-field name is its
+// path relative to the destination.
+func newCeUploadCmd() *cobra.Command {
+	var (
+		apiURL  string
+		dest    string
+		timeout time.Duration
+	)
+	cmd := &cobra.Command{
+		Use:   "upload <name|id> <src...> --dest D",
+		Short: "Stream files/folders into the cella (folder-preserving).",
+		Example: `  latere cella upload dev ./dist --dest /workspace
+  latere cella upload dev a.txt b.txt --dest /tmp`,
+		Args: cobra.MinimumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := authedClient(apiURL)
+			if err != nil {
+				return err
+			}
+			if c.HTTP != nil && timeout > 0 {
+				c.HTTP.Timeout = timeout
+			}
+			type upfile struct{ rel, local string }
+			var files []upfile
+			for _, src := range args[1:] {
+				info, err := os.Stat(src)
+				if err != nil {
+					return err
+				}
+				if info.IsDir() {
+					parent := filepath.Dir(filepath.Clean(src))
+					if werr := filepath.WalkDir(src, func(p string, d os.DirEntry, err error) error {
+						if err != nil {
+							return err
+						}
+						if d.IsDir() {
+							return nil
+						}
+						rel, err := filepath.Rel(parent, p)
+						if err != nil {
+							return err
+						}
+						files = append(files, upfile{rel: filepath.ToSlash(rel), local: p})
+						return nil
+					}); werr != nil {
+						return werr
+					}
+					continue
+				}
+				files = append(files, upfile{rel: filepath.Base(src), local: src})
+			}
+			if len(files) == 0 {
+				return fmt.Errorf("no files to upload")
+			}
+			pr, pw := io.Pipe()
+			mw := multipart.NewWriter(pw)
+			contentType := mw.FormDataContentType()
+			go func() {
+				if dest != "" {
+					if err := mw.WriteField("dest", dest); err != nil {
+						_ = pw.CloseWithError(err)
+						return
+					}
+				}
+				for _, uf := range files {
+					f, err := os.Open(uf.local)
+					if err != nil {
+						_ = pw.CloseWithError(err)
+						return
+					}
+					part, err := mw.CreateFormFile(uf.rel, filepath.Base(uf.local))
+					if err != nil {
+						_ = f.Close()
+						_ = pw.CloseWithError(err)
+						return
+					}
+					if _, err := io.Copy(part, f); err != nil {
+						_ = f.Close()
+						_ = pw.CloseWithError(err)
+						return
+					}
+					_ = f.Close()
+				}
+				_ = pw.CloseWithError(mw.Close())
+			}()
+			var resp struct {
+				Dest  string `json:"dest"`
+				Files int    `json:"files"`
+				Bytes int64  `json:"bytes"`
+			}
+			if err := c.Do(cmd.Context(), http.MethodPost, sbPath(args[0])+"/files/upload",
+				pr, contentType, &resp); err != nil {
+				return err
+			}
+			fmt.Printf("uploaded %d files (%d bytes) to %s\n", resp.Files, resp.Bytes, resp.Dest)
+			return nil
+		},
+	}
+	f := cmd.Flags()
+	f.StringVar(&apiURL, "api-url", "", "override Cella API base URL")
+	f.StringVar(&dest, "dest", "", "destination directory inside the cella; default /workspace")
+	f.DurationVar(&timeout, "timeout", 5*time.Minute, "upload timeout")
 	return cmd
 }
 
