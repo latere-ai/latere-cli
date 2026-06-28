@@ -169,14 +169,19 @@ func newToposSessionCmd() *cobra.Command {
 		Short: "Trigger and manage Topos agent sessions.",
 		Long: `Trigger agent runs on the Topos control plane.
 
-A session is one autonomous run. 'create' triggers a run on an agent
-with an initial prompt and prints the result once the run completes.
-
-attach / lift / drop (interactive session control) arrive with the
-lift/drop lifecycle.`,
-		Example: `  latere topos session create agent_01hxy --prompt "List the repo files."`,
+A session is one run. 'create' triggers an autonomous run and prints the
+result once it completes. 'start' opens an interactive session (a coding
+assistant TUI, or --print for a one-shot prompt); 'attach' reconnects to a
+running session; 'ls' lists interactive sessions.`,
+		Example: `  latere topos session start agent_01hxy
+  latere topos session start agent_01hxy -p "summarise README.md"
+  latere topos session attach sess_01hxy
+  latere topos session create agent_01hxy --prompt "List the repo files."`,
 	}
 	cmd.AddCommand(newToposSessionCreateCmd())
+	cmd.AddCommand(newToposSessionStartCmd())
+	cmd.AddCommand(newToposSessionAttachCmd())
+	cmd.AddCommand(newToposSessionLsCmd())
 	return cmd
 }
 
