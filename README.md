@@ -1,6 +1,6 @@
 # latere
 
-Command-line interface for the Latere product family — one binary for [Cella](https://cella.latere.ai) sandboxes and [Lux](https://lux.latere.ai) model access.
+Command-line interface for the Latere product family: one binary for [Cella](https://cella.latere.ai) sandboxes, [Lux](https://lux.latere.ai) model access, and Agon adversarial review.
 
 ## Install
 
@@ -82,10 +82,12 @@ latere auth org switch --personal   # scope the saved token to the personal cont
 |---------|--------------|-------|
 | **Cella** | Named sandboxes (ephemeral or persistent): create, exec, shell, logs, file transfer. | [docs/cella.md](docs/cella.md) |
 | **Lux** | Call language models on your identity, no key to allocate: discovery, SDK enablement, chat, usage, and serving your own local models (Ollama/vLLM/LM Studio/llama.cpp/MLX) through Lux. | [docs/lux.md](docs/lux.md) |
+| **Agon** | Adversarial review of your latest Claude Code session: a proposer defends the diff, critics attack it through Lux, unresolved attacks surface. | [docs/agon.md](docs/agon.md) |
 
 ```sh
 latere cella apply -f sandbox.yaml
 latere lux chat --model openai/gpt-4o-mini "Say hi"
+latere agon
 ```
 
 ## Development
