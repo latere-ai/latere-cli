@@ -51,6 +51,7 @@ load it from your shell startup files.`,
 	root.AddCommand(newCellaCmd())
 	root.AddCommand(newToposCmd())
 	root.AddCommand(newLuxCmd())
+	root.AddCommand(newAgonCmd())
 	root.AddCommand(newUpgradeCmd(version))
 	root.AddCommand(newCompletionCmd(root))
 	return root
