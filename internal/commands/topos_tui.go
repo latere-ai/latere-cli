@@ -176,7 +176,11 @@ func (m tuiModel) View() string {
 	var b strings.Builder
 	b.WriteString(strings.Join(body, "\n"))
 	b.WriteString("\n")
-	b.WriteString(statusStyle.Render("["+m.state.status+"]") + "  " + hintStyle.Render(m.sessionID))
+	bar := statusStyle.Render("["+m.state.status+"]") + "  " + hintStyle.Render(m.sessionID)
+	if m.state.usage != "" {
+		bar += "  " + hintStyle.Render(m.state.usage)
+	}
+	b.WriteString(bar)
 	b.WriteString("\n")
 	if m.state.pending != nil && !m.readonly {
 		b.WriteString("approve tool " + m.state.pending.ToolID + "? [y/n]")

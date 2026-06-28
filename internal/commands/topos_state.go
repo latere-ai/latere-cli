@@ -24,6 +24,8 @@ type sessionState struct {
 	pending *approvalRequestPayload
 	// lastSeq is the highest durable event seq seen, for reattach cursors.
 	lastSeq int64
+	// usage is the running token summary for the cost/usage HUD ("" until known).
+	usage string
 	// turn accumulates the in-flight assistant turn's streamed text.
 	turn strings.Builder
 }
@@ -90,6 +92,21 @@ func (s *sessionState) applyEvent(fr attachFrame) {
 			s.pending = &p
 			s.status = "awaiting approval"
 		}
+	case "Usage":
+		var p usagePayload
+		if json.Unmarshal(fr.Payload, &p) == nil {
+			s.usage = fmt.Sprintf("%d in / %d out", p.Total.InputTokens, p.Total.OutputTokens)
+		}
+	case "SubagentStart":
+		var p subagentPayload
+		if json.Unmarshal(fr.Payload, &p) == nil {
+			s.lines = append(s.lines, "↳ sub-agent "+shortID(p.SubagentID)+" started")
+		}
+	case "SubagentStop":
+		var p subagentPayload
+		if json.Unmarshal(fr.Payload, &p) == nil {
+			s.lines = append(s.lines, "↳ sub-agent "+shortID(p.SubagentID)+" done")
+		}
 	case "RunError":
 		var p runErrorPayload
 		_ = json.Unmarshal(fr.Payload, &p)
@@ -123,7 +140,15 @@ func (s *sessionState) echoUser(text string) {
 	s.lines = append(s.lines, "› "+text)
 }
 
-// oneLine collapses content to a single trimmed line capped at n runes.
+// shortID trims a long id to its last 8 characters for compact display.
+func shortID(id string) string {
+	if len(id) <= 8 {
+		return id
+	}
+	return "…" + id[len(id)-8:]
+}
+
+// truncLine collapses content to a single trimmed line capped at n runes.
 func truncLine(s string, n int) string {
 	s = strings.TrimSpace(strings.ReplaceAll(s, "\n", " "))
 	r := []rune(s)

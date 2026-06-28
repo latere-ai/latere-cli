@@ -102,6 +102,28 @@ func TestSessionStateLastSeqTracksDurableOnly(t *testing.T) {
 	}
 }
 
+func TestSessionStateUsageAndSubagents(t *testing.T) {
+	s := newSessionState()
+	s.apply(ev("Usage", `{"total":{"input_tokens":120,"output_tokens":45}}`))
+	if s.usage != "120 in / 45 out" {
+		t.Fatalf("usage = %q, want '120 in / 45 out'", s.usage)
+	}
+	s.apply(ev("SubagentStart", `{"subagent_id":"run-1/sub/reviewer"}`))
+	s.apply(ev("SubagentStop", `{"subagent_id":"run-1/sub/reviewer"}`))
+	if len(s.lines) != 2 || !strings.Contains(s.lines[0], "started") || !strings.Contains(s.lines[1], "done") {
+		t.Fatalf("sub-agent lines = %v", s.lines)
+	}
+}
+
+func TestShortID(t *testing.T) {
+	if got := shortID("short"); got != "short" {
+		t.Fatalf("shortID short = %q", got)
+	}
+	if got := shortID("run-1/sub/reviewer"); got != "…reviewer" {
+		t.Fatalf("shortID = %q, want …reviewer", got)
+	}
+}
+
 func TestEchoUserAndTruncLine(t *testing.T) {
 	s := newSessionState()
 	s.echoUser("hi there")

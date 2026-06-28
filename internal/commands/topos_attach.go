@@ -79,6 +79,19 @@ type runErrorPayload struct {
 	Error string `json:"error"`
 }
 
+type usageTotals struct {
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
+}
+
+type usagePayload struct {
+	Total usageTotals `json:"total"`
+}
+
+type subagentPayload struct {
+	SubagentID string `json:"subagent_id"`
+}
+
 // attachConn is a live attach connection: it reads frames into a channel and
 // sends control messages. The frames channel closes when the connection ends.
 type attachConn struct {
