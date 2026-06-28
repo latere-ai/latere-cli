@@ -72,13 +72,14 @@ Topos is the Latere agent control plane. Use these commands to list,
 inspect, and (in future releases) create and manage agent runs.
 
 Authentication: Topos uses the same bearer token as the rest of the
-Latere CLI, stored at ~/.config/latere/token.json. Run 'latere auth
-login' to authenticate.
+Latere CLI, stored at ~/.config/latere/token.json.
+Run 'latere auth login' to authenticate.
 
-Local development: When the Topos server runs with TOPOS_DEV_AUTH=true
-and TOPOS_DEV_TOKEN=<secret>, store the matching secret token via:
+Local development: when the Topos server runs with TOPOS_DEV_AUTH=true
+and TOPOS_DEV_TOKEN=<secret>, set TOPOS_TOKEN=<secret> to use that bearer
+directly (no login, no token file):
 
-  latere auth login --token <secret>
+  TOPOS_API_URL=http://localhost:8080 TOPOS_TOKEN=<secret> latere topos agents list
 
 The base URL defaults to https://topos.latere.ai and can be overridden
 by the TOPOS_API_URL environment variable or by --api-url on any
@@ -252,11 +253,10 @@ Authorization header. The response lists agents owned by the token's
 subject (or all agents for admin tokens).
 
 For local development against a Topos server running with
-TOPOS_DEV_AUTH=true and TOPOS_DEV_TOKEN=<secret>, store the matching
-dev token via 'latere auth login --token <secret>', then run this
-command against the local server:
+TOPOS_DEV_AUTH=true and TOPOS_DEV_TOKEN=<secret>, set TOPOS_TOKEN to the
+matching dev token to authenticate directly:
 
-  TOPOS_API_URL=http://localhost:8080 latere topos agents list`,
+  TOPOS_API_URL=http://localhost:8080 TOPOS_TOKEN=<secret> latere topos agents list`,
 		Example: `  latere topos agents list
   latere topos agents list --json
   TOPOS_API_URL=http://localhost:8080 latere topos agents list`,

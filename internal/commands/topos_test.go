@@ -56,7 +56,7 @@ func TestToposHelpText(t *testing.T) {
 			want: []string{
 				"List agents registered on the Topos control plane.",
 				"TOPOS_API_URL",
-				"latere auth login --token",
+				"TOPOS_TOKEN",
 				"override Topos API base URL",
 			},
 		},
@@ -317,6 +317,31 @@ func TestToposRequiresAuth(t *testing.T) {
 	if !strings.Contains(err.Error(), "latere auth login") {
 		t.Errorf("error doesn't mention auth login: %v", err)
 	}
+}
+
+// TestToposTokenEnvOverride verifies TOPOS_TOKEN supplies the bearer
+// directly for local development, bypassing the token file and login.
+func TestToposTokenEnvOverride(t *testing.T) {
+	// Ensure no token file is present for either subtest.
+	t.Setenv("LATERE_TOKEN_FILE", filepath.Join(t.TempDir(), "nonexistent.json"))
+
+	t.Run("TOPOS_TOKEN satisfies auth without a token file", func(t *testing.T) {
+		t.Setenv("TOPOS_TOKEN", "dev-secret")
+		c, err := toposClient("http://localhost:8080")
+		if err != nil {
+			t.Fatalf("toposClient: %v", err)
+		}
+		if c.Token != "dev-secret" {
+			t.Errorf("Token = %q, want dev-secret", c.Token)
+		}
+	})
+
+	t.Run("absent TOPOS_TOKEN still requires login", func(t *testing.T) {
+		t.Setenv("TOPOS_TOKEN", "")
+		if _, err := toposClient("http://localhost:8080"); err == nil {
+			t.Error("expected not-logged-in error without a token file or TOPOS_TOKEN")
+		}
+	})
 }
 
 // TestToposAgentsCreatePostsBody verifies 'latere topos agents create'
