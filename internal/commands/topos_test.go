@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // ---- wiring tests ----
@@ -87,9 +88,12 @@ func TestToposHelpText(t *testing.T) {
 
 // ---- client request / response tests ----
 
-// writeTokenFile writes a minimal token.json to dir and returns the
-// path. Uses LATERE_TOKEN_FILE so NewClient picks it up without
-// touching ~/.config/latere.
+// writeTokenFile writes a minimal token.json to dir and returns the path. It
+// sets LATERE_TOKEN_FILE (the Cella token NewClient reads) and ALSO writes an
+// auth-token.json under LATERE_AUTH_TOKEN_FILE carrying the same bearer, because
+// the Topos path (toposClient) authenticates with the auth root token, not the
+// Cella token. Isolating both keeps tests off ~/.config/latere — without the
+// auth-token isolation a developer's real login would leak into the assertions.
 func writeTokenFile(t *testing.T, dir, token string) string {
 	t.Helper()
 	p := filepath.Join(dir, "token.json")
@@ -97,6 +101,11 @@ func writeTokenFile(t *testing.T, dir, token string) string {
 	if err := os.WriteFile(p, []byte(data), 0o600); err != nil {
 		t.Fatalf("writeTokenFile: %v", err)
 	}
+	ap := filepath.Join(dir, "auth-token.json")
+	if err := os.WriteFile(ap, []byte(data), 0o600); err != nil {
+		t.Fatalf("writeTokenFile (auth): %v", err)
+	}
+	t.Setenv("LATERE_AUTH_TOKEN_FILE", ap)
 	return p
 }
 
@@ -303,6 +312,7 @@ func TestToposURLResolution(t *testing.T) {
 // not-logged-in error when no token file exists.
 func TestToposRequiresAuth(t *testing.T) {
 	t.Setenv("LATERE_TOKEN_FILE", filepath.Join(t.TempDir(), "nonexistent.json"))
+	t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(t.TempDir(), "nonexistent.json"))
 	t.Setenv("TOPOS_API_URL", "http://localhost:1") // unreachable; error is pre-flight
 
 	root := NewRoot("test")
@@ -319,11 +329,35 @@ func TestToposRequiresAuth(t *testing.T) {
 	}
 }
 
+// TestToposClientUsesAuthRootToken pins the Option-B behaviour: the Topos path
+// authenticates with the auth root token (aud=topos, run:agents), not the
+// Cella-audience token that `latere cella` uses. token.json and auth-token.json
+// carry different bearers; toposClient must pick the auth one.
+func TestToposClientUsesAuthRootToken(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LATERE_TOKEN_FILE", filepath.Join(dir, "token.json"))
+	if err := os.WriteFile(filepath.Join(dir, "token.json"),
+		[]byte(`{"access_token":"cella-token","token_type":"Bearer"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeAuthTokenFile(t, "auth-root-token", "", time.Time{})
+	t.Setenv("TOPOS_TOKEN", "")
+
+	c, err := toposClient("http://localhost:8080")
+	if err != nil {
+		t.Fatalf("toposClient: %v", err)
+	}
+	if c.Token != "auth-root-token" {
+		t.Fatalf("Token = %q, want the auth root token (not the cella token)", c.Token)
+	}
+}
+
 // TestToposTokenEnvOverride verifies TOPOS_TOKEN supplies the bearer
 // directly for local development, bypassing the token file and login.
 func TestToposTokenEnvOverride(t *testing.T) {
 	// Ensure no token file is present for either subtest.
 	t.Setenv("LATERE_TOKEN_FILE", filepath.Join(t.TempDir(), "nonexistent.json"))
+	t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(t.TempDir(), "nonexistent.json"))
 
 	t.Run("TOPOS_TOKEN satisfies auth without a token file", func(t *testing.T) {
 		t.Setenv("TOPOS_TOKEN", "dev-secret")

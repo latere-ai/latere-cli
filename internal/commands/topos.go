@@ -1,9 +1,12 @@
 package commands
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -334,19 +337,63 @@ func resolveToposURL(flagURL string) string {
 
 // toposClient builds an authenticated API client pointed at the Topos
 // control plane. For local development, TOPOS_TOKEN overrides the saved
-// token file with a static bearer, so a server running with
-// TOPOS_DEV_AUTH=true + TOPOS_DEV_TOKEN can be reached in one step
-// without `latere auth login` (which validates against the cloud auth
-// service and so rejects a local dev token).
+// token with a static bearer, so a server running with TOPOS_DEV_AUTH=true +
+// TOPOS_DEV_TOKEN can be reached in one step without `latere auth login`.
+//
+// Against production, Topos validates an auth-issued, topos-audience bearer
+// carrying run:agents. That is the retained auth root token (which
+// `latere auth login` now requests run:agents and the topos audience for),
+// NOT the Cella-audience token `latere cella` uses — so the Topos path uses the
+// auth root token, refreshed when expired.
 func toposClient(apiURL string) (*api.Client, error) {
 	c := api.NewClient(resolveToposURL(apiURL))
 	if v := os.Getenv("TOPOS_TOKEN"); v != "" {
 		c.Token = v
+		return c, nil
 	}
-	if err := c.MustRequireAuth(); err != nil {
+	bearer, err := toposIdentityBearer()
+	if err != nil {
 		return nil, err
 	}
+	c.Token = bearer
 	return c, nil
+}
+
+// toposIdentityBearer returns the auth-issued bearer Topos accepts: the retained
+// auth root token, refreshed when within a minute of expiry. It mirrors Lux's
+// authIdentityToken but is kept separate so the Topos path has its own clear
+// error messages.
+func toposIdentityBearer() (string, error) {
+	authTok, err := api.LoadAuthToken()
+	if err != nil {
+		if errors.Is(err, api.ErrNoToken) {
+			return "", errors.New("not signed in for Topos; run `latere auth login` (it grants the run:agents scope Topos needs)")
+		}
+		return "", err
+	}
+	access := authTok.AccessToken
+	if authTok.RefreshToken != "" && !authTok.ExpiresAt.IsZero() &&
+		time.Now().After(authTok.ExpiresAt.Add(-60*time.Second)) {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		refreshed, rerr := refreshAuthToken(ctx, toposAuthBase(), authTok.RefreshToken)
+		if rerr != nil {
+			return "", fmt.Errorf("auth token expired and refresh failed (%v); run `latere auth login`", rerr)
+		}
+		access = refreshed.AccessToken
+	}
+	if access == "" {
+		return "", errors.New("no auth token on file; run `latere auth login`")
+	}
+	return access, nil
+}
+
+// toposAuthBase resolves the auth service base URL for token refresh.
+func toposAuthBase() string {
+	if v := strings.TrimRight(os.Getenv("AUTH_URL"), "/"); v != "" {
+		return v
+	}
+	return "https://auth.latere.ai"
 }
 
 func agentPath(id string) string {

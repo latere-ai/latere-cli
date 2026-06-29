@@ -698,7 +698,7 @@ func refreshAuthToken(ctx context.Context, authBase, refreshToken string) (api.T
 	client := oidc.New(oidc.Config{
 		AuthURL:  authBase,
 		ClientID: "latere-cli",
-		Scopes:   []string{"openid", "email", "profile", "offline_access", "llm.read", "llm.invoke", "llm.serve"},
+		Scopes:   []string{"openid", "email", "profile", "offline_access", "llm.read", "llm.invoke", "llm.serve", "run:agents"},
 	})
 	if client == nil {
 		return api.Token{}, errors.New("oidc: missing AuthURL or ClientID")

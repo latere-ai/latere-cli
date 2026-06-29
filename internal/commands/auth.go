@@ -274,7 +274,7 @@ flow and store an access token directly.`,
 	f.StringVar(&apiURL, "api-url", "", "override Cella API base URL (default https://cella.latere.ai)")
 	f.StringVar(&authURL, "auth-url", "", "override auth base URL (default https://auth.latere.ai)")
 	f.StringVar(&clientID, "client-id", "latere-cli", "OAuth client_id used for the device-code request")
-	f.StringVar(&scopes, "scopes", "openid email profile offline_access read:sandbox write:sandbox exec:sandbox attach:sandbox llm.read llm.invoke llm.serve",
+	f.StringVar(&scopes, "scopes", "openid email profile offline_access read:sandbox write:sandbox exec:sandbox attach:sandbox llm.read llm.invoke llm.serve run:agents",
 		"space-delimited scope list")
 	f.BoolVar(&personal, "personal", false, "issue the CLI token for personal cellas")
 	f.StringVar(&orgID, "org-id", "", "issue the CLI token for this organization id")
