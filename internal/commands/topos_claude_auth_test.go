@@ -100,6 +100,8 @@ func TestBuildLocalModelUsesStoredClaudeLogin(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN_AUTO", "")
 	t.Setenv("LATERE_CLAUDE_TOKEN_FILE", filepath.Join(t.TempDir(), "claude.json"))
 	t.Setenv("LATERE_TOPOS_PROVIDER_FILE", filepath.Join(t.TempDir(), "provider.json"))
+	// No latere/Lux token, so the legacy Claude-login fallback is exercised.
+	t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(t.TempDir(), "auth.json"))
 	// A valid stored login (far-future expiry) → buildLocalModel returns a model.
 	_ = saveClaudeToken(claudeToken{AccessToken: "sk-ant-oat-stored", ExpiresAt: time.Now().Add(time.Hour)})
 	m, err := buildLocalModel(context.Background(), "")

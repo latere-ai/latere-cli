@@ -11,6 +11,9 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"latere.ai/x/topos/models/anthropic"
+
+	"github.com/latere-ai/latere-cli/internal/api"
 )
 
 func TestBuildLocalModelFromProviderConfig(t *testing.T) {
@@ -18,6 +21,7 @@ func TestBuildLocalModelFromProviderConfig(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN_AUTO", "")
 	t.Setenv("LATERE_CLAUDE_TOKEN_FILE", filepath.Join(t.TempDir(), "claude.json"))
+	t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(t.TempDir(), "auth.json"))
 	cfgPath := filepath.Join(t.TempDir(), "provider.json")
 	t.Setenv("LATERE_TOPOS_PROVIDER_FILE", cfgPath)
 
@@ -43,6 +47,36 @@ func TestBuildLocalModelFromProviderConfig(t *testing.T) {
 	}
 }
 
+// TestBuildLocalModelDefaultsToLux is the real 429 fix: once signed in to
+// latere, --local routes through Lux (keyless, billed to the login) instead of
+// the shared, rate-limited CLAUDE_CODE_OAUTH_TOKEN. Lux must win over that
+// ambient token; we tell them apart by the requested model id (the Lux path
+// pins luxDefaultModel, the ambient path uses the adapter's own default).
+func TestBuildLocalModelDefaultsToLux(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat-ambient-shared")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN_AUTO", "")
+	t.Setenv("LATERE_CLAUDE_TOKEN_FILE", filepath.Join(t.TempDir(), "claude.json"))
+	t.Setenv("LATERE_TOPOS_PROVIDER_FILE", filepath.Join(t.TempDir(), "provider.json"))
+	t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(t.TempDir(), "auth.json"))
+
+	// Signed in to latere → Lux is the default, overriding the ambient token.
+	if err := api.SaveAuthToken(api.Token{AccessToken: "latere-access-token"}); err != nil {
+		t.Fatal(err)
+	}
+	m, err := buildLocalModel(context.Background(), "")
+	if err != nil || m == nil {
+		t.Fatalf("signed in → Lux model, got (%v, %v)", m, err)
+	}
+	if got := m.(*anthropic.Adapter).Model(); got != luxDefaultModel {
+		t.Fatalf("model = %q, want Lux default %q (Lux did not win over the ambient token)", got, luxDefaultModel)
+	}
+	// An explicit --model is honored on the Lux path.
+	if m, _ := buildLocalModel(context.Background(), "claude-haiku-4-5-20251001"); m.(*anthropic.Adapter).Model() != "claude-haiku-4-5-20251001" {
+		t.Fatalf("--model override not applied on the Lux path")
+	}
+}
+
 // TestProviderConfigBeatsAmbientClaudeToken is the 429 fix: a user who picked a
 // provider (Ollama / API key) to escape Claude Code's shared, rate-limited token
 // must get that provider even when CLAUDE_CODE_OAUTH_TOKEN is set in their env.
@@ -52,6 +86,8 @@ func TestProviderConfigBeatsAmbientClaudeToken(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN_AUTO", "")
 	t.Setenv("LATERE_CLAUDE_TOKEN_FILE", filepath.Join(t.TempDir(), "claude.json"))
 	t.Setenv("LATERE_TOPOS_PROVIDER_FILE", filepath.Join(t.TempDir(), "provider.json"))
+	// No latere/Lux token, so the ambient-token fallback path is exercised.
+	t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(t.TempDir(), "auth.json"))
 
 	// The explicit Ollama choice must win over the ambient Claude token.
 	if err := saveProviderConfig(providerConfig{Provider: "ollama", Model: "llama3"}); err != nil {
