@@ -90,11 +90,11 @@ func TestBuildLocalModelCredentials(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN_AUTO", "")
-	if _, err := buildLocalModel(""); err == nil {
+	if _, err := buildLocalModel(context.Background(), ""); err == nil {
 		t.Fatal("expected an error with no credentials")
 	}
 	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
-	if m, err := buildLocalModel(""); err != nil || m == nil {
+	if m, err := buildLocalModel(context.Background(), ""); err != nil || m == nil {
 		t.Fatalf("buildLocalModel with API key = (%v, %v)", m, err)
 	}
 }

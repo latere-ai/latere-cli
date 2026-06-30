@@ -101,9 +101,29 @@ session or start a new one; it signs you in on first use.`,
 	cmd.Flags().StringVar(&model, "model", "", "model name for --local (default: the adapter's default)")
 	cmd.Flags().StringVarP(&print, "print", "p", "", "with --local: run this one prompt, stream the result, and exit")
 	cmd.Flags().StringVar(&apiURL, "api-url", "", "override the Topos API base URL")
+	cmd.AddCommand(newToposLoginCmd())
 	cmd.AddCommand(newToposAgentsCmd())
 	cmd.AddCommand(newToposSessionCmd())
 	return cmd
+}
+
+// newToposLoginCmd implements `latere topos login`: the Claude OAuth login the
+// local agent uses for its model credential.
+func newToposLoginCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "login",
+		Short: "Sign in to Claude for the local agent (latere topos --local).",
+		Long: `Sign in to Claude via OAuth and store the token for 'latere topos --local'.
+
+Opens your browser to authorize, then asks you to paste the code shown. The token
+is stored at ~/.config/latere/claude.json and refreshed automatically. This is a
+dedicated token, so the local agent does not share (or get rate-limited with)
+your Claude Code session.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runClaudeLogin(cmd.Context())
+		},
+	}
 }
 
 // ---- agents subgroup ----

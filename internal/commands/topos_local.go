@@ -29,7 +29,7 @@ Use the tools to read, search, edit, and run commands against their real files. 
 // tools execute directly on your files. No control plane, no Cella, no login.
 // With oneShot set it runs a single prompt and exits; otherwise it is a REPL.
 func runToposLocal(ctx context.Context, dir, modelName, oneShot string) error {
-	brain, err := buildLocalModel(modelName)
+	brain, err := buildLocalModel(ctx, modelName)
 	if err != nil {
 		return err
 	}
@@ -93,7 +93,7 @@ func runToposLocal(ctx context.Context, dir, modelName, oneShot string) error {
 
 // buildLocalModel builds the Anthropic model from a local credential: an API key
 // (ANTHROPIC_API_KEY) or a Claude Code OAuth token (CLAUDE_CODE_OAUTH_TOKEN).
-func buildLocalModel(modelName string) (models.Model, error) {
+func buildLocalModel(ctx context.Context, modelName string) (models.Model, error) {
 	var opts []anthropic.Option
 	if modelName != "" {
 		opts = append(opts, anthropic.WithModel(modelName))
@@ -108,7 +108,13 @@ func buildLocalModel(modelName string) (models.Model, error) {
 			return anthropic.New(tok, "", append(opts, anthropic.WithOAuthToken())...), nil
 		}
 	}
-	return nil, errors.New("no model credential: set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN")
+	// Our own Claude OAuth login (latere topos login), refreshed as needed.
+	if tok, err := claudeOAuthBearer(ctx); err != nil {
+		return nil, err
+	} else if tok != "" {
+		return anthropic.New(tok, "", append(opts, anthropic.WithOAuthToken())...), nil
+	}
+	return nil, errors.New("no Claude credential — run `latere topos login`, or set ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN")
 }
 
 // renderLocalEvent streams the run to the terminal: assistant text token by
