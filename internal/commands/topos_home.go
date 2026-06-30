@@ -14,17 +14,15 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"golang.org/x/term"
-
-	"github.com/latere-ai/latere-cli/internal/api"
 )
 
 // defaultLoginScopes is the scope set `latere topos` requests when it signs a
 // user in (mirrors `latere auth login`); run:agents lets the token drive Topos.
 const defaultLoginScopes = "openid email profile offline_access read:sandbox write:sandbox exec:sandbox attach:sandbox llm.read llm.invoke llm.serve run:agents read:agents write:agents"
 
-// runToposHome is the `latere topos` landing experience: it signs the user in if
-// needed, then loops on the home screen — pick a session to resume, or an agent
-// to start a new one — until they quit.
+// runToposHome is the `latere topos` landing experience: sign in if needed, then
+// loop on the home screen — start a new session, or resume one — until quit. A
+// session is just the agent loop running as you; there is no agent to create.
 func runToposHome(ctx context.Context, apiURL string) error {
 	if err := ensureToposLogin(ctx, apiURL); err != nil {
 		return err
@@ -38,24 +36,18 @@ func runToposHome(ctx context.Context, apiURL string) error {
 		if err := c.GetJSON(ctx, "/v1/sessions", &sresp); err != nil {
 			return err
 		}
-		var aresp listAgentsResponse
-		if err := c.GetJSON(ctx, "/v1/agents", &aresp); err != nil {
-			return err
-		}
 
-		// Non-interactive terminal (piped/CI): print a plain summary instead of a
-		// TUI that needs a TTY.
+		// Non-interactive terminal (piped/CI): print a plain summary.
 		if !term.IsTerminal(int(os.Stdout.Fd())) {
-			return printHomeText(sresp.Sessions, aresp.Agents)
+			return printHomeText(sresp.Sessions)
 		}
 
-		p := tea.NewProgram(newHomeModel(sresp.Sessions, aresp.Agents), tea.WithContext(ctx), tea.WithAltScreen())
+		p := tea.NewProgram(newHomeModel(sresp.Sessions), tea.WithContext(ctx), tea.WithAltScreen())
 		fm, err := p.Run()
 		if err != nil {
 			return err
 		}
-		res := fm.(homeModel).result
-		switch res.action {
+		switch res := fm.(homeModel).result; res.action {
 		case homeQuit:
 			return nil
 		case homeRefresh:
@@ -65,17 +57,9 @@ func runToposHome(ctx context.Context, apiURL string) error {
 				return err
 			}
 		case homeStart:
-			agentID := res.agentID
-			if agentID == "" {
-				// The "New session" entry: start on a zero-config default agent,
-				// creating it the first time so a brand-new user needs no setup.
-				agentID, err = ensureDefaultAgent(ctx, c)
-				if err != nil {
-					return err
-				}
-			}
+			// Start an ephemeral, owner-scoped session: no agent_id, no setup.
 			var created interactiveSessionDTO
-			if err := c.PostJSON(ctx, "/v1/sessions", map[string]string{"agent_id": agentID}, &created); err != nil {
+			if err := c.PostJSON(ctx, "/v1/sessions", map[string]string{}, &created); err != nil {
 				return err
 			}
 			if err := runInteractiveSession(ctx, c, created.ID, false); err != nil {
@@ -102,23 +86,15 @@ func ensureToposLogin(ctx context.Context, apiURL string) error {
 	})
 }
 
-// printHomeText is the non-TTY fallback: a plain listing of sessions + agents.
-func printHomeText(sessions []interactiveSessionDTO, agents []agentDTO) error {
-	if len(sessions) == 0 && len(agents) == 0 {
-		fmt.Fprintln(os.Stdout, "No agents or sessions yet.")
+// printHomeText is the non-TTY fallback: a plain listing of sessions.
+func printHomeText(sessions []interactiveSessionDTO) error {
+	if len(sessions) == 0 {
+		fmt.Fprintln(os.Stdout, "No sessions yet. Run `latere topos` in a terminal to start one.")
 		return nil
 	}
-	if len(sessions) > 0 {
-		fmt.Fprintln(os.Stdout, "Sessions:")
-		for _, s := range sessions {
-			fmt.Fprintf(os.Stdout, "  %s  %-16s  %s\n", s.ID, friendlyStatus(s.Status), s.AgentID) //nolint:errcheck
-		}
-	}
-	if len(agents) > 0 {
-		fmt.Fprintln(os.Stdout, "Agents:")
-		for _, a := range agents {
-			fmt.Fprintf(os.Stdout, "  %s  %s\n", a.ID, a.DisplayName) //nolint:errcheck
-		}
+	fmt.Fprintln(os.Stdout, "Sessions:")
+	for _, s := range sessions {
+		fmt.Fprintf(os.Stdout, "  %s  %s\n", s.ID, friendlyStatus(s.Status)) //nolint:errcheck
 	}
 	return nil
 }
@@ -129,29 +105,27 @@ type homeAction int
 const (
 	homeQuit homeAction = iota
 	homeRefresh
-	homeAttach // open an existing session (homeResult.sessionID)
-	homeStart  // start a new session on an agent (homeResult.agentID)
+	homeAttach // resume an existing session (homeResult.sessionID)
+	homeStart  // start a new ephemeral session
 )
 
 type homeResult struct {
 	action    homeAction
 	sessionID string
-	agentID   string
 }
 
-// homeRow is one selectable line: an existing session or an agent to start.
+// homeRow is one selectable line: the "new session" action, or a session to
+// resume.
 type homeRow struct {
-	isAgent bool
-	id      string // session id or agent id
-	title   string // agent name
-	detail  string // status / id, shown dim
-	group   string // section heading this row belongs to
+	newSession bool
+	sessionID  string
+	title      string
+	detail     string // shown dim
+	group      string // section heading
 }
 
-// homeModel is the `latere topos` landing screen: a single navigable list of
-// sessions (grouped by what they need) and agents you can start. It is a picker:
-// it exits with a homeResult the command acts on, so it composes with the
-// session UI without nesting bubbletea programs.
+// homeModel is the `latere topos` landing screen: start a new session, or resume
+// one. It is a picker: it exits with a homeResult the command acts on.
 type homeModel struct {
 	rows   []homeRow
 	cursor int
@@ -160,20 +134,9 @@ type homeModel struct {
 	height int
 }
 
-// buildHomeRows turns sessions + agents into grouped, ordered rows. Sessions are
-// grouped by urgency (needs input, running, recent); agents follow.
-func buildHomeRows(sessions []interactiveSessionDTO, agents []agentDTO) []homeRow {
-	name := map[string]string{}
-	for _, a := range agents {
-		name[a.ID] = a.DisplayName
-	}
-	agentLabel := func(id string) string {
-		if n := name[id]; n != "" {
-			return n
-		}
-		return id
-	}
-
+// buildHomeRows puts "New session" first (the primary action), then sessions
+// grouped by what they need (input, running, recent).
+func buildHomeRows(sessions []interactiveSessionDTO) []homeRow {
 	rank := func(s string) int {
 		switch s {
 		case "awaiting_approval":
@@ -204,52 +167,14 @@ func buildHomeRows(sessions []interactiveSessionDTO, agents []agentDTO) []homeRo
 		return ss[i].CreatedAt > ss[j].CreatedAt
 	})
 
-	var rows []homeRow
+	rows := []homeRow{{newSession: true, title: "New session", detail: "start coding", group: "Start"}}
 	for _, s := range ss {
 		rows = append(rows, homeRow{
-			id: s.ID, title: agentLabel(s.AgentID),
-			detail: friendlyStatus(s.Status) + "  " + shortID(s.ID),
-			group:  groupOf(s.Status),
-		})
-	}
-	// Always offer a one-tap new session on a default assistant (id "" is the
-	// sentinel the command resolves via ensureDefaultAgent), so the home screen
-	// is never a dead-end even with zero agents.
-	rows = append(rows, homeRow{
-		isAgent: true, id: "", title: "New session",
-		detail: "default assistant", group: "Start a new session",
-	})
-	for _, a := range agents {
-		rows = append(rows, homeRow{
-			isAgent: true, id: a.ID, title: a.DisplayName,
-			detail: a.Kind, group: "Start a new session",
+			sessionID: s.ID, title: "Session",
+			detail: friendlyStatus(s.Status) + "  " + shortID(s.ID), group: groupOf(s.Status),
 		})
 	}
 	return rows
-}
-
-// defaultAgentName is the display name of the zero-config assistant the CLI
-// provisions so a new user can start a session without creating an agent first.
-const defaultAgentName = "Assistant"
-
-// ensureDefaultAgent returns the id of the default assistant, creating it the
-// first time. Idempotent: it reuses an existing agent named defaultAgentName.
-func ensureDefaultAgent(ctx context.Context, c *api.Client) (string, error) {
-	var list listAgentsResponse
-	if err := c.GetJSON(ctx, "/v1/agents", &list); err != nil {
-		return "", err
-	}
-	for _, a := range list.Agents {
-		if a.DisplayName == defaultAgentName {
-			return a.ID, nil
-		}
-	}
-	var created agentDTO
-	if err := c.PostJSON(ctx, "/v1/agents",
-		createAgentRequest{DisplayName: defaultAgentName, Kind: "assistant"}, &created); err != nil {
-		return "", err
-	}
-	return created.ID, nil
 }
 
 func friendlyStatus(s string) string {
@@ -269,8 +194,8 @@ func friendlyStatus(s string) string {
 	}
 }
 
-func newHomeModel(sessions []interactiveSessionDTO, agents []agentDTO) homeModel {
-	return homeModel{rows: buildHomeRows(sessions, agents), width: 80, height: 24}
+func newHomeModel(sessions []interactiveSessionDTO) homeModel {
+	return homeModel{rows: buildHomeRows(sessions), width: 80, height: 24}
 }
 
 func (m homeModel) Init() tea.Cmd { return nil }
@@ -298,10 +223,10 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter":
 			if m.cursor < len(m.rows) {
 				row := m.rows[m.cursor]
-				if row.isAgent {
-					m.result = homeResult{action: homeStart, agentID: row.id}
+				if row.newSession {
+					m.result = homeResult{action: homeStart}
 				} else {
-					m.result = homeResult{action: homeAttach, sessionID: row.id}
+					m.result = homeResult{action: homeAttach, sessionID: row.sessionID}
 				}
 				return m, tea.Quit
 			}
@@ -319,13 +244,7 @@ var (
 
 func (m homeModel) View() string {
 	var b strings.Builder
-	b.WriteString(homeTitle.Render("Topos") + "  " + homeDim.Render("your agent sessions") + "\n\n")
-
-	if len(m.rows) == 0 {
-		b.WriteString(homeDim.Render("No agents or sessions yet.\n"))
-		b.WriteString("\n" + homeDim.Render("[r] refresh   [q] quit") + "\n")
-		return b.String()
-	}
+	b.WriteString(homeTitle.Render("Topos") + "  " + homeDim.Render("your coding sessions") + "\n\n")
 
 	lastGroup := ""
 	for i, row := range m.rows {
@@ -337,14 +256,14 @@ func (m homeModel) View() string {
 			lastGroup = row.group
 		}
 		cursor := "  "
-		line := "  " + row.title + "   " + homeDim.Render(row.detail)
+		title := row.title
 		if i == m.cursor {
 			cursor = "▸ "
-			line = homeSel.Render("  "+row.title) + "   " + homeDim.Render(row.detail)
+			title = homeSel.Render(row.title)
 		}
-		b.WriteString(cursor + strings.TrimPrefix(line, "  ") + "\n")
+		b.WriteString(cursor + title + "   " + homeDim.Render(row.detail) + "\n")
 	}
 
-	b.WriteString("\n" + homeDim.Render("[enter] open / start   [↑↓] move   [r] refresh   [q] quit") + "\n")
+	b.WriteString("\n" + homeDim.Render("[enter] open   [↑↓] move   [r] refresh   [q] quit") + "\n")
 	return b.String()
 }
