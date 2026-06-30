@@ -14,11 +14,13 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"golang.org/x/term"
+
+	"github.com/latere-ai/latere-cli/internal/api"
 )
 
 // defaultLoginScopes is the scope set `latere topos` requests when it signs a
 // user in (mirrors `latere auth login`); run:agents lets the token drive Topos.
-const defaultLoginScopes = "openid email profile offline_access read:sandbox write:sandbox exec:sandbox attach:sandbox llm.read llm.invoke llm.serve run:agents"
+const defaultLoginScopes = "openid email profile offline_access read:sandbox write:sandbox exec:sandbox attach:sandbox llm.read llm.invoke llm.serve run:agents read:agents write:agents"
 
 // runToposHome is the `latere topos` landing experience: it signs the user in if
 // needed, then loops on the home screen — pick a session to resume, or an agent
@@ -63,8 +65,17 @@ func runToposHome(ctx context.Context, apiURL string) error {
 				return err
 			}
 		case homeStart:
+			agentID := res.agentID
+			if agentID == "" {
+				// The "New session" entry: start on a zero-config default agent,
+				// creating it the first time so a brand-new user needs no setup.
+				agentID, err = ensureDefaultAgent(ctx, c)
+				if err != nil {
+					return err
+				}
+			}
 			var created interactiveSessionDTO
-			if err := c.PostJSON(ctx, "/v1/sessions", map[string]string{"agent_id": res.agentID}, &created); err != nil {
+			if err := c.PostJSON(ctx, "/v1/sessions", map[string]string{"agent_id": agentID}, &created); err != nil {
 				return err
 			}
 			if err := runInteractiveSession(ctx, c, created.ID, false); err != nil {
@@ -201,6 +212,13 @@ func buildHomeRows(sessions []interactiveSessionDTO, agents []agentDTO) []homeRo
 			group:  groupOf(s.Status),
 		})
 	}
+	// Always offer a one-tap new session on a default assistant (id "" is the
+	// sentinel the command resolves via ensureDefaultAgent), so the home screen
+	// is never a dead-end even with zero agents.
+	rows = append(rows, homeRow{
+		isAgent: true, id: "", title: "New session",
+		detail: "default assistant", group: "Start a new session",
+	})
 	for _, a := range agents {
 		rows = append(rows, homeRow{
 			isAgent: true, id: a.ID, title: a.DisplayName,
@@ -208,6 +226,30 @@ func buildHomeRows(sessions []interactiveSessionDTO, agents []agentDTO) []homeRo
 		})
 	}
 	return rows
+}
+
+// defaultAgentName is the display name of the zero-config assistant the CLI
+// provisions so a new user can start a session without creating an agent first.
+const defaultAgentName = "Assistant"
+
+// ensureDefaultAgent returns the id of the default assistant, creating it the
+// first time. Idempotent: it reuses an existing agent named defaultAgentName.
+func ensureDefaultAgent(ctx context.Context, c *api.Client) (string, error) {
+	var list listAgentsResponse
+	if err := c.GetJSON(ctx, "/v1/agents", &list); err != nil {
+		return "", err
+	}
+	for _, a := range list.Agents {
+		if a.DisplayName == defaultAgentName {
+			return a.ID, nil
+		}
+	}
+	var created agentDTO
+	if err := c.PostJSON(ctx, "/v1/agents",
+		createAgentRequest{DisplayName: defaultAgentName, Kind: "assistant"}, &created); err != nil {
+		return "", err
+	}
+	return created.ID, nil
 }
 
 func friendlyStatus(s string) string {
