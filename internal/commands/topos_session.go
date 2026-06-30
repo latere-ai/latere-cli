@@ -71,7 +71,7 @@ stdout (for scripts and pipelines), then exits — like 'claude -p'.`,
 			return runInteractiveSession(cmd.Context(), c, created.ID, false)
 		},
 	}
-	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Topos API base URL (overrides TOPOS_API_URL)")
+	cmd.Flags().StringVar(&apiURL, "api-url", "", "override the Topos API base URL")
 	cmd.Flags().StringVarP(&print, "print", "p", "", "non-interactive: run this prompt, stream the result, and exit")
 	return cmd
 }
@@ -106,7 +106,7 @@ exits.`,
 			return runInteractiveSession(cmd.Context(), c, args[0], readonly)
 		},
 	}
-	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Topos API base URL (overrides TOPOS_API_URL)")
+	cmd.Flags().StringVar(&apiURL, "api-url", "", "override the Topos API base URL")
 	cmd.Flags().StringVarP(&print, "print", "p", "", "non-interactive: send this prompt, stream the result, and exit")
 	cmd.Flags().BoolVar(&readonly, "readonly", false, "attach as a read-only viewer")
 	return cmd
@@ -146,7 +146,7 @@ func newToposSessionLsCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Topos API base URL (overrides TOPOS_API_URL)")
+	cmd.Flags().StringVar(&apiURL, "api-url", "", "override the Topos API base URL")
 	cmd.Flags().BoolVar(&jsonF, "json", false, "JSON output")
 	return cmd
 }

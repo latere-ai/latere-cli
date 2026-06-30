@@ -40,34 +40,17 @@ func TestToposHelpText(t *testing.T) {
 		{
 			name: "topos",
 			args: []string{"topos", "--help"},
-			// Long description text appears in topos --help output.
-			want: []string{
-				"Manage agents on the Topos control plane",
-				"topos.latere.ai",
-				"TOPOS_API_URL",
-				"latere auth login",
-				"TOPOS_DEV_AUTH",
-				"TOPOS_DEV_TOKEN",
-			},
+			want: []string{"Open Topos", "interactive app"},
 		},
 		{
 			name: "topos agents list",
 			args: []string{"topos", "agents", "list", "--help"},
-			// Long description text + flag descriptions appear in list --help output.
-			want: []string{
-				"List agents registered on the Topos control plane.",
-				"TOPOS_API_URL",
-				"TOPOS_TOKEN",
-				"override Topos API base URL",
-			},
+			want: []string{"List the agents you can run"},
 		},
 		{
 			name: "topos agents get",
 			args: []string{"topos", "agents", "get", "--help"},
-			want: []string{
-				"Fetch one agent by id",
-				"override Topos API base URL",
-			},
+			want: []string{"Fetch one agent by id"},
 		},
 	}
 
@@ -80,6 +63,12 @@ func TestToposHelpText(t *testing.T) {
 			for _, want := range tc.want {
 				if !strings.Contains(got, want) {
 					t.Fatalf("help output missing %q\noutput:\n%s", want, got)
+				}
+			}
+			// User-facing help must not leak developer/internal details.
+			for _, banned := range []string{"TOPOS_API_URL", "TOPOS_TOKEN", "TOPOS_DEV_AUTH", "TOPOS_DEV_TOKEN", "localhost:8080"} {
+				if strings.Contains(got, banned) {
+					t.Errorf("help output leaks dev detail %q\noutput:\n%s", banned, got)
 				}
 			}
 		})

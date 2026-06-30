@@ -66,31 +66,26 @@ type sessionResultDTO struct {
 // newToposCmd is the canonical `latere topos …` command group. Topos is
 // the Latere agent control plane at topos.latere.ai.
 func newToposCmd() *cobra.Command {
+	var apiURL string
 	cmd := &cobra.Command{
 		Use:   "topos",
-		Short: "Manage Topos agents and runs.",
-		Long: `Manage agents on the Topos control plane (topos.latere.ai).
+		Short: "Open Topos: your AI coding agents.",
+		Long: `Open Topos, the Latere agent platform.
 
-Topos is the Latere agent control plane. Use these commands to list,
-inspect, and (in future releases) create and manage agent runs.
+Run 'latere topos' with no arguments to open the interactive app: resume a
+running session, answer one that's waiting for you, or start a new one on any of
+your agents. It signs you in on first use.
 
-Authentication: Topos uses the same bearer token as the rest of the
-Latere CLI, stored at ~/.config/latere/token.json.
-Run 'latere auth login' to authenticate.
-
-Local development: when the Topos server runs with TOPOS_DEV_AUTH=true
-and TOPOS_DEV_TOKEN=<secret>, set TOPOS_TOKEN=<secret> to use that bearer
-directly (no login, no token file):
-
-  TOPOS_API_URL=http://localhost:8080 TOPOS_TOKEN=<secret> latere topos agents list
-
-The base URL defaults to https://topos.latere.ai and can be overridden
-by the TOPOS_API_URL environment variable or by --api-url on any
-subcommand.`,
-		Example: `  latere topos agents list
-  latere topos agents get agent_01hxy
-  TOPOS_API_URL=http://localhost:8080 latere topos agents list`,
+The subcommands below do the same things non-interactively, for scripts and CI.`,
+		Example: `  latere topos                              open the app
+  latere topos session start <agent>        start a session in your terminal
+  latere topos session start <agent> -p "summarise the repo"   one-shot, prints to stdout`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runToposHome(cmd.Context(), apiURL)
+		},
 	}
+	cmd.Flags().StringVar(&apiURL, "api-url", "", "override the Topos API base URL")
 	cmd.AddCommand(newToposAgentsCmd())
 	cmd.AddCommand(newToposSessionCmd())
 	return cmd
@@ -156,7 +151,7 @@ they are never sent by the client. Requires the write:agents scope.`,
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Topos API base URL (overrides TOPOS_API_URL)")
+	cmd.Flags().StringVar(&apiURL, "api-url", "", "override the Topos API base URL")
 	cmd.Flags().StringVar(&name, "name", "", "display name (required)")
 	cmd.Flags().StringVar(&kind, "kind", "", "agent kind, e.g. assistant|worker (required)")
 	cmd.Flags().StringVar(&instructions, "instructions", "", "custom system-prompt instructions")
@@ -203,9 +198,8 @@ func newToposSessionCreateCmd() *cobra.Command {
 POSTs the initial prompt to the agent's session endpoint; the run
 executes on the control plane and the result is printed when it
 completes. Requires the run:agents scope.`,
-		Example: `  latere topos session create agent_01hxy --prompt "Summarise README.md"
-  TOPOS_API_URL=http://localhost:8080 latere topos session create agent_01hxy -p "echo hi"`,
-		Args: cobra.ExactArgs(1),
+		Example: `  latere topos session create agent_01hxy --prompt "Summarise README.md"`,
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if prompt == "" {
 				return fmt.Errorf("--prompt is required")
@@ -227,7 +221,7 @@ completes. Requires the run:agents scope.`,
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Topos API base URL (overrides TOPOS_API_URL)")
+	cmd.Flags().StringVar(&apiURL, "api-url", "", "override the Topos API base URL")
 	cmd.Flags().StringVarP(&prompt, "prompt", "p", "", "initial prompt that starts the run (required)")
 	cmd.Flags().BoolVar(&jsonF, "json", false, "JSON output")
 	return cmd
@@ -254,20 +248,9 @@ func newToposAgentsListCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List agents visible to the current token.",
-		Long: `List agents registered on the Topos control plane.
-
-The bearer token from ~/.config/latere/token.json is sent as the
-Authorization header. The response lists agents owned by the token's
-subject (or all agents for admin tokens).
-
-For local development against a Topos server running with
-TOPOS_DEV_AUTH=true and TOPOS_DEV_TOKEN=<secret>, set TOPOS_TOKEN to the
-matching dev token to authenticate directly:
-
-  TOPOS_API_URL=http://localhost:8080 TOPOS_TOKEN=<secret> latere topos agents list`,
+		Long:  "List the agents you can run on Topos.",
 		Example: `  latere topos agents list
-  latere topos agents list --json
-  TOPOS_API_URL=http://localhost:8080 latere topos agents list`,
+  latere topos agents list --json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := toposClient(apiURL)
 			if err != nil {
@@ -288,7 +271,7 @@ matching dev token to authenticate directly:
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Topos API base URL (overrides TOPOS_API_URL)")
+	cmd.Flags().StringVar(&apiURL, "api-url", "", "override the Topos API base URL")
 	cmd.Flags().BoolVar(&jsonF, "json", false, "JSON output")
 	return cmd
 }
@@ -297,12 +280,11 @@ matching dev token to authenticate directly:
 func newToposAgentsGetCmd() *cobra.Command {
 	var apiURL string
 	cmd := &cobra.Command{
-		Use:   "get <id>",
-		Short: "Get a Topos agent by id.",
-		Long:  "Fetch one agent by id and print the full JSON response.",
-		Example: `  latere topos agents get agent_01hxy
-  latere topos agents get agent_01hxy --api-url http://localhost:8080`,
-		Args: cobra.ExactArgs(1),
+		Use:     "get <id>",
+		Short:   "Get a Topos agent by id.",
+		Long:    "Fetch one agent by id and print the full JSON response.",
+		Example: `  latere topos agents get agent_01hxy`,
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := toposClient(apiURL)
 			if err != nil {
@@ -315,7 +297,7 @@ func newToposAgentsGetCmd() *cobra.Command {
 			return printJSON(agent)
 		},
 	}
-	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Topos API base URL (overrides TOPOS_API_URL)")
+	cmd.Flags().StringVar(&apiURL, "api-url", "", "override the Topos API base URL")
 	return cmd
 }
 
