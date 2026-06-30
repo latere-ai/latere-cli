@@ -107,21 +107,24 @@ session or start a new one; it signs you in on first use.`,
 	return cmd
 }
 
-// newToposLoginCmd implements `latere topos login`: the Claude OAuth login the
-// local agent uses for its model credential.
+// newToposLoginCmd implements `latere topos login`: choose and configure the
+// model provider the local agent uses (Claude OAuth, an Anthropic API key, or
+// Ollama). Running it explicitly lets you switch providers even when a
+// CLAUDE_CODE_OAUTH_TOKEN is in your environment.
 func newToposLoginCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "login",
-		Short: "Sign in to Claude for the local agent (latere topos --local).",
-		Long: `Sign in to Claude via OAuth and store the token for 'latere topos --local'.
+		Short: "Choose the model provider for the local agent (latere topos --local).",
+		Long: `Choose and configure the model provider for 'latere topos --local'.
 
-Opens your browser to authorize, then asks you to paste the code shown. The token
-is stored at ~/.config/latere/claude.json and refreshed automatically. This is a
-dedicated token, so the local agent does not share (or get rate-limited with)
-your Claude Code session.`,
+Opens a picker: sign in with Claude (browser, no copy/paste), paste an Anthropic
+API key, or use Ollama (local models, no key). The choice is saved to
+~/.config/latere/topos-provider.json and takes precedence over any ambient
+CLAUDE_CODE_OAUTH_TOKEN, so you can escape Claude Code's shared rate limit by
+picking an API key (separate quota) or Ollama (fully local).`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runClaudeLogin(cmd.Context())
+			return runAuthPicker(cmd.Context())
 		},
 	}
 }

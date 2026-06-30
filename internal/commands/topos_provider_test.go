@@ -43,6 +43,31 @@ func TestBuildLocalModelFromProviderConfig(t *testing.T) {
 	}
 }
 
+// TestProviderConfigBeatsAmbientClaudeToken is the 429 fix: a user who picked a
+// provider (Ollama / API key) to escape Claude Code's shared, rate-limited token
+// must get that provider even when CLAUDE_CODE_OAUTH_TOKEN is set in their env.
+func TestProviderConfigBeatsAmbientClaudeToken(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat-ambient-shared")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN_AUTO", "")
+	t.Setenv("LATERE_CLAUDE_TOKEN_FILE", filepath.Join(t.TempDir(), "claude.json"))
+	t.Setenv("LATERE_TOPOS_PROVIDER_FILE", filepath.Join(t.TempDir(), "provider.json"))
+
+	// The explicit Ollama choice must win over the ambient Claude token.
+	if err := saveProviderConfig(providerConfig{Provider: "ollama", Model: "llama3"}); err != nil {
+		t.Fatal(err)
+	}
+	if m, err := buildLocalModel(context.Background(), ""); err != nil || m == nil {
+		t.Fatalf("config should override ambient token, got (%v, %v)", m, err)
+	}
+
+	// With no provider config, the ambient token is the fallback (still usable).
+	t.Setenv("LATERE_TOPOS_PROVIDER_FILE", filepath.Join(t.TempDir(), "empty.json"))
+	if m, err := buildLocalModel(context.Background(), ""); err != nil || m == nil {
+		t.Fatalf("ambient token fallback = (%v, %v)", m, err)
+	}
+}
+
 func TestProviderConfigRoundTrip(t *testing.T) {
 	t.Setenv("LATERE_TOPOS_PROVIDER_FILE", filepath.Join(t.TempDir(), "p.json"))
 	want := providerConfig{Provider: "anthropic", Method: "apikey", APIKey: "k", Model: "m"}

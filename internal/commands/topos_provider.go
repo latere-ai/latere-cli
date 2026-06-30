@@ -76,24 +76,35 @@ func buildLocalModel(ctx context.Context, modelName string) (models.Model, error
 		return nil
 	}
 
+	// 1. An explicit API key always wins.
 	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
 		return anthropic.New(key, "", anthOpts()...), nil
 	}
+
+	// 2. An explicit provider choice (the picker / `latere topos login`) wins over
+	// the AMBIENT CLAUDE_CODE_OAUTH_TOKEN env, so a user who picked Ollama or an
+	// API key to escape Claude Code's shared rate limit actually gets it.
+	if cfg, err := loadProviderConfig(); err == nil && cfg.Provider != "" {
+		return modelFromProviderConfig(ctx, cfg, modelName)
+	}
+
+	// 3. The ambient Claude Code OAuth token (shared with Claude Code; note this
+	// is the rate-limited subscription token).
 	for _, env := range []string{"CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN_AUTO"} {
 		if tok := os.Getenv(env); tok != "" {
 			return anthropic.New(tok, "", append(anthOpts(), anthropic.WithOAuthToken())...), nil
 		}
 	}
 
-	cfg, err := loadProviderConfig()
-	if err != nil {
-		// No provider config: fall back to a stored Claude OAuth login if present.
-		if tok, berr := claudeOAuthBearer(ctx); berr == nil && tok != "" {
-			return anthropic.New(tok, "", append(anthOpts(), anthropic.WithOAuthToken())...), nil
-		}
-		return nil, errNeedAuth
+	// 4. A stored Claude login with no provider config (legacy).
+	if tok, berr := claudeOAuthBearer(ctx); berr == nil && tok != "" {
+		return anthropic.New(tok, "", append(anthOpts(), anthropic.WithOAuthToken())...), nil
 	}
+	return nil, errNeedAuth
+}
 
+// modelFromProviderConfig builds the model for an explicit provider choice.
+func modelFromProviderConfig(ctx context.Context, cfg providerConfig, modelName string) (models.Model, error) {
 	model := modelName
 	if model == "" {
 		model = cfg.Model
@@ -101,16 +112,15 @@ func buildLocalModel(ctx context.Context, modelName string) (models.Model, error
 	switch cfg.Provider {
 	case "anthropic":
 		if cfg.Method == "apikey" && cfg.APIKey != "" {
-			opts := []anthropic.Option(nil)
+			var opts []anthropic.Option
 			if model != "" {
 				opts = append(opts, anthropic.WithModel(model))
 			}
 			return anthropic.New(cfg.APIKey, "", opts...), nil
 		}
-		// oauth (or unspecified): use the stored Claude login.
-		tok, berr := claudeOAuthBearer(ctx)
-		if berr != nil {
-			return nil, berr
+		tok, err := claudeOAuthBearer(ctx)
+		if err != nil {
+			return nil, err
 		}
 		if tok == "" {
 			return nil, errNeedAuth

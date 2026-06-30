@@ -138,11 +138,6 @@ func postClaudeToken(ctx context.Context, httpc *http.Client, body []byte) (clau
 	return t, nil
 }
 
-// runClaudeLogin drives the Claude OAuth login (loopback: no copy/paste).
-func runClaudeLogin(ctx context.Context) error {
-	return loopbackClaudeLogin(ctx)
-}
-
 // loopbackClaudeLogin runs the Claude OAuth flow with a localhost redirect, so
 // the browser hands the code back automatically — no copy/paste. It stores the
 // token and records the provider choice (anthropic / oauth).
