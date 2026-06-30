@@ -40,7 +40,7 @@ func TestToposHelpText(t *testing.T) {
 		{
 			name: "topos",
 			args: []string{"topos", "--help"},
-			want: []string{"Open Topos", "interactive app"},
+			want: []string{"agent platform", "--local"},
 		},
 		{
 			name: "topos agents list",

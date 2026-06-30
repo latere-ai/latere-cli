@@ -66,25 +66,40 @@ type sessionResultDTO struct {
 // newToposCmd is the canonical `latere topos …` command group. Topos is
 // the Latere agent control plane at topos.latere.ai.
 func newToposCmd() *cobra.Command {
-	var apiURL string
+	var (
+		apiURL string
+		local  bool
+		dir    string
+		model  string
+		print  string
+	)
 	cmd := &cobra.Command{
 		Use:   "topos",
-		Short: "Open Topos: your AI coding agents.",
-		Long: `Open Topos, the Latere agent platform.
+		Short: "Topos: the Latere agent platform.",
+		Long: `Topos is the Latere agent platform — run agents locally or on the hosted
+control plane.
 
-Run 'latere topos' with no arguments to open the interactive app: resume a
-running session, answer one that's waiting for you, or start a new one on any of
-your agents. It signs you in on first use.
+Run 'latere topos --local' to run an agent entirely on this machine: it works in
+your current directory with your real files, using your local model credential
+(ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN). No control plane, no login.
 
-The subcommands below do the same things non-interactively, for scripts and CI.`,
-		Example: `  latere topos                              open the app
-  latere topos session start <agent>        start a session in your terminal
-  latere topos session start <agent> -p "summarise the repo"   one-shot, prints to stdout`,
+Run 'latere topos' (no --local) to use the hosted control plane: resume a running
+session or start a new one; it signs you in on first use.`,
+		Example: `  latere topos --local                      run an agent here, on your files
+  latere topos --local -p "add a test for foo()"   one-shot, then exit
+  latere topos                              hosted: open the platform`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if local {
+				return runToposLocal(cmd.Context(), dir, model, print)
+			}
 			return runToposHome(cmd.Context(), apiURL)
 		},
 	}
+	cmd.Flags().BoolVar(&local, "local", false, "run the agent on this machine (no control plane), like Claude Code")
+	cmd.Flags().StringVar(&dir, "dir", ".", "working directory for --local (default: current directory)")
+	cmd.Flags().StringVar(&model, "model", "", "model name for --local (default: the adapter's default)")
+	cmd.Flags().StringVarP(&print, "print", "p", "", "with --local: run this one prompt, stream the result, and exit")
 	cmd.Flags().StringVar(&apiURL, "api-url", "", "override the Topos API base URL")
 	cmd.AddCommand(newToposAgentsCmd())
 	cmd.AddCommand(newToposSessionCmd())
