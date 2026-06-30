@@ -90,6 +90,9 @@ func TestBuildLocalModelCredentials(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN_AUTO", "")
+	// Isolate the on-disk config so a real login can't leak in.
+	t.Setenv("LATERE_CLAUDE_TOKEN_FILE", filepath.Join(t.TempDir(), "claude.json"))
+	t.Setenv("LATERE_TOPOS_PROVIDER_FILE", filepath.Join(t.TempDir(), "provider.json"))
 	if _, err := buildLocalModel(context.Background(), ""); err == nil {
 		t.Fatal("expected an error with no credentials")
 	}

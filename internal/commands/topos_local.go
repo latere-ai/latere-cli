@@ -16,7 +16,8 @@ import (
 	"latere.ai/x/topos"
 	"latere.ai/x/topos/harness/tools"
 	"latere.ai/x/topos/models"
-	"latere.ai/x/topos/models/anthropic"
+
+	"golang.org/x/term"
 )
 
 // localSystemPrompt is the default instruction for `latere topos --local`: a
@@ -30,6 +31,18 @@ Use the tools to read, search, edit, and run commands against their real files. 
 // With oneShot set it runs a single prompt and exits; otherwise it is a REPL.
 func runToposLocal(ctx context.Context, dir, modelName, oneShot string) error {
 	brain, err := buildLocalModel(ctx, modelName)
+	if errors.Is(err, errNeedAuth) {
+		// No credential yet. In an interactive terminal, show the provider picker
+		// and retry; otherwise (one-shot -p, or piped) fail with a clear message
+		// rather than launching a TUI with no TTY.
+		if oneShot != "" || !term.IsTerminal(int(os.Stdin.Fd())) {
+			return errors.New("no model credential — run `latere topos login`, or set ANTHROPIC_API_KEY")
+		}
+		if perr := runAuthPicker(ctx); perr != nil {
+			return perr
+		}
+		brain, err = buildLocalModel(ctx, modelName)
+	}
 	if err != nil {
 		return err
 	}
@@ -89,32 +102,6 @@ func runToposLocal(ctx context.Context, dir, modelName, oneShot string) error {
 			fmt.Fprintln(os.Stderr, "error:", err)
 		}
 	}
-}
-
-// buildLocalModel builds the Anthropic model from a local credential: an API key
-// (ANTHROPIC_API_KEY) or a Claude Code OAuth token (CLAUDE_CODE_OAUTH_TOKEN).
-func buildLocalModel(ctx context.Context, modelName string) (models.Model, error) {
-	var opts []anthropic.Option
-	if modelName != "" {
-		opts = append(opts, anthropic.WithModel(modelName))
-	}
-	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
-		return anthropic.New(key, "", opts...), nil
-	}
-	// CLAUDE_CODE_OAUTH_TOKEN and the _AUTO variant are the Claude Code OAuth
-	// tokens (prefix sk-ant-oat); both go on the Authorization: Bearer header.
-	for _, env := range []string{"CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN_AUTO"} {
-		if tok := os.Getenv(env); tok != "" {
-			return anthropic.New(tok, "", append(opts, anthropic.WithOAuthToken())...), nil
-		}
-	}
-	// Our own Claude OAuth login (latere topos login), refreshed as needed.
-	if tok, err := claudeOAuthBearer(ctx); err != nil {
-		return nil, err
-	} else if tok != "" {
-		return anthropic.New(tok, "", append(opts, anthropic.WithOAuthToken())...), nil
-	}
-	return nil, errors.New("no Claude credential — run `latere topos login`, or set ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN")
 }
 
 // renderLocalEvent streams the run to the terminal: assistant text token by

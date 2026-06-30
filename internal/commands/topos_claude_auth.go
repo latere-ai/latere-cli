@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -30,7 +31,6 @@ const (
 	// CLI integration (no secret; PKCE protects the exchange).
 	claudeOAuthClientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 	claudeAuthorizeURL  = "https://claude.ai/oauth/authorize"
-	claudeRedirectURI   = "https://console.anthropic.com/oauth/code/callback"
 	claudeScopes        = "org:create_api_key user:profile user:inference"
 )
 
@@ -96,37 +96,6 @@ func newPKCE() (pkce, error) {
 	return pkce{verifier: verifier, challenge: base64.RawURLEncoding.EncodeToString(sum[:])}, nil
 }
 
-// claudeAuthorizeURL builds the authorize URL for the manual-paste flow
-// (code=true makes the callback page display the code for the user to paste).
-func buildClaudeAuthorizeURL(p pkce) string {
-	q := url.Values{
-		"code":                  {"true"},
-		"client_id":             {claudeOAuthClientID},
-		"response_type":         {"code"},
-		"redirect_uri":          {claudeRedirectURI},
-		"scope":                 {claudeScopes},
-		"code_challenge":        {p.challenge},
-		"code_challenge_method": {"S256"},
-		"state":                 {p.verifier},
-	}
-	return claudeAuthorizeURL + "?" + q.Encode()
-}
-
-// exchangeClaudeCode trades the pasted "code#state" for tokens. The callback
-// page returns the authorization code and state joined by '#'.
-func exchangeClaudeCode(ctx context.Context, httpc *http.Client, pasted string, p pkce) (claudeToken, error) {
-	code, state, _ := strings.Cut(strings.TrimSpace(pasted), "#")
-	body, _ := json.Marshal(map[string]string{
-		"grant_type":    "authorization_code",
-		"code":          code,
-		"state":         state,
-		"client_id":     claudeOAuthClientID,
-		"redirect_uri":  claudeRedirectURI,
-		"code_verifier": p.verifier,
-	})
-	return postClaudeToken(ctx, httpc, body)
-}
-
 // refreshClaudeToken renews an expired access token using the refresh token.
 func refreshClaudeToken(ctx context.Context, httpc *http.Client, refresh string) (claudeToken, error) {
 	body, _ := json.Marshal(map[string]string{
@@ -169,32 +138,80 @@ func postClaudeToken(ctx context.Context, httpc *http.Client, body []byte) (clau
 	return t, nil
 }
 
-// runClaudeLogin drives the interactive login: open the browser, read the pasted
-// code, exchange it, and store the token.
+// runClaudeLogin drives the Claude OAuth login (loopback: no copy/paste).
 func runClaudeLogin(ctx context.Context) error {
+	return loopbackClaudeLogin(ctx)
+}
+
+// loopbackClaudeLogin runs the Claude OAuth flow with a localhost redirect, so
+// the browser hands the code back automatically — no copy/paste. It stores the
+// token and records the provider choice (anthropic / oauth).
+func loopbackClaudeLogin(ctx context.Context) error {
 	p, err := newPKCE()
 	if err != nil {
 		return err
 	}
-	authURL := buildClaudeAuthorizeURL(p)
-	fmt.Fprintln(os.Stderr, "Sign in to Claude to authorize the local agent:")
-	fmt.Fprintln(os.Stderr, "\n  "+authURL+"\n")
-	_ = openBrowser(authURL)
-	fmt.Fprint(os.Stderr, "Paste the code shown after you approve, then press Enter:\n> ")
-
-	var pasted string
-	if _, err := fmt.Fscanln(os.Stdin, &pasted); err != nil {
-		return fmt.Errorf("read code: %w", err)
-	}
-	tok, err := exchangeClaudeCode(ctx, &http.Client{Timeout: 30 * time.Second}, pasted, p)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		return err
+		return fmt.Errorf("claude login: open loopback: %w", err)
 	}
-	if err := saveClaudeToken(tok); err != nil {
-		return err
+	defer func() { _ = ln.Close() }()
+	redirectURI := fmt.Sprintf("http://localhost:%d/callback", ln.Addr().(*net.TCPAddr).Port)
+
+	q := url.Values{
+		"client_id":             {claudeOAuthClientID},
+		"response_type":         {"code"},
+		"redirect_uri":          {redirectURI},
+		"scope":                 {claudeScopes},
+		"code_challenge":        {p.challenge},
+		"code_challenge_method": {"S256"},
+		"state":                 {p.verifier},
 	}
-	fmt.Fprintln(os.Stderr, "Signed in to Claude. `latere topos --local` will use this token.")
-	return nil
+	authURL := claudeAuthorizeURL + "?" + q.Encode()
+
+	type result struct {
+		code, state string
+	}
+	resCh := make(chan result, 1)
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		qq := r.URL.Query()
+		if qq.Get("code") == "" {
+			http.Error(w, "missing code", http.StatusBadRequest)
+			return
+		}
+		_, _ = io.WriteString(w, "Signed in. You can close this tab and return to the terminal.")
+		resCh <- result{code: qq.Get("code"), state: qq.Get("state")}
+	})}
+	go func() { _ = srv.Serve(ln) }()
+	defer func() { _ = srv.Shutdown(context.Background()) }()
+
+	fmt.Fprintln(os.Stderr, "Opening your browser to sign in to Claude...")
+	fmt.Fprintln(os.Stderr, "If it doesn't open, visit:\n\n  "+authURL+"\n")
+	_ = openBrowser(authURL)
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case res := <-resCh:
+		body, _ := json.Marshal(map[string]string{
+			"grant_type":    "authorization_code",
+			"code":          res.code,
+			"state":         res.state,
+			"client_id":     claudeOAuthClientID,
+			"redirect_uri":  redirectURI,
+			"code_verifier": p.verifier,
+		})
+		tok, err := postClaudeToken(ctx, &http.Client{Timeout: 30 * time.Second}, body)
+		if err != nil {
+			return err
+		}
+		if err := saveClaudeToken(tok); err != nil {
+			return err
+		}
+		_ = saveProviderConfig(providerConfig{Provider: "anthropic", Method: "oauth"})
+		fmt.Fprintln(os.Stderr, "Signed in to Claude.")
+		return nil
+	}
 }
 
 // claudeOAuthBearer returns a usable Claude OAuth access token from the stored

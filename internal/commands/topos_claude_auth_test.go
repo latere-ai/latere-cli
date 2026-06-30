@@ -12,7 +12,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"path/filepath"
 	"testing"
 	"time"
@@ -32,33 +31,8 @@ func TestPKCEChallengeMatchesVerifier(t *testing.T) {
 	}
 }
 
-func TestBuildClaudeAuthorizeURL(t *testing.T) {
-	p := pkce{verifier: "ver", challenge: "chal"}
-	u, err := url.Parse(buildClaudeAuthorizeURL(p))
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	q := u.Query()
-	checks := map[string]string{
-		"client_id":             claudeOAuthClientID,
-		"response_type":         "code",
-		"code_challenge":        "chal",
-		"code_challenge_method": "S256",
-		"state":                 "ver",
-		"redirect_uri":          claudeRedirectURI,
-	}
-	for k, want := range checks {
-		if q.Get(k) != want {
-			t.Errorf("authorize URL %s = %q, want %q", k, q.Get(k), want)
-		}
-	}
-}
-
-func TestExchangeAndStoreClaudeToken(t *testing.T) {
-	var gotBody map[string]string
+func TestPostAndStoreClaudeToken(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		b, _ := io.ReadAll(r.Body)
-		_ = json.Unmarshal(b, &gotBody)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"access_token": "sk-ant-oat-new", "refresh_token": "rt-1", "expires_in": 3600,
 		})
@@ -69,23 +43,17 @@ func TestExchangeAndStoreClaudeToken(t *testing.T) {
 	defer func() { claudeTokenURL = old }()
 	t.Setenv("LATERE_CLAUDE_TOKEN_FILE", filepath.Join(t.TempDir(), "claude.json"))
 
-	tok, err := exchangeClaudeCode(context.Background(), srv.Client(), "AUTHCODE#STATEXYZ", pkce{verifier: "ver"})
+	tok, err := postClaudeToken(context.Background(), srv.Client(), []byte(`{"grant_type":"authorization_code"}`))
 	if err != nil {
-		t.Fatalf("exchange: %v", err)
-	}
-	// The pasted "code#state" is split correctly and the verifier is sent.
-	if gotBody["code"] != "AUTHCODE" || gotBody["state"] != "STATEXYZ" || gotBody["code_verifier"] != "ver" {
-		t.Fatalf("token request body = %v", gotBody)
+		t.Fatalf("postClaudeToken: %v", err)
 	}
 	if tok.AccessToken != "sk-ant-oat-new" || tok.RefreshToken != "rt-1" || tok.ExpiresAt.IsZero() {
 		t.Fatalf("token = %+v", tok)
 	}
-
 	if err := saveClaudeToken(tok); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	got, err := loadClaudeToken()
-	if err != nil || got.AccessToken != "sk-ant-oat-new" {
+	if got, err := loadClaudeToken(); err != nil || got.AccessToken != "sk-ant-oat-new" {
 		t.Fatalf("load = (%+v, %v)", got, err)
 	}
 }
@@ -131,6 +99,7 @@ func TestBuildLocalModelUsesStoredClaudeLogin(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN_AUTO", "")
 	t.Setenv("LATERE_CLAUDE_TOKEN_FILE", filepath.Join(t.TempDir(), "claude.json"))
+	t.Setenv("LATERE_TOPOS_PROVIDER_FILE", filepath.Join(t.TempDir(), "provider.json"))
 	// A valid stored login (far-future expiry) → buildLocalModel returns a model.
 	_ = saveClaudeToken(claudeToken{AccessToken: "sk-ant-oat-stored", ExpiresAt: time.Now().Add(time.Hour)})
 	m, err := buildLocalModel(context.Background(), "")
