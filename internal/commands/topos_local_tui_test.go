@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,35 @@ import (
 	"latere.ai/x/topos/harness/tools"
 	"latere.ai/x/topos/models/fake"
 )
+
+var ansiRE = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+// TestLocalTUIFrameLayout renders a full frame and asserts the structural
+// properties that can't be eyeballed in CI: no line overflows the terminal
+// width (the viewport horizontal-scrolls otherwise) and Markdown is actually
+// rendered (bold markers stripped), not shown raw.
+func TestLocalTUIFrameLayout(t *testing.T) {
+	m := newTestTUI(t)
+	m.turnVerb = "Churning"
+	m.Update(localEventMsg{ev: event(t, topos.EventTextDelta, textDeltaPayload{
+		Text: "A **bold** word and a paragraph long enough that it must wrap at the viewport width rather than running off the right edge of the terminal, plus a `code` span.",
+	})})
+	m.Update(localEventMsg{ev: event(t, "PreToolUse", preToolUsePayload{ToolCall: toolCall{Name: "bash", Input: json.RawMessage(`{"command":"go build ./..."}`)}})})
+	m.Update(localTurnDoneMsg{elapsed: 3 * time.Second})
+
+	frame := ansiRE.ReplaceAllString(m.View(), "")
+	for i, ln := range strings.Split(frame, "\n") {
+		if w := len([]rune(strings.TrimRight(ln, " "))); w > m.width {
+			t.Fatalf("line %d width %d exceeds terminal width %d: %q", i, w, m.width, ln)
+		}
+	}
+	if strings.Contains(frame, "**bold**") {
+		t.Fatal("Markdown not rendered: literal **bold** present in frame")
+	}
+	if !strings.Contains(frame, "❯ what") && !strings.Contains(frame, "Churning for 3s") {
+		t.Fatalf("frame missing expected content:\n%s", frame)
+	}
+}
 
 // newTestTUI builds a sized localTUI with a fake brain for driving Update.
 func newTestTUI(t *testing.T) *localTUI {

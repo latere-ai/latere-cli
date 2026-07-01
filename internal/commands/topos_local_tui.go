@@ -19,6 +19,8 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/glamour/ansi"
+	"github.com/charmbracelet/glamour/styles"
 	"github.com/charmbracelet/lipgloss"
 
 	"latere.ai/x/topos"
@@ -353,7 +355,11 @@ func (m *localTUI) appendNotice(styled string, isErr bool) {
 
 // footer is the settled "✻ <verb> for Ns" line shown after a turn completes.
 func (m *localTUI) footer(d time.Duration) string {
-	s := fmt.Sprintf("✻ %s for %ds", m.turnVerb, int(d.Seconds()))
+	verb := m.turnVerb
+	if verb == "" {
+		verb = "Worked"
+	}
+	s := fmt.Sprintf("✻ %s for %ds", verb, int(d.Seconds()))
 	if m.outTok > 0 {
 		s += fmt.Sprintf(" · ↓ %d tokens", m.outTok)
 	}
@@ -493,13 +499,24 @@ func (m *localTUI) layout() {
 	m.refresh()
 }
 
+// markdownStyle is the dark glamour style with the document margin zeroed, so
+// assistant text aligns flush under the ⏺ marker instead of being indented. An
+// explicit style (vs auto) also renders Markdown deterministically regardless of
+// terminal color detection.
+func markdownStyle() ansi.StyleConfig {
+	s := styles.DarkStyleConfig
+	zero := uint(0)
+	s.Document.Margin = &zero
+	return s
+}
+
 // setupGlamour (re)builds the Markdown renderer for the current width and
 // invalidates cached blocks so they re-wrap.
 func (m *localTUI) setupGlamour(w int) {
 	if w <= 0 || w == m.glamWidth {
 		return
 	}
-	if r, err := glamour.NewTermRenderer(glamour.WithAutoStyle(), glamour.WithWordWrap(w)); err == nil {
+	if r, err := glamour.NewTermRenderer(glamour.WithStyles(markdownStyle()), glamour.WithWordWrap(w)); err == nil {
 		m.glam, m.glamWidth = r, w
 	}
 	for i := range m.blocks {
