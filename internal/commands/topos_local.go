@@ -76,12 +76,19 @@ func runToposLocal(ctx context.Context, dir, modelName, oneShot string) error {
 	const sandboxID = "local"
 
 	render := &localRenderer{}
-	runner, err := topos.NewRunner(topos.Options{
-		Brain:    brain,
-		Sandbox:  sb,
-		Observer: render.render,
-	})
-	if err != nil {
+	// The runner is rebuilt when the model changes (/model), so it lives in a
+	// closure variable; curModel tracks what the header/status shows.
+	var runner *topos.Runner
+	var curModel string
+	rebuild := func(b models.Model) error {
+		rn, e := topos.NewRunner(topos.Options{Brain: b, Sandbox: sb, Observer: render.render})
+		if e != nil {
+			return e
+		}
+		runner, curModel = rn, modelString(b)
+		return nil
+	}
+	if err := rebuild(brain); err != nil {
 		return err
 	}
 
@@ -110,7 +117,7 @@ func runToposLocal(ctx context.Context, dir, modelName, oneShot string) error {
 
 	abs, _ := os.Getwd()
 	fmt.Printf("Topos (local) in %s\n", abs)
-	fmt.Printf("model: %s   ·   /model to switch, /help for commands, Ctrl+D to quit\n", modelString(brain))
+	fmt.Printf("model: %s   ·   /model to switch, /help for commands, Ctrl+D to quit\n", curModel)
 	sc := bufio.NewScanner(os.Stdin)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for {
@@ -123,8 +130,15 @@ func runToposLocal(ctx context.Context, dir, modelName, oneShot string) error {
 		if line == "" {
 			continue
 		}
+		if strings.HasPrefix(line, "/") {
+			if quit := handleLocalCommand(ctx, line, &curModel, rebuild); quit {
+				return nil
+			}
+			continue
+		}
 		if err := turn(line); err != nil {
-			fmt.Fprintln(os.Stderr, "error:", err)
+			render.closeText()
+			fmt.Fprintln(os.Stderr, styleErr.Render("error: "+err.Error()))
 		}
 	}
 }
