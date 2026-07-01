@@ -525,20 +525,14 @@ func (m *localTUI) View() string {
 	return lipgloss.JoinVertical(lipgloss.Left, m.headerView(), m.vp.View(), inputBox, m.statusView())
 }
 
-// toposLogo is the three-line brand mark shown at the left of the header (a
-// blocky "T"). Kept as a const so the art is easy to swap.
-const toposLogo = "█████\n  █\n  █"
-
 func (m *localTUI) headerView() string {
-	logo := lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true).Render(toposLogo)
-	info := lipgloss.JoinVertical(lipgloss.Left,
-		lipgloss.NewStyle().Bold(true).Render("Topos")+styleDim.Render("  local · v"+m.version),
-		styleDim.Render(m.curModel),
-		styleDim.Render(homeAbbrev(m.cwd)),
-	)
-	// Three lines (logo and info both 3 rows), no trailing newline — layout()
-	// budgets headerH=3.
-	return lipgloss.JoinHorizontal(lipgloss.Top, logo, "   ", info)
+	// Minimal wordmark: a thin accent bar + bold "Topos", with the model and cwd
+	// aligned beneath. Three lines, no trailing newline — layout() budgets headerH=3.
+	bar := lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Render("▌")
+	l1 := bar + " " + lipgloss.NewStyle().Bold(true).Render("Topos") + styleDim.Render("  local · v"+m.version)
+	return l1 + "\n" +
+		"  " + styleDim.Render(m.curModel) + "\n" +
+		"  " + styleDim.Render(homeAbbrev(m.cwd))
 }
 
 func (m *localTUI) statusView() string {
