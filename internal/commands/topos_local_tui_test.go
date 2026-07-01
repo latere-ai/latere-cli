@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"latere.ai/x/topos"
@@ -35,6 +36,16 @@ func newTestTUI(t *testing.T) *localTUI {
 	return m
 }
 
+// rawText concatenates the raw text of every transcript block, for assertions.
+func (m *localTUI) rawText() string {
+	var b strings.Builder
+	for _, blk := range m.blocks {
+		b.WriteString(blk.text)
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
 func event(t *testing.T, name string, payload any) topos.Event {
 	t.Helper()
 	b, err := json.Marshal(payload)
@@ -53,58 +64,55 @@ func TestLocalTUISizingAndStreaming(t *testing.T) {
 		t.Fatalf("viewport not sized: %dx%d", m.vp.Width, m.vp.Height)
 	}
 
-	// Assistant text streams into the buffer and opens a text block.
+	// Assistant text streams into a single open assistant block.
 	m.Update(localEventMsg{ev: event(t, topos.EventTextDelta, textDeltaPayload{Text: "hello "})})
 	m.Update(localEventMsg{ev: event(t, topos.EventTextDelta, textDeltaPayload{Text: "world"})})
-	if got := m.buf.String(); !strings.Contains(got, "hello world") {
-		t.Fatalf("buffer = %q, want streamed text", got)
-	}
-	if !m.inText {
-		t.Fatal("a text block should be open after deltas")
+	if a := m.openAssistant(); a == nil || a.text != "hello world" {
+		t.Fatalf("assistant block = %+v, want streamed 'hello world'", a)
 	}
 
-	// A tool call closes the text block and shows name + arg hint.
+	// A tool call closes the assistant block and records name + arg hint.
 	m.Update(localEventMsg{ev: event(t, "PreToolUse", preToolUsePayload{
 		ToolCall: toolCall{Name: "glob", Input: json.RawMessage(`{"pattern":"*.go"}`)},
 	})})
-	if m.inText {
-		t.Fatal("a tool call should close the text block")
+	if m.openAssistant() != nil {
+		t.Fatal("a tool call should close the assistant block")
 	}
-	if got := m.buf.String(); !strings.Contains(got, "glob") || !strings.Contains(got, "*.go") {
-		t.Fatalf("buffer = %q, want tool name + arg", got)
+	last := m.blocks[len(m.blocks)-1]
+	if last.kind != blkTool || last.name != "glob" || !strings.Contains(last.args, "*.go") {
+		t.Fatalf("tool block = %+v, want glob(*.go)", last)
 	}
 
-	// A tool result hangs under the branch.
+	// A tool result is captured as a result block.
 	m.Update(localEventMsg{ev: event(t, topos.EventPostToolUse, postToolUsePayload{
 		ToolCall: toolCall{Name: "glob"},
 		Result:   toolResult{Content: "a.go b.go"},
 	})})
-	if got := m.buf.String(); !strings.Contains(got, "a.go b.go") {
-		t.Fatalf("buffer = %q, want tool result", got)
+	if last := m.blocks[len(m.blocks)-1]; last.kind != blkResult || last.text != "a.go b.go" {
+		t.Fatalf("result block = %+v, want the tool content", last)
 	}
 
-	// Usage updates the status counters without touching the transcript.
-	before := m.buf.String()
+	// Usage updates the status counters without adding a block.
+	n := len(m.blocks)
 	m.Update(localEventMsg{ev: event(t, topos.EventUsage, usagePayload{Total: usageTotals{InputTokens: 12, OutputTokens: 7}})})
 	if m.inTok != 12 || m.outTok != 7 {
 		t.Fatalf("usage = %d/%d, want 12/7", m.inTok, m.outTok)
 	}
-	if m.buf.String() != before {
-		t.Fatal("usage should not append to the transcript")
+	if len(m.blocks) != n {
+		t.Fatal("usage should not add a transcript block")
 	}
 }
 
-func TestLocalTUIClosesTextBeforeNotice(t *testing.T) {
+func TestLocalTUINoticeClosesAssistant(t *testing.T) {
 	m := newTestTUI(t)
-	// Streamed assistant text ends without a newline...
-	m.Update(localEventMsg{ev: event(t, topos.EventTextDelta, textDeltaPayload{Text: "help you with today?"})})
-	// ...then a slash-command notice must start on its own line, not concatenate.
+	m.Update(localEventMsg{ev: event(t, topos.EventTextDelta, textDeltaPayload{Text: "text"})})
 	m.onSlash("/help")
-	if strings.Contains(m.buf.String(), "today?Commands") {
-		t.Fatalf("notice ran onto the assistant line: %q", m.buf.String())
+	// The assistant block is separate from the help notice (blocks can't concatenate).
+	if m.openAssistant() != nil {
+		t.Fatal("appending a notice should settle the assistant block")
 	}
-	if !strings.Contains(m.buf.String(), "today?\n") {
-		t.Fatalf("assistant block not closed with a newline: %q", m.buf.String())
+	if last := m.blocks[len(m.blocks)-1]; last.kind != blkNotice || !strings.Contains(last.text, "Commands:") {
+		t.Fatalf("last block = %+v, want the help notice", last)
 	}
 }
 
@@ -135,8 +143,9 @@ func TestHomeAbbrev(t *testing.T) {
 func TestLocalTUIScrolls(t *testing.T) {
 	m := newTestTUI(t)
 	for i := 0; i < 100; i++ { // fill well past one screen
-		m.appendLine("line")
+		m.appendNotice("line", false)
 	}
+	m.refresh()
 	if !m.vp.AtBottom() {
 		t.Fatal("new content should pin to the bottom")
 	}
@@ -147,36 +156,58 @@ func TestLocalTUIScrolls(t *testing.T) {
 	}
 }
 
+func TestLocalTUIResultFolding(t *testing.T) {
+	m := newTestTUI(t)
+	long := strings.Repeat("x\n", collapseThreshold+5)
+	m.Update(localEventMsg{ev: event(t, topos.EventPostToolUse, postToolUsePayload{
+		ToolCall: toolCall{Name: "bash"},
+		Result:   toolResult{Content: long},
+	})})
+	// Collapsed by default: summary mentions the hidden line count.
+	if got := m.renderBlock(len(m.blocks) - 1); !strings.Contains(got, "lines") {
+		t.Fatalf("collapsed result = %q, want a '+N lines' summary", got)
+	}
+	// Ctrl+O expands: the full content is shown (more rows than the summary).
+	m.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
+	expanded := m.renderBlock(len(m.blocks) - 1)
+	if strings.Count(expanded, "\n") < collapseThreshold {
+		t.Fatalf("expanded result should show all lines, got %q", expanded)
+	}
+}
+
 func TestLocalTUITurnDone(t *testing.T) {
 	m := newTestTUI(t)
 	m.running = true
+	m.turnVerb = "Churning"
 
-	// A failed turn stops running and surfaces the error in the transcript.
-	m.Update(localTurnDoneMsg{err: context.Canceled})
+	// A successful turn stops running and appends the "✻ …for Ns" footer.
+	m.outTok = 42
+	m.Update(localTurnDoneMsg{transcript: nil, elapsed: 3 * time.Second})
 	if m.running {
 		t.Fatal("turn done should clear running")
 	}
-	if !strings.Contains(m.buf.String(), "error:") {
-		t.Fatalf("buffer = %q, want error line", m.buf.String())
+	if got := m.rawText(); !strings.Contains(got, "Churning for 3s") || !strings.Contains(got, "42 tokens") {
+		t.Fatalf("footer = %q, want elapsed + tokens", got)
+	}
+
+	// A failed turn surfaces the error.
+	m.running = true
+	m.Update(localTurnDoneMsg{err: context.Canceled})
+	if !strings.Contains(m.rawText(), "error:") {
+		t.Fatalf("transcript = %q, want error notice", m.rawText())
 	}
 }
 
 func TestLocalTUISlashCommands(t *testing.T) {
 	m := newTestTUI(t)
 
-	// /help lists commands.
-	m.onSlash("/help")
-	if !strings.Contains(m.buf.String(), "Commands:") {
-		t.Fatalf("/help buffer = %q", m.buf.String())
-	}
-
 	// /model <name> switches the active model in place.
 	m.onSlash("/model claude-switched-9")
 	if m.curModel != "claude-switched-9" {
 		t.Fatalf("curModel = %q, want claude-switched-9", m.curModel)
 	}
-	if !strings.Contains(m.buf.String(), "switched to claude-switched-9") {
-		t.Fatalf("buffer missing switch notice: %q", m.buf.String())
+	if !strings.Contains(m.rawText(), "switched to claude-switched-9") {
+		t.Fatalf("transcript missing switch notice: %q", m.rawText())
 	}
 
 	// /quit asks the program to quit.
