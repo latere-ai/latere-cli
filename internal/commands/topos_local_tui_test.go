@@ -94,6 +94,44 @@ func TestLocalTUISizingAndStreaming(t *testing.T) {
 	}
 }
 
+func TestLocalTUIClosesTextBeforeNotice(t *testing.T) {
+	m := newTestTUI(t)
+	// Streamed assistant text ends without a newline...
+	m.Update(localEventMsg{ev: event(t, topos.EventTextDelta, textDeltaPayload{Text: "help you with today?"})})
+	// ...then a slash-command notice must start on its own line, not concatenate.
+	m.onSlash("/help")
+	if strings.Contains(m.buf.String(), "today?Commands") {
+		t.Fatalf("notice ran onto the assistant line: %q", m.buf.String())
+	}
+	if !strings.Contains(m.buf.String(), "today?\n") {
+		t.Fatalf("assistant block not closed with a newline: %q", m.buf.String())
+	}
+}
+
+func TestHeaderRowsMatchLayoutBudget(t *testing.T) {
+	m := newTestTUI(t)
+	// headerView must render exactly the 3 rows layout() budgets, else the input
+	// box or status line is pushed off / cut.
+	if got := strings.Count(m.headerView(), "\n") + 1; got != 3 {
+		t.Fatalf("header rows = %d, want 3", got)
+	}
+}
+
+func TestHomeAbbrev(t *testing.T) {
+	t.Setenv("HOME", "/Users/x")
+	cases := map[string]string{
+		"/Users/x":            "~",
+		"/Users/x/dev/agents": "~/dev/agents",
+		"/other/path":         "/other/path",
+		"/Users/xyz":          "/Users/xyz", // not a subpath of the home dir
+	}
+	for in, want := range cases {
+		if got := homeAbbrev(in); got != want {
+			t.Fatalf("homeAbbrev(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestLocalTUITurnDone(t *testing.T) {
 	m := newTestTUI(t)
 	m.running = true

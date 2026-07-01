@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -270,8 +271,13 @@ func (m *localTUI) appendEvent(e topos.Event) {
 }
 
 // appendLine adds a standalone line to the transcript (help, errors, notices).
+// It first closes any open assistant text block — streamed text has no trailing
+// newline, so without this a slash-command's output would run onto the same line.
 func (m *localTUI) appendLine(s string) {
-	m.inText = false
+	if m.inText {
+		m.buf.WriteByte('\n')
+		m.inText = false
+	}
 	m.buf.WriteString(s + "\n")
 	m.refresh()
 }
@@ -297,9 +303,9 @@ func (m *localTUI) refresh() {
 
 // layout sizes the header/viewport/input/status to the terminal.
 func (m *localTUI) layout() {
-	// headerH=2 (two lines, no trailing blank), inputH=3 (rounded border top +
-	// content + bottom), statusH=1 — must match the rows View actually renders.
-	const headerH, inputH, statusH = 2, 3, 1
+	// headerH=3 (logo + info, three rows), inputH=3 (rounded border top + content
+	// + bottom), statusH=1 — must match the rows View actually renders.
+	const headerH, inputH, statusH = 3, 3, 1
 	vpH := m.height - headerH - inputH - statusH
 	if vpH < 3 {
 		vpH = 3
@@ -322,16 +328,26 @@ func (m *localTUI) View() string {
 	return lipgloss.JoinVertical(lipgloss.Left, m.headerView(), m.vp.View(), inputBox, m.statusView())
 }
 
+// toposLogo is the three-line brand mark shown at the left of the header (a
+// blocky "T"). Kept as a const so the art is easy to swap.
+const toposLogo = "█████\n  █\n  █"
+
 func (m *localTUI) headerView() string {
-	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12")).Render("◤ Topos")
-	// Exactly two lines, no trailing newline — layout() budgets headerH=2 and
-	// JoinVertical adds the separators.
-	return title + " " + styleDim.Render("local · v"+m.version) + "\n" +
-		styleDim.Render(m.curModel+"  ·  "+m.cwd)
+	logo := lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true).Render(toposLogo)
+	info := lipgloss.JoinVertical(lipgloss.Left,
+		lipgloss.NewStyle().Bold(true).Render("Topos")+styleDim.Render("  local · v"+m.version),
+		styleDim.Render(m.curModel),
+		styleDim.Render(homeAbbrev(m.cwd)),
+	)
+	// Three lines (logo and info both 3 rows), no trailing newline — layout()
+	// budgets headerH=3.
+	return lipgloss.JoinHorizontal(lipgloss.Top, logo, "   ", info)
 }
 
 func (m *localTUI) statusView() string {
-	left := fmt.Sprintf("%s · %d↑ %d↓ tok", m.curModel, m.inTok, m.outTok)
+	// The model is already in the header; the status line carries token usage
+	// (and a working spinner) on the left, key hints on the right.
+	left := fmt.Sprintf("%d↑ %d↓ tok", m.inTok, m.outTok)
 	if m.running {
 		left = m.spin.View() + " working…  " + left
 	}
@@ -341,6 +357,19 @@ func (m *localTUI) statusView() string {
 		gap = 1
 	}
 	return styleDim.Render(left) + strings.Repeat(" ", gap) + styleDim.Render(right)
+}
+
+// homeAbbrev replaces the user's home directory prefix with ~.
+func homeAbbrev(p string) string {
+	if h, err := os.UserHomeDir(); err == nil && h != "" {
+		if p == h {
+			return "~"
+		}
+		if strings.HasPrefix(p, h+string(os.PathSeparator)) {
+			return "~" + p[len(h):]
+		}
+	}
+	return p
 }
 
 func localTUIHelp() string {
