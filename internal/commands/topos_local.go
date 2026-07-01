@@ -18,6 +18,7 @@ import (
 	"latere.ai/x/topos/harness/tools"
 	"latere.ai/x/topos/models"
 
+	"github.com/charmbracelet/lipgloss"
 	"golang.org/x/term"
 )
 
@@ -74,10 +75,11 @@ func runToposLocal(ctx context.Context, dir, modelName, oneShot string) error {
 	}
 	const sandboxID = "local"
 
+	render := &localRenderer{}
 	runner, err := topos.NewRunner(topos.Options{
 		Brain:    brain,
 		Sandbox:  sb,
-		Observer: renderLocalEvent,
+		Observer: render.render,
 	})
 	if err != nil {
 		return err
@@ -98,7 +100,7 @@ func runToposLocal(ctx context.Context, dir, modelName, oneShot string) error {
 			return terr
 		}
 		transcript = res.Transcript
-		fmt.Println()
+		render.endTurn()
 		return nil
 	}
 
@@ -127,28 +129,84 @@ func runToposLocal(ctx context.Context, dir, modelName, oneShot string) error {
 	}
 }
 
-// renderLocalEvent streams the run to the terminal: assistant text token by
-// token, and a one-line marker per tool call.
-func renderLocalEvent(e topos.Event) {
+// Block styles for the local REPL: a green dot leads an assistant message, a
+// blue dot leads a tool action, and results hang under a dim branch (red on
+// error) — visually separating message / action / result blocks.
+var (
+	styleAsstDot  = lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true)
+	styleToolDot  = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true)
+	styleToolName = lipgloss.NewStyle().Bold(true)
+	styleDim      = lipgloss.NewStyle().Faint(true)
+	styleErr      = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
+)
+
+// localRenderer streams a run to the terminal as distinct blocks. It keeps the
+// small amount of state needed to know when an assistant text block is open, so
+// text, tool calls, and results are cleanly separated.
+type localRenderer struct {
+	inText bool // an assistant text block is currently streaming
+}
+
+func (r *localRenderer) render(e topos.Event) {
 	switch e.Name {
 	case topos.EventTextDelta:
 		var p textDeltaPayload
-		if json.Unmarshal(e.PayloadJSON, &p) == nil {
-			fmt.Print(p.Text)
+		if json.Unmarshal(e.PayloadJSON, &p) != nil || p.Text == "" {
+			return
 		}
+		if !r.inText {
+			fmt.Print("\n" + styleAsstDot.Render("⏺") + " ")
+			r.inText = true
+		}
+		fmt.Print(p.Text)
 	case "PreToolUse":
 		var p preToolUsePayload
-		if json.Unmarshal(e.PayloadJSON, &p) == nil {
-			fmt.Printf("\n● %s\n", p.ToolCall.Name)
+		if json.Unmarshal(e.PayloadJSON, &p) != nil {
+			return
 		}
+		r.closeText()
+		fmt.Printf("\n%s %s%s\n", styleToolDot.Render("⏺"),
+			styleToolName.Render(p.ToolCall.Name), styleDim.Render(summarizeToolInput(p.ToolCall.Input)))
 	case topos.EventPostToolUse:
 		var p postToolUsePayload
-		if json.Unmarshal(e.PayloadJSON, &p) == nil {
-			mark := "ok"
-			if p.Result.IsError {
-				mark = "error"
-			}
-			fmt.Printf("  %s [%s] %s\n", p.ToolCall.Name, mark, truncLine(p.Result.Content, 100))
+		if json.Unmarshal(e.PayloadJSON, &p) != nil {
+			return
+		}
+		line := truncLine(p.Result.Content, 120)
+		if p.Result.IsError {
+			fmt.Printf("%s%s\n", styleDim.Render("  ⎿ "), styleErr.Render(line))
+			return
+		}
+		fmt.Printf("%s%s\n", styleDim.Render("  ⎿ "), styleDim.Render(line))
+	}
+}
+
+// closeText ends an open assistant text block with a newline.
+func (r *localRenderer) closeText() {
+	if r.inText {
+		fmt.Println()
+		r.inText = false
+	}
+}
+
+// endTurn terminates the current turn's output before the next prompt.
+func (r *localRenderer) endTurn() { r.closeText() }
+
+// summarizeToolInput renders a compact "(...)" hint from a tool call's input —
+// the most salient argument (command, path, pattern) — so an action block reads
+// like "⏺ bash (go build ./...)" without dumping the whole JSON.
+func summarizeToolInput(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var m map[string]any
+	if json.Unmarshal(raw, &m) != nil {
+		return ""
+	}
+	for _, k := range []string{"command", "file_path", "path", "pattern", "query"} {
+		if v, ok := m[k]; ok {
+			return " (" + truncLine(fmt.Sprint(v), 60) + ")"
 		}
 	}
+	return ""
 }
