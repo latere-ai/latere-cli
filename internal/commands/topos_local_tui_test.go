@@ -43,8 +43,8 @@ func TestLocalTUIFrameLayout(t *testing.T) {
 	if strings.Contains(frame, "**bold**") {
 		t.Fatal("Markdown not rendered: literal **bold** present in frame")
 	}
-	if !strings.Contains(frame, "❯ what") && !strings.Contains(frame, "Churning for 3s") {
-		t.Fatalf("frame missing expected content:\n%s", frame)
+	if !strings.Contains(frame, "bash") || !strings.Contains(frame, "3s") {
+		t.Fatalf("frame missing expected content (tool + timing):\n%s", frame)
 	}
 }
 
@@ -210,13 +210,13 @@ func TestLocalTUITurnDone(t *testing.T) {
 	m.running = true
 	m.turnVerb = "Churning"
 
-	// A successful turn stops running and appends the "✻ …for Ns" footer.
+	// A successful turn stops running and appends the timing footer.
 	m.outTok = 42
 	m.Update(localTurnDoneMsg{transcript: nil, elapsed: 3 * time.Second})
 	if m.running {
 		t.Fatal("turn done should clear running")
 	}
-	if got := m.rawText(); !strings.Contains(got, "Churning for 3s") || !strings.Contains(got, "42 tokens") {
+	if got := m.rawText(); !strings.Contains(got, "3s") || !strings.Contains(got, "42 tok") {
 		t.Fatalf("footer = %q, want elapsed + tokens", got)
 	}
 

@@ -120,7 +120,8 @@ func newLocalTUI(ctx context.Context, version, cwd string, sb sandbox.Provider, 
 	in.Prompt = "❯ "
 	in.Focus()
 	sp := spinner.New()
-	sp.Spinner = spinner.Spinner{Frames: []string{"✻", "✽", "✳", "✶", "✷", "✸"}, FPS: time.Second / 8}
+	// A rotating arc — distinct from other assistants' star/braille spinners.
+	sp.Spinner = spinner.Spinner{Frames: []string{"◜", "◠", "◝", "◞", "◡", "◟"}, FPS: time.Second / 8}
 	m := &localTUI{ctx: ctx, version: version, cwd: cwd, sb: sb, builtins: builtins, input: in, spin: sp}
 	if err := m.rebuild(brain); err != nil {
 		return nil, err
@@ -151,10 +152,6 @@ func (m *localTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 		m.layout()
 		return m, nil
-	case tea.MouseMsg:
-		var cmd tea.Cmd
-		m.vp, cmd = m.vp.Update(msg)
-		return m, cmd
 	case tea.KeyMsg:
 		return m.onKey(msg)
 	case localEventMsg:
@@ -353,27 +350,23 @@ func (m *localTUI) appendNotice(styled string, isErr bool) {
 	m.blocks = append(m.blocks, block{kind: blkNotice, text: styled, isErr: isErr})
 }
 
-// footer is the settled "✻ <verb> for Ns" line shown after a turn completes.
+// footer is the settled status shown after a turn completes: a neutral timing
+// summary (no verb, so tenses stay clean and it doesn't echo other tools' phrasing).
 func (m *localTUI) footer(d time.Duration) string {
-	verb := m.turnVerb
-	if verb == "" {
-		verb = "Worked"
-	}
-	s := fmt.Sprintf("✻ %s for %ds", verb, int(d.Seconds()))
+	s := fmt.Sprintf("◇ %ds", int(d.Seconds()))
 	if m.outTok > 0 {
-		s += fmt.Sprintf(" · ↓ %d tokens", m.outTok)
+		s += fmt.Sprintf(" · ↓ %d tok", m.outTok)
 	}
 	return s
 }
 
-// workingLine is the live status shown while a turn runs.
+// workingLine is the live status shown while a turn runs: "<arc> <Verb>…  Ns · ↓N tok".
 func (m *localTUI) workingLine() string {
 	secs := int(time.Since(m.turnStart).Seconds())
-	aux := fmt.Sprintf(" (%ds", secs)
+	aux := fmt.Sprintf("  %ds", secs)
 	if m.outTok > 0 {
-		aux += fmt.Sprintf(" · ↓ %d tokens", m.outTok)
+		aux += fmt.Sprintf(" · ↓ %d tok", m.outTok)
 	}
-	aux += ")"
 	head := styleVerb.Render(m.spin.View()+" "+m.turnVerb+"…") + styleDim.Render(aux)
 	return head + "\n" + styleDim.Render("  ⎿ "+m.turnTip)
 }
@@ -585,10 +578,11 @@ Commands:
 Ctrl+O expands/folds tool output · ↑↓ or PgUp/PgDn scroll.`)
 }
 
-// workVerbs and workTips add a little personality to the working line, varied by
-// turn so it doesn't read the same every time.
+// workVerbs give the working line a little personality, on a cartography / topology
+// theme that fits Topos (a "topos" is a space) — varied by turn so it doesn't read
+// the same each time.
 var (
-	workVerbs = []string{"Churning", "Whirlpooling", "Percolating", "Simmering", "Noodling", "Cogitating", "Tinkering"}
+	workVerbs = []string{"Mapping", "Charting", "Tracing", "Weaving", "Threading", "Traversing", "Surveying", "Contouring", "Plotting", "Meshing"}
 	workTips  = []string{
 		"Tip: Ctrl+O expands tool output.",
 		"Tip: /model switches models mid-session.",
@@ -606,7 +600,9 @@ func runLocalTUI(ctx context.Context, version, cwd string, sb sandbox.Provider, 
 	if err != nil {
 		return err
 	}
-	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithContext(ctx))
+	// No mouse capture: it would disable the terminal's native text selection.
+	// Scrolling is via the keyboard (↑/↓, PgUp/PgDn).
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithContext(ctx))
 	m.prog = p
 	_, err = p.Run()
 	return err
