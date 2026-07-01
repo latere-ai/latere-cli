@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 
@@ -19,6 +20,26 @@ import (
 
 	"golang.org/x/term"
 )
+
+// modelNamer is implemented by model adapters that can report the model id they
+// request (the Anthropic adapter does), so the REPL can show it.
+type modelNamer interface{ Model() string }
+
+// modelString returns the model id a brain requests, or "unknown".
+func modelString(m models.Model) string {
+	if mn, ok := m.(modelNamer); ok {
+		return mn.Model()
+	}
+	return "unknown"
+}
+
+// quietSDKLogs silences the SDK's INFO chatter (e.g. "loop: turn completed")
+// that otherwise interleaves with the chat. The loop logs through slog.Default;
+// warnings and errors are kept. Genuine failures still surface as returned
+// errors and through the Observer.
+func quietSDKLogs() {
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})))
+}
 
 // localSystemPrompt is the default instruction for `latere topos --local`: a
 // coding assistant working directly in the user's directory.
@@ -30,6 +51,7 @@ Use the tools to read, search, edit, and run commands against their real files. 
 // tools execute directly on your files. No control plane, no Cella, no login.
 // With oneShot set it runs a single prompt and exits; otherwise it is a REPL.
 func runToposLocal(ctx context.Context, dir, modelName, oneShot string) error {
+	quietSDKLogs()
 	brain, err := buildLocalModel(ctx, modelName)
 	if errors.Is(err, errNeedAuth) {
 		// No credential yet. In an interactive terminal, show the provider picker
@@ -85,7 +107,8 @@ func runToposLocal(ctx context.Context, dir, modelName, oneShot string) error {
 	}
 
 	abs, _ := os.Getwd()
-	fmt.Printf("Topos (local) in %s — type a message, Ctrl+D to quit.\n", abs)
+	fmt.Printf("Topos (local) in %s\n", abs)
+	fmt.Printf("model: %s   ·   /model to switch, /help for commands, Ctrl+D to quit\n", modelString(brain))
 	sc := bufio.NewScanner(os.Stdin)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for {
