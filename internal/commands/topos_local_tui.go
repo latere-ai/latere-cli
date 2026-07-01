@@ -283,7 +283,13 @@ func (m *localTUI) refresh() {
 		return
 	}
 	atBottom := m.vp.AtBottom()
-	m.vp.SetContent(m.buf.String())
+	// The bubbles viewport horizontal-scrolls long lines rather than soft-wrapping,
+	// so wrap the transcript to the viewport width before handing it over.
+	content := m.buf.String()
+	if m.vp.Width > 0 {
+		content = lipgloss.NewStyle().Width(m.vp.Width).Render(content)
+	}
+	m.vp.SetContent(content)
 	if atBottom {
 		m.vp.GotoBottom()
 	}
@@ -291,7 +297,9 @@ func (m *localTUI) refresh() {
 
 // layout sizes the header/viewport/input/status to the terminal.
 func (m *localTUI) layout() {
-	const headerH, inputH, statusH = 3, 3, 1
+	// headerH=2 (two lines, no trailing blank), inputH=3 (rounded border top +
+	// content + bottom), statusH=1 — must match the rows View actually renders.
+	const headerH, inputH, statusH = 2, 3, 1
 	vpH := m.height - headerH - inputH - statusH
 	if vpH < 3 {
 		vpH = 3
@@ -316,8 +324,10 @@ func (m *localTUI) View() string {
 
 func (m *localTUI) headerView() string {
 	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12")).Render("◤ Topos")
+	// Exactly two lines, no trailing newline — layout() budgets headerH=2 and
+	// JoinVertical adds the separators.
 	return title + " " + styleDim.Render("local · v"+m.version) + "\n" +
-		styleDim.Render(m.curModel+"  ·  "+m.cwd) + "\n"
+		styleDim.Render(m.curModel+"  ·  "+m.cwd)
 }
 
 func (m *localTUI) statusView() string {
