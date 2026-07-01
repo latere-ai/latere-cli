@@ -91,7 +91,7 @@ session or start a new one; it signs you in on first use.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if local {
-				return runToposLocal(cmd.Context(), dir, model, print)
+				return runToposLocal(cmd.Context(), dir, model, print, cmd.Root().Version)
 			}
 			return runToposHome(cmd.Context(), apiURL)
 		},

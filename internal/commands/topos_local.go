@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"latere.ai/x/topos"
@@ -34,6 +35,12 @@ func modelString(m models.Model) string {
 	return "unknown"
 }
 
+// isInteractiveTTY reports whether both stdin and stdout are terminals, so the
+// full-screen TUI can take over the screen (piped/redirected runs use the REPL).
+func isInteractiveTTY() bool {
+	return term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd()))
+}
+
 // quietSDKLogs silences the SDK's INFO chatter (e.g. "loop: turn completed")
 // that otherwise interleaves with the chat. The loop logs through slog.Default;
 // warnings and errors are kept. Genuine failures still surface as returned
@@ -51,7 +58,7 @@ Use the tools to read, search, edit, and run commands against their real files. 
 // the model is your local Claude credential, the workspace is your directory, and
 // tools execute directly on your files. No control plane, no Cella, no login.
 // With oneShot set it runs a single prompt and exits; otherwise it is a REPL.
-func runToposLocal(ctx context.Context, dir, modelName, oneShot string) error {
+func runToposLocal(ctx context.Context, dir, modelName, oneShot, version string) error {
 	quietSDKLogs()
 	brain, err := buildLocalModel(ctx, modelName)
 	if errors.Is(err, errNeedAuth) {
@@ -74,6 +81,16 @@ func runToposLocal(ctx context.Context, dir, modelName, oneShot string) error {
 		return err
 	}
 	const sandboxID = "local"
+
+	// Interactive on a real terminal → the full-screen TUI. One-shot (-p) and
+	// piped/non-TTY input fall through to the scriptable line REPL below.
+	if oneShot == "" && isInteractiveTTY() {
+		cwd := dir
+		if a, e := filepath.Abs(dir); e == nil {
+			cwd = a
+		}
+		return runLocalTUI(ctx, version, cwd, sb, tools.Builtins(), brain)
+	}
 
 	render := &localRenderer{}
 	// The runner is rebuilt when the model changes (/model), so it lives in a
