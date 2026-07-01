@@ -132,6 +132,21 @@ func TestHomeAbbrev(t *testing.T) {
 	}
 }
 
+func TestLocalTUIScrolls(t *testing.T) {
+	m := newTestTUI(t)
+	for i := 0; i < 100; i++ { // fill well past one screen
+		m.appendLine("line")
+	}
+	if !m.vp.AtBottom() {
+		t.Fatal("new content should pin to the bottom")
+	}
+	// ↑ must scroll the transcript (routed to the viewport, not the input).
+	m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	if m.vp.AtBottom() {
+		t.Fatal("↑ should scroll the transcript up, away from the bottom")
+	}
+}
+
 func TestLocalTUITurnDone(t *testing.T) {
 	m := newTestTUI(t)
 	m.running = true

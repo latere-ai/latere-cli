@@ -108,6 +108,11 @@ func (m *localTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 		m.layout()
 		return m, nil
+	case tea.MouseMsg:
+		// Mouse-wheel scrolling of the transcript.
+		var cmd tea.Cmd
+		m.vp, cmd = m.vp.Update(msg)
+		return m, cmd
 	case tea.KeyMsg:
 		return m.onKey(msg)
 	case localEventMsg:
@@ -139,7 +144,8 @@ func (m *localTUI) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyCtrlC, tea.KeyCtrlD:
 		return m, tea.Quit
-	case tea.KeyPgUp, tea.KeyPgDown:
+	case tea.KeyPgUp, tea.KeyPgDown, tea.KeyUp, tea.KeyDown:
+		// Scroll the transcript (the input is single-line, so ↑/↓ are free).
 		var cmd tea.Cmd
 		m.vp, cmd = m.vp.Update(msg)
 		return m, cmd
@@ -351,7 +357,7 @@ func (m *localTUI) statusView() string {
 	if m.running {
 		left = m.spin.View() + " working…  " + left
 	}
-	right := "/help · /model · Ctrl+D quit"
+	right := "↑↓ scroll · /model · Ctrl+D quit"
 	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 1 {
 		gap = 1
@@ -390,7 +396,7 @@ func runLocalTUI(ctx context.Context, version, cwd string, sb sandbox.Provider, 
 	if err != nil {
 		return err
 	}
-	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithContext(ctx))
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithContext(ctx))
 	m.prog = p
 	_, err = p.Run()
 	return err
