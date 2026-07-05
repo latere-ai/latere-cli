@@ -372,9 +372,12 @@ func (m *localTUI) workingLine() string {
 }
 
 // content renders the whole transcript (plus the live working line) for the
-// viewport, memoizing per-block so the ticking status stays cheap.
+// viewport, memoizing per-block so the ticking status stays cheap. The banner is
+// the first line so it scrolls away with the conversation rather than being
+// pinned to the top.
 func (m *localTUI) content() string {
-	parts := make([]string, 0, len(m.blocks)+1)
+	parts := make([]string, 0, len(m.blocks)+2)
+	parts = append(parts, m.bannerView())
 	for i := range m.blocks {
 		parts = append(parts, m.renderBlock(i))
 	}
@@ -389,7 +392,7 @@ func (m *localTUI) renderBlock(i int) string {
 	// A streaming assistant block changes every delta; render it raw and skip the
 	// cache. Everything else is memoized until invalidated.
 	if b.kind == blkAssistant && b.streaming {
-		return styleAsstDot.Render("⏺") + " " + m.wrap(b.text, m.vp.Width-2)
+		return styleAsstDot.Render("⏺") + " " + m.wrap(b.text, m.innerWidth()-2)
 	}
 	if b.cached {
 		return b.rendered
@@ -397,7 +400,7 @@ func (m *localTUI) renderBlock(i int) string {
 	var s string
 	switch b.kind {
 	case blkUser:
-		s = styleUserMsg.Width(m.vp.Width).Render("❯ " + b.text)
+		s = styleUserMsg.Width(m.innerWidth()).Render("❯ " + b.text)
 	case blkAssistant:
 		s = styleAsstDot.Render("⏺") + " " + m.markdown(b.text)
 	case blkTool:
@@ -405,7 +408,7 @@ func (m *localTUI) renderBlock(i int) string {
 	case blkResult:
 		s = m.renderResult(b)
 	case blkNotice:
-		s = m.wrap(b.text, m.vp.Width)
+		s = m.wrap(b.text, m.innerWidth())
 	}
 	b.rendered, b.cached = s, true
 	return s
@@ -420,7 +423,7 @@ func (m *localTUI) renderResult(b *block) string {
 	}
 	branch := styleDim.Render("  ⎿ ")
 	if b.collapsed && len(lines) > collapseThreshold {
-		return branch + style.Render(truncLine(lines[0], m.vp.Width-24)) +
+		return branch + style.Render(truncLine(lines[0], m.innerWidth()-22)) +
 			styleDim.Render(fmt.Sprintf("  +%d lines · Ctrl+O", len(lines)-1))
 	}
 	var out strings.Builder
@@ -429,7 +432,7 @@ func (m *localTUI) renderResult(b *block) string {
 		if i > 0 {
 			prefix = "    "
 		}
-		out.WriteString(prefix + style.Render(truncLine(ln, m.vp.Width-6)))
+		out.WriteString(prefix + style.Render(truncLine(ln, m.innerWidth()-4)))
 		if i < len(lines)-1 {
 			out.WriteByte('\n')
 		}
@@ -440,11 +443,11 @@ func (m *localTUI) renderResult(b *block) string {
 // markdown renders assistant Markdown via glamour, falling back to raw text.
 func (m *localTUI) markdown(s string) string {
 	if m.glam == nil {
-		return m.wrap(s, m.vp.Width-2)
+		return m.wrap(s, m.innerWidth()-2)
 	}
 	out, err := m.glam.Render(s)
 	if err != nil {
-		return m.wrap(s, m.vp.Width-2)
+		return m.wrap(s, m.innerWidth()-2)
 	}
 	return strings.Trim(out, "\n")
 }
@@ -458,6 +461,30 @@ func (m *localTUI) wrap(s string, w int) string {
 	return lipgloss.NewStyle().Width(w).Render(s)
 }
 
+// gutter margins give the transcript breathing room from the terminal edges.
+const (
+	leftGutter  = 2
+	rightGutter = 2
+)
+
+// innerWidth is the width transcript content wraps to, leaving left/right gutters.
+func (m *localTUI) innerWidth() int {
+	if w := m.vp.Width - leftGutter - rightGutter; w > 1 {
+		return w
+	}
+	return 1
+}
+
+// indent left-pads every line of s by the left gutter.
+func indentLines(s string, n int) string {
+	pad := strings.Repeat(" ", n)
+	lines := strings.Split(s, "\n")
+	for i := range lines {
+		lines[i] = pad + lines[i]
+	}
+	return strings.Join(lines, "\n")
+}
+
 // refresh syncs the viewport to the transcript, pinning to the bottom only when
 // the user was already there (so scrolling back isn't yanked).
 func (m *localTUI) refresh() {
@@ -465,7 +492,7 @@ func (m *localTUI) refresh() {
 		return
 	}
 	atBottom := m.vp.AtBottom()
-	m.vp.SetContent(m.content())
+	m.vp.SetContent(indentLines(m.content(), leftGutter))
 	if atBottom {
 		m.vp.GotoBottom()
 	}
@@ -474,10 +501,10 @@ func (m *localTUI) refresh() {
 // layout sizes the header/viewport/input/status to the terminal and rebuilds the
 // width-dependent Markdown renderer.
 func (m *localTUI) layout() {
-	// headerH=3 (logo + info, three rows), inputH=3 (rounded border top + content
-	// + bottom), statusH=1 — must match the rows View actually renders.
-	const headerH, inputH, statusH = 3, 3, 1
-	vpH := m.height - headerH - inputH - statusH
+	// The banner now scrolls inside the viewport, so only the input box (rounded
+	// border: 3 rows) and the status line (1 row) are fixed chrome.
+	const inputH, statusH = 3, 1
+	vpH := m.height - inputH - statusH
 	if vpH < 3 {
 		vpH = 3
 	}
@@ -488,7 +515,7 @@ func (m *localTUI) layout() {
 		m.vp.Width, m.vp.Height = m.width, vpH
 	}
 	m.input.Width = m.width - 6
-	m.setupGlamour(m.vp.Width - 2)
+	m.setupGlamour(m.innerWidth() - 2)
 	m.refresh()
 }
 
@@ -522,12 +549,13 @@ func (m *localTUI) View() string {
 		return "Starting Topos…"
 	}
 	inputBox := styleInputBorder.Width(m.width - 2).Render(m.input.View())
-	return lipgloss.JoinVertical(lipgloss.Left, m.headerView(), m.vp.View(), inputBox, m.statusView())
+	// No fixed header: the banner lives at the top of the scrolling transcript.
+	return lipgloss.JoinVertical(lipgloss.Left, m.vp.View(), inputBox, m.statusView())
 }
 
-func (m *localTUI) headerView() string {
-	// Minimal wordmark: a thin accent bar + bold "Topos", with the model and cwd
-	// aligned beneath. Three lines, no trailing newline — layout() budgets headerH=3.
+// bannerView is the wordmark shown once at the top of the transcript (it scrolls
+// away with the conversation). The active model stays visible in the status line.
+func (m *localTUI) bannerView() string {
 	bar := lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Render("▌")
 	l1 := bar + " " + lipgloss.NewStyle().Bold(true).Render("Topos") + styleDim.Render("  local · v"+m.version)
 	return l1 + "\n" +
@@ -538,16 +566,18 @@ func (m *localTUI) headerView() string {
 func (m *localTUI) statusView() string {
 	// The model is already in the header; the status line carries token usage
 	// (and a working spinner) on the left, key hints on the right.
-	left := fmt.Sprintf("%d↑ %d↓ tok", m.inTok, m.outTok)
+	// The banner scrolls away, so the always-visible model lives here alongside
+	// token usage (and a spinner while working); key hints sit on the right.
+	left := fmt.Sprintf("%s  ·  %d↑ %d↓ tok", m.curModel, m.inTok, m.outTok)
 	if m.running {
-		left = m.spin.View() + " working  " + left
+		left = m.spin.View() + " " + left
 	}
 	right := "↑↓ scroll · Ctrl+O expand · /model · Ctrl+D quit"
-	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
+	gap := m.width - leftGutter - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 1 {
 		gap = 1
 	}
-	return styleDim.Render(left) + strings.Repeat(" ", gap) + styleDim.Render(right)
+	return strings.Repeat(" ", leftGutter) + styleDim.Render(left) + strings.Repeat(" ", gap) + styleDim.Render(right)
 }
 
 // homeAbbrev replaces the user's home directory prefix with ~.

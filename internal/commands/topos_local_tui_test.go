@@ -146,12 +146,12 @@ func TestLocalTUINoticeClosesAssistant(t *testing.T) {
 	}
 }
 
-func TestHeaderRowsMatchLayoutBudget(t *testing.T) {
+func TestBannerRows(t *testing.T) {
 	m := newTestTUI(t)
-	// headerView must render exactly the 3 rows layout() budgets, else the input
-	// box or status line is pushed off / cut.
-	if got := strings.Count(m.headerView(), "\n") + 1; got != 3 {
-		t.Fatalf("header rows = %d, want 3", got)
+	// The banner is three lines (wordmark, model, cwd) and scrolls in the
+	// transcript rather than being a fixed header.
+	if got := strings.Count(m.bannerView(), "\n") + 1; got != 3 {
+		t.Fatalf("banner rows = %d, want 3", got)
 	}
 }
 
