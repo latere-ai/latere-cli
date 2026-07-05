@@ -10,7 +10,7 @@ import (
 // open attacks. It carries the count so main can map it to a distinct exit
 // code: a completed debate with unresolved attacks is the verdict "review
 // found issues", which must be distinguishable from a command error. This
-// mirrors cmd/agon's exit-code-as-verdict contract.
+// gives adversarial review an exit-code-as-verdict contract.
 type unresolvedError struct{ n int }
 
 func (e *unresolvedError) Error() string {

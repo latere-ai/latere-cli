@@ -136,8 +136,8 @@ func runAgon(ctx context.Context, cmd *cobra.Command, o *agonOpts) error {
 		transcriptPath = path
 	}
 
-	// Compute the diff and gate. Mirror cmd/agon's HEAD~1 fallback: when
-	// the tree is clean (claude already committed), review the last commit.
+	// Compute the diff and gate. When the tree is clean (claude already
+	// committed), fall back to reviewing the last commit via HEAD~1..HEAD.
 	diff, err := input.Compute(ctx, input.DiffSpec{From: "HEAD", To: ".", Cwd: cwd})
 	if err != nil {
 		return err
@@ -185,9 +185,9 @@ func runAgon(ctx context.Context, cmd *cobra.Command, o *agonOpts) error {
 		return err
 	}
 	printAgonSummary(cmd, summary)
-	// Verdict in the exit code (matches cmd/agon): a completed debate with
-	// open attacks exits non-zero so it can gate CI/hooks, distinct from a
-	// command error. main maps this sentinel to exit 2.
+	// Verdict in the exit code: a completed debate with open attacks exits
+	// non-zero so it can gate CI/hooks, distinct from a command error. main
+	// maps this sentinel to exit 2.
 	if summary.Unresolved > 0 {
 		return &unresolvedError{n: summary.Unresolved}
 	}
@@ -217,9 +217,9 @@ func ensureBearerFresh(bearer string) error {
 
 // mostRecentSession finds the newest Claude Code transcript under the
 // project directory claude derives from cwd, returning its session ID and
-// on-disk path. There is no importable "most recent" helper (cmd/agon
-// always receives a session ID from the stop hook), so the discovery
-// lives here for the manual invocation path.
+// on-disk path. The engine has no importable "most recent" helper (it takes a
+// session ID directly), so the discovery lives here for the manual invocation
+// path where the user has not passed --session.
 func mostRecentSession(home, cwd string) (sessionID, path string, err error) {
 	dir := filepath.Join(home, ".claude", "projects", input.EncodeCwd(cwd))
 	entries, derr := os.ReadDir(dir)
