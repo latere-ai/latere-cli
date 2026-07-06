@@ -6,13 +6,73 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"strings"
+	"time"
+
+	"github.com/hashicorp/yamux"
 
 	"latere.ai/x/topos/sandbox"
 	"latere.ai/x/topos/sandbox/rpc"
+
+	"github.com/latere-ai/latere-cli/internal/tunnel"
 )
+
+// SandboxDescriptor is the handshake the laptop writes on the control stream when
+// it connects a mode-2 sandbox tunnel — it advertises the workspace root it will
+// serve. It mirrors the Lux tunnel's Descriptor handshake, on the sandbox tunnel.
+type SandboxDescriptor struct {
+	NodeID string `json:"node_id"`
+	Root   string `json:"root"`
+}
+
+// sandboxYamuxConfig mirrors the Lux tunnel's config: keepalive on so a dead peer
+// is detected, logs discarded.
+func sandboxYamuxConfig() *yamux.Config {
+	c := yamux.DefaultConfig()
+	c.EnableKeepAlive = true
+	c.KeepAliveInterval = 15 * time.Second
+	c.LogOutput = io.Discard
+	return c
+}
+
+// serveSandboxTunnel connects this machine as a sandbox the control plane drives
+// (mode 2): it runs a yamux client over conn, opens a control stream advertising
+// the workspace root, then serves every stream the control plane opens as a
+// confined+consented Provider-RPC channel against the local workspace
+// (serveHostSandbox). conn is a WSS NetConn in production and any net.Conn (a
+// localhost TCP link) for local verification — the transport is otherwise opaque.
+// It returns when the session ends or ctx is cancelled.
+func serveSandboxTunnel(ctx context.Context, conn net.Conn, root string, consent sandbox.ConsentFunc, out io.Writer) error {
+	sess, err := yamux.Client(conn, sandboxYamuxConfig())
+	if err != nil {
+		return fmt.Errorf("sandbox tunnel: yamux: %w", err)
+	}
+	defer sess.Close()
+
+	// The laptop opens the control stream (the control plane opens the work
+	// streams), matching the Lux tunnel's directionality.
+	ctrl, err := sess.OpenStream()
+	if err != nil {
+		return fmt.Errorf("sandbox tunnel: control stream: %w", err)
+	}
+	line, _ := json.Marshal(SandboxDescriptor{NodeID: tunnel.NodeID(), Root: root})
+	if _, err := ctrl.Write(append(line, '\n')); err != nil {
+		return fmt.Errorf("sandbox tunnel: write descriptor: %w", err)
+	}
+	fmt.Fprintf(out, "sandbox tunnel: connected; serving %s\n", root)
+
+	for {
+		stream, err := sess.AcceptStream()
+		if err != nil {
+			return err // session closed / ctx cancelled
+		}
+		go func() { _ = serveHostSandbox(ctx, stream, root, consent) }()
+	}
+}
 
 // serveHostSandbox exposes this machine as a confined, consented sandbox.Provider
 // over conn, so a remote (mode-2, interactive-session-modes) session can drive the
