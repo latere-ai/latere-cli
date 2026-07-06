@@ -129,6 +129,37 @@ func TestSessionAttachPrintModeSendsTurn(t *testing.T) {
 	}
 }
 
+func TestSessionStartFromRepoSendsFromRepo(t *testing.T) {
+	var gotBody map[string]string
+	mux := interactiveTestMux(t, nil)
+	// Wrap the mux: intercept the create POST to capture its body, delegate the
+	// rest (the attach websocket) to the canned mux.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/v1/sessions" {
+			_ = json.NewDecoder(r.Body).Decode(&gotBody)
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "sess_test", "agent_id": "ag", "status": "awaiting_input"})
+			return
+		}
+		mux.ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+	toposTestEnv(t, srv.URL)
+
+	// Use -p so the command runs non-interactively (no TUI) and exits.
+	_, err := captureStdout(func() error {
+		root := NewRoot("test")
+		root.SetErr(&strings.Builder{})
+		root.SetArgs([]string{"topos", "session", "start", "ag", "-p", "go", "--from-repo", "https://example.com/r.git"})
+		return root.Execute()
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if gotBody["from_repo"] != "https://example.com/r.git" {
+		t.Fatalf("from_repo in body = %q, want the repo URL (body=%v)", gotBody["from_repo"], gotBody)
+	}
+}
+
 func TestWsURLFromBase(t *testing.T) {
 	if got := wsURLFromBase("https://topos.latere.ai", "sess_1", 5, false); got != "wss://topos.latere.ai/v1/sessions/sess_1/attach?since=5" {
 		t.Fatalf("wss url = %q", got)

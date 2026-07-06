@@ -32,8 +32,9 @@ type listSessionsResponse struct {
 // runs the prompt non-interactively and streams the result to stdout.
 func newToposSessionStartCmd() *cobra.Command {
 	var (
-		apiURL string
-		print  string
+		apiURL   string
+		print    string
+		fromRepo string
 	)
 	cmd := &cobra.Command{
 		Use:   "start <agent-id>",
@@ -59,6 +60,12 @@ stdout (for scripts and pipelines), then exits — like 'claude -p'.`,
 			if print != "" {
 				body["prompt"] = print
 			}
+			if fromRepo != "" {
+				// Start from a server-side clone of the repo (no laptop files
+				// pushed); the server records a lift receipt so a dead sandbox
+				// reprovisions by re-cloning on resume.
+				body["from_repo"] = fromRepo
+			}
 			var created interactiveSessionDTO
 			if err := c.PostJSON(cmd.Context(), "/v1/sessions", body, &created); err != nil {
 				return err
@@ -73,6 +80,7 @@ stdout (for scripts and pipelines), then exits — like 'claude -p'.`,
 	}
 	cmd.Flags().StringVar(&apiURL, "api-url", "", "override the Topos API base URL")
 	cmd.Flags().StringVarP(&print, "print", "p", "", "non-interactive: run this prompt, stream the result, and exit")
+	cmd.Flags().StringVar(&fromRepo, "from-repo", "", "start from a server-side clone of this git repository URL")
 	return cmd
 }
 
