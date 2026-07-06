@@ -13,9 +13,8 @@ require (
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/oauth2 v0.36.0
 	golang.org/x/term v0.42.0
-	latere.ai/x/agon v0.1.3
 	latere.ai/x/pkg v0.19.1
-	latere.ai/x/topos v0.0.12-0.20260706230537-25c5b995ddd7
+	latere.ai/x/topos v0.1.0
 )
 
 require (

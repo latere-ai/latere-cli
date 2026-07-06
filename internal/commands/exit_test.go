@@ -24,7 +24,7 @@ func TestHandleExitError(t *testing.T) {
 
 	t.Run("wrapped unresolved -> 2", func(t *testing.T) {
 		var buf bytes.Buffer
-		err := fmt.Errorf("agon: %w", &unresolvedError{n: 1})
+		err := fmt.Errorf("review: %w", &unresolvedError{n: 1})
 		if code := HandleExitError(&buf, err); code != 2 {
 			t.Errorf("exit code = %d, want 2 (errors.As must unwrap)", code)
 		}

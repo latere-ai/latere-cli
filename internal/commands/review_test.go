@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"latere.ai/x/agon/pkg/adversarial/input"
+	"latere.ai/x/topos/adversarial/input"
 )
 
 // jwtWithExp builds a minimal three-segment JWT whose payload carries the
@@ -19,10 +19,10 @@ func jwtWithExp(exp int64) string {
 	return "h." + base64.RawURLEncoding.EncodeToString(payload) + ".s"
 }
 
-// TestAgonFlagDefaults pins the documented defaults so a careless flag
+// TestReviewFlagDefaults pins the documented defaults so a careless flag
 // edit can't silently change the command's behavior.
-func TestAgonFlagDefaults(t *testing.T) {
-	cmd := newAgonCmd()
+func TestReviewFlagDefaults(t *testing.T) {
+	cmd := newReviewCmd()
 	cases := []struct {
 		flag string
 		want string
