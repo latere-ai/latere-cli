@@ -109,5 +109,5 @@ latere.ai/x/agon v0.1.3 h1:konn73G+WqiVxEHtGj/pK7X3/fbuuSnUw9KNhRMdKLw=
 latere.ai/x/agon v0.1.3/go.mod h1:6J+9g6WLT9jnzuIdoFifkoJ4YB8lkpGp/7jY9a4ue8c=
 latere.ai/x/pkg v0.19.1 h1:xul2pgw3yjawEpjcL9aX/oYhFarVg1v6xHfjZNHQgk0=
 latere.ai/x/pkg v0.19.1/go.mod h1:e2hUAJKxCMtoJi1gD7FupeBYxk65XF5UHMZfE67GFHs=
-latere.ai/x/topos v0.0.8 h1:phDIOO3nOZpQQlaTfxyqdhk29KImXObqgH7kImo6I3o=
-latere.ai/x/topos v0.0.8/go.mod h1:e1d7tVV96+Gse4JwHGkZ8MC2XDswnImwB/H7CqCGjWs=
+latere.ai/x/topos v0.0.12-0.20260706230537-25c5b995ddd7 h1:D3u4gSsAZ9F7CgUqMVMWIWTgwX6t8Izyh7QTAGWC+j4=
+latere.ai/x/topos v0.0.12-0.20260706230537-25c5b995ddd7/go.mod h1:e1d7tVV96+Gse4JwHGkZ8MC2XDswnImwB/H7CqCGjWs=

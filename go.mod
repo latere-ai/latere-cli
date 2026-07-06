@@ -15,7 +15,7 @@ require (
 	golang.org/x/term v0.42.0
 	latere.ai/x/agon v0.1.3
 	latere.ai/x/pkg v0.19.1
-	latere.ai/x/topos v0.0.8
+	latere.ai/x/topos v0.0.12-0.20260706230537-25c5b995ddd7
 )
 
 require (
