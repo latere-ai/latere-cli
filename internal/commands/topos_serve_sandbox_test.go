@@ -43,25 +43,17 @@ func TestToposTunnelBearerDevOverride(t *testing.T) {
 	}
 }
 
-// TestServeSandboxDialsWSSAndServes is the client-side real-WSS e2e: the
-// serve-sandbox command's dial path connects to a stand-in toposd over a real
-// websocket, presents its Bearer, and serves the workspace — and the server side
-// drives the laptop's real files back over the tunnel.
-func TestServeSandboxDialsWSSAndServes(t *testing.T) {
-	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "hello.txt"), []byte("hi from laptop"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+type tunnelOutcome struct {
+	auth string
+	node string
+	body string
+}
 
-	type outcome struct {
-		auth string
-		node string
-		body string
-	}
-	got := make(chan outcome, 1)
-
-	// Stand-in toposd handler: the sandboxtunnel.Server counterpart — accept the
-	// WSS upgrade, run yamux.Server, read the descriptor, then drive the laptop.
+// standInToposd is the sandboxtunnel.Server counterpart for the client tests: it
+// accepts the WSS upgrade, runs yamux.Server, reads the descriptor, drives one
+// ReadFile back over the tunnel, and reports what it saw on got.
+func standInToposd(t *testing.T, got chan tunnelOutcome) *httptest.Server {
+	t.Helper()
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 			Subprotocols: []string{sandboxTunnelSubprotocol},
@@ -102,10 +94,24 @@ func TestServeSandboxDialsWSSAndServes(t *testing.T) {
 			return
 		}
 		b, _ := provider.ReadFile(ctx, sb.ID, "hello.txt")
-		got <- outcome{auth: r.Header.Get("Authorization"), node: desc.NodeID, body: string(b)}
+		got <- tunnelOutcome{auth: r.Header.Get("Authorization"), node: desc.NodeID, body: string(b)}
 	}
 	hs := httptest.NewServer(http.HandlerFunc(handler))
-	defer hs.Close()
+	t.Cleanup(hs.Close)
+	return hs
+}
+
+// TestServeSandboxDialsWSSAndServes is the client-side real-WSS e2e: the
+// serve-sandbox command's dial path connects to a stand-in toposd over a real
+// websocket, presents its Bearer, and serves the workspace — and the server side
+// drives the laptop's real files back over the tunnel.
+func TestServeSandboxDialsWSSAndServes(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "hello.txt"), []byte("hi from laptop"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := make(chan tunnelOutcome, 1)
+	hs := standInToposd(t, got)
 
 	t.Setenv("TOPOS_TOKEN", "dev-token")
 	ctx, cancel := context.WithCancel(context.Background())
@@ -126,5 +132,51 @@ func TestServeSandboxDialsWSSAndServes(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timeout: the server never drove the laptop over WSS")
+	}
+}
+
+// TestServeSandboxCommandExecute drives the whole cobra command — RunE, the
+// --yes allow-all consent swap, --root resolution, and the dial — proving the
+// wired command connects and serves, not just the runServeSandbox helper.
+func TestServeSandboxCommandExecute(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "hello.txt"), []byte("hi from laptop"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := make(chan tunnelOutcome, 1)
+	hs := standInToposd(t, got)
+
+	t.Setenv("TOPOS_TOKEN", "dev-token")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cmd := newToposServeSandboxCmd()
+	cmd.SetArgs([]string{"--yes", "--topos-url", hs.URL, "--root", root})
+	go func() { _ = cmd.ExecuteContext(ctx) }()
+
+	select {
+	case o := <-got:
+		if o.body != "hi from laptop" {
+			t.Errorf("command did not serve the workspace: ReadFile = %q", o.body)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout: the command never connected and served")
+	}
+}
+
+// TestServeSandboxBearerError covers the no-bearer path: with TOPOS_TOKEN unset
+// and no auth token on file (empty XDG config), the command fails before dialing
+// with a sign-in hint rather than hanging or panicking.
+func TestServeSandboxBearerError(t *testing.T) {
+	t.Setenv("TOPOS_TOKEN", "")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // no token on file → toposIdentityBearer errors
+
+	if _, err := toposTunnelBearer(); err == nil {
+		t.Fatal("toposTunnelBearer must error when no token is available")
+	}
+	err := runServeSandbox(context.Background(), "http://127.0.0.1:0", t.TempDir(),
+		func(context.Context, string, sandbox.ExecOptions) error { return nil })
+	if err == nil {
+		t.Fatal("runServeSandbox must return the bearer error before dialing")
 	}
 }
