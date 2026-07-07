@@ -104,6 +104,7 @@ session or start a new one; it signs you in on first use.`,
 	cmd.AddCommand(newToposLoginCmd())
 	cmd.AddCommand(newToposAgentsCmd())
 	cmd.AddCommand(newToposSessionCmd())
+	cmd.AddCommand(newToposServeSandboxCmd())
 	return cmd
 }
 
