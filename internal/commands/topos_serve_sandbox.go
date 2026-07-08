@@ -29,7 +29,7 @@ const (
 
 // newToposServeSandboxCmd implements `latere topos serve-sandbox`: connect this
 // machine to the Topos control plane as a sandbox it can drive (mode 2). The
-// laptop dials the toposd WSS endpoint and serves its workspace as a
+// edge dials the toposd WSS endpoint and serves its workspace as a
 // confined+consented sandbox.Provider; a remote interactive session then runs
 // its tools here, on the real files, with every command gated by a local prompt.
 func newToposServeSandboxCmd() *cobra.Command {
@@ -43,7 +43,7 @@ func newToposServeSandboxCmd() *cobra.Command {
 		Short: "Serve this machine as a sandbox the control plane can drive (mode 2).",
 		Long: `Connect this machine to the Topos control plane as a sandbox (mode 2).
 
-The laptop dials the toposd sandbox-tunnel endpoint over WSS and serves the
+The edge dials the toposd sandbox-tunnel endpoint over WSS and serves the
 workspace root as a confined, consented sandbox.Provider: a remote interactive
 session runs its tools here, on your real files. Every command a remote session
 wants to run is shown and prompted for (y/N) unless --yes is given, path access

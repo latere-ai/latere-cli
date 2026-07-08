@@ -22,7 +22,7 @@ import (
 	"github.com/latere-ai/latere-cli/internal/tunnel"
 )
 
-// SandboxDescriptor is the handshake the laptop writes on the control stream when
+// SandboxDescriptor is the handshake the edge writes on the control stream when
 // it connects a mode-2 sandbox tunnel — it advertises the workspace root it will
 // serve. It mirrors the Lux tunnel's Descriptor handshake, on the sandbox tunnel.
 type SandboxDescriptor struct {
@@ -54,7 +54,7 @@ func serveSandboxTunnel(ctx context.Context, conn net.Conn, root string, consent
 	}
 	defer sess.Close()
 
-	// The laptop opens the control stream (the control plane opens the work
+	// The edge opens the control stream (the control plane opens the work
 	// streams), matching the Lux tunnel's directionality.
 	ctrl, err := sess.OpenStream()
 	if err != nil {
@@ -65,8 +65,8 @@ func serveSandboxTunnel(ctx context.Context, conn net.Conn, root string, consent
 	if _, err := ctrl.Write(append(line, '\n')); err != nil {
 		return fmt.Errorf("sandbox tunnel: write descriptor: %w", err)
 	}
-	// Echo the machine name: a session binds with sandbox_node "" ("my laptop")
-	// when this is your only connected machine, and by this name when it is not.
+	// Echo the machine name: a session binds with edge "" ("my edge") when this
+	// is your only connected machine, and by this name when it is not.
 	fmt.Fprintf(out, "sandbox tunnel: connected as %q; serving %s\n", node, root)
 
 	for {
@@ -78,7 +78,7 @@ func serveSandboxTunnel(ctx context.Context, conn net.Conn, root string, consent
 	}
 }
 
-// sandboxNodeID is the machine name a mode-2 laptop advertises when it connects.
+// sandboxNodeID is the machine name a mode-2 edge advertises when it connects.
 // It defaults to the OS hostname (lowercased, domain stripped) so that a caller
 // with more than one machine connected picks between meaningful names like
 // "changkun-mbp" rather than a random id — while a caller with a single machine
@@ -103,7 +103,7 @@ func sanitizeNodeID(h string) string {
 
 // serveHostSandbox exposes this machine as a confined, consented sandbox.Provider
 // over conn, so a remote (mode-2, interactive-session-modes) session can drive the
-// laptop's files and commands as its sandbox. It composes the ratified trust
+// edge's files and commands as its sandbox. It composes the ratified trust
 // protections around the local host provider before serving the RPC:
 //
 //	rpc.Serve(conn, Consent(Confine(hostSandbox(root), root), consent))
@@ -111,7 +111,7 @@ func sanitizeNodeID(h string) string {
 // so path-root confinement (#1) + the non-overridable secret deny-list (#2) apply
 // to every path, and per-call exec consent (#3) prompts before any command runs on
 // the real machine. Content withheld from the durable control plane (#4) is the
-// control-plane's concern, not the laptop's. conn is any bidirectional stream (a
+// control-plane's concern, not the edge's. conn is any bidirectional stream (a
 // tunnel stream in production; an in-memory pipe in tests).
 func serveHostSandbox(ctx context.Context, conn io.ReadWriteCloser, root string, consent sandbox.ConsentFunc) error {
 	host, err := newHostSandbox(root)
@@ -122,7 +122,7 @@ func serveHostSandbox(ctx context.Context, conn io.ReadWriteCloser, root string,
 	return rpc.Serve(ctx, conn, provider)
 }
 
-// promptExecConsent is the default laptop-side consent decider: it prints the
+// promptExecConsent is the default edge-side consent decider: it prints the
 // command a remote session wants to run and blocks for a y/N answer read from in
 // (stdin in production). Any non-yes answer denies. It is the interactive form of
 // trust protection #3; a session-scoped "allow all" is a follow-on.
