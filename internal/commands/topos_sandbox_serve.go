@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"strings"
 	"time"
 
@@ -59,11 +60,14 @@ func serveSandboxTunnel(ctx context.Context, conn net.Conn, root string, consent
 	if err != nil {
 		return fmt.Errorf("sandbox tunnel: control stream: %w", err)
 	}
-	line, _ := json.Marshal(SandboxDescriptor{NodeID: tunnel.NodeID(), Root: root})
+	node := sandboxNodeID()
+	line, _ := json.Marshal(SandboxDescriptor{NodeID: node, Root: root})
 	if _, err := ctrl.Write(append(line, '\n')); err != nil {
 		return fmt.Errorf("sandbox tunnel: write descriptor: %w", err)
 	}
-	fmt.Fprintf(out, "sandbox tunnel: connected; serving %s\n", root)
+	// Echo the machine name: a session binds with sandbox_node "" ("my laptop")
+	// when this is your only connected machine, and by this name when it is not.
+	fmt.Fprintf(out, "sandbox tunnel: connected as %q; serving %s\n", node, root)
 
 	for {
 		stream, err := sess.AcceptStream()
@@ -72,6 +76,29 @@ func serveSandboxTunnel(ctx context.Context, conn net.Conn, root string, consent
 		}
 		go func() { _ = serveHostSandbox(ctx, stream, root, consent) }()
 	}
+}
+
+// sandboxNodeID is the machine name a mode-2 laptop advertises when it connects.
+// It defaults to the OS hostname (lowercased, domain stripped) so that a caller
+// with more than one machine connected picks between meaningful names like
+// "changkun-mbp" rather than a random id — while a caller with a single machine
+// never needs a name at all (sandbox_node ""). It falls back to the stable random
+// tunnel.NodeID() when the hostname is unavailable.
+func sandboxNodeID() string {
+	if h, err := os.Hostname(); err == nil {
+		if id := sanitizeNodeID(h); id != "" {
+			return id
+		}
+	}
+	return tunnel.NodeID()
+}
+
+func sanitizeNodeID(h string) string {
+	h = strings.ToLower(strings.TrimSpace(h))
+	if i := strings.IndexByte(h, '.'); i > 0 { // drop any .local / domain suffix
+		h = h[:i]
+	}
+	return strings.ReplaceAll(h, " ", "-")
 }
 
 // serveHostSandbox exposes this machine as a confined, consented sandbox.Provider

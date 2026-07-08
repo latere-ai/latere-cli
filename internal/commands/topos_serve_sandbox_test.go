@@ -180,3 +180,29 @@ func TestServeSandboxBearerError(t *testing.T) {
 		t.Fatal("runServeSandbox must return the bearer error before dialing")
 	}
 }
+
+func TestSanitizeNodeID(t *testing.T) {
+	cases := map[string]string{
+		"Changkuns-MBP.local": "changkuns-mbp",
+		"desktop":             "desktop",
+		"  My Machine  ":      "my-machine",
+		"host.example.com":    "host",
+	}
+	for in, want := range cases {
+		if got := sanitizeNodeID(in); got != want {
+			t.Errorf("sanitizeNodeID(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestSandboxNodeIDFromHostname proves the advertised node id is the machine's
+// hostname (a human-meaningful name for the multi-machine case), not a random id.
+func TestSandboxNodeIDFromHostname(t *testing.T) {
+	h, err := os.Hostname()
+	if err != nil || sanitizeNodeID(h) == "" {
+		t.Skip("no usable hostname on this host")
+	}
+	if got := sandboxNodeID(); got != sanitizeNodeID(h) {
+		t.Errorf("sandboxNodeID() = %q, want hostname-derived %q", got, sanitizeNodeID(h))
+	}
+}
