@@ -1,6 +1,6 @@
 module github.com/latere-ai/latere-cli
 
-go 1.26.4
+go 1.26.5
 
 require (
 	github.com/charmbracelet/bubbles v1.0.0
