@@ -78,20 +78,23 @@ latere auth org switch --personal   # scope the saved token to the personal cont
 
 ## Git with Drive
 
-Drive (`drive.latere.ai`) serves repo workspaces over git smart-HTTP. Wire git to the CLI's credential helper once, and plain `git clone` authenticates with your saved login — no token in the URL:
+Drive (`drive.latere.ai`) serves repo workspaces over git smart-HTTP. Signing in is all it takes — `latere auth login` also wires git's credential helper for `drive.latere.ai`, so plain `git clone` authenticates with your saved login, no token in the URL:
 
 ```sh
 latere auth login
-latere git-credential setup
 
 git clone https://drive.latere.ai/git/me/<repo>.git          # your personal repos
 git clone https://drive.latere.ai/git/<org-slug>/<repo>.git  # org repos
 ```
 
-`setup` scopes the helper to `drive.latere.ai` only; credentials for every other host keep flowing through your existing helpers. Fetch and clone need read access to the repo workspace, push needs write access. Undo with:
+The helper is scoped to `drive.latere.ai` only; credentials for every other host keep flowing through your existing helpers. Fetch and clone need read access to the repo workspace, push needs write access.
+
+If you'd rather manage the git config yourself, these are the escape hatches:
 
 ```sh
-latere git-credential setup --remove
+latere auth login --no-git             # sign in without touching git config
+latere git-credential setup            # wire the helper explicitly
+latere git-credential setup --remove   # undo the wiring
 ```
 
 In CI, skip the helper and embed a token in the URL instead:
