@@ -3,9 +3,11 @@ package commands
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -52,7 +54,88 @@ global git config, scoped to drive.latere.ai only.`,
 	cmd.AddCommand(newGitCredentialGetCmd())
 	cmd.AddCommand(newGitCredentialNoopCmd("store"))
 	cmd.AddCommand(newGitCredentialNoopCmd("erase"))
+	cmd.AddCommand(newGitCredentialSetupCmd())
 	return cmd
+}
+
+// newGitCredentialSetupCmd wires the helper into the user's global git
+// config, scoped to the Drive host only. Two entries are written: an empty
+// helper first, which makes git discard credential helpers inherited from
+// broader config scopes (e.g. osxkeychain from the system gitconfig) for
+// this host — so no other helper caches or serves a stale Drive token —
+// then the real helper.
+func newGitCredentialSetupCmd() *cobra.Command {
+	var remove bool
+	cmd := &cobra.Command{
+		Use:   "setup",
+		Short: "Configure git to use this helper for Drive (undo with --remove).",
+		Long: `Write the global git config entries that route Drive credentials
+through this helper:
+
+    credential.https://<drive-host>.helper =                        (reset)
+    credential.https://<drive-host>.helper = !latere git-credential
+
+The empty first entry clears helpers inherited from wider git config
+scopes for the Drive host, so only this helper answers there. Helpers
+for every other host are untouched. Re-running setup is idempotent;
+--remove deletes both entries.`,
+		Example: `  latere git-credential setup
+  latere git-credential setup --remove`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			key := fmt.Sprintf("credential.https://%s.helper", driveHost())
+			errw := cmd.ErrOrStderr()
+			if remove {
+				if err := gitConfigUnsetAll(cmd.Context(), key); err != nil {
+					return err
+				}
+				fmt.Fprintf(errw, "Removed %s from the global git config.\n", key)
+				return nil
+			}
+			// --replace-all collapses any previous entries into the single
+			// empty reset entry, making re-runs idempotent; --add appends
+			// the real helper after it.
+			if err := gitConfig(cmd.Context(), "--replace-all", key, ""); err != nil {
+				return err
+			}
+			if err := gitConfig(cmd.Context(), "--add", key, "!latere git-credential"); err != nil {
+				return err
+			}
+			fmt.Fprintf(errw, "Configured the global git config:\n")
+			fmt.Fprintf(errw, "  %s=                          (resets inherited helpers)\n", key)
+			fmt.Fprintf(errw, "  %s=!latere git-credential\n\n", key)
+			fmt.Fprintf(errw, "git clone https://%s/git/me/<repo>.git now authenticates\nwith the token from `latere auth login`.\n", driveHost())
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&remove, "remove", false, "remove the Drive credential-helper entries from the global git config")
+	return cmd
+}
+
+// gitConfig runs `git config --global <args>`. Tests point it at a scratch
+// file via the GIT_CONFIG_GLOBAL environment variable, which git honors.
+func gitConfig(ctx context.Context, args ...string) error {
+	full := append([]string{"config", "--global"}, args...)
+	out, err := exec.CommandContext(ctx, "git", full...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git %s: %w: %s", strings.Join(full, " "), err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// gitConfigUnsetAll removes every value of key from the global git config.
+// git exits 5 when the key is not set; removing nothing is success, so
+// `setup --remove` stays idempotent.
+func gitConfigUnsetAll(ctx context.Context, key string) error {
+	out, err := exec.CommandContext(ctx, "git", "config", "--global", "--unset-all", key).CombinedOutput()
+	if err != nil {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) && ee.ExitCode() == 5 {
+			return nil
+		}
+		return fmt.Errorf("git config --global --unset-all %s: %w: %s", key, err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 // newGitCredentialGetCmd implements the `get` operation of the

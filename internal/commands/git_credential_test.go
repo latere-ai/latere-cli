@@ -3,9 +3,11 @@ package commands
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -195,6 +197,74 @@ func TestParseCredentialAttrs(t *testing.T) {
 		if attrs[k] != v {
 			t.Errorf("attrs[%q] = %q, want %q", k, attrs[k], v)
 		}
+	}
+}
+
+// setupGitConfigFile points git's global config at a scratch file (git
+// honors GIT_CONFIG_GLOBAL) and returns a reader for the configured helper
+// values. Skips when git is not installed.
+func setupGitConfigFile(t *testing.T) func() []string {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	cfg := filepath.Join(t.TempDir(), "gitconfig")
+	t.Setenv("GIT_CONFIG_GLOBAL", cfg)
+	key := "credential.https://drive.latere.ai.helper"
+	return func() []string {
+		out, err := exec.Command("git", "config", "--global", "--get-all", key).Output()
+		if err != nil {
+			var ee *exec.ExitError
+			if errors.As(err, &ee) && ee.ExitCode() == 1 { // key not set
+				return nil
+			}
+			t.Fatalf("git config --get-all: %v", err)
+		}
+		vals := strings.Split(strings.TrimSuffix(string(out), "\n"), "\n")
+		return vals
+	}
+}
+
+func TestGitCredentialSetupWritesScopedHelper(t *testing.T) {
+	isolateDriveTokens(t)
+	getAll := setupGitConfigFile(t)
+
+	if _, err := runGitCredential(t, "", "setup"); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	want := []string{"", "!latere git-credential"} // empty reset entry first
+	got := getAll()
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("helper entries = %q, want %q", got, want)
+	}
+
+	// Re-running setup is idempotent: still exactly the same two entries.
+	if _, err := runGitCredential(t, "", "setup"); err != nil {
+		t.Fatalf("setup (rerun): %v", err)
+	}
+	got = getAll()
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("helper entries after rerun = %q, want %q", got, want)
+	}
+}
+
+func TestGitCredentialSetupRemove(t *testing.T) {
+	isolateDriveTokens(t)
+	getAll := setupGitConfigFile(t)
+
+	if _, err := runGitCredential(t, "", "setup"); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if _, err := runGitCredential(t, "", "setup", "--remove"); err != nil {
+		t.Fatalf("setup --remove: %v", err)
+	}
+	if got := getAll(); len(got) != 0 {
+		t.Fatalf("helper entries after --remove = %q, want none", got)
+	}
+
+	// Removing when nothing is configured is not an error.
+	if _, err := runGitCredential(t, "", "setup", "--remove"); err != nil {
+		t.Fatalf("setup --remove (already removed): %v", err)
 	}
 }
 
