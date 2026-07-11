@@ -48,6 +48,7 @@ load it from your shell startup files.`,
 	}
 
 	root.AddCommand(newAuthCmd())
+	root.AddCommand(newGitCredentialCmd())
 	root.AddCommand(newCellaCmd())
 	root.AddCommand(newToposCmd())
 	root.AddCommand(newLuxCmd())
@@ -59,11 +60,13 @@ load it from your shell startup files.`,
 
 // skipUpdateCheck reports whether the passive update check should be skipped
 // for cmd. The upgrade command does its own checking; completion and help
-// output must stay clean and machine-parseable.
+// output must stay clean and machine-parseable; git-credential is invoked by
+// git on every fetch/push, so a notice on stderr (or an in-place
+// auto-upgrade) must never interleave with the credential protocol.
 func skipUpdateCheck(cmd *cobra.Command) bool {
 	for c := cmd; c != nil; c = c.Parent() {
 		switch c.Name() {
-		case "upgrade", "completion", "help", "__complete", "__completeNoDesc":
+		case "upgrade", "completion", "help", "__complete", "__completeNoDesc", "git-credential":
 			return true
 		}
 	}
