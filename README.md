@@ -76,6 +76,30 @@ latere auth org switch --personal   # scope the saved token to the personal cont
 | `--auth-url` | Override the auth URL for `latere auth login`. |
 | `LATERE_TOKEN_FILE` | Token file path, default `~/.config/latere/token.json`. |
 
+## Git with Drive
+
+Drive (`drive.latere.ai`) serves repo workspaces over git smart-HTTP. Wire git to the CLI's credential helper once, and plain `git clone` authenticates with your saved login — no token in the URL:
+
+```sh
+latere auth login
+latere git-credential setup
+
+git clone https://drive.latere.ai/git/me/<repo>.git          # your personal repos
+git clone https://drive.latere.ai/git/<org-slug>/<repo>.git  # org repos
+```
+
+`setup` scopes the helper to `drive.latere.ai` only; credentials for every other host keep flowing through your existing helpers. Fetch and clone need read access to the repo workspace, push needs write access. Undo with:
+
+```sh
+latere git-credential setup --remove
+```
+
+In CI, skip the helper and embed a token in the URL instead:
+
+```sh
+git clone https://x:${LATERE_TOKEN}@drive.latere.ai/git/<org-slug>/<repo>.git
+```
+
 ## Products
 
 | Product | What it does | Guide |
