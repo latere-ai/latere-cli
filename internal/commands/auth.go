@@ -210,6 +210,7 @@ func newAuthLoginCmd() *cobra.Command {
 		personal  bool
 		orgID     string
 		noBrowser bool
+		noGit     bool
 	)
 	cmd := &cobra.Command{
 		Use:   "login",
@@ -227,12 +228,19 @@ Use --personal or --org-id to preselect the token context from the
 terminal. Re-run login with a different context to switch which cellas
 the CLI can list and operate.
 
+After a successful login the CLI also wires git's credential helper for
+drive.latere.ai (idempotent, scoped to that host only), so plain
+'git clone https://drive.latere.ai/git/me/<repo>.git' works with no
+token in the URL. Pass --no-git to leave your git config untouched;
+'latere git-credential setup --remove' undoes the wiring later.
+
 For unattended setups (CI, scripts), pass --token to skip the device
 flow and store an access token directly.`,
 		Example: `  latere auth login
   latere auth login --personal
   latere auth login --org-id org_123
   latere auth login --no-browser
+  latere auth login --no-git
   latere auth login --token "$LATERE_TOKEN"`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -243,30 +251,41 @@ flow and store an access token directly.`,
 			// Token-paste fast path: --token wins, or stdin pipe falls
 			// back to it. The device flow only kicks in for an
 			// interactive terminal with no --token.
-			if t := strings.TrimSpace(token); t != "" {
-				clearStaleAuthToken()
-				return saveAndVerify(ctx, apiURL, t)
-			}
-			if stat, _ := os.Stdin.Stat(); (stat.Mode() & os.ModeCharDevice) == 0 {
-				b, err := readAll(os.Stdin)
-				if err != nil {
-					return err
-				}
-				if t := strings.TrimSpace(b); t != "" {
+			login := func() error {
+				if t := strings.TrimSpace(token); t != "" {
 					clearStaleAuthToken()
 					return saveAndVerify(ctx, apiURL, t)
 				}
+				if stat, _ := os.Stdin.Stat(); (stat.Mode() & os.ModeCharDevice) == 0 {
+					b, err := readAll(os.Stdin)
+					if err != nil {
+						return err
+					}
+					if t := strings.TrimSpace(b); t != "" {
+						clearStaleAuthToken()
+						return saveAndVerify(ctx, apiURL, t)
+					}
+				}
+				return runDeviceFlow(ctx, deviceFlowOpts{
+					AuthURL:   authURL,
+					APIURL:    apiURL,
+					ClientID:  clientID,
+					Scopes:    scopes,
+					OrgID:     strings.TrimSpace(orgID),
+					OrgIDSet:  personal || strings.TrimSpace(orgID) != "",
+					NoBrowser: noBrowser,
+				})
 			}
-
-			return runDeviceFlow(ctx, deviceFlowOpts{
-				AuthURL:   authURL,
-				APIURL:    apiURL,
-				ClientID:  clientID,
-				Scopes:    scopes,
-				OrgID:     strings.TrimSpace(orgID),
-				OrgIDSet:  personal || strings.TrimSpace(orgID) != "",
-				NoBrowser: noBrowser,
-			})
+			if err := login(); err != nil {
+				return err
+			}
+			// Every login variant ends by wiring git for Drive (best-effort,
+			// never fatal) so `git clone https://drive.latere.ai/...` is a
+			// one-step story after sign-in.
+			if !noGit {
+				configureDriveGitAfterLogin(ctx, cmd.ErrOrStderr())
+			}
+			return nil
 		},
 	}
 	f := cmd.Flags()
@@ -279,6 +298,7 @@ flow and store an access token directly.`,
 	f.BoolVar(&personal, "personal", false, "issue the CLI token for personal cellas")
 	f.StringVar(&orgID, "org-id", "", "issue the CLI token for this organization id")
 	f.BoolVar(&noBrowser, "no-browser", false, "print the device URL without opening a browser")
+	f.BoolVar(&noGit, "no-git", false, "do not configure git's credential helper for drive.latere.ai")
 	return cmd
 }
 

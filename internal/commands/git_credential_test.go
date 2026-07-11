@@ -2,8 +2,10 @@ package commands
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -265,6 +267,128 @@ func TestGitCredentialSetupRemove(t *testing.T) {
 	// Removing when nothing is configured is not an error.
 	if _, err := runGitCredential(t, "", "setup", "--remove"); err != nil {
 		t.Fatalf("setup --remove (already removed): %v", err)
+	}
+}
+
+// fakeSandboxAPI serves the /v1/sandboxes probe saveAndVerify uses to
+// confirm a pasted token.
+func fakeSandboxAPI(t *testing.T, acceptToken bool) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/sandboxes" {
+			http.NotFound(w, r)
+			return
+		}
+		if !acceptToken {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// swapGitWiring replaces the post-login git wiring seam with a counter.
+func swapGitWiring(t *testing.T) *int {
+	t.Helper()
+	orig := configureDriveGitAfterLogin
+	t.Cleanup(func() { configureDriveGitAfterLogin = orig })
+	calls := 0
+	configureDriveGitAfterLogin = func(ctx context.Context, errw io.Writer) { calls++ }
+	return &calls
+}
+
+func runAuthLogin(t *testing.T, args ...string) error {
+	t.Helper()
+	cmd := newAuthLoginCmd()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs(args)
+	_, err := captureStdout(func() error { return cmd.Execute() })
+	return err
+}
+
+func TestAuthLoginWiresGitHelperOnce(t *testing.T) {
+	isolateDriveTokens(t)
+	calls := swapGitWiring(t)
+	srv := fakeSandboxAPI(t, true)
+
+	if err := runAuthLogin(t, "--token", "pasted-token", "--api-url", srv.URL); err != nil {
+		t.Fatalf("login --token: %v", err)
+	}
+	if *calls != 1 {
+		t.Fatalf("git wiring invoked %d times, want exactly 1", *calls)
+	}
+}
+
+func TestAuthLoginNoGitSkipsWiring(t *testing.T) {
+	isolateDriveTokens(t)
+	calls := swapGitWiring(t)
+	srv := fakeSandboxAPI(t, true)
+
+	if err := runAuthLogin(t, "--token", "pasted-token", "--api-url", srv.URL, "--no-git"); err != nil {
+		t.Fatalf("login --token --no-git: %v", err)
+	}
+	if *calls != 0 {
+		t.Fatalf("git wiring invoked %d times with --no-git, want 0", *calls)
+	}
+}
+
+func TestAuthLoginFailureSkipsWiring(t *testing.T) {
+	isolateDriveTokens(t)
+	calls := swapGitWiring(t)
+	srv := fakeSandboxAPI(t, false)
+
+	if err := runAuthLogin(t, "--token", "bad-token", "--api-url", srv.URL); err == nil {
+		t.Fatal("login with rejected token succeeded, want error")
+	}
+	if *calls != 0 {
+		t.Fatalf("git wiring invoked %d times after failed login, want 0", *calls)
+	}
+}
+
+func TestAutoConfigureDriveGitIdempotent(t *testing.T) {
+	isolateDriveTokens(t)
+	getAll := setupGitConfigFile(t)
+
+	var errw bytes.Buffer
+	autoConfigureDriveGit(t.Context(), &errw)
+	autoConfigureDriveGit(t.Context(), &errw) // second run: already configured, skip the write
+
+	want := []string{"", "!latere git-credential"}
+	got := getAll()
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("helper entries = %q, want %q", got, want)
+	}
+	announced := strings.Count(errw.String(), "git is configured for drive.latere.ai")
+	if announced != 2 {
+		t.Errorf("announcement printed %d times, want 2 (once per login):\n%s", announced, errw.String())
+	}
+	if strings.Contains(errw.String(), "warning") {
+		t.Errorf("unexpected warning: %s", errw.String())
+	}
+}
+
+func TestAuthLoginSucceedsWithoutGitBinary(t *testing.T) {
+	isolateDriveTokens(t)
+	srv := fakeSandboxAPI(t, true)
+	// An empty PATH hides git; login must still succeed and the real
+	// wiring hook must skip silently.
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "gitconfig"))
+
+	cmd := newAuthLoginCmd()
+	var errb bytes.Buffer
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&errb)
+	cmd.SetArgs([]string{"--token", "pasted-token", "--api-url", srv.URL})
+	if _, err := captureStdout(func() error { return cmd.Execute() }); err != nil {
+		t.Fatalf("login without git on PATH: %v", err)
+	}
+	if s := errb.String(); strings.Contains(s, "git is configured") || strings.Contains(s, "warning") {
+		t.Errorf("expected a silent skip without git, got: %s", s)
 	}
 }
 

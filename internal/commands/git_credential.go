@@ -83,7 +83,7 @@ for every other host are untouched. Re-running setup is idempotent;
   latere git-credential setup --remove`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			key := fmt.Sprintf("credential.https://%s.helper", driveHost())
+			key := driveGitHelperKey()
 			errw := cmd.ErrOrStderr()
 			if remove {
 				if err := gitConfigUnsetAll(cmd.Context(), key); err != nil {
@@ -92,13 +92,7 @@ for every other host are untouched. Re-running setup is idempotent;
 				fmt.Fprintf(errw, "Removed %s from the global git config.\n", key)
 				return nil
 			}
-			// --replace-all collapses any previous entries into the single
-			// empty reset entry, making re-runs idempotent; --add appends
-			// the real helper after it.
-			if err := gitConfig(cmd.Context(), "--replace-all", key, ""); err != nil {
-				return err
-			}
-			if err := gitConfig(cmd.Context(), "--add", key, "!latere git-credential"); err != nil {
+			if err := writeDriveGitHelperConfig(cmd.Context()); err != nil {
 				return err
 			}
 			fmt.Fprintf(errw, "Configured the global git config:\n")
@@ -110,6 +104,54 @@ for every other host are untouched. Re-running setup is idempotent;
 	}
 	cmd.Flags().BoolVar(&remove, "remove", false, "remove the Drive credential-helper entries from the global git config")
 	return cmd
+}
+
+func driveGitHelperKey() string {
+	return fmt.Sprintf("credential.https://%s.helper", driveHost())
+}
+
+// writeDriveGitHelperConfig writes the reset + helper entries for the Drive
+// host into the global git config. --replace-all collapses any previous
+// entries into the single empty reset entry, making re-runs idempotent;
+// --add appends the real helper after it.
+func writeDriveGitHelperConfig(ctx context.Context) error {
+	key := driveGitHelperKey()
+	if err := gitConfig(ctx, "--replace-all", key, ""); err != nil {
+		return err
+	}
+	return gitConfig(ctx, "--add", key, "!latere git-credential")
+}
+
+// driveGitHelperConfigured reports whether the global git config already
+// carries exactly the two entries setup writes (reset + helper).
+func driveGitHelperConfigured(ctx context.Context) bool {
+	out, err := exec.CommandContext(ctx, "git", "config", "--global", "--get-all", driveGitHelperKey()).Output()
+	if err != nil {
+		return false
+	}
+	return string(out) == "\n!latere git-credential\n"
+}
+
+// configureDriveGitAfterLogin is the post-login hook `latere auth login`
+// runs (unless --no-git). Swappable for tests.
+var configureDriveGitAfterLogin = autoConfigureDriveGit
+
+// autoConfigureDriveGit wires the Drive credential helper after a
+// successful login. Best-effort by design — login must never fail over git
+// config: no git binary on PATH is a silent skip, and a git config error
+// degrades to one quiet warning pointing at the manual command. Skips the
+// write when the entries are already in place.
+func autoConfigureDriveGit(ctx context.Context, errw io.Writer) {
+	if _, err := exec.LookPath("git"); err != nil {
+		return
+	}
+	if !driveGitHelperConfigured(ctx) {
+		if err := writeDriveGitHelperConfig(ctx); err != nil {
+			fmt.Fprintf(errw, "  warning: could not configure git for %s (%v); run `latere git-credential setup` manually\n", driveHost(), err)
+			return
+		}
+	}
+	fmt.Fprintf(errw, "git is configured for %s (clone with git clone https://%s/git/<handle>/<repo>.git)\n", driveHost(), driveHost())
 }
 
 // gitConfig runs `git config --global <args>`. Tests point it at a scratch
