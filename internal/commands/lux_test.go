@@ -971,3 +971,21 @@ func TestLuxInvokeExplicitProviderSkipsInference(t *testing.T) {
 		}
 	}
 }
+
+func TestFmtRateRoundsFloatArtifacts(t *testing.T) {
+	cases := []struct {
+		in   float64
+		want string
+	}{
+		{0.024999999999999998, "0.025"},
+		{1.25, "1.25"},
+		{15, "15"},
+		{0.5, "0.5"},
+		{0, "0"},
+	}
+	for _, tc := range cases {
+		if got := fmtRate(tc.in); got != tc.want {
+			t.Errorf("fmtRate(%v) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

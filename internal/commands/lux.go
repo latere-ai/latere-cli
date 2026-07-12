@@ -8,10 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -343,16 +345,22 @@ llm.read scope.`,
 // rateLine folds a model's joined rate fields into one readable line,
 // e.g. "$2.5/M in, $15/M out ($0.25/M cached input)".
 func rateLine(m map[string]any) string {
-	in, okIn := m["input_usd_per_m"]
-	out, okOut := m["output_usd_per_m"]
+	in, okIn := m["input_usd_per_m"].(float64)
+	out, okOut := m["output_usd_per_m"].(float64)
 	if !okIn || !okOut {
 		return ""
 	}
-	s := fmt.Sprintf("$%v/M in, $%v/M out", in, out)
-	if c, ok := m["input_cached_usd_per_m"]; ok {
-		s += fmt.Sprintf(" ($%v/M cached input)", c)
+	s := fmt.Sprintf("$%s/M in, $%s/M out", fmtRate(in), fmtRate(out))
+	if c, ok := m["input_cached_usd_per_m"].(float64); ok {
+		s += fmt.Sprintf(" ($%s/M cached input)", fmtRate(c))
 	}
 	return s
+}
+
+// fmtRate renders a USD-per-million price compactly, rounding away
+// binary float artifacts from the wire (0.024999999999999998 → 0.025).
+func fmtRate(v float64) string {
+	return strconv.FormatFloat(math.Round(v*1e4)/1e4, 'f', -1, 64)
 }
 
 // rateFor picks the rate-card entry for provider/model: an exact model
