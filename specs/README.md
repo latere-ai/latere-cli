@@ -10,7 +10,7 @@ Active specs:
 specs/
   review-local-subcommand.md     (implemented — latere review local Cobra subcommand; critics via Lux/topos)
   auth-unification-migration.md  (planned, leaf — adopts pkg/authkit DeviceCodeClient + FileTokenStore)
-  flatten-auth-commands.md       (drafted — latere login/logout/whoami/print-token/org as top-level verbs)
+  flatten-auth-commands.md       (implemented — latere login/logout/whoami/print-token/org as top-level verbs)
   drive-subcommand.md            (drafted — latere drive: 8 orthogonal file-plane verbs; depends on flatten-auth-commands)
 ```
 

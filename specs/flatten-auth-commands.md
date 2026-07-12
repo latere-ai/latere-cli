@@ -1,6 +1,6 @@
 ---
 title: Flatten auth commands to top-level verbs
-status: drafted
+status: implemented
 depends_on: []
 affects:
   - internal/commands/auth.go
@@ -10,6 +10,7 @@ affects:
 effort: small
 created: 2026-07-12
 updated: 2026-07-12
+implemented: 2026-07-12
 author: changkun
 dispatched_task_id: null
 ---
@@ -113,6 +114,39 @@ alias covers the rest.
 - Help-text test asserting root `--help` lists the verbs and not `auth`.
 - Grep-guard test (or just the sweep): no remaining `latere auth login`
   string in user-facing output.
+
+## Outcome
+
+Shipped directly on main, same day as drafting. Drift: minimal — all spec
+items satisfied. Commits: `3aa5434` (flatten + org verb + tests), `4630c93`
+(hint sweep in errors/help/comments + their tests), `5ab0aae` (README and
+product guides).
+
+**What shipped.** `latere login/logout/whoami/print-token/org` registered on
+root; `auth` (and `auth org switch`) hidden but functional from the same
+factories; `switchOrgContext`/`showOrgContext` extracted so both paths share
+one implementation; `print-token` added to `skipUpdateCheck`; every
+user-facing `latere auth <verb>` string in code, tests, README, and docs
+moved to the flat form. Seven new tests in
+`internal/commands/flatten_auth_test.go`; full `make build` gate green.
+Verified live: `latere org` prints the active context, root help hides
+`auth`, the alias still resolves.
+
+**Deviations.** Test names differ from the spec sketch
+(`TestTopLevelSessionVerbsRegisteredInRoot`; `TestOrgShowAndSwitch` split
+into four focused tests). The grep-guard for leftover `latere auth login`
+strings was done as a one-time sweep, not a standing test — a test would
+false-positive on the alias's own doc comments.
+
+**Decisions.** `latere org` prints the bare context (`personal` or the org
+UUID) to stdout so it is scriptable; org id + `--personal` together is an
+explicit error rather than silently preferring one; the alias prints no
+deprecation notice (scripts' stderr stays clean).
+
+**Follow-ups.** Landscape classes 2–5 (sandbox smoke script, cella
+remediation string, product frontends, cross-repo docs) land per-repo after
+a release ships, per the Landscape Impact section. specs/drive-subcommand.md
+is now unblocked.
 
 ## Non-goals
 
