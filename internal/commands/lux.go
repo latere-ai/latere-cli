@@ -41,10 +41,10 @@ var sandboxTokenFile = "/run/cella/sandbox-token/token"
 //   - Anthropic SDK: ANTHROPIC_AUTH_TOKEN -> Authorization: Bearer
 //     (NOT ANTHROPIC_API_KEY, which sends x-api-key and Lux ignores)
 //   - Gemini SDK: sends x-goog-api-key only — no bearer path, so `env`
-//     is not offered; use `lux chat` or an OpenRouter route instead.
+//     is not offered; use `lux invoke` or an OpenRouter route instead.
 type providerSpec struct {
 	name string
-	// chatPath is the full Lux path for `lux chat`; empty = chat
+	// chatPath is the full Lux path for `lux invoke`; empty = chat
 	// unsupported for this provider.
 	chatPath string
 	// anthropicStyle selects the Messages request/response shape and
@@ -75,7 +75,7 @@ func providerSpecs() map[string]providerSpec {
 			envBaseVar: "ANTHROPIC_BASE_URL", envKeyVar: "ANTHROPIC_AUTH_TOKEN", envBaseURL: "/anthropic",
 		},
 		"gemini": {
-			// Reachable via `lux chat`-style direct call is non-trivial
+			// Reachable via `lux invoke`-style direct call is non-trivial
 			// (generateContent), and the Gemini SDK has no bearer path,
 			// so neither chat nor env is offered here.
 			name: "gemini",
@@ -121,16 +121,20 @@ Free models (OpenRouter ':free') work with no setup. Paid models need an
 access profile binding to a provider key — see 'latere lux access'.`,
 		Example: `  latere lux models
   eval "$(latere lux env --provider openai)"
-  latere lux chat --model openai/gpt-4o-mini "Say hi"
+  latere lux invoke --model openai/gpt-4o-mini "Say hi"
   latere lux usage`,
 	}
 	cmd.PersistentFlags().StringVar(&luxURL, "lux-url", "", "override Lux base URL (overrides LUX_API_URL)")
 	cmd.PersistentFlags().StringVar(&authURL, "auth-url", "", "override auth base URL (default derived from the Lux URL)")
 	cmd.PersistentFlags().StringVar(&token, "token", "", "present this bearer to Lux instead of minting one (e.g. a sandbox token)")
 
-	cmd.AddCommand(newLuxCatalogCmd("models", "/lux/v1/models", "models visible to your identity", &luxURL, &authURL, &token))
+	cmd.AddCommand(newLuxModelsCmd(&luxURL, &authURL, &token))
 	cmd.AddCommand(newLuxCatalogCmd("providers", "/lux/v1/providers", "providers Lux can route to", &luxURL, &authURL, &token))
-	cmd.AddCommand(newLuxCatalogCmd("rates", "/lux/v1/rates", "model rate card", &luxURL, &authURL, &token))
+	// Deprecated: rates ride `lux models` now. Hidden but functional so
+	// scripts keep working.
+	rates := newLuxCatalogCmd("rates", "/lux/v1/rates", "model rate card", &luxURL, &authURL, &token)
+	rates.Hidden = true
+	cmd.AddCommand(rates)
 	cmd.AddCommand(newLuxEnvCmd(&luxURL, &authURL, &token))
 	cmd.AddCommand(newLuxTokenCmd(&luxURL, &authURL, &token))
 	cmd.AddCommand(newLuxChatCmd(&luxURL, &authURL, &token))
@@ -228,6 +232,111 @@ type luxCatalogResponse struct {
 	Items []map[string]any `json:"items"`
 }
 
+// newLuxModelsCmd lists the models visible to the caller with the rate
+// card joined in: a price you can't see next to the model name is not a
+// catalog. Rates are best-effort — the model list still prints if the
+// rate endpoint is unavailable.
+func newLuxModelsCmd(luxURL, authURL, token *string) *cobra.Command {
+	var jsonF bool
+	cmd := &cobra.Command{
+		Use:   "models",
+		Short: "List models visible to your identity, with their rates.",
+		Long: `List models visible to your identity, including the rate card
+(USD per million input/output/cached-input tokens) where one applies.
+
+Reads /lux/v1/models and /lux/v1/rates with your identity. Requires the
+llm.read scope.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, bearer, err := luxClient(cmd.Context(), *luxURL, *authURL, *token)
+			if err != nil {
+				return err
+			}
+			if err := ensureLuxScope(bearer, []string{"llm.read", "llm.invoke"}, "list models"); err != nil {
+				return err
+			}
+			var models luxCatalogResponse
+			if err := c.GetJSON(cmd.Context(), "/lux/v1/models", &models); err != nil {
+				return wrapLuxErr(err)
+			}
+			var rates luxCatalogResponse
+			if err := c.GetJSON(cmd.Context(), "/lux/v1/rates", &rates); err != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "warning: rate card unavailable (%v)\n", err)
+			}
+			for _, m := range models.Items {
+				provider, _ := m["provider"].(string)
+				name, _ := m["model"].(string)
+				r := rateFor(rates.Items, provider, name)
+				if r == nil {
+					continue
+				}
+				for _, k := range []string{"input_usd_per_m", "output_usd_per_m", "input_cached_usd_per_m"} {
+					if v, ok := r[k]; ok {
+						m[k] = v
+					}
+				}
+			}
+			if jsonF {
+				return printJSON(models.Items)
+			}
+			if len(models.Items) == 0 {
+				fmt.Println("No models.")
+				return nil
+			}
+			// Human output: fold the three numbers into one rate line.
+			for _, m := range models.Items {
+				if line := rateLine(m); line != "" {
+					m["rate"] = line
+					delete(m, "input_usd_per_m")
+					delete(m, "output_usd_per_m")
+					delete(m, "input_cached_usd_per_m")
+				}
+			}
+			printLuxItems(models.Items)
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&jsonF, "json", false, "JSON output")
+	return cmd
+}
+
+// rateLine folds a model's joined rate fields into one readable line,
+// e.g. "$2.5/M in, $15/M out ($0.25/M cached input)".
+func rateLine(m map[string]any) string {
+	in, okIn := m["input_usd_per_m"]
+	out, okOut := m["output_usd_per_m"]
+	if !okIn || !okOut {
+		return ""
+	}
+	s := fmt.Sprintf("$%v/M in, $%v/M out", in, out)
+	if c, ok := m["input_cached_usd_per_m"]; ok {
+		s += fmt.Sprintf(" ($%v/M cached input)", c)
+	}
+	return s
+}
+
+// rateFor picks the rate-card entry for provider/model: an exact model
+// match wins; otherwise the longest trailing-* prefix pattern (the rate
+// card keys entries like "gpt-5.6-terra*").
+func rateFor(rates []map[string]any, provider, model string) map[string]any {
+	var best map[string]any
+	bestLen := -1
+	for _, r := range rates {
+		p, _ := r["provider"].(string)
+		if p != provider {
+			continue
+		}
+		pat, _ := r["model"].(string)
+		if pat == model {
+			return r
+		}
+		if strings.HasSuffix(pat, "*") && strings.HasPrefix(model, strings.TrimSuffix(pat, "*")) && len(pat) > bestLen {
+			best, bestLen = r, len(pat)
+		}
+	}
+	return best
+}
+
 func newLuxCatalogCmd(name, path, what string, luxURL, authURL, token *string) *cobra.Command {
 	var jsonF bool
 	cmd := &cobra.Command{
@@ -270,7 +379,7 @@ func printLuxItems(items []map[string]any) {
 			fmt.Fprintln(os.Stdout)
 		}
 		for _, k := range []string{"id", "model", "provider", "name", "status", "default_route_prefix",
-			"input_usd_per_m", "output_usd_per_m"} {
+			"rate", "input_usd_per_m", "output_usd_per_m"} {
 			if v, ok := it[k]; ok && v != nil {
 				printWrappedField(k, fmt.Sprintf("%v", v))
 			}
@@ -297,7 +406,7 @@ session — re-run this when it expires.
 Supported: openai, openrouter (OpenAI SDK; the credential is sent as a
 bearer), and anthropic (via ANTHROPIC_AUTH_TOKEN, the SDK's bearer knob;
 ANTHROPIC_API_KEY would send x-api-key, which Lux ignores). Gemini's SDK
-has no bearer path; use 'latere lux chat' or an OpenRouter route.`,
+has no bearer path; use 'latere lux invoke' or an OpenRouter route.`,
 		Example: `  eval "$(latere lux env --provider openai)"
   eval "$(latere lux env --provider anthropic)"`,
 		Args: cobra.NoArgs,
@@ -307,7 +416,7 @@ has no bearer path; use 'latere lux chat' or an OpenRouter route.`,
 				return err
 			}
 			if spec.envBaseVar == "" {
-				return fmt.Errorf("`lux env` does not support %q (its SDK has no bearer path); use `lux chat` or --provider openrouter", provider)
+				return fmt.Errorf("`lux env` does not support %q (its SDK has no bearer path); use `lux invoke` or --provider openrouter", provider)
 			}
 			base := strings.TrimRight(resolveLuxURL(*luxURL), "/")
 			bearer, err := luxIdentityBearer(cmd.Context(), *token, *luxURL, *authURL)
@@ -355,9 +464,16 @@ func newLuxChatCmd(luxURL, authURL, token *string) *cobra.Command {
 		jsonF     bool
 	)
 	cmd := &cobra.Command{
-		Use:   "chat <prompt>",
-		Short: "Send a one-shot prompt to a model through Lux.",
-		Long: `Send a one-shot prompt to a model and print the reply.
+		Use:     "invoke <prompt>",
+		Aliases: []string{"chat"},
+		Short:   "Raw one-shot model call — for verifying Lux access and bindings.",
+		Long: `Send one raw prompt to a model through Lux and print the reply.
+
+This is a diagnostic, not an assistant: no tools, no session, no
+workspace — the built-in equivalent of a curl against the gateway. Use
+it to verify a model responds through your identity after 'lux access
+set' or a provider binding. For actual assistant work, use
+'latere topos -p "<prompt>"'.
 
 The request goes through Lux with your identity as the bearer, so cost
 is tracked on your identity and no key is allocated. The inference path
@@ -366,8 +482,8 @@ sandbox service token).
 
 Supported providers: openai, openrouter (OpenAI chat/completions) and
 anthropic (Messages API).`,
-		Example: `  latere lux chat --model openai/gpt-4o-mini "Say hi"
-  latere lux chat --provider anthropic --model claude-sonnet-4-6 "Say hi"`,
+		Example: `  latere lux invoke --model openai/gpt-4o-mini "Say hi"
+  latere lux invoke --provider anthropic --model claude-sonnet-4-6 "Say hi"`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if model == "" {
@@ -378,7 +494,7 @@ anthropic (Messages API).`,
 				return err
 			}
 			if spec.chatPath == "" {
-				return fmt.Errorf("`lux chat` does not support %q; use openai, openrouter, or anthropic", provider)
+				return fmt.Errorf("`lux invoke` does not support %q; use openai, openrouter, or anthropic", provider)
 			}
 			prompt := strings.Join(args, " ")
 			bearer, err := luxBearer(cmd.Context(), *token, *luxURL, *authURL)

@@ -7,9 +7,8 @@ Run `latere login` first (see the [main README](../README.md#sign-in)).
 ## Discover
 
 ```sh
-latere lux models
+latere lux models      # models visible to you, with rates (USD per million tokens)
 latere lux providers
-latere lux rates
 ```
 
 ## Point a stock SDK at Lux
@@ -23,11 +22,13 @@ eval "$(latere lux env --provider openai)"
 
 `--provider` accepts `openai`, `openrouter`, or `anthropic`. The exported token lasts your sign-in session; re-run the command when it expires.
 
-## One-shot chat
+## Verify access with a raw call
+
+`invoke` sends one raw prompt through the gateway — no tools, no session. Use it to check that a model responds through your identity after binding a provider key; for actual assistant work, use `latere topos -p "<prompt>"`.
 
 ```sh
-latere lux chat --model openai/gpt-4o-mini "Say hi"
-latere lux chat --provider anthropic --model claude-sonnet-4-6 "Say hi"
+latere lux invoke --model openai/gpt-4o-mini "Say hi"
+latere lux invoke --provider anthropic --model claude-sonnet-4-6 "Say hi"
 ```
 
 ## Usage and access

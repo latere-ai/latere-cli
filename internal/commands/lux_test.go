@@ -80,7 +80,7 @@ func TestLuxHelpText(t *testing.T) {
 	}{
 		{[]string{"lux", "--help"}, []string{"lux.latere.ai", "allocating an API key", "LUX_API_URL", "latere login"}},
 		{[]string{"lux", "env", "--help"}, []string{"provider SDK at Lux", "ANTHROPIC_AUTH_TOKEN"}},
-		{[]string{"lux", "chat", "--help"}, []string{"one-shot prompt", "--model"}},
+		{[]string{"lux", "invoke", "--help"}, []string{"diagnostic, not an assistant", "latere topos -p", "--model"}},
 		{[]string{"lux", "access", "set", "--help"}, []string{"provider key", "llm.invoke"}},
 	}
 	for _, tc := range cases {
@@ -315,12 +315,26 @@ func TestEnsureLuxScope(t *testing.T) {
 // ---- discovery ----
 
 func TestLuxModelsCallsEndpoint(t *testing.T) {
-	var gotPath, gotAuth string
+	var gotAuth string
+	gotPaths := map[string]bool{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath, gotAuth = r.URL.Path, r.Header.Get("Authorization")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"items": []map[string]any{{"id": "gpt-5", "provider": "openai"}},
-		})
+		gotPaths[r.URL.Path] = true
+		gotAuth = r.Header.Get("Authorization")
+		switch r.URL.Path {
+		case "/lux/v1/models":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"items": []map[string]any{{"id": "gpt-5", "model": "gpt-5-mini", "provider": "openai"}},
+			})
+		case "/lux/v1/rates":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"items": []map[string]any{
+					{"provider": "openai", "model": "gpt-5*", "input_usd_per_m": 5.0, "output_usd_per_m": 15.0},
+					{"provider": "openai", "model": "gpt-5-mini", "input_usd_per_m": 1.25, "output_usd_per_m": 10.0},
+				},
+			})
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
 	}))
 	defer srv.Close()
 
@@ -334,14 +348,59 @@ func TestLuxModelsCallsEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if gotPath != "/lux/v1/models" {
-		t.Errorf("path = %q", gotPath)
+	if !gotPaths["/lux/v1/models"] || !gotPaths["/lux/v1/rates"] {
+		t.Errorf("paths hit = %v; models must join the rate card", gotPaths)
 	}
 	if gotAuth != "Bearer "+tok {
 		t.Errorf("auth = %q", gotAuth)
 	}
 	if !strings.Contains(out, "gpt-5") {
 		t.Errorf("output missing model:\n%s", out)
+	}
+	// The exact-match rate (1.25) must win over the gpt-5* pattern (5.0).
+	if !strings.Contains(out, "1.25") {
+		t.Errorf("output missing joined rate:\n%s", out)
+	}
+}
+
+func TestRateForPicksMostSpecific(t *testing.T) {
+	rates := []map[string]any{
+		{"provider": "openai", "model": "gpt-5*", "input_usd_per_m": 5.0},
+		{"provider": "openai", "model": "gpt-5-mini*", "input_usd_per_m": 1.25},
+		{"provider": "anthropic", "model": "gpt-5-mini*", "input_usd_per_m": 99.0},
+		{"provider": "openai", "model": "gpt-5-mini-2026", "input_usd_per_m": 1.0},
+	}
+	if r := rateFor(rates, "openai", "gpt-5-mini-2026"); r == nil || r["input_usd_per_m"] != 1.0 {
+		t.Errorf("exact match: got %v", r)
+	}
+	if r := rateFor(rates, "openai", "gpt-5-mini-x"); r == nil || r["input_usd_per_m"] != 1.25 {
+		t.Errorf("longest pattern: got %v", r)
+	}
+	if r := rateFor(rates, "openai", "gpt-5-turbo"); r == nil || r["input_usd_per_m"] != 5.0 {
+		t.Errorf("shorter pattern: got %v", r)
+	}
+	if r := rateFor(rates, "gemini", "gpt-5-mini"); r != nil {
+		t.Errorf("provider mismatch: got %v", r)
+	}
+}
+
+func TestLuxRatesHiddenAlias(t *testing.T) {
+	for _, c := range newLuxCmd().Commands() {
+		if c.Name() == "rates" {
+			if !c.Hidden {
+				t.Error("lux rates must be hidden (rates ride lux models)")
+			}
+			return
+		}
+	}
+	t.Fatal("lux rates alias missing")
+}
+
+func TestLuxInvokeChatAlias(t *testing.T) {
+	root := NewRoot("test")
+	cmd, _, err := root.Find([]string{"lux", "chat"})
+	if err != nil || cmd.Name() != "invoke" {
+		t.Fatalf("lux chat must resolve to invoke; got %v, %v", cmd, err)
 	}
 }
 
@@ -414,7 +473,7 @@ func TestLuxChatAnthropic(t *testing.T) {
 	out, err := captureStdout(func() error {
 		root := NewRoot("test")
 		root.SetErr(&strings.Builder{})
-		root.SetArgs([]string{"lux", "chat", "--lux-url", srv.URL, "--token", tok,
+		root.SetArgs([]string{"lux", "invoke", "--lux-url", srv.URL, "--token", tok,
 			"--provider", "anthropic", "--model", "claude-sonnet-4-6", "Say hi"})
 		return root.Execute()
 	})
