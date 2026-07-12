@@ -427,6 +427,12 @@ func TestLuxChatOpenAI(t *testing.T) {
 	var gotPath string
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/lux/v1/models" { // provider inference lookup
+			_ = json.NewEncoder(w).Encode(map[string]any{"items": []map[string]any{
+				{"model": "gpt-4o-mini", "provider": "openai"},
+			}})
+			return
+		}
 		gotPath = r.URL.Path
 		_ = json.NewDecoder(r.Body).Decode(&gotBody)
 		_ = json.NewEncoder(w).Encode(map[string]any{
