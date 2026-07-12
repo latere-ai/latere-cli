@@ -1,6 +1,6 @@
 # Cella
 
-[Cella](https://cella.latere.ai) provides named sandboxes — ephemeral enough to throw away or persistent enough to keep. Run `latere auth login` first (see the [main README](../README.md#sign-in)).
+[Cella](https://cella.latere.ai) provides named sandboxes — ephemeral enough to throw away or persistent enough to keep. Run `latere login` first (see the [main README](../README.md#sign-in)).
 
 ## Quickstart
 

@@ -5,7 +5,7 @@ you run coding-assistant sessions whose work happens on the Topos control plane,
 not your laptop — so you can start a session, close your terminal, and pick it
 back up later, on the same machine or another one, right where it left off.
 
-Run `latere auth login` first (see the [main README](../README.md#sign-in)). For
+Run `latere login` first (see the [main README](../README.md#sign-in)). For
 local development against a Topos server started with `TOPOS_DEV_AUTH=true` and
 `TOPOS_DEV_TOKEN=<secret>`, set `TOPOS_API_URL` and `TOPOS_TOKEN` to talk to it
 directly:

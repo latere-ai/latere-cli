@@ -1,8 +1,8 @@
 # Models (Lux)
 
-`latere lux` calls language models through [Lux](https://lux.latere.ai), the Latere model gateway. You do not allocate or manage an API key: the CLI presents your Latere identity (your `latere auth login`), and usage is tracked on that identity. Inside a Cella sandbox that is allowed to reach Lux, the sandbox's own token is used automatically.
+`latere lux` calls language models through [Lux](https://lux.latere.ai), the Latere model gateway. You do not allocate or manage an API key: the CLI presents your Latere identity (your `latere login`), and usage is tracked on that identity. Inside a Cella sandbox that is allowed to reach Lux, the sandbox's own token is used automatically.
 
-Run `latere auth login` first (see the [main README](../README.md#sign-in)).
+Run `latere login` first (see the [main README](../README.md#sign-in)).
 
 ## Discover
 
@@ -50,7 +50,7 @@ latere lux serve --upstream http://localhost:1234 --models llama3.1:8b
 latere lux serve --share org        # share with your whole org (default for org accounts)
 ```
 
-`serve` opens a long-lived outbound tunnel (no inbound port) and forwards requests only to the configured local runtime. It needs the `llm.serve` scope — run `latere auth login` once to refresh your scopes. Call the model by pointing a stock SDK at the `/local/v1` route: `eval "$(latere lux env --provider local)"`. See the [Lux local-models guide](https://github.com/latere-ai/lux/blob/main/docs/lux/local-models.md).
+`serve` opens a long-lived outbound tunnel (no inbound port) and forwards requests only to the configured local runtime. It needs the `llm.serve` scope — run `latere login` once to refresh your scopes. Call the model by pointing a stock SDK at the `/local/v1` route: `eval "$(latere lux env --provider local)"`. See the [Lux local-models guide](https://github.com/latere-ai/lux/blob/main/docs/lux/local-models.md).
 
 ## Configuration
 

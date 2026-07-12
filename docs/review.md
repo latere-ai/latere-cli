@@ -1,12 +1,12 @@
 # Review
 
-`latere review` runs an adversarial review of your most recent Claude Code session: it forks the session as a *proposer* that defends the change, runs *critics* against the working-tree diff, and surfaces the attacks that survive. Run `latere auth login` first (see the [main README](../README.md#sign-in)).
+`latere review` runs an adversarial review of your most recent Claude Code session: it forks the session as a *proposer* that defends the change, runs *critics* against the working-tree diff, and surfaces the attacks that survive. Run `latere login` first (see the [main README](../README.md#sign-in)).
 
 The proposer runs locally through your own `claude` CLI for full fidelity (it forks your real session with `claude --resume <id> --fork-session`), while the critics run through [Lux](https://lux.latere.ai), so critic model cost is tracked on your Latere identity and no provider key is needed locally.
 
 ## Prerequisites
 
-- `latere auth login` (grants the `llm.invoke` scope the critics need).
+- `latere login` (grants the `llm.invoke` scope the critics need).
 - The [`claude`](https://docs.claude.com/en/docs/claude-code) CLI installed and authenticated (the proposer forks your real Claude Code session).
 - A git repository with a recent Claude Code session in it.
 

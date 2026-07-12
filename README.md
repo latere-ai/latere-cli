@@ -48,40 +48,41 @@ Auto-upgrade and the daily notice are skipped for `go install`/dev builds, in CI
 ## Sign in
 
 ```sh
-latere auth login
+latere login
 ```
 
-`latere auth login` starts the OAuth2 device-code flow against `auth.latere.ai`. It prints a URL and user code, waits for browser approval, then saves the token to `~/.config/latere/token.json`. One sign-in unlocks every product below.
+`latere login` starts the OAuth2 device-code flow against `auth.latere.ai`. It prints a URL and user code, waits for browser approval, then saves the token to `~/.config/latere/token.json`. One sign-in unlocks every product below.
 
 ```sh
-latere auth whoami
-latere auth print-token
-latere auth logout
+latere whoami
+latere print-token
+latere logout
 
 # CI or dashboard-minted tokens
-latere auth login --token <token>
+latere login --token <token>
 ```
 
 ### Switching the active organization
 
 ```sh
-latere auth org switch <org-uuid>   # scope the saved token to <org-uuid>
-latere auth org switch --personal   # scope the saved token to the personal context
+latere org                        # show the active context
+latere org <org-uuid>             # scope the saved token to <org-uuid>
+latere org --personal             # scope the saved token to the personal context
 ```
 
-`org switch` uses the auth service's refresh-token grant: no device-code re-prompt, the saved refresh token is exchanged for a new access token scoped to the chosen org. The on-disk token file is rewritten in place.
+Switching uses the auth service's refresh-token grant: no device-code re-prompt, the saved refresh token is exchanged for a new access token scoped to the chosen org. The on-disk token file is rewritten in place.
 
 | Setting | Purpose |
 |---------|---------|
-| `--auth-url` | Override the auth URL for `latere auth login`. |
+| `--auth-url` | Override the auth URL for `latere login`. |
 | `LATERE_TOKEN_FILE` | Token file path, default `~/.config/latere/token.json`. |
 
 ## Git with Drive
 
-Drive (`drive.latere.ai`) serves repo workspaces over git smart-HTTP. Signing in is all it takes — `latere auth login` also wires git's credential helper for `drive.latere.ai`, so plain `git clone` authenticates with your saved login, no token in the URL:
+Drive (`drive.latere.ai`) serves repo workspaces over git smart-HTTP. Signing in is all it takes — `latere login` also wires git's credential helper for `drive.latere.ai`, so plain `git clone` authenticates with your saved login, no token in the URL:
 
 ```sh
-latere auth login
+latere login
 
 git clone https://drive.latere.ai/git/me/<repo>.git          # your personal repos
 git clone https://drive.latere.ai/git/<org-slug>/<repo>.git  # org repos
@@ -92,7 +93,7 @@ The helper is scoped to `drive.latere.ai` only; credentials for every other host
 If you'd rather manage the git config yourself, these are the escape hatches:
 
 ```sh
-latere auth login --no-git             # sign in without touching git config
+latere login --no-git             # sign in without touching git config
 latere git-credential setup            # wire the helper explicitly
 latere git-credential setup --remove   # undo the wiring
 ```
