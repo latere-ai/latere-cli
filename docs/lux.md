@@ -16,11 +16,17 @@ latere lux providers
 No key to paste — export your identity and use the SDK normally:
 
 ```sh
-eval "$(latere lux env --provider openai)"
-# a normal OpenAI SDK call is now routed through Lux, billed to your identity
+eval "$(latere lux env)"             # OpenAI SDK -> the openai route
+eval "$(latere lux env anthropic)"   # Anthropic SDK -> the anthropic route
+# a normal SDK call is now routed through Lux, billed to your identity
 ```
 
-`--provider` accepts `openai`, `openrouter`, or `anthropic`. The exported token lasts your sign-in session; re-run the command when it expires.
+The route argument is `openai` (default), `openrouter`, `anthropic`, or `local` (your `lux serve` tunnels); the OpenAI-dialect routes all emit `OPENAI_BASE_URL`/`OPENAI_API_KEY` with different base URLs. The command reports on stderr which credential it embedded and when it expires — by default your login identity token, which lasts the sign-in session. Two variants:
+
+```sh
+eval "$(latere lux env --ttl 1h)"    # CI: a short-lived actor token instead
+TOKEN=$(latere lux env --raw)        # bare token for curl/scripts
+```
 
 ## Verify access with a raw call
 

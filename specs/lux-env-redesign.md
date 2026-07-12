@@ -1,6 +1,6 @@
 ---
 title: Redesign lux env around routes and token lifetime
-status: drafted
+status: implemented
 depends_on: []
 affects:
   - internal/commands/lux.go
@@ -65,6 +65,20 @@ One verb, route as the positional argument, dialect inferred:
 Follows lux_test.go conventions: exports per route (table), stderr
 provenance note per token source, `--ttl` mint path against a fake
 auth `/actor-tokens`, `--raw` bare output, hidden-alias checks.
+
+## Outcome
+
+Shipped same day, directly on main. Drift: minimal — one deliberate
+deviation: `lux token` stays a hidden alias with its old behavior
+(identity bearer to stdout) rather than literally delegating to
+`env --raw`, so its output shape cannot change under scripts; `--raw`
+additionally prints the provenance note on stderr. `--provider` remains
+as a hidden flag alias. Verified live: positional routes emit the right
+dialect exports, and stderr reports
+`# identity token, expires 2026-07-12T20:27Z — re-run after expiry`
+against the real login. Six new tests cover routes, eval-clean stdout,
+`--ttl` minting (ttl_seconds forwarded), `--raw`, the expiry note, and
+the hidden alias.
 
 ## Non-goals
 

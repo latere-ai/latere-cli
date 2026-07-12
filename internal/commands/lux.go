@@ -395,60 +395,110 @@ func printLuxItems(items []map[string]any) {
 
 // ---- SDK enablement: env / token ----
 
+// luxEnvBearer resolves the credential lux env embeds, and says what it
+// is: a passthrough token (flag/env/sandbox file), a minted actor token
+// bounded by ttl, or the refreshed login identity token with its expiry.
+func luxEnvBearer(ctx context.Context, tokenFlag, luxURL, authURLFlag string, ttl time.Duration) (bearer, provenance string, err error) {
+	if t, ok := passthroughToken(tokenFlag); ok {
+		return t, "passthrough token (--token, $LATERE_LUX_TOKEN, or sandbox)", nil
+	}
+	access, authBase, err := authIdentityToken(ctx, luxURL, authURLFlag)
+	if err != nil {
+		return "", "", err
+	}
+	if ttl > 0 {
+		httpc := &http.Client{Timeout: 15 * time.Second}
+		actor, err := mintActorToken(ctx, httpc, authBase, access, "lux.latere.ai", int(ttl.Seconds()))
+		if err != nil {
+			return "", "", fmt.Errorf("mint actor token: %w", err)
+		}
+		return actor, fmt.Sprintf("actor token, expires in %s", ttl), nil
+	}
+	provenance = "identity token"
+	if tok, lerr := api.LoadAuthToken(); lerr == nil && !tok.ExpiresAt.IsZero() {
+		provenance = fmt.Sprintf("identity token, expires %s — re-run after expiry",
+			tok.ExpiresAt.UTC().Format("2006-01-02T15:04Z"))
+	}
+	return access, provenance, nil
+}
+
 func newLuxEnvCmd(luxURL, authURL, token *string) *cobra.Command {
 	var provider string
+	var ttl time.Duration
+	var raw bool
 	cmd := &cobra.Command{
-		Use:   "env",
-		Short: "Print shell exports that point a stock SDK at Lux (keyless).",
-		Long: `Print 'export' lines that point a provider SDK at Lux using your
-identity as the bearer — no key allocation.
+		Use:       "env [route]",
+		ValidArgs: []string{"openai", "openrouter", "anthropic", "local"},
+		Short:     "Print shell exports that point a stock SDK at a Lux route (keyless).",
+		Long: `Print 'export' lines that point a stock SDK at a Lux route using your
+identity as the credential — no key allocation.
 
-    eval "$(latere lux env --provider openai)"
+    eval "$(latere lux env)"            # OpenAI SDK -> the openai route
+    eval "$(latere lux env anthropic)"  # Anthropic SDK -> the anthropic route
 
-Then a normal OpenAI SDK call is routed through Lux and billed to your
-identity. The printed token is your identity token; it lasts the login
-session — re-run this when it expires.
+Routes and their SDK dialect:
 
-Supported: openai, openrouter (OpenAI SDK; the credential is sent as a
-bearer), and anthropic (via ANTHROPIC_AUTH_TOKEN, the SDK's bearer knob;
-ANTHROPIC_API_KEY would send x-api-key, which Lux ignores). Gemini's SDK
-has no bearer path; use 'latere lux invoke' or an OpenRouter route.`,
-		Example: `  eval "$(latere lux env --provider openai)"
-  eval "$(latere lux env --provider anthropic)"`,
-		Args: cobra.NoArgs,
+    openai      OpenAI SDK      (OPENAI_BASE_URL, OPENAI_API_KEY)
+    openrouter  OpenAI SDK      (same variables, OpenRouter route)
+    local       OpenAI SDK      (your 'lux serve' tunnels)
+    anthropic   Anthropic SDK   (ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN —
+                not ANTHROPIC_API_KEY, which sends x-api-key and Lux ignores)
+
+Gemini's SDK has no bearer path; use 'latere lux invoke' or an
+OpenRouter route.
+
+The embedded credential and its lifetime are reported on stderr (stdout
+stays eval-clean). By default it is your login identity token, which
+lasts the login session. For CI, --ttl mints a short-lived actor token
+instead, bounding the blast radius of a leaked export.`,
+		Example: `  eval "$(latere lux env)"
+  eval "$(latere lux env anthropic)"
+  eval "$(latere lux env --ttl 1h)"
+  TOKEN=$(latere lux env --raw)`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			spec, err := lookupProvider(provider)
+			route := provider
+			if len(args) == 1 {
+				route = args[0]
+			}
+			spec, err := lookupProvider(route)
 			if err != nil {
 				return err
 			}
-			if spec.envBaseVar == "" {
-				return fmt.Errorf("`lux env` does not support %q (its SDK has no bearer path); use `lux invoke` or --provider openrouter", provider)
+			if !raw && spec.envBaseVar == "" {
+				return fmt.Errorf("`lux env` does not support %q (its SDK has no bearer path); use `lux invoke` or the openrouter route", route)
+			}
+			bearer, provenance, err := luxEnvBearer(cmd.Context(), *token, *luxURL, *authURL, ttl)
+			if err != nil {
+				return err
+			}
+			if raw {
+				fmt.Fprintln(cmd.OutOrStdout(), bearer)
+				fmt.Fprintf(cmd.ErrOrStderr(), "# %s\n", provenance)
+				return nil
 			}
 			base := strings.TrimRight(resolveLuxURL(*luxURL), "/")
-			bearer, err := luxIdentityBearer(cmd.Context(), *token, *luxURL, *authURL)
-			if err != nil {
-				return err
-			}
-			fmt.Printf("export %s=%s\n", spec.envBaseVar, base+spec.envBaseURL)
-			fmt.Printf("export %s=%s\n", spec.envKeyVar, bearer)
+			fmt.Fprintf(cmd.OutOrStdout(), "export %s=%s\n", spec.envBaseVar, base+spec.envBaseURL)
+			fmt.Fprintf(cmd.OutOrStdout(), "export %s=%s\n", spec.envKeyVar, bearer)
+			fmt.Fprintf(cmd.ErrOrStderr(), "# %s\n", provenance)
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&provider, "provider", "openai", "provider SDK to configure: openai|openrouter|anthropic")
+	cmd.Flags().StringVar(&provider, "provider", "openai", "deprecated alias for the [route] argument")
+	_ = cmd.Flags().MarkHidden("provider")
+	cmd.Flags().DurationVar(&ttl, "ttl", 0, "mint a short-lived actor token instead of the identity token (e.g. 1h)")
+	cmd.Flags().BoolVar(&raw, "raw", false, "print the bare token only, no exports")
 	return cmd
 }
 
+// newLuxTokenCmd is a hidden deprecated alias: `lux env --raw` owns the
+// bare-token job now. Kept functional so scripts don't break.
 func newLuxTokenCmd(luxURL, authURL, token *string) *cobra.Command {
 	return &cobra.Command{
-		Use:   "token",
-		Short: "Print a Lux identity bearer token to stdout.",
-		Long: `Print the identity bearer the CLI presents to Lux (your auth identity
-token, or a sandbox token when running inside a sandbox). It lasts the
-login session. Useful for scripting:
-
-    TOKEN=$(latere lux token)
-    curl -H "Authorization: Bearer $TOKEN" https://lux.latere.ai/lux/v1/models`,
-		Args: cobra.NoArgs,
+		Use:    "token",
+		Short:  "Deprecated alias for `lux env --raw`.",
+		Hidden: true,
+		Args:   cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			bearer, err := luxIdentityBearer(cmd.Context(), *token, *luxURL, *authURL)
 			if err != nil {

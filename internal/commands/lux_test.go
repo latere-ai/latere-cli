@@ -79,7 +79,7 @@ func TestLuxHelpText(t *testing.T) {
 		want []string
 	}{
 		{[]string{"lux", "--help"}, []string{"lux.latere.ai", "allocating an API key", "LUX_API_URL", "latere login"}},
-		{[]string{"lux", "env", "--help"}, []string{"provider SDK at Lux", "ANTHROPIC_AUTH_TOKEN"}},
+		{[]string{"lux", "env", "--help"}, []string{"stock SDK at a Lux route", "ANTHROPIC_AUTH_TOKEN", "--ttl"}},
 		{[]string{"lux", "invoke", "--help"}, []string{"diagnostic, not an assistant", "latere topos -p", "--model"}},
 		{[]string{"lux", "access", "set", "--help"}, []string{"provider key", "llm.invoke"}},
 	}
@@ -720,4 +720,138 @@ func TestFmtHelpers(t *testing.T) {
 	if got := fmtTokens(42); got != "42" {
 		t.Errorf("fmtTokens = %q", got)
 	}
+}
+
+func TestLuxEnvPositionalRoute(t *testing.T) {
+	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"llm.invoke"}})
+	cases := []struct {
+		route    string
+		wantBase string
+		wantKey  string
+	}{
+		{"openrouter", "export OPENAI_BASE_URL=https://lux.example/openrouter/v1", "export OPENAI_API_KEY="},
+		{"local", "export OPENAI_BASE_URL=https://lux.example/local/v1", "export OPENAI_API_KEY="},
+		{"anthropic", "export ANTHROPIC_BASE_URL=https://lux.example/anthropic", "export ANTHROPIC_AUTH_TOKEN="},
+	}
+	for _, tc := range cases {
+		t.Run(tc.route, func(t *testing.T) {
+			out, err := captureStdout(func() error {
+				root := NewRoot("test")
+				root.SetErr(&strings.Builder{})
+				root.SetArgs([]string{"lux", "env", tc.route, "--lux-url", "https://lux.example", "--token", tok})
+				return root.Execute()
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(out, tc.wantBase) || !strings.Contains(out, tc.wantKey+tok) {
+				t.Errorf("route %s exports wrong:\n%s", tc.route, out)
+			}
+		})
+	}
+}
+
+func TestLuxEnvProvenanceOnStderrOnly(t *testing.T) {
+	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"llm.invoke"}})
+	var errBuf strings.Builder
+	out, err := captureStdout(func() error {
+		root := NewRoot("test")
+		root.SetErr(&errBuf)
+		root.SetArgs([]string{"lux", "env", "--lux-url", "https://lux.example", "--token", tok})
+		return root.Execute()
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "#") {
+		t.Errorf("stdout must stay eval-clean, got:\n%s", out)
+	}
+	if !strings.Contains(errBuf.String(), "passthrough token") {
+		t.Errorf("stderr missing provenance note: %q", errBuf.String())
+	}
+}
+
+func TestLuxEnvRaw(t *testing.T) {
+	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"llm.invoke"}})
+	out, err := captureStdout(func() error {
+		root := NewRoot("test")
+		root.SetErr(&strings.Builder{})
+		root.SetArgs([]string{"lux", "env", "--raw", "--token", tok})
+		return root.Execute()
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(out) != tok {
+		t.Errorf("--raw must print the bare token, got %q", out)
+	}
+}
+
+func TestLuxEnvTTLMintsActorToken(t *testing.T) {
+	isolateBearer(t)
+	var gotTTL float64
+	authSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/actor-tokens" {
+			http.Error(w, "unexpected", http.StatusNotFound)
+			return
+		}
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		gotTTL, _ = body["ttl_seconds"].(float64)
+		_ = json.NewEncoder(w).Encode(map[string]any{"actor_token": "short-lived"})
+	}))
+	defer authSrv.Close()
+	writeAuthTokenFile(t, fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"llm.invoke"}}), "r", time.Now().Add(time.Hour))
+
+	var errBuf strings.Builder
+	out, err := captureStdout(func() error {
+		root := NewRoot("test")
+		root.SetErr(&errBuf)
+		root.SetArgs([]string{"lux", "env", "--ttl", "1h", "--lux-url", "https://lux.example", "--auth-url", authSrv.URL})
+		return root.Execute()
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotTTL != 3600 {
+		t.Errorf("ttl_seconds = %v, want 3600", gotTTL)
+	}
+	if !strings.Contains(out, "export OPENAI_API_KEY=short-lived") {
+		t.Errorf("exports must embed the actor token:\n%s", out)
+	}
+	if !strings.Contains(errBuf.String(), "actor token, expires in 1h") {
+		t.Errorf("stderr = %q", errBuf.String())
+	}
+}
+
+func TestLuxEnvIdentityExpiryNote(t *testing.T) {
+	isolateBearer(t)
+	exp := time.Date(2026, 7, 13, 8, 0, 0, 0, time.UTC)
+	writeAuthTokenFile(t, fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"llm.invoke"}}), "r", exp)
+
+	var errBuf strings.Builder
+	_, err := captureStdout(func() error {
+		root := NewRoot("test")
+		root.SetErr(&errBuf)
+		root.SetArgs([]string{"lux", "env", "--lux-url", "https://lux.example"})
+		return root.Execute()
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(errBuf.String(), "identity token, expires 2026-07-13T08:00Z") {
+		t.Errorf("stderr = %q", errBuf.String())
+	}
+}
+
+func TestLuxTokenHiddenAlias(t *testing.T) {
+	for _, c := range newLuxCmd().Commands() {
+		if c.Name() == "token" {
+			if !c.Hidden {
+				t.Error("lux token must be hidden (env --raw owns bare-token output)")
+			}
+			return
+		}
+	}
+	t.Fatal("lux token alias missing")
 }
