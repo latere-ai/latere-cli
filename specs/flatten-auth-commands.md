@@ -68,6 +68,38 @@ All user-facing hints change to the flat form: `run latere login` (grep for
 `latere auth login` across internal/ and README.md). `skipUpdateCheck`
 (root.go:66) gains `print-token` (bare-token stdout must stay clean).
 
+## Landscape Impact
+
+`latere auth <verb>` appears in ~50 files across `../` (survey 2026-07-12;
+dominant forms: `login` ×45 incl. `--token`/`--org-id`, `print-token` ×16,
+`whoami` ×4, `logout` ×2). The hidden alias means **nothing breaks at
+flatten time**; the alias cannot be removed until the sweep below lands.
+
+By class, in migration order:
+
+1. **This repo** — commands, hints, README (part of this spec).
+2. **Executable dependency** — `sandbox/test/e2e-cli-credential-smoke.sh`
+   invokes `latere auth login` (the only script/CI caller found). Switch to
+   `latere login` once a flattened CLI release is out.
+3. **Server-emitted remediation** — `sandbox/api/errors.go:94` tells API
+   callers to `Run \`latere auth login\``. Cella deploy must trail the CLI
+   release (old CLIs still understand the alias, so ordering is soft).
+4. **Product frontends (user-visible copy, en+zh)** — sandbox frontend
+   (ConsoleScreen, DetailPane, HeroDemo, i18n), drive frontend
+   (`onboarding.ts` + test, `CloneUrlBox.vue`), agents frontend (review
+   content).
+5. **Docs & marketing** — sandbox `docs/cella/*` (en+zh) + deploy docs, lux
+   `docs/lux/*`, drive README, auth `INTEGRATION.md`, wallfacer docs +
+   `internal/cli/auth.go` help text, latere-ai site (`developers.html`,
+   introducing-drive blog en+zh), `../specs/products/cli.md`.
+6. **Not affected** — `pkg/oidclogin` ("latere auth" there names the auth
+   *service*, not the CLI); archived specs stay as written; code comments
+   (auth `device.go:33`) are cosmetic.
+
+Classes 2-5 are per-repo follow-up commits in their own repos, not part of
+this spec's implementation; this spec is done when class 1 ships and the
+alias covers the rest.
+
 ## Testing Strategy
 
 - `TestTopLevelVerbsRegisteredInRoot`: `login`, `logout`, `whoami`,
