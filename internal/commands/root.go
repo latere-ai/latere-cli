@@ -58,6 +58,7 @@ load it from your shell startup files.`,
 	root.AddCommand(newDriveCmd())
 	root.AddCommand(newGitCredentialCmd())
 	root.AddCommand(newCellaCmd())
+	root.AddCommand(newEvalCmd())
 	root.AddCommand(newToposCmd())
 	root.AddCommand(newLuxCmd())
 	root.AddCommand(newReviewCmd())
