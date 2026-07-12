@@ -579,6 +579,16 @@ anthropic (Messages API).`,
 			if model == "" {
 				return errors.New("--model is required")
 			}
+			// Without an explicit --provider, resolve it from the caller's
+			// catalog: `--model claude-sonnet-5` must reach anthropic, not
+			// 404 on the openai default.
+			if !cmd.Flags().Changed("provider") {
+				if p, err := inferInvokeProvider(cmd.Context(), *luxURL, *authURL, *token, model); err != nil {
+					return err
+				} else if p != "" {
+					provider = p
+				}
+			}
 			spec, err := lookupProvider(provider)
 			if err != nil {
 				return err
@@ -1079,6 +1089,44 @@ func refreshAuthToken(ctx context.Context, authBase, refreshToken string) (api.T
 	}
 	_ = api.SaveAuthToken(out) // best-effort; the in-memory token still works this run
 	return out, nil
+}
+
+// inferInvokeProvider resolves which provider serves model by looking it
+// up in the caller's catalog. A model reachable both natively and via
+// OpenRouter prefers the native route. An unknown model is a hard error
+// pointing at `lux models`; a catalog fetch failure falls back to ""
+// (caller keeps its default) so scope-limited tokens can still invoke.
+func inferInvokeProvider(ctx context.Context, luxURL, authURL, token, model string) (string, error) {
+	c, _, err := luxClient(ctx, luxURL, authURL, token)
+	if err != nil {
+		return "", err
+	}
+	var resp luxCatalogResponse
+	if err := c.GetJSON(ctx, "/lux/v1/models", &resp); err != nil {
+		fmt.Fprintf(os.Stderr, "note: could not infer the provider from your catalog (%v); assuming openai — pass --provider to override\n", err)
+		return "", nil
+	}
+	var providers []string
+	for _, it := range resp.Items {
+		if m, _ := it["model"].(string); m == model {
+			if p, _ := it["provider"].(string); p != "" && !slices.Contains(providers, p) {
+				providers = append(providers, p)
+			}
+		}
+	}
+	switch len(providers) {
+	case 0:
+		return "", fmt.Errorf("model %q is not in your catalog; run `latere lux models` to see what you can call", model)
+	case 1:
+		return providers[0], nil
+	default:
+		for _, p := range providers {
+			if p != "openrouter" {
+				return p, nil
+			}
+		}
+		return providers[0], nil
+	}
 }
 
 // luxClient builds an authenticated API client pointed at Lux, using the

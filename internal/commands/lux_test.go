@@ -877,3 +877,91 @@ func TestLuxServeFriendlyWhenRuntimeDown(t *testing.T) {
 		t.Errorf("dial noise leaked into the message: %q", msg)
 	}
 }
+
+func TestLuxInvokeInfersProviderFromCatalog(t *testing.T) {
+	var invokedPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/lux/v1/models":
+			_ = json.NewEncoder(w).Encode(map[string]any{"items": []map[string]any{
+				{"model": "claude-sonnet-5", "provider": "anthropic"},
+				{"model": "anthropic/claude-sonnet-5", "provider": "openrouter"},
+			}})
+		case "/anthropic/v1/messages":
+			invokedPath = r.URL.Path
+			if r.Header.Get("anthropic-version") == "" {
+				t.Error("missing anthropic-version header")
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"content": []map[string]any{{"type": "text", "text": "hi"}},
+			})
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"llm.read", "llm.invoke"}})
+	out, err := captureStdout(func() error {
+		root := NewRoot("test")
+		root.SetErr(&strings.Builder{})
+		root.SetArgs([]string{"lux", "invoke", "--lux-url", srv.URL, "--token", tok, "--model", "claude-sonnet-5", "Say hi"})
+		return root.Execute()
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if invokedPath != "/anthropic/v1/messages" {
+		t.Errorf("model routed to %q, want the anthropic route", invokedPath)
+	}
+	if !strings.Contains(out, "hi") {
+		t.Errorf("out = %q", out)
+	}
+}
+
+func TestLuxInvokeUnknownModelPointsAtCatalog(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"items": []map[string]any{
+			{"model": "gpt-4o", "provider": "openai"},
+		}})
+	}))
+	defer srv.Close()
+
+	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"llm.read", "llm.invoke"}})
+	root := NewRoot("test")
+	root.SetOut(&strings.Builder{})
+	root.SetErr(&strings.Builder{})
+	root.SetArgs([]string{"lux", "invoke", "--lux-url", srv.URL, "--token", tok, "--model", "nope-1", "Say hi"})
+	err := root.Execute()
+	if err == nil || !strings.Contains(err.Error(), "latere lux models") {
+		t.Fatalf("want catalog hint, got %v", err)
+	}
+}
+
+func TestLuxInvokeExplicitProviderSkipsInference(t *testing.T) {
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]any{"content": "hi"}}},
+		})
+	}))
+	defer srv.Close()
+
+	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"llm.invoke"}})
+	_, err := captureStdout(func() error {
+		root := NewRoot("test")
+		root.SetErr(&strings.Builder{})
+		root.SetArgs([]string{"lux", "invoke", "--lux-url", srv.URL, "--token", tok, "--provider", "openai", "--model", "gpt-4o", "Say hi"})
+		return root.Execute()
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range paths {
+		if p == "/lux/v1/models" {
+			t.Error("explicit --provider must not fetch the catalog")
+		}
+	}
+}
