@@ -1,15 +1,19 @@
 ---
 title: latere drive subcommand
-status: drafted
+status: implemented
 depends_on:
   - flatten-auth-commands.md
 affects:
   - internal/commands/drive.go
   - internal/commands/root.go
   - internal/drive/client.go
+  - cmd/latere/drive_e2e_test.go
+  - docs/drive.md
+  - README.md
 effort: medium
 created: 2026-07-12
 updated: 2026-07-12
+implemented: 2026-07-12
 author: changkun
 dispatched_task_id: null
 ---
@@ -135,6 +139,42 @@ Follows `internal/commands` conventions (white-box, package `commands`):
 - E2E (env-gated, like `cmd/latere/cella_import_e2e_test.go`): put → ls →
   get → history → rm → restore roundtrip against a real Drive.
 - `TestSkipUpdateCheckForDrive`.
+
+## Outcome
+
+Shipped directly on main, same day. Drift: minimal — the eight-verb space
+landed exactly as specced; one naming split (`shares --inbox` instead of a
+flag on `share`) was already in the spec table. Commits: `19230df`
+(internal/drive client, 87.8% coverage), `94e8e3f` (command tree + tests),
+`3346fc1` (docs/drive.md + README row), `438824f` (live-API fix below),
+`44a2fc0` (binary e2e).
+
+**What shipped.** `internal/drive/client.go` — typed client over the wire
+shapes extracted from `../drive/docs/openapi.yaml` (error envelope is a bare
+`{"error"}`; versions use `version_no`/`superseded_at`; trash purge returns
+a count). `internal/commands/drive.go` — the verbs, with
+`TestDriveVerbSet` pinning the command space so growth requires a spec
+change. Verified three ways: package tests, a binary-level e2e (roundtrip +
+16 MiB multipart, byte-identical), and a live run against production Drive
+(put/get/history/trash/restore/purge all exercised and cleaned up).
+
+**Found against the live API.** Drive 400s a trailing slash on listing
+paths (`files/` → "invalid path"); the client trims it (`438824f`). The
+OpenAPI docs don't state this.
+
+**Decisions.** Two security-relevant ones in the client: the bearer is
+stripped on every redirect (Go only auto-strips cross-host; presigned URLs
+reject double auth), and part PUTs go bare to the object store. `share`
+grantee inference: `--to` containing `@` → email grant, otherwise principal
+id; org/team/role grantee types stay web-only. `rm --permanent` falls back
+to a trash purge when the live file is already gone, making it the single
+"make it not exist" verb. Version pruning rides `rm --version` per the
+flags table.
+
+**Follow-ups.** The `shares` flags table mentions `--path-prefix` filtering
+on `GET /shares` — not wired; add on demand. Multipart CAS rides the
+complete call; a concurrent-writer e2e against staging would be nice but
+needs a second identity. None blocking.
 
 ## Non-goals
 
