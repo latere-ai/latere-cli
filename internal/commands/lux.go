@@ -174,6 +174,19 @@ an OpenAI-compatible SDK at <lux>/local/v1.`,
   latere lux serve --upstream http://localhost:1234 --models llama3.1:8b
   latere lux serve --share org`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Availability first: a missing local runtime is the most
+			// common failure and deserves a plain answer, not a tunnel
+			// reconnect loop of dial errors.
+			upstreamBase := upstream
+			if upstreamBase == "" {
+				upstreamBase = tunnel.DefaultURL(runtime)
+			}
+			found, err := tunnel.Preflight(cmd.Context(), runtime, upstream, splitCSV(models))
+			if err != nil {
+				return fmt.Errorf("no %s runtime is answering at %s.\n%s\nOr serve a different runtime: --runtime ollama|vllm|lmstudio|llamacpp|mlx, or --upstream http://localhost:<port>", runtime, upstreamBase, localRuntimeStartHint(runtime))
+			}
+			fmt.Fprintf(os.Stderr, "Local %s runtime at %s: %d model(s).\n", runtime, upstreamBase, len(found))
+
 			bearerFn := func(ctx context.Context) (string, error) {
 				return luxIdentityBearer(ctx, *token, *luxURL, *authURL)
 			}
@@ -211,6 +224,25 @@ an OpenAI-compatible SDK at <lux>/local/v1.`,
 	cmd.Flags().StringVar(&models, "models", "", "comma-separated allowlist (default: all discovered models)")
 	cmd.Flags().StringVar(&share, "share", "auto", "who may call: owner, org, or auto (org if your identity has one)")
 	return cmd
+}
+
+// localRuntimeStartHint says how to start the runtime `lux serve`
+// could not reach — the actionable half of the availability message.
+func localRuntimeStartHint(rt string) string {
+	switch rt {
+	case "ollama":
+		return "Start it with `ollama serve` (or open the Ollama app)."
+	case "lmstudio":
+		return "Start the LM Studio local server (Developer tab → Start Server)."
+	case "mlx":
+		return "Start it with `mlx_lm.server`."
+	case "vllm":
+		return "Start it with `vllm serve <model>`."
+	case "llamacpp":
+		return "Start it with `llama-server -m <model.gguf>`."
+	default:
+		return "Start your OpenAI-compatible server."
+	}
 }
 
 // bearerHasOrg reports whether a JWT bearer carries a non-empty org_id

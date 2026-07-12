@@ -855,3 +855,25 @@ func TestLuxTokenHiddenAlias(t *testing.T) {
 	}
 	t.Fatal("lux token alias missing")
 }
+
+func TestLuxServeFriendlyWhenRuntimeDown(t *testing.T) {
+	root := NewRoot("test")
+	root.SetOut(&strings.Builder{})
+	root.SetErr(&strings.Builder{})
+	// A closed port stands in for "ollama is not running".
+	root.SetArgs([]string{"lux", "serve", "--upstream", "http://127.0.0.1:1"})
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("want availability error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "no ollama runtime is answering at http://127.0.0.1:1") {
+		t.Errorf("missing availability headline: %q", msg)
+	}
+	if !strings.Contains(msg, "ollama serve") || !strings.Contains(msg, "--upstream") {
+		t.Errorf("missing actionable hints: %q", msg)
+	}
+	if strings.Contains(msg, "dial tcp") {
+		t.Errorf("dial noise leaked into the message: %q", msg)
+	}
+}

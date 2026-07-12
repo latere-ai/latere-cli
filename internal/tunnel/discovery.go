@@ -109,6 +109,18 @@ func discoverOpenAI(ctx context.Context, hc *http.Client, base string) ([]string
 	return out, nil
 }
 
+// Preflight verifies the local runtime answers before the tunnel opens,
+// so a missing runtime surfaces as one clear availability message
+// instead of a reconnect loop of dial errors. Returns the models the
+// runtime reports (filtered by allow when non-empty).
+func Preflight(ctx context.Context, runtime, upstreamURL string, allow []string) ([]string, error) {
+	base := upstreamURL
+	if base == "" {
+		base = DefaultURL(runtime)
+	}
+	return discover(ctx, &http.Client{Timeout: 10 * time.Second}, runtime, base, allow)
+}
+
 func getJSON(ctx context.Context, hc *http.Client, url string, dst any) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
