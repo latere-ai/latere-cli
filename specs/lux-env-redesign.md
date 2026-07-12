@@ -1,0 +1,73 @@
+---
+title: Redesign lux env around routes and token lifetime
+status: drafted
+depends_on: []
+affects:
+  - internal/commands/lux.go
+  - docs/lux.md
+effort: small
+created: 2026-07-12
+updated: 2026-07-12
+author: changkun
+dispatched_task_id: null
+---
+
+# Redesign lux env around routes and token lifetime
+
+## Overview
+
+`lux env` is the keyless SDK-enablement path and worth keeping, but its
+design conflates three things behind one `--provider` flag: which Lux
+*route* to point at, which SDK *dialect* the exports serve, and *which
+token* gets embedded. This spec unbundles them.
+
+## What is wrong today
+
+1. **`--provider` is the wrong axis.** OpenAI, OpenRouter, and local
+   routes all speak the OpenAI dialect and emit the same two variables
+   with different base URLs; Anthropic is the odd one out; Gemini is a
+   permanent error. The flag looks like "choose your vendor" but
+   actually chooses a route-and-dialect pair, and the dialect is
+   derivable from the route.
+2. **Token story is invisible.** The exported credential is whatever
+   `luxIdentityBearer` resolves — an explicit `--token`, the sandbox
+   passthrough file, or the refreshed identity token — and the command
+   never says which one it embedded or when it dies. An identity token
+   expires with the login session; users discover this as a mystery 401
+   in their SDK, far from the `eval` that planted it.
+3. **`lux token` overlaps.** It mints/prints a bearer; `env` prints the
+   same bearer wrapped in exports. Two commands, one job.
+
+## Design
+
+One verb, route as the positional argument, dialect inferred:
+
+    latere lux env [route]        # openai (default) | openrouter | anthropic | local
+
+- Emits the exports for the route's dialect: OpenAI-compat routes →
+  `OPENAI_BASE_URL` + `OPENAI_API_KEY`; anthropic → `ANTHROPIC_BASE_URL`
+  + `ANTHROPIC_AUTH_TOKEN`. Gemini stays unsupported with the same
+  actionable error.
+- **Says what it embedded** on stderr (stdout stays eval-clean):
+  `# identity token, expires 2026-07-12T22:10Z — re-run after expiry`
+  or `# sandbox service token (passthrough)`.
+- `--ttl <duration>` mints a short-lived `aud=lux.latere.ai` actor token
+  instead of the identity token (CI: bound blast radius, no refresh
+  file). Reuses `mintActorToken`.
+- `lux token` becomes a hidden deprecated alias for `lux env --raw`
+  (bare token on stdout, no exports), collapsing the overlap the same
+  way rates/providers folded into models.
+- `--provider` stays as a hidden flag alias for the positional for one
+  release.
+
+## Testing Strategy
+
+Follows lux_test.go conventions: exports per route (table), stderr
+provenance note per token source, `--ttl` mint path against a fake
+auth `/actor-tokens`, `--raw` bare output, hidden-alias checks.
+
+## Non-goals
+
+- A local credential-injecting proxy (would fix expiry properly but is
+  a different weight class; revisit if expiry keeps biting).
+- Changing how Lux validates tokens.

@@ -11,6 +11,7 @@ specs/
   review-local-subcommand.md     (implemented — latere review local Cobra subcommand; critics via Lux/topos)
   auth-unification-migration.md  (planned, leaf — adopts pkg/authkit DeviceCodeClient + FileTokenStore)
   flatten-auth-commands.md       (implemented — latere login/logout/whoami/print-token/org as top-level verbs)
+  lux-env-redesign.md            (drafted — lux env keyed by route, token provenance/TTL, folds lux token)
   drive-subcommand.md            (implemented — latere drive: 8 orthogonal file-plane verbs over Drive /api/v1)
 ```
 
