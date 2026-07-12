@@ -590,3 +590,134 @@ func TestLuxAccessSetPatchesBindings(t *testing.T) {
 		t.Fatalf("unexpected bindings: %+v", bindings)
 	}
 }
+
+func TestLuxProvidersHidden(t *testing.T) {
+	for _, c := range newLuxCmd().Commands() {
+		if c.Name() == "providers" {
+			if !c.Hidden {
+				t.Error("lux providers must be hidden (provider rides each lux models row)")
+			}
+			return
+		}
+	}
+	t.Fatal("lux providers alias missing")
+}
+
+func TestLuxUsageOverview(t *testing.T) {
+	gotParams := map[string]string{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		switch r.URL.Path {
+		case "/lux/v1/usage":
+			gotParams["group_by"] = q.Get("group_by")
+			if q.Get("from") == "" || q.Get("to") == "" {
+				t.Error("usage missing from/to range")
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"items": []map[string]any{
+				{"group": "claude-fable-5", "calls": 20, "tokens_in": 1200000, "tokens_out": 340000, "cost_usd_micro": 280000},
+				{"group": "gpt-5-mini", "calls": 10, "tokens_in": 500, "tokens_out": 100, "cost_usd_micro": 3400},
+			}})
+		case "/lux/v1/usage/series":
+			gotParams["interval"] = q.Get("interval")
+			_ = json.NewEncoder(w).Encode(map[string]any{"items": []map[string]any{
+				{"ts": "2026-07-10T00:00:00Z", "group": "claude-fable-5", "calls": 12, "cost_usd_micro": 200000},
+				{"ts": "2026-07-10T00:00:00Z", "group": "gpt-5-mini", "calls": 6, "cost_usd_micro": 3400},
+				{"ts": "2026-07-11T00:00:00Z", "group": "claude-fable-5", "calls": 8, "cost_usd_micro": 80000},
+			}})
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"llm.read"}})
+	out, err := captureStdout(func() error {
+		root := NewRoot("test")
+		root.SetErr(&strings.Builder{})
+		root.SetArgs([]string{"lux", "usage", "--lux-url", srv.URL, "--token", tok})
+		return root.Execute()
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if gotParams["group_by"] != "model" || gotParams["interval"] != "day" {
+		t.Errorf("params = %v (defaults: model/day for --period month)", gotParams)
+	}
+	for _, want := range []string{
+		"$0.28",          // total... per-group cost for fable
+		"30 calls",       // period total calls
+		"claude-fable-5", // breakdown row
+		"1.2M in",        // token formatting
+		"$0.0034",        // sub-cent cost keeps precision
+		"Jul 10",         // series bucket label
+		"▇",              // bar chart present
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+	// Jul 10 bucket sums both groups (203400); Jul 11 is smaller (80000):
+	// the max-cost bar must belong to Jul 10.
+	jul10 := strings.Index(out, "Jul 10")
+	jul11 := strings.Index(out, "Jul 11")
+	if jul10 == -1 || jul11 == -1 || jul10 > jul11 {
+		t.Errorf("series buckets out of order:\n%s", out)
+	}
+}
+
+func TestLuxUsagePeriodValidation(t *testing.T) {
+	root := NewRoot("test")
+	root.SetOut(&strings.Builder{})
+	root.SetErr(&strings.Builder{})
+	root.SetArgs([]string{"lux", "usage", "--period", "fortnight"})
+	err := root.Execute()
+	if err == nil || !strings.Contains(err.Error(), "day, week, month, quarter, year") {
+		t.Fatalf("want period validation error, got %v", err)
+	}
+}
+
+func TestLuxUsageQuarterUsesWeekInterval(t *testing.T) {
+	var interval string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/lux/v1/usage/series" {
+			interval = r.URL.Query().Get("interval")
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"items": []map[string]any{}})
+	}))
+	defer srv.Close()
+
+	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"llm.read"}})
+	_, err := captureStdout(func() error {
+		root := NewRoot("test")
+		root.SetErr(&strings.Builder{})
+		root.SetArgs([]string{"lux", "usage", "--period", "quarter", "--lux-url", srv.URL, "--token", tok})
+		return root.Execute()
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if interval != "week" {
+		t.Errorf("quarter interval = %q, want week", interval)
+	}
+}
+
+func TestFmtHelpers(t *testing.T) {
+	if got := fmtUSDMicro(280000); got != "$0.28" {
+		t.Errorf("fmtUSDMicro(280000) = %q", got)
+	}
+	if got := fmtUSDMicro(3400); got != "$0.0034" {
+		t.Errorf("fmtUSDMicro(3400) = %q", got)
+	}
+	if got := fmtUSDMicro(0); got != "$0.00" {
+		t.Errorf("fmtUSDMicro(0) = %q", got)
+	}
+	if got := fmtTokens(1200000); got != "1.2M" {
+		t.Errorf("fmtTokens = %q", got)
+	}
+	if got := fmtTokens(1500); got != "1.5K" {
+		t.Errorf("fmtTokens = %q", got)
+	}
+	if got := fmtTokens(42); got != "42" {
+		t.Errorf("fmtTokens = %q", got)
+	}
+}

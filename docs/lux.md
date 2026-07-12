@@ -34,7 +34,9 @@ latere lux invoke --provider anthropic --model claude-sonnet-4-6 "Say hi"
 ## Usage and access
 
 ```sh
-latere lux usage
+latere lux usage                  # last 30 days: total, per-model breakdown, cost chart
+latere lux usage --period week    # day, week, month, quarter, or year
+latere lux usage --by provider    # break down by provider instead of model
 latere lux access show
 ```
 

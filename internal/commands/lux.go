@@ -9,8 +9,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"slices"
 	"strings"
+	"text/tabwriter"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -129,12 +132,15 @@ access profile binding to a provider key — see 'latere lux access'.`,
 	cmd.PersistentFlags().StringVar(&token, "token", "", "present this bearer to Lux instead of minting one (e.g. a sandbox token)")
 
 	cmd.AddCommand(newLuxModelsCmd(&luxURL, &authURL, &token))
-	cmd.AddCommand(newLuxCatalogCmd("providers", "/lux/v1/providers", "providers Lux can route to", &luxURL, &authURL, &token))
-	// Deprecated: rates ride `lux models` now. Hidden but functional so
-	// scripts keep working.
+	// Deprecated: rates ride `lux models` now, and every model row names
+	// its provider, so the static provider list adds nothing. Both stay
+	// hidden but functional so scripts keep working.
 	rates := newLuxCatalogCmd("rates", "/lux/v1/rates", "model rate card", &luxURL, &authURL, &token)
 	rates.Hidden = true
 	cmd.AddCommand(rates)
+	providers := newLuxCatalogCmd("providers", "/lux/v1/providers", "providers Lux can route to", &luxURL, &authURL, &token)
+	providers.Hidden = true
+	cmd.AddCommand(providers)
 	cmd.AddCommand(newLuxEnvCmd(&luxURL, &authURL, &token))
 	cmd.AddCommand(newLuxTokenCmd(&luxURL, &authURL, &token))
 	cmd.AddCommand(newLuxChatCmd(&luxURL, &authURL, &token))
@@ -580,14 +586,61 @@ func extractChatText(raw []byte, anthropicStyle bool) (string, error) {
 
 // ---- usage ----
 
+// usagePeriods maps the --period presets onto a window, the series
+// interval Lux supports (hour/day/week), and the label format used to
+// bucket points client-side (year re-buckets week points into months).
+var usagePeriods = map[string]struct {
+	window   time.Duration
+	interval string
+	labelFmt string
+}{
+	"day":     {24 * time.Hour, "hour", "15:00"},
+	"week":    {7 * 24 * time.Hour, "day", "Mon Jan 02"},
+	"month":   {30 * 24 * time.Hour, "day", "Jan 02"},
+	"quarter": {90 * 24 * time.Hour, "week", "Jan 02"},
+	"year":    {365 * 24 * time.Hour, "week", "Jan 2006"},
+}
+
+type luxUsageRow struct {
+	Group        string `json:"group"`
+	Calls        int64  `json:"calls"`
+	TokensIn     int64  `json:"tokens_in"`
+	TokensOut    int64  `json:"tokens_out"`
+	CostUSDMicro int64  `json:"cost_usd_micro"`
+}
+
+type luxSeriesPoint struct {
+	TS           time.Time `json:"ts"`
+	Group        string    `json:"group"`
+	Calls        int64     `json:"calls"`
+	CostUSDMicro int64     `json:"cost_usd_micro"`
+}
+
 func newLuxUsageCmd(luxURL, authURL, token *string) *cobra.Command {
 	var jsonF bool
+	var period, groupBy string
 	cmd := &cobra.Command{
 		Use:   "usage",
-		Short: "Show model usage and cost attributed to your identity.",
-		Long:  "Show usage and cost recorded by Lux for your identity (GET /lux/v1/me/usage). Requires the llm.read scope.",
-		Args:  cobra.NoArgs,
+		Short: "Usage and cost overview for a period (day/week/month/quarter/year).",
+		Long: `Show the usage and cost Lux recorded for your identity: the period
+total, a per-model (or per-provider) breakdown, and a cost-over-time
+bar chart.
+
+Reads /lux/v1/usage and /lux/v1/usage/series. Requires the llm.read
+scope.`,
+		Example: `  latere lux usage
+  latere lux usage --period week
+  latere lux usage --period year --by provider
+  latere lux usage --json`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			p, ok := usagePeriods[period]
+			if !ok {
+				return fmt.Errorf("unknown --period %q; one of: day, week, month, quarter, year", period)
+			}
+			if groupBy != "model" && groupBy != "provider" {
+				return fmt.Errorf("unknown --by %q; one of: model, provider", groupBy)
+			}
 			c, bearer, err := luxClient(cmd.Context(), *luxURL, *authURL, *token)
 			if err != nil {
 				return err
@@ -595,17 +648,123 @@ func newLuxUsageCmd(luxURL, authURL, token *string) *cobra.Command {
 			if err := ensureLuxScope(bearer, []string{"llm.read", "llm.invoke"}, "read usage"); err != nil {
 				return err
 			}
-			var out json.RawMessage
-			if err := c.GetJSON(cmd.Context(), "/lux/v1/me/usage", &out); err != nil {
+
+			to := time.Now().UTC()
+			from := to.Add(-p.window)
+			rng := fmt.Sprintf("from=%s&to=%s", url.QueryEscape(from.Format(time.RFC3339)), url.QueryEscape(to.Format(time.RFC3339)))
+
+			var groups struct {
+				Items []luxUsageRow `json:"items"`
+			}
+			if err := c.GetJSON(cmd.Context(), "/lux/v1/usage?"+rng+"&group_by="+groupBy, &groups); err != nil {
 				return wrapLuxErr(err)
 			}
-			// The usage shape is backend-defined; pretty JSON is the only
-			// stable view, so --json (kept for compatibility) is the default.
-			return printJSON(out)
+			var series struct {
+				Items []luxSeriesPoint `json:"items"`
+			}
+			if err := c.GetJSON(cmd.Context(), "/lux/v1/usage/series?"+rng+"&group_by="+groupBy+"&interval="+p.interval, &series); err != nil {
+				return wrapLuxErr(err)
+			}
+
+			if jsonF {
+				return printJSON(map[string]any{
+					"from": from, "to": to, "period": period, "group_by": groupBy,
+					"groups": groups.Items, "series": series.Items,
+				})
+			}
+			renderLuxUsage(cmd.OutOrStdout(), period, from, to, p.labelFmt, groups.Items, series.Items)
+			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&jsonF, "json", false, "JSON output")
+	cmd.Flags().StringVar(&period, "period", "month", "window: day, week, month, quarter, or year")
+	cmd.Flags().StringVar(&groupBy, "by", "model", "breakdown dimension: model or provider")
 	return cmd
+}
+
+// renderLuxUsage prints the period total, the per-group breakdown sorted
+// by cost, and a cost bar chart bucketed by the period's label format.
+func renderLuxUsage(w io.Writer, period string, from, to time.Time, labelFmt string, groups []luxUsageRow, series []luxSeriesPoint) {
+	var totalCost, totalCalls int64
+	for _, g := range groups {
+		totalCost += g.CostUSDMicro
+		totalCalls += g.Calls
+	}
+	fmt.Fprintf(w, "Usage last %s (%s – %s): %s, %d calls\n\n",
+		period, from.Format("Jan 02"), to.Format("Jan 02"), fmtUSDMicro(totalCost), totalCalls)
+	if totalCalls == 0 {
+		fmt.Fprintln(w, "No usage in this period.")
+		return
+	}
+
+	sortGroups := make([]luxUsageRow, len(groups))
+	copy(sortGroups, groups)
+	slices.SortFunc(sortGroups, func(a, b luxUsageRow) int {
+		return int(b.CostUSDMicro - a.CostUSDMicro)
+	})
+	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
+	for _, g := range sortGroups {
+		fmt.Fprintf(tw, "  %s\t%s\t%d calls\t%s in / %s out\n",
+			g.Group, fmtUSDMicro(g.CostUSDMicro), g.Calls, fmtTokens(g.TokensIn), fmtTokens(g.TokensOut))
+	}
+	_ = tw.Flush()
+
+	// Bucket the series by label (sums across groups); labels keep their
+	// first-seen chronological order.
+	type bucket struct {
+		label string
+		cost  int64
+	}
+	var buckets []bucket
+	idx := map[string]int{}
+	for _, pt := range series {
+		label := pt.TS.Format(labelFmt)
+		i, ok := idx[label]
+		if !ok {
+			i = len(buckets)
+			idx[label] = i
+			buckets = append(buckets, bucket{label: label})
+		}
+		buckets[i].cost += pt.CostUSDMicro
+	}
+	var maxCost int64
+	for _, b := range buckets {
+		maxCost = max(maxCost, b.cost)
+	}
+	if maxCost == 0 {
+		return
+	}
+	fmt.Fprintln(w)
+	const width = 28
+	for _, b := range buckets {
+		n := int(b.cost * width / maxCost)
+		if n == 0 && b.cost > 0 {
+			n = 1
+		}
+		fmt.Fprintf(w, "  %-12s %-*s %s\n", b.label, width, strings.Repeat("▇", n), fmtUSDMicro(b.cost))
+	}
+}
+
+// fmtUSDMicro renders micro-USD as dollars, keeping sub-cent amounts
+// readable ($0.0034 rather than $0.00).
+func fmtUSDMicro(micro int64) string {
+	v := float64(micro) / 1e6
+	if v != 0 && v < 0.01 {
+		return fmt.Sprintf("$%.4f", v)
+	}
+	return fmt.Sprintf("$%.2f", v)
+}
+
+// fmtTokens renders token counts compactly (1.2K, 3.4M).
+func fmtTokens(n int64) string {
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(n)/1e6)
+	case n >= 1_000:
+		return fmt.Sprintf("%.1fK", float64(n)/1e3)
+	default:
+		return fmt.Sprintf("%d", n)
+	}
 }
 
 // ---- access profile ----
