@@ -30,24 +30,24 @@ func driveHost() string {
 // newGitCredentialCmd is the git credential helper for Drive. git invokes it
 // as `latere git-credential get|store|erase` with an attribute block on
 // stdin, so `git clone https://drive.latere.ai/git/me/<repo>.git` works with
-// no token in the URL after `latere auth login`.
+// no token in the URL after `latere login`.
 func newGitCredentialCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "git-credential",
 		Short: "Git credential helper for Drive (drive.latere.ai).",
 		Long: `Authenticate git against Drive (drive.latere.ai) with the token saved
-by 'latere auth login'.
+by 'latere login'.
 
 git invokes this helper as 'latere git-credential get|store|erase',
 writing an attribute block (protocol, host, ...) to stdin. 'get' answers
 only for the Drive host and emits the saved login as username/password
 lines, refreshing the token first when it has expired. 'store' and
 'erase' are no-ops: the token lives in ~/.config/latere, managed by
-'latere auth login' and 'latere auth logout', never in git's own store.
+'latere login' and 'latere logout', never in git's own store.
 
 Run 'latere git-credential setup' once to wire the helper into your
 global git config, scoped to drive.latere.ai only.`,
-		Example: `  latere auth login
+		Example: `  latere login
   latere git-credential setup
   git clone https://drive.latere.ai/git/me/<repo>.git`,
 	}
@@ -98,7 +98,7 @@ for every other host are untouched. Re-running setup is idempotent;
 			fmt.Fprintf(errw, "Configured the global git config:\n")
 			fmt.Fprintf(errw, "  %s=                          (resets inherited helpers)\n", key)
 			fmt.Fprintf(errw, "  %s=!latere git-credential\n\n", key)
-			fmt.Fprintf(errw, "git clone https://%s/git/me/<repo>.git now authenticates\nwith the token from `latere auth login`.\n", driveHost())
+			fmt.Fprintf(errw, "git clone https://%s/git/me/<repo>.git now authenticates\nwith the token from `latere login`.\n", driveHost())
 			return nil
 		},
 	}
@@ -132,7 +132,7 @@ func driveGitHelperConfigured(ctx context.Context) bool {
 	return string(out) == "\n!latere git-credential\n"
 }
 
-// configureDriveGitAfterLogin is the post-login hook `latere auth login`
+// configureDriveGitAfterLogin is the post-login hook `latere login`
 // runs (unless --no-git). Swappable for tests.
 var configureDriveGitAfterLogin = autoConfigureDriveGit
 

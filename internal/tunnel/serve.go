@@ -132,7 +132,7 @@ func runSession(ctx context.Context, opts Options) error {
 			case http.StatusNotFound:
 				return fatal(fmt.Errorf("the local-model tunnel is not enabled on %s yet. Ask your operator to turn it on (LUX_TUNNEL_ENABLED).", opts.LuxURL))
 			case http.StatusUnauthorized, http.StatusForbidden:
-				return fatal(fmt.Errorf("your login may not serve models here (it needs the llm.serve scope). Run `latere auth login` to refresh your scopes, then try again."))
+				return fatal(fmt.Errorf("your login may not serve models here (it needs the llm.serve scope). Run `latere login` to refresh your scopes, then try again."))
 			}
 		}
 		return fmt.Errorf("dial %s: %w", wsURL, err)

@@ -1,7 +1,7 @@
 // Package api is the HTTP client every `latere sandbox …` command
 // shares. Uses the public sandboxd surface at cella.latere.ai. The
 // client carries a Bearer token loaded from ~/.config/latere/token.json,
-// written by `latere auth login`.
+// written by `latere login`.
 package api
 
 import (
@@ -25,7 +25,7 @@ import (
 // DefaultAPIURL is overridden by SANDBOX_API_URL or --api-url.
 const DefaultAPIURL = "https://cella.latere.ai"
 
-// Token is what `latere auth login` writes to disk. Shape matches an
+// Token is what `latere login` writes to disk. Shape matches an
 // OAuth2 token response so an eventual device-code flow can dump its
 // reply directly. Only AccessToken is required for now.
 type Token struct {
@@ -91,7 +91,7 @@ func tokenFilePath(envVar, name string) string {
 }
 
 // ErrNoToken means the file does not exist (the user hasn't logged in).
-var ErrNoToken = errors.New("not logged in; run `latere auth login`")
+var ErrNoToken = errors.New("not logged in; run `latere login`")
 
 // LoadToken reads token.json. Empty path uses TokenPath().
 func LoadToken(path string) (Token, error) {
@@ -193,7 +193,7 @@ type APIError struct {
 func (e *APIError) Error() string {
 	if e.Code == "policy_sidecar_required" {
 		return "cannot create cella: the selected policy requires Cella's credential sidecar, but the server has no complete sidecar configuration for this CLI token.\n" +
-			"This is not a local command syntax problem. Re-run `latere auth login` with the latest CLI, then retry.\n" +
+			"This is not a local command syntax problem. Re-run `latere login` with the latest CLI, then retry.\n" +
 			"To choose another policy, run `latere cella policy list` and set `spec.policy` in your Manifest to a selectable policy where sidecar is `no`.\n" +
 			"If no such policy is available, ask your Latere admin/support to configure the CLI sidecar client or assign a non-sidecar policy.\n" +
 			"server code: policy_sidecar_required"

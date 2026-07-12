@@ -359,11 +359,11 @@ func resolveToposURL(flagURL string) string {
 // toposClient builds an authenticated API client pointed at the Topos
 // control plane. For local development, TOPOS_TOKEN overrides the saved
 // token with a static bearer, so a server running with TOPOS_DEV_AUTH=true +
-// TOPOS_DEV_TOKEN can be reached in one step without `latere auth login`.
+// TOPOS_DEV_TOKEN can be reached in one step without `latere login`.
 //
 // Against production, Topos validates an auth-issued, topos-audience bearer
 // carrying run:agents. That is the retained auth root token (which
-// `latere auth login` now requests run:agents and the topos audience for),
+// `latere login` now requests run:agents and the topos audience for),
 // NOT the Cella-audience token `latere cella` uses — so the Topos path uses the
 // auth root token, refreshed when expired.
 func toposClient(apiURL string) (*api.Client, error) {
@@ -388,7 +388,7 @@ func toposIdentityBearer() (string, error) {
 	authTok, err := api.LoadAuthToken()
 	if err != nil {
 		if errors.Is(err, api.ErrNoToken) {
-			return "", errors.New("not signed in for Topos; run `latere auth login` (it grants the run:agents scope Topos needs)")
+			return "", errors.New("not signed in for Topos; run `latere login` (it grants the run:agents scope Topos needs)")
 		}
 		return "", err
 	}
@@ -399,12 +399,12 @@ func toposIdentityBearer() (string, error) {
 		defer cancel()
 		refreshed, rerr := refreshAuthToken(ctx, toposAuthBase(), authTok.RefreshToken)
 		if rerr != nil {
-			return "", fmt.Errorf("auth token expired and refresh failed (%v); run `latere auth login`", rerr)
+			return "", fmt.Errorf("auth token expired and refresh failed (%v); run `latere login`", rerr)
 		}
 		access = refreshed.AccessToken
 	}
 	if access == "" {
-		return "", errors.New("no auth token on file; run `latere auth login`")
+		return "", errors.New("no auth token on file; run `latere login`")
 	}
 	return access, nil
 }

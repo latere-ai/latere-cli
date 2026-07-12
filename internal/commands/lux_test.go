@@ -78,7 +78,7 @@ func TestLuxHelpText(t *testing.T) {
 		args []string
 		want []string
 	}{
-		{[]string{"lux", "--help"}, []string{"lux.latere.ai", "allocating an API key", "LUX_API_URL", "latere auth login"}},
+		{[]string{"lux", "--help"}, []string{"lux.latere.ai", "allocating an API key", "LUX_API_URL", "latere login"}},
 		{[]string{"lux", "env", "--help"}, []string{"provider SDK at Lux", "ANTHROPIC_AUTH_TOKEN"}},
 		{[]string{"lux", "chat", "--help"}, []string{"one-shot prompt", "--model"}},
 		{[]string{"lux", "access", "set", "--help"}, []string{"provider key", "llm.invoke"}},
@@ -154,7 +154,7 @@ func TestLuxBearerNoAuthToken(t *testing.T) {
 	isolateBearer(t)
 	t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(t.TempDir(), "absent.json"))
 	_, err := luxBearer(t.Context(), "", "", "")
-	if err == nil || !strings.Contains(err.Error(), "latere auth login") {
+	if err == nil || !strings.Contains(err.Error(), "latere login") {
 		t.Fatalf("want re-login error, got %v", err)
 	}
 }
@@ -298,7 +298,7 @@ func TestEnsureLuxScope(t *testing.T) {
 	}
 	none := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"read:sandbox"}})
 	err := ensureLuxScope(none, []string{"llm.read", "llm.invoke"}, "list models")
-	if err == nil || !strings.Contains(err.Error(), "latere auth login") {
+	if err == nil || !strings.Contains(err.Error(), "latere login") {
 		t.Errorf("missing scope should give re-login hint, got %v", err)
 	}
 	sandbox := fakeJWT(t, map[string]any{"sub": "u", "kind": "sandbox", "scp": []string{"trust-plane:egress"}})

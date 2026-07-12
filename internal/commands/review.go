@@ -59,7 +59,7 @@ topos with model calls routed via Lux (lux.latere.ai), authenticated by
 your retained Latere identity bearer, so critic cost is tracked on your
 Latere account with no provider key needed locally.
 
-Run 'latere auth login' first (it grants the llm.invoke scope the
+Run 'latere login' first (it grants the llm.invoke scope the
 critics need). The proposer additionally needs the 'claude' CLI
 installed and authenticated.
 
@@ -241,7 +241,7 @@ func ensureBearerFresh(bearer string) error {
 		return nil
 	}
 	if time.Now().Unix() >= int64(exp) {
-		return fmt.Errorf("your Lux identity token has expired; run `latere auth login` and retry")
+		return fmt.Errorf("your Lux identity token has expired; run `latere login` and retry")
 	}
 	return nil
 }

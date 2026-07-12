@@ -113,7 +113,7 @@ token — and Lux tracks cost on that identity. Inside a sandbox with a
 'lux' trust plane, the projected token at /run/cella/sandbox-token/token
 is used automatically.
 
-Run 'latere auth login' first (it now requests the llm.read / llm.invoke
+Run 'latere login' first (it now requests the llm.read / llm.invoke
 scopes Lux needs). The base URL defaults to https://lux.latere.ai and
 can be overridden by LUX_API_URL or --lux-url.
 
@@ -153,7 +153,7 @@ same gates and request log as any other Lux model (lux spec 18).
 
 This runs a long-lived outbound connection (no inbound port is opened) and
 forwards inbound requests only to the configured local runtime. Requires
-the llm.serve scope (run 'latere auth login' to refresh your scopes).
+the llm.serve scope (run 'latere login' to refresh your scopes).
 
 Discoverable as local/<model> in 'latere lux models'. Call it by pointing
 an OpenAI-compatible SDK at <lux>/local/v1.`,
@@ -632,7 +632,7 @@ func authIdentityToken(ctx context.Context, luxURL, authURLFlag string) (access,
 	authTok, err := api.LoadAuthToken()
 	if err != nil {
 		if errors.Is(err, api.ErrNoToken) {
-			return "", "", errors.New("not signed in for Lux; run `latere auth login` (it grants the llm.* scopes Lux needs)")
+			return "", "", errors.New("not signed in for Lux; run `latere login` (it grants the llm.* scopes Lux needs)")
 		}
 		return "", "", err
 	}
@@ -650,7 +650,7 @@ func authIdentityToken(ctx context.Context, luxURL, authURLFlag string) (access,
 		time.Now().After(authTok.ExpiresAt.Add(-60*time.Second)) {
 		refreshed, rerr := refreshAuthToken(ctx, authBase, authTok.RefreshToken)
 		if rerr != nil {
-			return "", "", fmt.Errorf("auth token expired and refresh failed (%v); run `latere auth login`", rerr)
+			return "", "", fmt.Errorf("auth token expired and refresh failed (%v); run `latere login`", rerr)
 		}
 		access = refreshed.AccessToken
 	}
@@ -686,7 +686,7 @@ func luxBearer(ctx context.Context, tokenFlag, luxURL, authURL string) (string, 
 	httpc := &http.Client{Timeout: 15 * time.Second}
 	bearer, err := mintActorToken(ctx, httpc, authBase, access, "lux.latere.ai", 300)
 	if err != nil {
-		return "", fmt.Errorf("mint Lux token: %w; if this persists run `latere auth login`", err)
+		return "", fmt.Errorf("mint Lux token: %w; if this persists run `latere login`", err)
 	}
 	return bearer, nil
 }
@@ -790,12 +790,12 @@ func ensureLuxScope(bearer string, anyOf []string, action string) error {
 	if stringClaim(claims, "kind") == "sandbox" {
 		return fmt.Errorf(
 			"this is a sandbox/service identity (scope trust-plane:egress): it can invoke models but can't %s, which needs %s.\n"+
-				"Use a user login (`latere auth login`) for catalog, usage, and access commands.",
+				"Use a user login (`latere login`) for catalog, usage, and access commands.",
 			action, missing)
 	}
 	return fmt.Errorf(
 		"your Lux token is missing the %s scope needed to %s.\n"+
-			"Re-run `latere auth login` and approve LLM access when prompted. If your organization hasn't\n"+
+			"Re-run `latere login` and approve LLM access when prompted. If your organization hasn't\n"+
 			"enabled LLM access for the CLI yet, ask an admin to grant llm.read / llm.invoke to the \"latere-cli\" client.",
 		missing, action)
 }
@@ -811,7 +811,7 @@ func wrapLuxErr(err error) error {
 	case apiErr.Code == "auth.forbidden" || (apiErr.Status == http.StatusForbidden && strings.Contains(apiErr.Message, "missing llm")):
 		return fmt.Errorf(
 			"Lux rejected the token for missing an llm.* scope (%s).\n"+
-				"Re-run `latere auth login` and approve LLM access, or ask an admin to grant llm.read / llm.invoke to the \"latere-cli\" client.",
+				"Re-run `latere login` and approve LLM access, or ask an admin to grant llm.read / llm.invoke to the \"latere-cli\" client.",
 			apiErr.Message)
 	case strings.Contains(apiErr.Code, "provider_not_bound"):
 		return fmt.Errorf(

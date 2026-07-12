@@ -313,7 +313,7 @@ func TestToposRequiresAuth(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected auth error, got nil")
 	}
-	if !strings.Contains(err.Error(), "latere auth login") {
+	if !strings.Contains(err.Error(), "latere login") {
 		t.Errorf("error doesn't mention auth login: %v", err)
 	}
 }

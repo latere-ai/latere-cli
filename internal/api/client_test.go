@@ -16,7 +16,7 @@ func TestAPIErrorPolicySidecarRequiredIsActionable(t *testing.T) {
 		"cannot create cella",
 		"server has no complete sidecar configuration for this CLI token",
 		"not a local command syntax problem",
-		"latere auth login",
+		"latere login",
 		"latere cella policy list",
 		"spec.policy",
 		"sidecar is `no`",

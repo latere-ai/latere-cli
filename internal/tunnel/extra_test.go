@@ -24,7 +24,7 @@ func TestRunFailsFastOnAuthError(t *testing.T) {
 	}))
 	defer local.Close()
 
-	authErr := errors.New("not signed in for Lux; run `latere auth login`")
+	authErr := errors.New("not signed in for Lux; run `latere login`")
 	done := make(chan error, 1)
 	go func() {
 		done <- Run(context.Background(), Options{

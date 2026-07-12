@@ -17,7 +17,7 @@ import (
 )
 
 // defaultLoginScopes is the scope set `latere topos` requests when it signs a
-// user in (mirrors `latere auth login`); run:agents lets the token drive Topos.
+// user in (mirrors `latere login`); run:agents lets the token drive Topos.
 const defaultLoginScopes = "openid email profile offline_access read:sandbox write:sandbox exec:sandbox attach:sandbox llm.read llm.invoke llm.serve run:agents read:agents write:agents"
 
 // runToposHome is the `latere topos` landing experience: sign in if needed, then
@@ -70,7 +70,7 @@ func runToposHome(ctx context.Context, apiURL string) error {
 }
 
 // ensureToposLogin signs the user in (device flow) when there is no usable token,
-// so `latere topos` never dead-ends on a "run latere auth login" error.
+// so `latere topos` never dead-ends on a "run latere login" error.
 func ensureToposLogin(ctx context.Context, apiURL string) error {
 	if os.Getenv("TOPOS_TOKEN") != "" {
 		return nil
