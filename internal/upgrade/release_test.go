@@ -8,9 +8,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -201,5 +203,104 @@ func TestDownloadBinaryRejectsBadChecksum(t *testing.T) {
 
 	if _, err := DownloadBinary(context.Background(), srv.Client(), "v9.9.9"); err == nil {
 		t.Fatal("expected checksum mismatch error")
+	}
+}
+
+func TestProgressReaderRendersBar(t *testing.T) {
+	var buf bytes.Buffer
+	p := &progressReader{
+		r:     bytes.NewReader(bytes.Repeat([]byte("x"), 4<<20)),
+		w:     &buf,
+		label: "Downloading test.tar.gz",
+		total: 4 << 20,
+	}
+	if _, err := io.Copy(io.Discard, p); err != nil {
+		t.Fatal(err)
+	}
+	p.clear()
+	out := buf.String()
+	if !strings.Contains(out, "Downloading test.tar.gz") {
+		t.Errorf("missing label: %q", out)
+	}
+	if !strings.Contains(out, "100% (4.0 MB / 4.0 MB)") {
+		t.Errorf("missing final percentage: %q", out)
+	}
+	if !strings.Contains(out, "▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇") {
+		t.Errorf("missing full bar: %q", out)
+	}
+	if !strings.HasSuffix(out, "\r\033[K") {
+		t.Errorf("clear must erase the line: %q", out[len(out)-20:])
+	}
+}
+
+func TestProgressReaderUnknownTotal(t *testing.T) {
+	var buf bytes.Buffer
+	p := &progressReader{
+		r:     bytes.NewReader(bytes.Repeat([]byte("x"), 1<<20)),
+		w:     &buf,
+		label: "Downloading test.tar.gz",
+		total: -1, // ContentLength unknown
+	}
+	if _, err := io.Copy(io.Discard, p); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "1.0 MB") || strings.Contains(out, "%") {
+		t.Errorf("unknown total must show bytes only: %q", out)
+	}
+}
+
+func TestProgressReaderRedrawsOnlyOnChange(t *testing.T) {
+	var buf bytes.Buffer
+	p := &progressReader{r: bytes.NewReader(make([]byte, 100)), w: &buf, label: "dl", total: 1 << 30}
+	// 100 bytes of a 1 GiB total: percent and MB stay at zero across reads.
+	tmp := make([]byte, 10)
+	for {
+		if _, err := p.Read(tmp); err != nil {
+			break
+		}
+	}
+	if n := strings.Count(buf.String(), "dl"); n != 1 {
+		t.Errorf("expected a single draw for unchanged content, got %d", n)
+	}
+}
+
+// The bar draws during DownloadBinary when stderr is interactive.
+func TestDownloadBinaryDrawsProgress(t *testing.T) {
+	oldTTY, oldDst := isTerminalStderr, progressDst
+	var drawn bytes.Buffer
+	isTerminalStderr = func() bool { return true }
+	progressDst = &drawn
+	t.Cleanup(func() { isTerminalStderr, progressDst = oldTTY, oldDst })
+
+	bin := []byte("#!fake binary")
+	archive := makeTarGz(t, map[string]string{"latere": string(bin)})
+	sum := sha256.Sum256(archive)
+	asset := assetName("v9.9.9")
+
+	mux := http.NewServeMux()
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	mux.HandleFunc("/latere-ai/latere-cli/releases/download/v9.9.9/"+asset, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", fmt.Sprint(len(archive)))
+		_, _ = w.Write(archive)
+	})
+	mux.HandleFunc("/latere-ai/latere-cli/releases/download/v9.9.9/checksums.txt", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "%s  %s\n", hex.EncodeToString(sum[:]), asset)
+	})
+
+	oldBase := githubBase
+	githubBase = srv.URL
+	t.Cleanup(func() { githubBase = oldBase })
+
+	got, err := DownloadBinary(context.Background(), srv.Client(), "v9.9.9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, bin) {
+		t.Errorf("binary mismatch")
+	}
+	if !strings.Contains(drawn.String(), "Downloading "+asset) {
+		t.Errorf("no progress drawn: %q", drawn.String())
 	}
 }

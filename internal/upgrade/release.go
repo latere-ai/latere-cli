@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"path"
 	"runtime"
 	"strings"
@@ -97,11 +98,11 @@ func DownloadBinary(ctx context.Context, client *http.Client, tag string) ([]byt
 	asset := assetName(tag)
 	base := githubBase + "/" + repoSlug + "/releases/download/" + tag + "/"
 
-	archive, err := fetch(ctx, client, base+asset)
+	archive, err := fetch(ctx, client, base+asset, "Downloading "+asset)
 	if err != nil {
 		return nil, fmt.Errorf("download %s: %w", asset, err)
 	}
-	sums, err := fetch(ctx, client, base+"checksums.txt")
+	sums, err := fetch(ctx, client, base+"checksums.txt", "")
 	if err != nil {
 		return nil, fmt.Errorf("download checksums: %w", err)
 	}
@@ -116,7 +117,13 @@ func DownloadBinary(ctx context.Context, client *http.Client, tag string) ([]byt
 	return extractBinary(archive)
 }
 
-func fetch(ctx context.Context, client *http.Client, url string) ([]byte, error) {
+// progressDst is where the download bar is drawn. A var so tests can
+// capture it; the isTerminalStderr gate decides whether it draws at all.
+var progressDst io.Writer = os.Stderr
+
+// fetch GETs url. With a non-empty label and an interactive stderr it
+// renders a single-line progress bar while the body streams.
+func fetch(ctx context.Context, client *http.Client, url, label string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -130,7 +137,61 @@ func fetch(ctx context.Context, client *http.Client, url string) ([]byte, error)
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("GET %s: status %d", url, resp.StatusCode)
 	}
-	return io.ReadAll(io.LimitReader(resp.Body, maxArchiveBytes))
+	var body io.Reader = io.LimitReader(resp.Body, maxArchiveBytes)
+	if label != "" && isTerminalStderr() {
+		p := &progressReader{r: body, w: progressDst, label: label, total: resp.ContentLength}
+		defer p.clear()
+		body = p
+	}
+	return io.ReadAll(body)
+}
+
+// progressReader renders a one-line download bar as reads flow through
+// it, redrawing only when the rendered line changes. The caller clears
+// the line when the download ends so following output starts clean.
+type progressReader struct {
+	r     io.Reader
+	w     io.Writer
+	label string
+	total int64
+	done  int64
+	last  string
+}
+
+func (p *progressReader) Read(b []byte) (int, error) {
+	n, err := p.r.Read(b)
+	p.done += int64(n)
+	p.render()
+	return n, err
+}
+
+func (p *progressReader) render() {
+	var line string
+	if p.total > 0 {
+		pct := min(p.done*100/p.total, 100)
+		const cells = 20
+		filled := int(pct) * cells / 100
+		bar := strings.Repeat("▇", filled) + strings.Repeat("─", cells-filled)
+		line = fmt.Sprintf("%s  %s %3d%% (%s / %s)", p.label, bar, pct, fmtMB(p.done), fmtMB(p.total))
+	} else {
+		line = fmt.Sprintf("%s  %s", p.label, fmtMB(p.done))
+	}
+	if line == p.last {
+		return
+	}
+	p.last = line
+	fmt.Fprintf(p.w, "\r\033[K%s", line)
+}
+
+// clear erases the bar so the next message starts on a clean line.
+func (p *progressReader) clear() {
+	if p.last != "" {
+		fmt.Fprint(p.w, "\r\033[K")
+	}
+}
+
+func fmtMB(n int64) string {
+	return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
 }
 
 // checksumFor returns the hex sha256 recorded for asset in a checksums.txt
