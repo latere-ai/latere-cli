@@ -99,7 +99,7 @@ func execDrive(t *testing.T, srv *httptest.Server, args ...string) (string, stri
 func TestDriveLsListsAndPaginates(t *testing.T) {
 	calls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/files/me/files/" {
+		if r.URL.Path != "/api/v1/files/me/files" {
 			t.Errorf("path = %q", r.URL.Path)
 		}
 		calls++
@@ -436,7 +436,7 @@ func TestDriveOwnerFlagRoutesToSpace(t *testing.T) {
 	if _, _, err := execDrive(t, srv, "ls", "--owner", "org"); err != nil {
 		t.Fatal(err)
 	}
-	if gotPath != "/api/v1/files/org/files/" {
+	if gotPath != "/api/v1/files/org/files" {
 		t.Errorf("path = %q", gotPath)
 	}
 }

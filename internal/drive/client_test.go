@@ -71,7 +71,7 @@ func asDriveErr(err error, out **Error) bool {
 func TestListPaginatesWithCursor(t *testing.T) {
 	var gotCursor, gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/files/me/files/" {
+		if r.URL.Path != "/api/v1/files/me/files" {
 			t.Errorf("path = %q", r.URL.Path)
 		}
 		if _, ok := r.URL.Query()["list"]; !ok {

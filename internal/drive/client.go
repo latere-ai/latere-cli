@@ -283,6 +283,9 @@ func (c *Client) postJSON(ctx context.Context, path string, in, out any) error {
 // ---- files ----
 
 func (c *Client) List(ctx context.Context, owner, prefix, cursor string, limit int) (*FileListPage, error) {
+	// Drive rejects a trailing slash on the listing path (it appends its
+	// own prefix separator server-side).
+	prefix = strings.TrimRight(prefix, "/")
 	q := url.Values{"list": {""}}
 	if cursor != "" {
 		q.Set("cursor", cursor)
