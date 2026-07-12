@@ -10,6 +10,7 @@ Active specs:
 specs/
   review-local-subcommand.md     (implemented — latere review local Cobra subcommand; critics via Lux/topos)
   auth-unification-migration.md  (planned, leaf — adopts pkg/authkit DeviceCodeClient + FileTokenStore)
+  drive-subcommand.md            (drafted — latere drive command space over the Drive /api/v1 file plane)
 ```
 
 ## Dependencies
