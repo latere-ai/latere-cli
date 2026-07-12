@@ -23,18 +23,16 @@ import (
 	"github.com/latere-ai/latere-cli/internal/api"
 )
 
+// newAuthCmd is a hidden back-compat alias: the session verbs live at the
+// top level (latere login/whoami/print-token/logout/org). Children are built
+// from the same factories as the top-level verbs so behavior cannot drift.
+// Scripts written against `latere auth <verb>` keep working silently; remove
+// the alias in a later major version.
 func newAuthCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "auth",
-		Short: "Authenticate against auth.latere.ai.",
-		Long: `Authenticate the CLI against auth.latere.ai.
-
-Login stores a bearer token at ~/.config/latere/token.json. The same
-token is used by Cella commands.`,
-		Example: `  latere auth login
-  latere auth whoami
-  latere auth print-token
-  latere auth logout`,
+		Use:    "auth",
+		Short:  "Deprecated alias for the top-level session commands.",
+		Hidden: true,
 	}
 	cmd.AddCommand(newAuthLoginCmd())
 	cmd.AddCommand(newAuthWhoamiCmd())
@@ -44,22 +42,55 @@ token is used by Cella commands.`,
 	return cmd
 }
 
-// newAuthOrgCmd groups org-context management: list memberships and
-// switch the active context. Switch uses the refresh-token grant with
-// `org_id=<uuid>` so the user does not need to re-run device-code login.
-// An empty <id> ("" or --personal) switches to the personal context.
-func newAuthOrgCmd() *cobra.Command {
+// newOrgCmd is the top-level organization-context verb. With no argument it
+// prints the active context of the saved token; with an org UUID (or
+// --personal) it switches the context via the refresh-token grant, so the
+// user does not need to re-run device-code login.
+func newOrgCmd() *cobra.Command {
+	var authURL, clientID string
+	var personal bool
 	cmd := &cobra.Command{
-		Use:   "org",
-		Short: "Manage the active organization context.",
-		Long: `Manage which organization the saved token is scoped to.
+		Use:   "org [org-uuid]",
+		Short: "Show or switch the active organization context.",
+		Long: `Show or switch which organization the saved token is scoped to.
 
-    latere auth org list                # show known orgs
-    latere auth org switch <org-uuid>   # switch to <org-uuid>
-    latere auth org switch --personal   # switch to personal context
+    latere org                # show the active context
+    latere org <org-uuid>     # switch to <org-uuid>
+    latere org --personal     # switch to the personal context
 
 Switch uses the refresh-token grant; the user does not need to
 re-run device-code login.`,
+		Example: `  latere org
+  latere org 3fa85f64-5717-4562-b3fc-2c963f66afa6
+  latere org --personal`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if personal && len(args) == 1 {
+				return errors.New("--personal and an org id are mutually exclusive")
+			}
+			if !personal && len(args) == 0 {
+				return showOrgContext(cmd)
+			}
+			orgID := ""
+			if len(args) == 1 {
+				orgID = args[0]
+			}
+			return switchOrgContext(cmd, authURL, clientID, orgID)
+		},
+	}
+	cmd.Flags().StringVar(&authURL, "auth-url", "", "auth service base URL (default $AUTH_URL or https://auth.latere.ai)")
+	cmd.Flags().StringVar(&clientID, "client-id", "", "OAuth client id (default $AUTH_CLIENT_ID or latere-cli)")
+	cmd.Flags().BoolVar(&personal, "personal", false, "switch to the personal context")
+	return cmd
+}
+
+// newAuthOrgCmd keeps `latere auth org switch` working under the hidden
+// alias. It shares switchOrgContext with the top-level org verb.
+func newAuthOrgCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:    "org",
+		Short:  "Deprecated alias for `latere org`.",
+		Hidden: true,
 	}
 	cmd.AddCommand(newAuthOrgSwitchCmd())
 	return cmd
@@ -80,88 +111,7 @@ func newAuthOrgSwitchCmd() *cobra.Command {
 			if personal {
 				orgID = ""
 			}
-
-			tok, err := api.LoadAuthToken()
-			if err != nil {
-				return err
-			}
-			if tok.RefreshToken == "" {
-				return errors.New("no refresh token on file; run `latere auth login` first")
-			}
-
-			authBase := authURL
-			if authBase == "" {
-				authBase = strings.TrimRight(os.Getenv("AUTH_URL"), "/")
-				if authBase == "" {
-					authBase = "https://auth.latere.ai"
-				}
-			}
-			cid := clientID
-			if cid == "" {
-				cid = os.Getenv("AUTH_CLIENT_ID")
-				if cid == "" {
-					cid = "latere-cli"
-				}
-			}
-
-			form := url.Values{
-				"grant_type":    {"refresh_token"},
-				"refresh_token": {tok.RefreshToken},
-				"client_id":     {cid},
-				"org_id":        {orgID},
-			}
-			req, err := http.NewRequestWithContext(cmd.Context(),
-				http.MethodPost,
-				authBase+"/token",
-				strings.NewReader(form.Encode()),
-			)
-			if err != nil {
-				return err
-			}
-			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-			req.Header.Set("Accept", "application/json")
-
-			httpc := &http.Client{Timeout: 15 * time.Second}
-			resp, err := httpc.Do(req)
-			if err != nil {
-				return fmt.Errorf("token endpoint: %w", err)
-			}
-			defer resp.Body.Close()
-			body, _ := io.ReadAll(resp.Body)
-			if resp.StatusCode != http.StatusOK {
-				return fmt.Errorf("token endpoint: %s: %s", resp.Status, strings.TrimSpace(string(body)))
-			}
-			var got struct {
-				AccessToken  string `json:"access_token"`
-				RefreshToken string `json:"refresh_token"`
-				ExpiresIn    int    `json:"expires_in"`
-			}
-			if err := json.Unmarshal(body, &got); err != nil {
-				return fmt.Errorf("decode token: %w", err)
-			}
-			if got.AccessToken == "" {
-				return errors.New("token endpoint returned no access_token")
-			}
-
-			expiry := time.Now().Add(time.Duration(got.ExpiresIn) * time.Second).UTC()
-			if got.RefreshToken == "" {
-				got.RefreshToken = tok.RefreshToken
-			}
-			if err := api.SaveAuthToken(api.Token{
-				AccessToken:  got.AccessToken,
-				RefreshToken: got.RefreshToken,
-				TokenType:    "Bearer",
-				ExpiresAt:    expiry,
-				IssuedAt:     time.Now().UTC(),
-			}); err != nil {
-				return fmt.Errorf("save auth token: %w", err)
-			}
-			if orgID == "" {
-				fmt.Fprintln(cmd.ErrOrStderr(), "Switched to personal context.")
-			} else {
-				fmt.Fprintf(cmd.ErrOrStderr(), "Switched to org %s.\n", orgID)
-			}
-			return nil
+			return switchOrgContext(cmd, authURL, clientID, orgID)
 		},
 	}
 	cmd.Flags().StringVar(&authURL, "auth-url", "", "auth service base URL (default $AUTH_URL or https://auth.latere.ai)")
@@ -170,8 +120,117 @@ func newAuthOrgSwitchCmd() *cobra.Command {
 	return cmd
 }
 
+// showOrgContext prints the active context without a network call: the org
+// scope is stamped into the JWT claims at issue time. Prints "personal" or
+// the org UUID, bare, so it is scriptable.
+func showOrgContext(cmd *cobra.Command) error {
+	tok, err := api.LoadAuthToken()
+	if err != nil {
+		tok, err = api.LoadToken("")
+		if err != nil {
+			return err
+		}
+	}
+	info, err := principalFromJWT(tok.AccessToken)
+	if err != nil {
+		return err
+	}
+	if info.OrgID == "" {
+		fmt.Fprintln(cmd.OutOrStdout(), "personal")
+	} else {
+		fmt.Fprintln(cmd.OutOrStdout(), info.OrgID)
+	}
+	return nil
+}
+
+// switchOrgContext re-scopes the saved token to orgID (empty = personal)
+// using the refresh-token grant with `org_id=<uuid>`.
+func switchOrgContext(cmd *cobra.Command, authURL, clientID, orgID string) error {
+	tok, err := api.LoadAuthToken()
+	if err != nil {
+		return err
+	}
+	if tok.RefreshToken == "" {
+		return errors.New("no refresh token on file; run `latere login` first")
+	}
+
+	authBase := authURL
+	if authBase == "" {
+		authBase = strings.TrimRight(os.Getenv("AUTH_URL"), "/")
+		if authBase == "" {
+			authBase = "https://auth.latere.ai"
+		}
+	}
+	cid := clientID
+	if cid == "" {
+		cid = os.Getenv("AUTH_CLIENT_ID")
+		if cid == "" {
+			cid = "latere-cli"
+		}
+	}
+
+	form := url.Values{
+		"grant_type":    {"refresh_token"},
+		"refresh_token": {tok.RefreshToken},
+		"client_id":     {cid},
+		"org_id":        {orgID},
+	}
+	req, err := http.NewRequestWithContext(cmd.Context(),
+		http.MethodPost,
+		authBase+"/token",
+		strings.NewReader(form.Encode()),
+	)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+
+	httpc := &http.Client{Timeout: 15 * time.Second}
+	resp, err := httpc.Do(req)
+	if err != nil {
+		return fmt.Errorf("token endpoint: %w", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("token endpoint: %s: %s", resp.Status, strings.TrimSpace(string(body)))
+	}
+	var got struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		ExpiresIn    int    `json:"expires_in"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		return fmt.Errorf("decode token: %w", err)
+	}
+	if got.AccessToken == "" {
+		return errors.New("token endpoint returned no access_token")
+	}
+
+	expiry := time.Now().Add(time.Duration(got.ExpiresIn) * time.Second).UTC()
+	if got.RefreshToken == "" {
+		got.RefreshToken = tok.RefreshToken
+	}
+	if err := api.SaveAuthToken(api.Token{
+		AccessToken:  got.AccessToken,
+		RefreshToken: got.RefreshToken,
+		TokenType:    "Bearer",
+		ExpiresAt:    expiry,
+		IssuedAt:     time.Now().UTC(),
+	}); err != nil {
+		return fmt.Errorf("save auth token: %w", err)
+	}
+	if orgID == "" {
+		fmt.Fprintln(cmd.ErrOrStderr(), "Switched to personal context.")
+	} else {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Switched to org %s.\n", orgID)
+	}
+	return nil
+}
+
 // newAuthPrintTokenCmd prints the saved access token to stdout so it
-// can be embedded in shell scripts: `TOKEN=$(latere auth print-token)`.
+// can be embedded in shell scripts: `TOKEN=$(latere print-token)`.
 // Stays on stdout (without a trailing newline guaranteed by Println)
 // so command substitution gives a clean string.
 func newAuthPrintTokenCmd() *cobra.Command {
@@ -182,9 +241,9 @@ func newAuthPrintTokenCmd() *cobra.Command {
 
 Useful for piping into shell tools without depending on jq:
 
-    TOKEN=$(latere auth print-token)
+    TOKEN=$(latere print-token)
     curl -H "Authorization: Bearer $TOKEN" https://cella.latere.ai/v1/sandboxes`,
-		Example: `  TOKEN=$(latere auth print-token)
+		Example: `  TOKEN=$(latere print-token)
   curl -H "Authorization: Bearer $TOKEN" https://cella.latere.ai/v1/sandboxes`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			tok, err := api.LoadToken("")
@@ -236,12 +295,12 @@ token in the URL. Pass --no-git to leave your git config untouched;
 
 For unattended setups (CI, scripts), pass --token to skip the device
 flow and store an access token directly.`,
-		Example: `  latere auth login
-  latere auth login --personal
-  latere auth login --org-id org_123
-  latere auth login --no-browser
-  latere auth login --no-git
-  latere auth login --token "$LATERE_TOKEN"`,
+		Example: `  latere login
+  latere login --personal
+  latere login --org-id org_123
+  latere login --no-browser
+  latere login --no-git
+  latere login --token "$LATERE_TOKEN"`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			if personal && strings.TrimSpace(orgID) != "" {
@@ -625,8 +684,8 @@ func newAuthWhoamiCmd() *cobra.Command {
 For auth-issued tokens this asks auth.latere.ai for token information.
 For Cella-issued tokens, it first confirms the token is accepted by
 Cella, then prints the identity claims embedded in the saved JWT.`,
-		Example: `  latere auth whoami
-  latere auth whoami --api-url https://cella.latere.ai`,
+		Example: `  latere whoami
+  latere whoami --api-url https://cella.latere.ai`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := api.NewClient(apiURL)
 			if err := c.MustRequireAuth(); err != nil {
@@ -781,8 +840,8 @@ func newAuthLogoutCmd() *cobra.Command {
 		Use:   "logout",
 		Short: "Clear ~/.config/latere/token.json.",
 		Long:  "Clear the saved Latere CLI token from ~/.config/latere/token.json.",
-		Example: `  latere auth logout
-  latere auth login`,
+		Example: `  latere logout
+  latere login`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := api.ClearToken(""); err != nil {
 				return err

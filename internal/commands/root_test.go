@@ -51,7 +51,7 @@ func TestHelpIncludesUserExamples(t *testing.T) {
 			name: "root",
 			args: []string{"--help"},
 			want: []string{
-				"latere auth login",
+				"latere login",
 				"latere cella apply -f sandbox.yaml",
 				"latere completion zsh",
 			},
@@ -66,11 +66,11 @@ func TestHelpIncludesUserExamples(t *testing.T) {
 			},
 		},
 		{
-			name: "auth login",
-			args: []string{"auth", "login", "--help"},
+			name: "login",
+			args: []string{"login", "--help"},
 			want: []string{
-				"latere auth login --personal",
-				"latere auth login --no-browser",
+				"latere login --personal",
+				"latere login --no-browser",
 				"override Cella API base URL",
 			},
 		},
