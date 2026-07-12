@@ -67,7 +67,7 @@ func providerSpecs() map[string]providerSpec {
 		},
 		"openrouter": {
 			// OpenAI-compatible: use the OpenAI SDK pointed at the
-			// OpenRouter route. Best keyless lane (free models live here).
+			// OpenRouter route.
 			name: "openrouter", chatPath: "/openrouter/v1/chat/completions",
 			envBaseVar: "OPENAI_BASE_URL", envKeyVar: "OPENAI_API_KEY", envBaseURL: "/openrouter/v1",
 		},
@@ -120,8 +120,10 @@ Run 'latere login' first (it now requests the llm.read / llm.invoke
 scopes Lux needs). The base URL defaults to https://lux.latere.ai and
 can be overridden by LUX_API_URL or --lux-url.
 
-Free models (OpenRouter ':free') work with no setup. Paid models need an
-access profile binding to a provider key — see 'latere lux access'.`,
+A model resolves through a provider key you or your org own (see
+'latere lux access'), or through a platform grant a Latere admin
+configured for you — granted models simply appear in 'latere lux
+models'.`,
 		Example: `  latere lux models
   eval "$(latere lux env --provider openai)"
   latere lux invoke --model openai/gpt-4o-mini "Say hi"
@@ -825,10 +827,11 @@ func newLuxAccessCmd(luxURL, authURL, token *string) *cobra.Command {
 		Short: "View or set your Lux access profile (model bindings).",
 		Long: `Inspect and self-provision your Lux access profile.
 
-A paid model resolves only when your identity is bound to a provider key
-(an operator-managed platform key, or your own registered key). Free
-models need no binding. 'show' prints the current profile; 'set' binds a
-model to a provider key.`,
+A model resolves only when your identity is bound to a provider key —
+your own registered key, or a Latere platform key you hold a grant on.
+'show' prints the current profile; 'set' binds a model to a provider
+key. Platform-granted models need no binding here; they appear in
+'latere lux models' automatically.`,
 	}
 	cmd.AddCommand(newLuxAccessShowCmd(luxURL, authURL, token))
 	cmd.AddCommand(newLuxAccessSetCmd(luxURL, authURL, token))
@@ -1141,9 +1144,8 @@ func wrapLuxErr(err error) error {
 	case strings.Contains(apiErr.Code, "provider_not_bound"):
 		return fmt.Errorf(
 			"no provider is bound for this model, so Lux can't route it (%s).\n"+
-				"Free models (OpenRouter ':free') work with no setup. For a paid model, bind it with\n"+
-				"`latere lux access set --model <m> --provider <p> --provider-key <id>`, or ask an operator to\n"+
-				"enable a platform key for your identity.",
+				"Bind it with `latere lux access set --model <m> --provider <p> --provider-key <id>`,\n"+
+				"or ask a Latere admin for a platform grant that covers it.",
 			apiErr.Message)
 	}
 	return err

@@ -46,7 +46,7 @@ latere lux usage --by provider    # break down by provider instead of model
 latere lux access show
 ```
 
-Free models work with no setup. A paid model needs your access profile bound to a provider key — `latere lux access set --model <m> --provider <p> --provider-key <id>` (or ask your Latere admin to enable one for you).
+A model resolves through a provider key you or your org own — bind it with `latere lux access set --model <m> --provider <p> --provider-key <id>` — or through a **platform grant** a Latere admin configured for you (optionally capped per month). Granted models just show up in `latere lux models`; no binding needed. Past a grant's cap, calls return HTTP 402 until the month rolls over.
 
 ## Serve a local model
 
