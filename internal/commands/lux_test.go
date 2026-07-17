@@ -832,7 +832,10 @@ func TestLuxEnvTTLMintsActorToken(t *testing.T) {
 
 func TestLuxEnvIdentityExpiryNote(t *testing.T) {
 	isolateBearer(t)
-	exp := time.Date(2026, 7, 13, 8, 0, 0, 0, time.UTC)
+	// A future expiry so the identity path emits the note without
+	// attempting a refresh; derived from now so the fixture cannot rot
+	// into the past and turn the test into a refresh-failure test.
+	exp := time.Now().Add(48 * time.Hour).UTC().Truncate(time.Minute)
 	writeAuthTokenFile(t, fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"llm.invoke"}}), "r", exp)
 
 	var errBuf strings.Builder
@@ -845,8 +848,9 @@ func TestLuxEnvIdentityExpiryNote(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(errBuf.String(), "identity token, expires 2026-07-13T08:00Z") {
-		t.Errorf("stderr = %q", errBuf.String())
+	want := "identity token, expires " + exp.Format("2006-01-02T15:04Z")
+	if !strings.Contains(errBuf.String(), want) {
+		t.Errorf("stderr = %q, want substring %q", errBuf.String(), want)
 	}
 }
 
