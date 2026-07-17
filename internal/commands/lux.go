@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"latere.ai/x/pkg/oidc"
 
 	"github.com/latere-ai/latere-cli/internal/api"
 	"github.com/latere-ai/latere-cli/internal/tunnel"
@@ -450,7 +449,7 @@ func luxEnvBearer(ctx context.Context, tokenFlag, luxURL, authURLFlag string, tt
 	}
 	if ttl > 0 {
 		httpc := &http.Client{Timeout: 15 * time.Second}
-		actor, err := mintActorToken(ctx, httpc, authBase, access, "lux.latere.ai", int(ttl.Seconds()))
+		actor, err := api.MintActorToken(ctx, httpc, authBase, access, "lux.latere.ai", int(ttl.Seconds()))
 		if err != nil {
 			return "", "", fmt.Errorf("mint actor token: %w", err)
 		}
@@ -1016,7 +1015,7 @@ func authIdentityToken(ctx context.Context, luxURL, authURLFlag string) (access,
 	}
 	authBase = authURLFlag
 	if authBase == "" {
-		authBase = inferAuthURL(resolveLuxURL(luxURL))
+		authBase = api.InferAuthURL(resolveLuxURL(luxURL))
 	}
 	authBase = strings.TrimRight(authBase, "/")
 
@@ -1026,7 +1025,7 @@ func authIdentityToken(ctx context.Context, luxURL, authURLFlag string) (access,
 	// downstream call surface a re-login error if it is in fact expired.
 	if authTok.RefreshToken != "" && !authTok.ExpiresAt.IsZero() &&
 		time.Now().After(authTok.ExpiresAt.Add(-60*time.Second)) {
-		refreshed, rerr := refreshAuthToken(ctx, authBase, authTok.RefreshToken)
+		refreshed, rerr := api.RefreshAuthToken(ctx, authBase, authTok.RefreshToken)
 		if rerr != nil {
 			return "", "", fmt.Errorf("auth token expired and refresh failed (%v); run `latere login`", rerr)
 		}
@@ -1062,41 +1061,11 @@ func luxBearer(ctx context.Context, tokenFlag, luxURL, authURL string) (string, 
 		return "", err
 	}
 	httpc := &http.Client{Timeout: 15 * time.Second}
-	bearer, err := mintActorToken(ctx, httpc, authBase, access, "lux.latere.ai", 300)
+	bearer, err := api.MintActorToken(ctx, httpc, authBase, access, "lux.latere.ai", 300)
 	if err != nil {
 		return "", fmt.Errorf("mint Lux token: %w; if this persists run `latere login`", err)
 	}
 	return bearer, nil
-}
-
-// refreshAuthToken refreshes the retained auth root token and persists
-// the result, preserving the previous refresh token when the response
-// omits a new one (a common OAuth behaviour).
-func refreshAuthToken(ctx context.Context, authBase, refreshToken string) (api.Token, error) {
-	client := oidc.New(oidc.Config{
-		AuthURL:  authBase,
-		ClientID: "latere-cli",
-		Scopes:   []string{"openid", "email", "profile", "offline_access", "llm.read", "llm.invoke", "llm.serve", "run:agents", "read:agents", "write:agents"},
-	})
-	if client == nil {
-		return api.Token{}, errors.New("oidc: missing AuthURL or ClientID")
-	}
-	tok, err := client.RefreshTokenContext(ctx, refreshToken)
-	if err != nil {
-		return api.Token{}, err
-	}
-	out := api.Token{
-		AccessToken:  tok.AccessToken,
-		RefreshToken: tok.RefreshToken,
-		TokenType:    "Bearer",
-		ExpiresAt:    tok.Expiry,
-		IssuedAt:     time.Now().UTC(),
-	}
-	if out.RefreshToken == "" {
-		out.RefreshToken = refreshToken
-	}
-	_ = api.SaveAuthToken(out) // best-effort; the in-memory token still works this run
-	return out, nil
 }
 
 // inferInvokeProvider resolves which provider serves model by looking it
