@@ -334,7 +334,8 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body io
 }
 
 // DoRaw runs the request and returns the response so the caller can
-// stream the body (used for files/export and SSE log follow).
+// stream the body (used for files/export and SSE log follow). Streaming
+// requests do not auto-refresh the bearer; a 401 surfaces to the caller.
 func (c *Client) DoRaw(ctx context.Context, method, path string, body io.Reader, contentType string) (*http.Response, error) {
 	req, err := c.req(ctx, method, path, body, contentType)
 	if err != nil {

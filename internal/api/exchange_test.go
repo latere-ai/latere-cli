@@ -15,6 +15,8 @@ func TestInferAuthURL(t *testing.T) {
 		"https://cella.latere.ai":   "https://auth.latere.ai",
 		"https://api.example.com":   "https://auth.example.com",
 		"http://cella.localhost:80": "http://auth.localhost:80",
+		"://not-a-url":              "https://auth.latere.ai",
+		"https://localhost":         "https://auth.latere.ai",
 	}
 	for in, want := range cases {
 		if got := InferAuthURL(in); got != want {

@@ -750,13 +750,22 @@ func scopesClaim(claims map[string]any) []string {
 }
 
 func newAuthLogoutCmd() *cobra.Command {
-	return &cobra.Command{
+	var apiURL, authURL string
+	cmd := &cobra.Command{
 		Use:   "logout",
-		Short: "Clear ~/.config/latere/token.json.",
-		Long:  "Clear the saved Latere CLI token from ~/.config/latere/token.json.",
+		Short: "Sign out: revoke the session server-side and clear local tokens.",
+		Long: `Sign out of Latere.
+
+Revokes the saved cella token server-side (DELETE /v1/tokens/current)
+and the retained auth refresh token (RFC 7009 /revoke), then clears
+~/.config/latere/token.json and auth-token.json. Server-side revocation
+is best-effort: an unreachable or older server prints a warning and the
+local sign-out still completes.`,
 		Example: `  latere logout
   latere login`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			revokeCellaTokenServerSide(cmd.Context(), apiURL, cmd.ErrOrStderr())
+			revokeAuthRefreshToken(cmd.Context(), apiURL, authURL, cmd.ErrOrStderr())
 			if err := api.ClearToken(""); err != nil {
 				return err
 			}
@@ -764,9 +773,81 @@ func newAuthLogoutCmd() *cobra.Command {
 			if err := api.ClearAuthToken(); err != nil {
 				return err
 			}
-			fmt.Fprintln(os.Stderr, "Logged out.")
+			fmt.Fprintln(cmd.ErrOrStderr(), "Logged out.")
 			return nil
 		},
+	}
+	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL (default https://cella.latere.ai)")
+	cmd.Flags().StringVar(&authURL, "auth-url", "", "override auth base URL (default derived from the API URL)")
+	return cmd
+}
+
+// revokeCellaTokenServerSide best-effort revokes the saved cella
+// catalog token via DELETE /v1/tokens/current so it dies now instead
+// of at TTL expiry. A sandbox-kind bearer (403), an older cella
+// without the endpoint (404), or an unreachable server degrades to a
+// stderr note; the local sign-out proceeds regardless.
+func revokeCellaTokenServerSide(ctx context.Context, apiURL string, errw io.Writer) {
+	c := api.NewClient(apiURL)
+	c.Refresh = nil // never mint a fresh credential just to revoke it
+	if c.Token == "" {
+		return
+	}
+	rctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	err := c.Do(rctx, http.MethodDelete, "/v1/tokens/current", nil, "", nil)
+	if err == nil {
+		return
+	}
+	var apiErr *api.APIError
+	if errors.As(err, &apiErr) && (apiErr.Status == http.StatusNotFound || apiErr.Status == http.StatusForbidden) {
+		fmt.Fprintf(errw, "  note: server-side token revocation unavailable (%d); the token expires on its own\n", apiErr.Status)
+		return
+	}
+	fmt.Fprintf(errw, "  warning: could not revoke the cella token server-side (%v); it remains valid until expiry\n", err)
+}
+
+// revokeAuthRefreshToken best-effort revokes the retained auth refresh
+// token via RFC 7009 (POST {auth}/revoke, public client) so the root
+// credential cannot mint further access tokens after sign-out.
+func revokeAuthRefreshToken(ctx context.Context, apiURL, authURL string, errw io.Writer) {
+	tok, err := api.LoadAuthToken()
+	if err != nil || tok.RefreshToken == "" {
+		return
+	}
+	authBase := strings.TrimRight(authURL, "/")
+	if authBase == "" {
+		authBase = strings.TrimRight(os.Getenv("AUTH_URL"), "/")
+	}
+	if authBase == "" {
+		authBase = api.InferAuthURL(api.NewClient(apiURL).BaseURL)
+	}
+	cid := os.Getenv("AUTH_CLIENT_ID")
+	if cid == "" {
+		cid = "latere-cli"
+	}
+	form := url.Values{
+		"token":           {tok.RefreshToken},
+		"token_type_hint": {"refresh_token"},
+		"client_id":       {cid},
+	}
+	rctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(rctx, http.MethodPost, authBase+"/revoke", strings.NewReader(form.Encode()))
+	if err != nil {
+		fmt.Fprintf(errw, "  warning: could not revoke the auth refresh token (%v)\n", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	if err != nil {
+		fmt.Fprintf(errw, "  warning: could not revoke the auth refresh token (%v); it remains valid until expiry\n", err)
+		return
+	}
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode/100 != 2 {
+		fmt.Fprintf(errw, "  warning: auth refresh-token revocation returned %d; it may remain valid until expiry\n", resp.StatusCode)
 	}
 }
 
