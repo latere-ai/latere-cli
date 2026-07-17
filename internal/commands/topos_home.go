@@ -14,11 +14,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"golang.org/x/term"
-)
 
-// defaultLoginScopes is the scope set `latere topos` requests when it signs a
-// user in (mirrors `latere login`); run:agents lets the token drive Topos.
-const defaultLoginScopes = "openid email profile offline_access read:sandbox write:sandbox exec:sandbox attach:sandbox llm.read llm.invoke llm.serve run:agents read:agents write:agents"
+	"github.com/latere-ai/latere-cli/internal/api"
+)
 
 // runToposHome is the `latere topos` landing experience: sign in if needed, then
 // loop on the home screen — start a new session, or resume one — until quit. A
@@ -82,7 +80,7 @@ func ensureToposLogin(ctx context.Context, apiURL string) error {
 	return runDeviceFlow(ctx, deviceFlowOpts{
 		ClientID: "latere-cli",
 		AuthURL:  toposAuthBase(),
-		Scopes:   defaultLoginScopes,
+		Scopes:   api.LoginScopes,
 	})
 }
 
