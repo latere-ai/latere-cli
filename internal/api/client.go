@@ -41,6 +41,19 @@ type Client struct {
 	BaseURL string
 	Token   string
 	HTTP    *http.Client
+
+	// Refresh, when set, re-derives the bearer and is invoked at most
+	// once per client: proactively when the saved token is within 60s
+	// of a known expiry, or reactively after a 401. NewClient wires the
+	// default (re-exchange through the retained auth root token); set
+	// nil to disable, e.g. when the client must never mint credentials.
+	Refresh func(ctx context.Context) (string, bool)
+
+	// expiresAt is token.json's recorded expiry at construction. Zero
+	// means unknown (cella's exchange response carries no expiry) and
+	// skips the proactive refresh; the 401 path still applies.
+	expiresAt time.Time
+	refreshed bool
 }
 
 // NewClient builds a Client from env + the token file. Returns the
@@ -56,11 +69,62 @@ func NewClient(apiURL string) *Client {
 	}
 	apiURL = strings.TrimRight(apiURL, "/")
 	tok, _ := LoadToken("")
-	return &Client{
-		BaseURL: apiURL,
-		Token:   tok.AccessToken,
-		HTTP:    &http.Client{Timeout: 60 * time.Second},
+	c := &Client{
+		BaseURL:   apiURL,
+		Token:     tok.AccessToken,
+		HTTP:      &http.Client{Timeout: 60 * time.Second},
+		expiresAt: tok.ExpiresAt,
 	}
+	c.Refresh = func(ctx context.Context) (string, bool) {
+		return RefreshCellaToken(ctx, c.BaseURL)
+	}
+	return c
+}
+
+// RefreshCellaToken re-derives the cella bearer from the retained auth
+// root token: refresh the root when it is expiring, mint a sandboxd
+// actor token, exchange it at /v1/tokens/exchange, and persist the
+// replacement (cella's catalog replaces the previous row by label, so
+// this rotates the credential). Returns ok=false when no auth root
+// token exists (paste-mode login has none) or any step fails; callers
+// keep their original error.
+func RefreshCellaToken(ctx context.Context, apiBase string) (string, bool) {
+	authTok, err := LoadAuthToken()
+	if err != nil || authTok.AccessToken == "" {
+		return "", false
+	}
+	authBase := strings.TrimRight(os.Getenv("AUTH_URL"), "/")
+	if authBase == "" {
+		authBase = InferAuthURL(apiBase)
+	}
+	access := authTok.AccessToken
+	if authTok.RefreshToken != "" && !authTok.ExpiresAt.IsZero() &&
+		time.Now().After(authTok.ExpiresAt.Add(-60*time.Second)) {
+		refreshed, rerr := RefreshAuthToken(ctx, authBase, authTok.RefreshToken)
+		if rerr != nil {
+			return "", false
+		}
+		access = refreshed.AccessToken
+	}
+	httpc := &http.Client{Timeout: 15 * time.Second}
+	bearer, err := MintActorToken(ctx, httpc, authBase, access, "sandboxd", 60)
+	if errors.Is(err, ErrActorAudienceMismatch) {
+		// Legacy audience shape: the root token itself is accepted by
+		// sandboxd, mirror the login-time fallback.
+		bearer = access
+	} else if err != nil {
+		return "", false
+	}
+	cellaTok, err := ExchangeAtCella(ctx, httpc, apiBase, bearer)
+	if err != nil {
+		return "", false
+	}
+	_ = SaveToken("", Token{
+		AccessToken: cellaTok,
+		TokenType:   "Bearer",
+		IssuedAt:    time.Now().UTC(),
+	}) // best-effort; the in-memory token still works this run
+	return cellaTok, true
 }
 
 // ---- token storage ----
@@ -212,17 +276,51 @@ func (c *Client) Do(ctx context.Context, method, path string, body io.Reader, co
 }
 
 // DoWithHeaders is Do with extra request headers (e.g. Idempotency-Key).
+// When a Refresh hook is set it fires at most once: before the request
+// if the saved token has a known expiry within 60s, or after a 401,
+// retrying the request once with the fresh bearer (only when the body
+// is nil or rewindable, so a consumed stream is never resent corrupt).
 func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body io.Reader, contentType string, headers map[string]string, out any) error {
-	req, err := c.req(ctx, method, path, body, contentType)
+	if c.Refresh != nil && !c.refreshed && !c.expiresAt.IsZero() &&
+		time.Now().After(c.expiresAt.Add(-60*time.Second)) {
+		c.refreshed = true
+		if t, ok := c.Refresh(ctx); ok {
+			c.Token = t
+			c.expiresAt = time.Time{}
+		}
+	}
+	send := func() (*http.Response, error) {
+		req, err := c.req(ctx, method, path, body, contentType)
+		if err != nil {
+			return nil, err
+		}
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+		return c.HTTP.Do(req)
+	}
+	resp, err := send()
 	if err != nil {
 		return err
 	}
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-	resp, err := c.HTTP.Do(req)
-	if err != nil {
-		return err
+	if resp.StatusCode == http.StatusUnauthorized && c.Refresh != nil && !c.refreshed {
+		rewindable := body == nil
+		if s, ok := body.(io.Seeker); !rewindable && ok {
+			_, serr := s.Seek(0, io.SeekStart)
+			rewindable = serr == nil
+		}
+		if rewindable {
+			c.refreshed = true
+			if t, ok := c.Refresh(ctx); ok {
+				_, _ = io.Copy(io.Discard, resp.Body)
+				_ = resp.Body.Close()
+				c.Token = t
+				resp, err = send()
+				if err != nil {
+					return err
+				}
+			}
+		}
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode/100 != 2 {

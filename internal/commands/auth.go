@@ -608,6 +608,9 @@ Cella, then prints the identity claims embedded in the saved JWT.`,
 			authURL := api.InferAuthURL(c.BaseURL)
 			req := *c
 			req.BaseURL = authURL
+			// The probe 401s by design for cella-issued tokens; a
+			// bearer refresh cannot change that outcome.
+			req.Refresh = nil
 			var info struct {
 				Sub           string   `json:"sub"`
 				Email         *string  `json:"email,omitempty"`
