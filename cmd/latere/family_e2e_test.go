@@ -41,14 +41,11 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/latere-ai/latere-cli/internal/api"
 )
 
 type familyEnv struct {
 	bin       string // path to a freshly built latere binary
 	token     string // cella-issued bearer (token.json), valid at cella
-	authToken string // auth root bearer (auth-token.json), valid at auth
 	cellaURL  string
 	authURL   string
 	luxURL    string
@@ -103,14 +100,6 @@ func setupFamily(t *testing.T) *familyEnv {
 		}
 		fe.token = strings.TrimSpace(out)
 	}
-
-	// The auth root bearer (auth-token.json) is the token that verifies at
-	// auth; token.json is cella-issued and 401s at auth by design.
-	if at := os.Getenv("LATERE_E2E_AUTH_TOKEN"); at != "" {
-		fe.authToken = at
-	} else if tok, err := api.LoadToken(api.AuthTokenPath()); err == nil {
-		fe.authToken = tok.AccessToken
-	}
 	return fe
 }
 
@@ -145,6 +134,47 @@ func (fe *familyEnv) get(t *testing.T, url, bearer string) (int, string) {
 	return resp.StatusCode, string(body)
 }
 
+// freshBearer mints a short-lived auth-issued identity token via `lux env`.
+// Unlike the on-disk auth-token.json (which goes stale between runs), this is
+// freshly minted, so a direct /tokeninfo check stays green. Returns "" if lux
+// access is unavailable.
+func (fe *familyEnv) freshBearer(t *testing.T) string {
+	t.Helper()
+	out, _, err := fe.run(t, 30*time.Second, "lux", "env", "anthropic")
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if _, v, ok := strings.Cut(strings.TrimSpace(line), "ANTHROPIC_AUTH_TOKEN="); ok {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
+// firstModel reads the first enabled model + its provider from `lux models`,
+// so a live invoke uses whatever the identity actually has bound.
+func (fe *familyEnv) firstModel(t *testing.T) (model, provider string) {
+	t.Helper()
+	out, _, err := fe.run(t, 30*time.Second, "lux", "models")
+	if err != nil {
+		return "", ""
+	}
+	for _, line := range strings.Split(out, "\n") {
+		f := strings.Fields(line)
+		if len(f) >= 2 && f[0] == "model:" && model == "" {
+			model = f[1]
+		}
+		if len(f) >= 2 && f[0] == "provider:" && provider == "" {
+			provider = f[1]
+		}
+		if model != "" && provider != "" {
+			break
+		}
+	}
+	return model, provider
+}
+
 func TestFamilyE2E(t *testing.T) {
 	requireFamilyE2E(t)
 	fe := setupFamily(t)
@@ -171,14 +201,16 @@ func TestFamilyE2E(t *testing.T) {
 		}
 	})
 
-	// The auth root bearer verifies at auth /tokeninfo and resolves to the
-	// same owner (invariant 1). token.json is cella-issued and would 401
-	// here by design (asserted separately below), so this uses authToken.
+	// A fresh auth-issued bearer verifies at auth /tokeninfo and resolves to
+	// the same owner (invariant 1). token.json is cella-issued and would 401
+	// here by design (asserted separately below), so this mints a fresh
+	// identity token via lux env rather than reusing the stale disk token.
 	t.Run("auth/tokeninfo-verifies", func(t *testing.T) {
-		if fe.authToken == "" {
-			t.Skip("no auth root token (auth-token.json); set LATERE_E2E_AUTH_TOKEN")
+		bearer := fe.freshBearer(t)
+		if bearer == "" {
+			t.Skip("could not mint a fresh auth bearer via lux env")
 		}
-		status, body := fe.get(t, fe.authURL+"/tokeninfo", fe.authToken)
+		status, body := fe.get(t, fe.authURL+"/tokeninfo", bearer)
 		if status != http.StatusOK {
 			t.Fatalf("/tokeninfo = %d, want 200\n%s", status, body)
 		}
@@ -274,11 +306,18 @@ func TestFamilyE2E(t *testing.T) {
 // drive round-trip, and the if-14 in-sandbox->lux path via a throwaway
 // cella. Each cleans up after itself.
 func (fe *familyEnv) runWriteTier(t *testing.T) {
-	// Edge: CLI -> lux invoke (a real one-shot completion).
+	// Edge: CLI -> lux invoke (a real one-shot completion) using whatever
+	// model the identity has bound.
 	t.Run("cli->lux-invoke", func(t *testing.T) {
-		out, errOut, err := fe.run(t, 60*time.Second, "lux", "invoke", "--prompt", "reply with the single word: ok")
+		model, provider := fe.firstModel(t)
+		if model == "" {
+			t.Skip("no lux model bound to this identity; run `latere lux access set`")
+		}
+		out, errOut, err := fe.run(t, 60*time.Second, "lux", "invoke",
+			"--provider", provider, "--model", model, "--max-tokens", "16",
+			"reply with the single word: ok")
 		if err != nil {
-			t.Fatalf("lux invoke: %v\n%s", err, errOut)
+			t.Fatalf("lux invoke (%s/%s): %v\n%s", provider, model, err, errOut)
 		}
 		if strings.TrimSpace(out) == "" {
 			t.Error("lux invoke returned empty completion")
@@ -298,7 +337,7 @@ func (fe *familyEnv) runWriteTier(t *testing.T) {
 			t.Fatalf("drive put: %v\n%s", err, errOut)
 		}
 		t.Cleanup(func() { _, _, _ = fe.run(t, 30*time.Second, "drive", "rm", "--permanent", dest) })
-		got, errOut, err := fe.run(t, 40*time.Second, "drive", "get", dest, "-")
+		got, errOut, err := fe.run(t, 40*time.Second, "drive", "get", dest, "-o", "-")
 		if err != nil {
 			t.Fatalf("drive get: %v\n%s", err, errOut)
 		}
