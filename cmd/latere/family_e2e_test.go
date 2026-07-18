@@ -358,13 +358,51 @@ func (fe *familyEnv) runWriteTier(t *testing.T) {
 	})
 }
 
-// inSandboxLux creates an access-profile cella, runs in-sandbox code that
-// calls lux through the egress substitution, and asserts the call
-// succeeds without the code ever holding a real key (if-14).
+// inSandboxLux creates a model-access cella, runs in-sandbox code that calls
+// lux through the injected ANTHROPIC_BASE_URL, and asserts two things (if-14):
+// the code sees only an opaque placeholder key (never a real lux_ key, which
+// rides solely in the egress substitution map), and the call still returns a
+// completion. Needs sandbox if-14 released and a model_access policy named by
+// LATERE_FAMILY_E2E_POLICY.
 func (fe *familyEnv) inSandboxLux(t *testing.T) {
-	// Deferred to a dedicated builder once sandbox v0.10.223 is live; the
-	// create/run/delete sequence is driven through `latere cella`.
-	t.Skip("in-sandbox->lux builder lands with the sandbox release verification pass")
+	policy := os.Getenv("LATERE_FAMILY_E2E_POLICY")
+	if policy == "" {
+		t.Skip("set LATERE_FAMILY_E2E_POLICY to a model_access policy name (needs sandbox if-14 released + a model_access policy configured)")
+	}
+	model, _ := fe.firstModel(t)
+	if model == "" {
+		model = "claude-fable-5"
+	}
+
+	dir := t.TempDir()
+	name := fmt.Sprintf("fam-e2e-if14-%d", time.Now().UnixNano()%1000000)
+	manifest := filepath.Join(dir, "sandbox.yaml")
+	spec := fmt.Sprintf("apiVersion: cella.latere.ai/v1\nkind: Sandbox\nmetadata:\n  name: %s\nspec:\n  tier: ephemeral\n  policy: %s\n  lifecycle:\n    autoStop: 5m\n", name, policy)
+	if err := os.WriteFile(manifest, []byte(spec), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, errOut, err := fe.run(t, 120*time.Second, "cella", "apply", "-f", manifest); err != nil {
+		t.Fatalf("cella apply (model_access policy %q): %v\n%s", policy, err, errOut)
+	}
+	t.Cleanup(func() { _, _, _ = fe.run(t, 60*time.Second, "cella", "delete", name) })
+
+	// In-sandbox code: base URL must point at lux, the key the code holds must
+	// be a placeholder (not a real lux_ key), and the call must still complete.
+	script := fmt.Sprintf(`set -e
+test -n "$ANTHROPIC_BASE_URL" || { echo "MISSING ANTHROPIC_BASE_URL"; exit 3; }
+case "$ANTHROPIC_API_KEY" in lux_*) echo "LEAK: code holds a real lux key"; exit 4;; esac
+curl -sS "$ANTHROPIC_BASE_URL/v1/messages" \
+  -H "x-api-key: $ANTHROPIC_API_KEY" -H "anthropic-version: 2023-06-01" \
+  -H "content-type: application/json" \
+  -d '{"model":"%s","max_tokens":16,"messages":[{"role":"user","content":"reply with the single word: ok"}]}'`, model)
+
+	out, errOut, err := fe.run(t, 150*time.Second, "cella", "run", name, "--follow", "--", "sh", "-c", script)
+	if err != nil {
+		t.Fatalf("in-sandbox->lux call: %v\nstdout:\n%s\nstderr:\n%s", err, out, errOut)
+	}
+	if !strings.Contains(out, "content") && !strings.Contains(strings.ToLower(out), "ok") {
+		t.Errorf("in-sandbox lux response lacked a completion:\n%s", out)
+	}
 }
 
 // runLogoutTier proves server-side revocation (if-11): after logout, the
