@@ -10,11 +10,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 
+	"latere.ai/x/pkg/luxsdk"
 	"latere.ai/x/topos/models"
-	"latere.ai/x/topos/models/anthropic"
-	"latere.ai/x/topos/models/ollama"
+	toposlux "latere.ai/x/topos/models/lux"
 
 	"github.com/latere-ai/latere-cli/internal/api"
 )
@@ -78,16 +77,9 @@ func saveProviderConfig(c providerConfig) error {
 // login); an ambient CLAUDE_CODE_OAUTH_TOKEN; a legacy stored Claude login.
 // If nothing is available it returns errNeedAuth so the caller runs the picker.
 func buildLocalModel(ctx context.Context, modelName string) (models.Model, error) {
-	anthOpts := func() []anthropic.Option {
-		if modelName != "" {
-			return []anthropic.Option{anthropic.WithModel(modelName)}
-		}
-		return nil
-	}
-
 	// 1. An explicit API key always wins.
 	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
-		return anthropic.New(key, "", anthOpts()...), nil
+		return anthropicDirect(key, false, modelName)
 	}
 
 	// 2. An explicit provider choice (the picker / `latere topos login`) wins over
@@ -109,30 +101,48 @@ func buildLocalModel(ctx context.Context, modelName string) (models.Model, error
 	// rate-limited subscription token — only used when not signed in to latere).
 	for _, env := range []string{"CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN_AUTO"} {
 		if tok := os.Getenv(env); tok != "" {
-			return anthropic.New(tok, "", append(anthOpts(), anthropic.WithOAuthToken())...), nil
+			return anthropicDirect(tok, true, modelName)
 		}
 	}
 
 	// 5. A stored Claude login with no provider config (legacy).
 	if tok, berr := claudeOAuthBearer(ctx); berr == nil && tok != "" {
-		return anthropic.New(tok, "", append(anthOpts(), anthropic.WithOAuthToken())...), nil
+		return anthropicDirect(tok, true, modelName)
 	}
 	return nil, errNeedAuth
 }
 
-// luxLocalModel builds the Anthropic adapter pointed at Latere Lux's Anthropic
-// proxy (<lux>/anthropic, the adapter appends /v1/messages), authenticated with
-// the caller's latere identity bearer per request (refreshed on expiry). This is
-// the same wiring the hosted brain uses (agents/internal/runtime/brain).
+// anthropicDirect builds a provider-direct Anthropic model via luxsdk:
+// the lux format translated client-side, no gateway in the path. oauth
+// selects bearer + OAuth-beta auth (Claude subscription tokens) over
+// x-api-key.
+func anthropicDirect(credential string, oauth bool, modelName string) (models.Model, error) {
+	var opts []luxsdk.Option
+	if oauth {
+		opts = append(opts, luxsdk.WithOAuthToken())
+	}
+	d, err := luxsdk.NewDirect(luxsdk.ProviderAnthropic, credential, "", opts...)
+	if err != nil {
+		return nil, err
+	}
+	var lopts []toposlux.Option
+	if modelName != "" {
+		lopts = append(lopts, toposlux.WithModel(modelName))
+	}
+	return toposlux.NewFromCaller(d, lopts...), nil
+}
+
+// luxLocalModel routes inference through Latere Lux's native dialect
+// (POST <lux>/lux/v1/generate, lux spec 33), authenticated with the
+// caller's latere identity bearer per request (refreshed on expiry).
 func luxLocalModel(modelName string) models.Model {
-	base := strings.TrimRight(resolveLuxURL(""), "/") + "/anthropic"
 	model := modelName
 	if model == "" {
 		model = luxDefaultModel
 	}
-	return anthropic.New("", base,
-		anthropic.WithModel(model),
-		anthropic.WithBearerSource(func(ctx context.Context) (string, error) {
+	return toposlux.New("", resolveLuxURL(""),
+		toposlux.WithModel(model),
+		toposlux.WithBearerSource(func(ctx context.Context) (string, error) {
 			return luxIdentityBearer(ctx, "", "", "")
 		}),
 	)
@@ -149,11 +159,7 @@ func modelFromProviderConfig(ctx context.Context, cfg providerConfig, modelName 
 		return luxLocalModel(model), nil
 	case "anthropic":
 		if cfg.Method == "apikey" && cfg.APIKey != "" {
-			var opts []anthropic.Option
-			if model != "" {
-				opts = append(opts, anthropic.WithModel(model))
-			}
-			return anthropic.New(cfg.APIKey, "", opts...), nil
+			return anthropicDirect(cfg.APIKey, false, model)
 		}
 		tok, err := claudeOAuthBearer(ctx)
 		if err != nil {
@@ -162,17 +168,20 @@ func modelFromProviderConfig(ctx context.Context, cfg providerConfig, modelName 
 		if tok == "" {
 			return nil, errNeedAuth
 		}
-		opts := []anthropic.Option{anthropic.WithOAuthToken()}
-		if model != "" {
-			opts = append(opts, anthropic.WithModel(model))
-		}
-		return anthropic.New(tok, "", opts...), nil
+		return anthropicDirect(tok, true, model)
 	case "ollama":
 		host := cfg.OllamaHost
 		if host == "" {
 			host = "http://localhost:11434"
 		}
-		return ollama.New(host, model), nil
+		if model == "" {
+			model = "llama3.1" // the old adapter's default tool-capable model
+		}
+		d, err := luxsdk.NewDirect(luxsdk.ProviderOllama, "", host)
+		if err != nil {
+			return nil, err
+		}
+		return toposlux.NewFromCaller(d, toposlux.WithModel(model)), nil
 	default:
 		return nil, errNeedAuth
 	}

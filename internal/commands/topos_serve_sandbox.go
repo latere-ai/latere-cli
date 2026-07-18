@@ -92,7 +92,7 @@ func runServeSandbox(ctx context.Context, apiURL, root string, consent sandbox.C
 		return fmt.Errorf("dial toposd sandbox tunnel %s: %w", wsURL, err)
 	}
 	defer c.CloseNow() //nolint:errcheck
-	c.SetReadLimit(-1)  // streams carry full request/response bodies.
+	c.SetReadLimit(-1) // streams carry full request/response bodies.
 
 	nc := websocket.NetConn(ctx, c, websocket.MessageBinary)
 	fmt.Fprintf(os.Stderr, "sandbox tunnel: serving %s to %s\n", root, wsURL) //nolint:errcheck

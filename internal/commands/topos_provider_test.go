@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"latere.ai/x/topos/models/anthropic"
+	toposlux "latere.ai/x/topos/models/lux"
 
 	"github.com/latere-ai/latere-cli/internal/api"
 )
@@ -68,11 +68,11 @@ func TestBuildLocalModelDefaultsToLux(t *testing.T) {
 	if err != nil || m == nil {
 		t.Fatalf("signed in → Lux model, got (%v, %v)", m, err)
 	}
-	if got := m.(*anthropic.Adapter).Model(); got != luxDefaultModel {
+	if got := m.(*toposlux.Adapter).Model(); got != luxDefaultModel {
 		t.Fatalf("model = %q, want Lux default %q (Lux did not win over the ambient token)", got, luxDefaultModel)
 	}
 	// An explicit --model is honored on the Lux path.
-	if m, _ := buildLocalModel(context.Background(), "claude-haiku-4-5-20251001"); m.(*anthropic.Adapter).Model() != "claude-haiku-4-5-20251001" {
+	if m, _ := buildLocalModel(context.Background(), "claude-haiku-4-5-20251001"); m.(*toposlux.Adapter).Model() != "claude-haiku-4-5-20251001" {
 		t.Fatalf("--model override not applied on the Lux path")
 	}
 }

@@ -11,11 +11,11 @@ import (
 
 	"github.com/spf13/cobra"
 
+	xtopos "latere.ai/x/topos"
 	adversarial "latere.ai/x/topos/adversarial"
 	"latere.ai/x/topos/adversarial/claude"
 	"latere.ai/x/topos/adversarial/critic"
 	"latere.ai/x/topos/adversarial/input"
-	xtopos "latere.ai/x/topos"
 
 	"github.com/latere-ai/latere-cli/internal/reviews"
 )
