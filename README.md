@@ -51,7 +51,7 @@ Auto-upgrade and the daily notice are skipped for `go install`/dev builds, in CI
 latere login
 ```
 
-`latere login` starts the OAuth2 device-code flow against `auth.latere.ai`. It prints a URL and user code, waits for browser approval, then saves the token to `~/.config/latere/token.json`. One sign-in unlocks every product below.
+`latere login` starts the OAuth2 device-code flow against `auth.latere.ai`. It prints a URL and user code, waits for browser approval, then writes two files under `~/.config/latere/`: `auth-token.json` (the auth root token every per-product credential is derived from) and `token.json` (the Cella bearer). One sign-in unlocks every product below. See [docs/login-and-tokens.md](docs/login-and-tokens.md) for what each file is and how each product derives its credential.
 
 ```sh
 latere whoami
@@ -75,7 +75,8 @@ Switching uses the auth service's refresh-token grant: no device-code re-prompt,
 | Setting | Purpose |
 |---------|---------|
 | `--auth-url` | Override the auth URL for `latere login`. |
-| `LATERE_TOKEN_FILE` | Token file path, default `~/.config/latere/token.json`. |
+| `LATERE_TOKEN_FILE` | Cella bearer file path, default `~/.config/latere/token.json`. |
+| `LATERE_AUTH_TOKEN_FILE` | Auth root token file path, default `~/.config/latere/auth-token.json`. |
 
 ## Git with Drive
 
