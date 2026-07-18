@@ -346,10 +346,10 @@ func (fe *familyEnv) runWriteTier(t *testing.T) {
 		}
 	})
 
-	// The if-14 in-sandbox->lux edge is the flagship of this release; it is
-	// covered by its own dedicated builder in family_e2e_ifat_test scope
-	// once the sandbox release is deployed. Placeholder marker so coverage
-	// is visibly intentional, not forgotten.
+	// The if-14 in-sandbox->lux edge is the flagship of this release. Its
+	// builder (inSandboxLux) creates a model_access cella and reaches lux from
+	// inside it; it needs a configured model_access policy and the cella lux
+	// wiring (CELLA_LUX_BASE_URL + CELLA_LUX_KEYS_CLIENT_SECRET) live in prod.
 	t.Run("if-14/in-sandbox->lux", func(t *testing.T) {
 		if os.Getenv("LATERE_FAMILY_E2E_SANDBOX") != "1" {
 			t.Skip("set LATERE_FAMILY_E2E_SANDBOX=1 to create a cella and reach lux from inside it (costs a running sandbox)")
@@ -373,11 +373,17 @@ func (fe *familyEnv) inSandboxLux(t *testing.T) {
 	if model == "" {
 		model = "claude-fable-5"
 	}
+	// The image must be a curated-catalog ref; the catalog is version-pinned
+	// to the images release, so this is overridable as the catalog advances.
+	image := os.Getenv("LATERE_FAMILY_E2E_IMAGE")
+	if image == "" {
+		image = "ghcr.io/latere-ai/sandbox-base:v0.0.15"
+	}
 
 	dir := t.TempDir()
 	name := fmt.Sprintf("fam-e2e-if14-%d", time.Now().UnixNano()%1000000)
 	manifest := filepath.Join(dir, "sandbox.yaml")
-	spec := fmt.Sprintf("apiVersion: cella.latere.ai/v1\nkind: Sandbox\nmetadata:\n  name: %s\nspec:\n  tier: ephemeral\n  policy: %s\n  lifecycle:\n    autoStop: 5m\n", name, policy)
+	spec := fmt.Sprintf("apiVersion: cella.latere.ai/v1\nkind: Sandbox\nmetadata:\n  name: %s\nspec:\n  image: %s\n  tier: ephemeral\n  policy: %s\n  lifecycle:\n    autoStop: 5m\n", name, image, policy)
 	if err := os.WriteFile(manifest, []byte(spec), 0o600); err != nil {
 		t.Fatal(err)
 	}
