@@ -369,9 +369,12 @@ func (fe *familyEnv) inSandboxLux(t *testing.T) {
 	if policy == "" {
 		t.Skip("set LATERE_FAMILY_E2E_POLICY to a model_access policy name (needs sandbox if-14 released + a model_access policy configured)")
 	}
-	model, _ := fe.firstModel(t)
+	// The in-sandbox request must name a model the owner's lux access profile
+	// binds (the per-sandbox key routes through that profile). Default to
+	// claude-sonnet-5; override to match the owner's fallback binding.
+	model := os.Getenv("LATERE_FAMILY_E2E_MODEL")
 	if model == "" {
-		model = "claude-fable-5"
+		model = "claude-sonnet-5"
 	}
 	// The image must be a curated-catalog ref; the catalog is version-pinned
 	// to the images release, so this is overridable as the catalog advances.
