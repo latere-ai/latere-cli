@@ -24,7 +24,7 @@ import (
 )
 
 // modelNamer is implemented by model adapters that can report the model id they
-// request (the Anthropic adapter does), so the REPL can show it.
+// request (the luxsdk-backed lux adapter does), so the REPL can show it.
 type modelNamer interface{ Model() string }
 
 // modelString returns the model id a brain requests, or "unknown".

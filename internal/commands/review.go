@@ -178,9 +178,8 @@ func runReview(ctx context.Context, cmd *cobra.Command, o *reviewOpts) error {
 	critics := critic.NewCriticFactory(critic.Config{
 		Model: xtopos.ModelOptions{
 			Kind:         xtopos.ModelLux,
-			Provider:     "anthropic",
 			Model:        o.model,
-			BaseURL:      resolveLuxURL(o.luxURL) + "/anthropic",
+			BaseURL:      resolveLuxURL(o.luxURL),
 			BearerSource: bearerFn,
 		},
 	})

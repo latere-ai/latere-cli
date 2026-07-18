@@ -193,14 +193,16 @@ is cheaper to cover end-to-end than to fake.
 
 ## Lux routing detail
 
-topos's `ModelLux` kind routes the Anthropic-wire request through Lux. The
-command sets `BearerSource` to `luxIdentityBearer`, the same identity-bearer
-path `latere lux env` / `lux serve` use; it returns a passthrough token when one
-is configured, otherwise the refreshed auth.latere.ai identity token, which Lux
-accepts directly. `BaseURL` is `resolveLuxURL(--lux-url) + "/anthropic"`; the
-topos anthropic adapter appends `/v1/messages`, so requests land on Lux's
-`/anthropic/v1/messages` route as `Authorization: Bearer`. The provider key
-stays in Lux, never in the CLI.
+topos's `ModelLux` kind routes the request through Lux in the gateway's native
+dialect (lux spec 33): `latere.ai/x/pkg/luxsdk` posts to Lux's
+`/lux/v1/generate` as `Authorization: Bearer`. The command sets `BearerSource`
+to `luxIdentityBearer`, the same identity-bearer path `latere lux env` /
+`lux serve` use; it returns a passthrough token when one is configured,
+otherwise the refreshed auth.latere.ai identity token, which Lux accepts
+directly. `BaseURL` is the gateway root, `resolveLuxURL(--lux-url)`. The
+provider key stays in Lux, never in the CLI. (Originally shipped over the
+`/anthropic` passthrough with the topos Anthropic-wire adapter; that adapter
+was deleted when topos migrated onto luxsdk.)
 
 For local Lux development (`LUX_STATELESS=1` + personal provider key), set
 `--lux-url http://localhost:<port>` (no `/anthropic` suffix; the command appends
