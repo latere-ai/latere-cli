@@ -25,7 +25,7 @@ returns your root token and the CLI writes two files under
 `~/.config/latere/`.
 
 ```sh
-latere login --org <org-uuid>   # sign in scoped to an organization
+latere login --org-id <org-uuid>   # sign in scoped to an organization
 latere login --personal         # sign in in your personal context
 latere login --no-browser       # print the URL instead of opening a browser
 ```
