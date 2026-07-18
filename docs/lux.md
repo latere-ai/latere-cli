@@ -8,8 +8,10 @@ Run `latere login` first (see the [main README](../README.md#sign-in)).
 
 ```sh
 latere lux models      # models visible to you, with rates (USD per million tokens)
-latere lux providers
 ```
+
+Each model row names its provider, so `models` is the one discovery
+command you need.
 
 ## Point a stock SDK at Lux
 
@@ -59,7 +61,7 @@ latere lux serve --upstream http://localhost:1234 --models llama3.1:8b
 latere lux serve --share org        # share with your whole org (default for org accounts)
 ```
 
-`serve` opens a long-lived outbound tunnel (no inbound port) and forwards requests only to the configured local runtime. It needs the `llm.serve` scope — run `latere login` once to refresh your scopes. Call the model by pointing a stock SDK at the `/local/v1` route: `eval "$(latere lux env --provider local)"`. See the [Lux local-models guide](https://github.com/latere-ai/lux/blob/main/docs/lux/local-models.md).
+`serve` opens a long-lived outbound tunnel (no inbound port) and forwards requests only to the configured local runtime. It needs the `llm.serve` scope — run `latere login` once to refresh your scopes. Call the model by pointing a stock SDK at the `/local/v1` route: `eval "$(latere lux env local)"`. See the [Lux local-models guide](https://github.com/latere-ai/lux/blob/main/docs/lux/local-models.md).
 
 ## Configuration
 
