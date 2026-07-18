@@ -13,6 +13,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/oauth2 v0.36.0
 	golang.org/x/term v0.42.0
+	gopkg.in/yaml.v3 v3.0.1
 	latere.ai/x/pkg v0.31.0
 	latere.ai/x/topos v0.2.0
 )
@@ -50,5 +51,4 @@ require (
 	golang.org/x/net v0.53.0 // indirect
 	golang.org/x/sys v0.43.0 // indirect
 	golang.org/x/text v0.36.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
