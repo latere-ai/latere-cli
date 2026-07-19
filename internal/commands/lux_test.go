@@ -296,7 +296,7 @@ func TestLuxModelsCallsEndpoint(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"llm.read"}})
+	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"openid"}})
 	out, err := captureStdout(func() error {
 		root := NewRoot("test")
 		root.SetErr(&strings.Builder{})
@@ -406,7 +406,7 @@ func TestLuxChatOpenAI(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"llm.invoke"}})
+	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"openid"}})
 	out, err := captureStdout(func() error {
 		root := NewRoot("test")
 		root.SetErr(&strings.Builder{})
@@ -440,7 +440,7 @@ func TestLuxChatAnthropic(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"llm.invoke"}})
+	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"openid"}})
 	out, err := captureStdout(func() error {
 		root := NewRoot("test")
 		root.SetErr(&strings.Builder{})
@@ -468,7 +468,7 @@ func TestLuxChatAnthropic(t *testing.T) {
 // ---- env ----
 
 func TestLuxEnvOpenAI(t *testing.T) {
-	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"llm.invoke"}})
+	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"openid"}})
 	out, err := captureStdout(func() error {
 		root := NewRoot("test")
 		root.SetErr(&strings.Builder{})
@@ -487,7 +487,7 @@ func TestLuxEnvOpenAI(t *testing.T) {
 }
 
 func TestLuxEnvAnthropicUsesAuthToken(t *testing.T) {
-	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"llm.invoke"}})
+	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"openid"}})
 	out, err := captureStdout(func() error {
 		root := NewRoot("test")
 		root.SetErr(&strings.Builder{})
@@ -506,7 +506,7 @@ func TestLuxEnvAnthropicUsesAuthToken(t *testing.T) {
 }
 
 func TestLuxEnvGeminiUnsupported(t *testing.T) {
-	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"llm.invoke"}})
+	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"openid"}})
 	root := NewRoot("test")
 	root.SetOut(&strings.Builder{})
 	root.SetErr(&strings.Builder{})
@@ -530,7 +530,7 @@ func TestLuxAccessSetPatchesBindings(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"llm.invoke"}})
+	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"openid"}})
 	_, err := captureStdout(func() error {
 		root := NewRoot("test")
 		root.SetErr(&strings.Builder{})
@@ -601,7 +601,7 @@ func TestLuxUsageOverview(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"llm.read"}})
+	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"openid"}})
 	out, err := captureStdout(func() error {
 		root := NewRoot("test")
 		root.SetErr(&strings.Builder{})
@@ -657,7 +657,7 @@ func TestLuxUsageQuarterUsesWeekInterval(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"llm.read"}})
+	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"openid"}})
 	_, err := captureStdout(func() error {
 		root := NewRoot("test")
 		root.SetErr(&strings.Builder{})
@@ -694,7 +694,7 @@ func TestFmtHelpers(t *testing.T) {
 }
 
 func TestLuxEnvPositionalRoute(t *testing.T) {
-	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"llm.invoke"}})
+	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"openid"}})
 	cases := []struct {
 		route    string
 		wantBase string
@@ -723,7 +723,7 @@ func TestLuxEnvPositionalRoute(t *testing.T) {
 }
 
 func TestLuxEnvProvenanceOnStderrOnly(t *testing.T) {
-	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"llm.invoke"}})
+	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"openid"}})
 	var errBuf strings.Builder
 	out, err := captureStdout(func() error {
 		root := NewRoot("test")
@@ -743,7 +743,7 @@ func TestLuxEnvProvenanceOnStderrOnly(t *testing.T) {
 }
 
 func TestLuxEnvRaw(t *testing.T) {
-	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"llm.invoke"}})
+	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"openid"}})
 	out, err := captureStdout(func() error {
 		root := NewRoot("test")
 		root.SetErr(&strings.Builder{})
@@ -772,7 +772,7 @@ func TestLuxEnvTTLMintsActorToken(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"actor_token": "short-lived"})
 	}))
 	defer authSrv.Close()
-	writeAuthTokenFile(t, fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"llm.invoke"}}), "r", time.Now().Add(time.Hour))
+	writeAuthTokenFile(t, fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"openid"}}), "r", time.Now().Add(time.Hour))
 
 	var errBuf strings.Builder
 	out, err := captureStdout(func() error {
@@ -801,7 +801,7 @@ func TestLuxEnvIdentityExpiryNote(t *testing.T) {
 	// attempting a refresh; derived from now so the fixture cannot rot
 	// into the past and turn the test into a refresh-failure test.
 	exp := time.Now().Add(48 * time.Hour).UTC().Truncate(time.Minute)
-	writeAuthTokenFile(t, fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"llm.invoke"}}), "r", exp)
+	writeAuthTokenFile(t, fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"openid"}}), "r", exp)
 
 	var errBuf strings.Builder
 	_, err := captureStdout(func() error {
@@ -877,7 +877,7 @@ func TestLuxInvokeInfersProviderFromCatalog(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"llm.read", "llm.invoke"}})
+	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"openid"}})
 	out, err := captureStdout(func() error {
 		root := NewRoot("test")
 		root.SetErr(&strings.Builder{})
@@ -903,7 +903,7 @@ func TestLuxInvokeUnknownModelPointsAtCatalog(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"llm.read", "llm.invoke"}})
+	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"openid"}})
 	root := NewRoot("test")
 	root.SetOut(&strings.Builder{})
 	root.SetErr(&strings.Builder{})
@@ -924,7 +924,7 @@ func TestLuxInvokeExplicitProviderSkipsInference(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"llm.invoke"}})
+	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"openid"}})
 	_, err := captureStdout(func() error {
 		root := NewRoot("test")
 		root.SetErr(&strings.Builder{})

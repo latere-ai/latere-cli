@@ -6,7 +6,7 @@ The proposer runs locally through your own `claude` CLI for full fidelity (it fo
 
 ## Prerequisites
 
-- `latere login` (grants the `llm.invoke` scope the critics need).
+- `latere login` (the critics call models with your identity; no scope to grant).
 - The [`claude`](https://docs.claude.com/en/docs/claude-code) CLI installed and authenticated (the proposer forks your real Claude Code session).
 - A git repository with a recent Claude Code session in it.
 
