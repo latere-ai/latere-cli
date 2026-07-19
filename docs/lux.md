@@ -15,7 +15,7 @@ command you need.
 
 ## Point a stock SDK at Lux
 
-No key to paste — export your identity and use the SDK normally:
+No key to paste: export your identity and use the SDK normally:
 
 ```sh
 eval "$(latere lux env)"             # OpenAI SDK -> the openai route
@@ -23,7 +23,7 @@ eval "$(latere lux env anthropic)"   # Anthropic SDK -> the anthropic route
 # a normal SDK call is now routed through Lux, billed to your identity
 ```
 
-The route argument is `openai` (default), `openrouter`, `anthropic`, or `local` (your `lux serve` tunnels); the OpenAI-dialect routes all emit `OPENAI_BASE_URL`/`OPENAI_API_KEY` with different base URLs. The command reports on stderr which credential it embedded and when it expires — by default your login identity token, which lasts the sign-in session. Two variants:
+The route argument is `openai` (default), `openrouter`, `anthropic`, or `local` (your `lux serve` tunnels); the OpenAI-dialect routes all emit `OPENAI_BASE_URL`/`OPENAI_API_KEY` with different base URLs. The command reports on stderr which credential it embedded and when it expires: by default your login identity token, which lasts the sign-in session. Two variants:
 
 ```sh
 eval "$(latere lux env --ttl 1h)"    # CI: a short-lived actor token instead
@@ -32,7 +32,7 @@ TOKEN=$(latere lux env --raw)        # bare token for curl/scripts
 
 ## Verify access with a raw call
 
-`invoke` sends one raw prompt through the gateway — no tools, no session. Use it to check that a model responds through your identity after binding a provider key; for actual assistant work, use `latere topos -p "<prompt>"`.
+`invoke` sends one raw prompt through the gateway: no tools, no session. Use it to check that a model responds through your identity after binding a provider key; for actual assistant work, use `latere topos -p "<prompt>"`.
 
 ```sh
 latere lux invoke --model openai/gpt-4o-mini "Say hi"
@@ -48,7 +48,7 @@ latere lux usage --by provider    # break down by provider instead of model
 latere lux access show
 ```
 
-A model resolves through a provider key you or your org own — bind it with `latere lux access set --model <m> --provider <p> --provider-key <id>` — or through a **platform grant** a Latere admin configured for you (optionally capped per month). Granted models just show up in `latere lux models`; no binding needed. Past a grant's cap, calls return HTTP 402 until the month rolls over.
+A model resolves through a provider key you or your org own (bind it with `latere lux access set --model <m> --provider <p> --provider-key <id>`), or through a **platform grant** a Latere admin configured for you (optionally capped per month). Granted models just show up in `latere lux models`; no binding needed. Past a grant's cap, calls return HTTP 402 until the month rolls over.
 
 ## Serve a local model
 

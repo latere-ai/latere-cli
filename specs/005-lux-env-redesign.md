@@ -30,8 +30,8 @@ token* gets embedded. This spec unbundles them.
    actually chooses a route-and-dialect pair, and the dialect is
    derivable from the route.
 2. **Token story is invisible.** The exported credential is whatever
-   `luxIdentityBearer` resolves — an explicit `--token`, the sandbox
-   passthrough file, or the refreshed identity token — and the command
+   `luxIdentityBearer` resolves (a passthrough token from `--token` or
+   `$LATERE_LUX_TOKEN`, or the refreshed identity token), and the command
    never says which one it embedded or when it dies. An identity token
    expires with the login session; users discover this as a mystery 401
    in their SDK, far from the `eval` that planted it.
@@ -50,7 +50,7 @@ One verb, route as the positional argument, dialect inferred:
   actionable error.
 - **Says what it embedded** on stderr (stdout stays eval-clean):
   `# identity token, expires 2026-07-12T22:10Z — re-run after expiry`
-  or `# sandbox service token (passthrough)`.
+  or `# passthrough token (--token or $LATERE_LUX_TOKEN)`.
 - `--ttl <duration>` mints a short-lived `aud=lux.latere.ai` actor token
   instead of the identity token (CI: bound blast radius, no refresh
   file). Reuses `mintActorToken`.
