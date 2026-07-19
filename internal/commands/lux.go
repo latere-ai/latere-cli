@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -101,8 +102,14 @@ const localProviderName = "local"
 // dropped. Every other route is passed through untouched: openrouter ids
 // are legitimately slash-qualified.
 func localWireModel(provider, model string) string {
-	if provider == localProviderName {
-		return strings.TrimPrefix(model, localProviderName+"/")
+	// The gateway addresses models as `<provider>/<model>` on its compat and
+	// lux-native surfaces, so users reasonably type that here too. Strip the
+	// prefix when it names the provider we resolved: the passthrough route
+	// already encodes the provider in the path and wants the bare upstream
+	// id. Non-matching prefixes are left alone, so OpenRouter ids that
+	// genuinely contain a slash (anthropic/claude-...) survive.
+	if provider != "" && strings.HasPrefix(model, provider+"/") {
+		return strings.TrimPrefix(model, provider+"/")
 	}
 	return model
 }
@@ -110,7 +117,101 @@ func localWireModel(provider, model string) string {
 func lookupProvider(name string) (providerSpec, error) {
 	p, ok := providerSpecs()[name]
 	if !ok {
-		return providerSpec{}, fmt.Errorf("unknown provider %q; one of: openai, openrouter, anthropic, gemini", name)
+		return providerSpec{}, fmt.Errorf("unknown provider %q; one of: %s",
+			name, strings.Join(knownProviderNames(providerSpecs()), ", "))
+	}
+	return p, nil
+}
+
+func knownProviderNames(specs map[string]providerSpec) []string {
+	out := make([]string, 0, len(specs))
+	for k := range specs {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// deriveProviderSpec builds a spec from what Lux publishes about a provider:
+// its route prefix and the wire dialect that route speaks. Everything the CLI
+// needs (chat path, request shape, SDK env vars) follows from those two, so a
+// provider Lux adds is usable here with no CLI release.
+func deriveProviderSpec(id, dialect, prefix string) providerSpec {
+	if prefix == "" {
+		prefix = "/" + id
+	}
+	switch dialect {
+	case "anthropic-messages":
+		// The Anthropic SDK appends /v1/messages, so its base is the bare
+		// prefix. ANTHROPIC_AUTH_TOKEN -> bearer (ANTHROPIC_API_KEY would
+		// send x-api-key, which Lux ignores).
+		return providerSpec{
+			name: id, chatPath: prefix + "/v1/messages", anthropicStyle: true,
+			envBaseVar: "ANTHROPIC_BASE_URL", envKeyVar: "ANTHROPIC_AUTH_TOKEN", envBaseURL: prefix,
+		}
+	case "gemini":
+		// Gemini speaks generateContent and its SDK has no bearer path, so
+		// neither direct chat nor env enablement is offered.
+		return providerSpec{name: id}
+	default: // openai-chat, the majority shape
+		return providerSpec{
+			name: id, chatPath: prefix + "/v1/chat/completions",
+			envBaseVar: "OPENAI_BASE_URL", envKeyVar: "OPENAI_API_KEY", envBaseURL: prefix + "/v1",
+		}
+	}
+}
+
+// resolveProviderSpecs asks Lux which providers it serves and derives a spec
+// for each. The built-in table is the fallback when the catalog is
+// unreachable (offline, or an older server that predates the dialect field),
+// and it also supplies `local`, which is a CLI-side pseudo-provider that no
+// server lists.
+func resolveProviderSpecs(ctx context.Context, luxURL, authURL, token string) map[string]providerSpec {
+	specs := providerSpecs()
+	c, _, err := luxClient(ctx, luxURL, authURL, token)
+	if err != nil {
+		return specs
+	}
+	var resp luxCatalogResponse
+	if err := c.GetJSON(ctx, "/lux/v1/providers", &resp); err != nil {
+		return specs
+	}
+	for _, it := range resp.Items {
+		id, _ := it["id"].(string)
+		if id == "" {
+			continue
+		}
+		dialect, _ := it["dialect"].(string)
+		prefix, _ := it["default_route_prefix"].(string)
+		if dialect == "" {
+			// Older server: keep whatever the built-in table says rather
+			// than guessing a dialect for it.
+			if _, ok := specs[id]; ok {
+				continue
+			}
+			dialect = "openai-chat"
+		}
+		specs[id] = deriveProviderSpec(id, dialect, prefix)
+	}
+	return specs
+}
+
+// lookupProviderFor resolves a provider against the server's live list,
+// falling back to the built-in table. This is what keeps `lux chat` working
+// for a provider added to Lux after this binary shipped.
+func lookupProviderFor(ctx context.Context, luxURL, authURL, token, name string) (providerSpec, error) {
+	// Fast path: a provider this binary already knows needs no round trip,
+	// so the common case adds no latency and still works offline. Only an
+	// unrecognised provider — one Lux gained after this binary shipped —
+	// costs a catalog fetch.
+	if p, ok := providerSpecs()[name]; ok {
+		return p, nil
+	}
+	specs := resolveProviderSpecs(ctx, luxURL, authURL, token)
+	p, ok := specs[name]
+	if !ok {
+		return providerSpec{}, fmt.Errorf("unknown provider %q; one of: %s",
+			name, strings.Join(knownProviderNames(specs), ", "))
 	}
 	return p, nil
 }
@@ -471,9 +572,23 @@ func newLuxEnvCmd(luxURL, authURL, token *string) *cobra.Command {
 	var ttl time.Duration
 	var raw bool
 	cmd := &cobra.Command{
-		Use:       "env [route]",
-		ValidArgs: []string{"openai", "openrouter", "anthropic", "local"},
-		Short:     "Print shell exports that point a stock SDK at a Lux route (keyless).",
+		Use: "env [route]",
+		// Completion is served from the live provider list, not a literal,
+		// so a provider Lux adds is suggested without a CLI release.
+		ValidArgsFunction: func(cmd *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
+			if len(args) > 0 {
+				return nil, cobra.ShellCompDirectiveNoFileComp
+			}
+			specs := resolveProviderSpecs(cmd.Context(), *luxURL, *authURL, *token)
+			out := make([]string, 0, len(specs))
+			for _, name := range knownProviderNames(specs) {
+				if specs[name].envBaseVar != "" {
+					out = append(out, name)
+				}
+			}
+			return out, cobra.ShellCompDirectiveNoFileComp
+		},
+		Short: "Print shell exports that point a stock SDK at a Lux route (keyless).",
 		Long: `Print 'export' lines that point a stock SDK at a Lux route using your
 identity as the credential — no key allocation.
 
@@ -505,7 +620,7 @@ instead, bounding the blast radius of a leaked export.`,
 			if len(args) == 1 {
 				route = args[0]
 			}
-			spec, err := lookupProvider(route)
+			spec, err := lookupProviderFor(cmd.Context(), *luxURL, *authURL, *token, route)
 			if err != nil {
 				return err
 			}
@@ -602,7 +717,7 @@ model listed as local/<model> can be called either way.`,
 					provider = p
 				}
 			}
-			spec, err := lookupProvider(provider)
+			spec, err := lookupProviderFor(cmd.Context(), *luxURL, *authURL, *token, provider)
 			if err != nil {
 				return err
 			}
@@ -649,7 +764,8 @@ model listed as local/<model> can be called either way.`,
 		},
 	}
 	cmd.Flags().StringVar(&model, "model", "", "model id to call (required)")
-	cmd.Flags().StringVar(&provider, "provider", "openai", "provider route: openai|openrouter|anthropic")
+	cmd.Flags().StringVar(&provider, "provider", "openai",
+		"provider route; defaults to the provider that owns the model in your catalog (see `latere lux providers`)")
 	cmd.Flags().IntVar(&maxTokens, "max-tokens", 1024, "max output tokens (Anthropic requires this)")
 	cmd.Flags().BoolVar(&jsonF, "json", false, "print the raw provider JSON response")
 	return cmd
