@@ -362,11 +362,11 @@ func TestLuxInvokeChatAlias(t *testing.T) {
 	}
 }
 
-// TestLuxModelsAllowsNonLLMToken proves the CLI no longer preflights
-// llm.* scopes: a pure-OIDC login (no llm scopes) reaches Lux, which is
-// now the sole authority on access. Previously this token was blocked
-// client-side before any request left the machine.
-func TestLuxModelsAllowsNonLLMToken(t *testing.T) {
+// TestLuxModelsAllowsPlainOIDCToken proves the CLI does not preflight
+// scopes: a plain OIDC login reaches Lux, which is the sole authority on
+// access. The request must leave the machine rather than being refused
+// client-side on a claim the CLI cannot authoritatively judge.
+func TestLuxModelsAllowsPlainOIDCToken(t *testing.T) {
 	var hit bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hit = true
