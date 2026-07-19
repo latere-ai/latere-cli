@@ -24,7 +24,7 @@ func TestDriveCommandRegisteredInRoot(t *testing.T) {
 }
 
 func TestDriveVerbSet(t *testing.T) {
-	// The command space is deliberately small (specs/drive-subcommand.md);
+	// The command space is deliberately small (specs/003-drive-subcommand.md);
 	// growing it should be a conscious spec change, not a drive-by.
 	want := map[string]bool{
 		"ls": false, "get": false, "put": false, "mv": false, "rm": false,

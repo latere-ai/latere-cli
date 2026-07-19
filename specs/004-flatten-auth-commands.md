@@ -145,7 +145,7 @@ deprecation notice (scripts' stderr stays clean).
 
 **Follow-ups.** Landscape classes 2–5 (sandbox smoke script, cella
 remediation string, product frontends, cross-repo docs) land per-repo after
-a release ships, per the Landscape Impact section. specs/drive-subcommand.md
+a release ships, per the Landscape Impact section. specs/003-drive-subcommand.md
 is now unblocked.
 
 ## Non-goals

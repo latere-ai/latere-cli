@@ -16,7 +16,7 @@ import (
 	"github.com/latere-ai/latere-cli/internal/drive"
 )
 
-// newDriveCmd groups the Drive file-plane verbs (specs/drive-subcommand.md):
+// newDriveCmd groups the Drive file-plane verbs (specs/003-drive-subcommand.md):
 // eight orthogonal commands over https://drive.latere.ai/api/v1. Paths are
 // namespace-rooted exactly as in the API (files/…, memory/…, repos/…,
 // workspaces/…); variations are flags, not subcommand groups.

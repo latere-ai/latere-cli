@@ -13,7 +13,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// The session verbs live at the top level (specs/flatten-auth-commands.md);
+// The session verbs live at the top level (specs/004-flatten-auth-commands.md);
 // `auth` survives only as a hidden back-compat alias.
 
 func TestTopLevelSessionVerbsRegisteredInRoot(t *testing.T) {
