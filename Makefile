@@ -33,6 +33,15 @@ vuln: ## Scan for known vulnerabilities
 fmt: ## Format all Go sources in place
 	gofmt -w .
 
+.PHONY: fmt-check
+fmt-check: ## Fail if any Go source is not gofmt-formatted
+	@out=$$(gofmt -l .); if [ -n "$$out" ]; then echo "gofmt: unformatted files:"; echo "$$out"; exit 1; fi
+
+.PHONY: hooks
+hooks: ## Install repository git hooks (pre-commit gofmt guard)
+	git config core.hooksPath .githooks
+	@echo "installed git hooks (core.hooksPath=.githooks)"
+
 .PHONY: lint
 lint: ## Stricter lint via golangci-lint (has pre-existing findings; not in `make build`)
 	golangci-lint run ./...

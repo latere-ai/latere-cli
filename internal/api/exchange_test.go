@@ -31,4 +31,3 @@ func TestInferAuthURL(t *testing.T) {
 		t.Errorf("InferAuthURL(%q) still resolves to the same (wrong) host %q", nonCella, old)
 	}
 }
-

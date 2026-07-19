@@ -44,15 +44,15 @@ import (
 )
 
 type familyEnv struct {
-	bin       string // path to a freshly built latere binary
-	token     string // cella-issued bearer (token.json), valid at cella
-	cellaURL  string
-	authURL   string
-	luxURL    string
-	driveURL  string
-	toposURL  string
-	sub       string // owner subject, read from whoami
-	httpc     *http.Client
+	bin      string // path to a freshly built latere binary
+	token    string // cella-issued bearer (token.json), valid at cella
+	cellaURL string
+	authURL  string
+	luxURL   string
+	driveURL string
+	toposURL string
+	sub      string // owner subject, read from whoami
+	httpc    *http.Client
 }
 
 func requireFamilyE2E(t *testing.T) {
