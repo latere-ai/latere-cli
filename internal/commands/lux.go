@@ -110,9 +110,8 @@ Lux is the Latere model gateway. Instead of allocating an API key, the
 CLI presents your identity (your user login) and Lux tracks cost on that
 identity.
 
-Run 'latere login' first (it now requests the llm.read / llm.invoke
-scopes Lux needs). The base URL defaults to https://lux.latere.ai and
-can be overridden by LUX_API_URL or --lux-url.
+Run 'latere login' first to sign in. The base URL defaults to
+https://lux.latere.ai and can be overridden by LUX_API_URL or --lux-url.
 
 A model resolves through a provider key you or your org own (see
 'latere lux access'), or through a platform grant a Latere admin
@@ -158,8 +157,8 @@ callable through lux.latere.ai from anywhere, with your identity and the
 same gates and request log as any other Lux model (lux spec 18).
 
 This runs a long-lived outbound connection (no inbound port is opened) and
-forwards inbound requests only to the configured local runtime. Requires
-the llm.serve scope (run 'latere login' to refresh your scopes).
+forwards inbound requests only to the configured local runtime. Run
+'latere login' first to sign in.
 
 Discoverable as local/<model> in 'latere lux models'. Call it by pointing
 an OpenAI-compatible SDK at <lux>/local/v1.`,
@@ -278,15 +277,11 @@ func newLuxModelsCmd(luxURL, authURL, token *string) *cobra.Command {
 		Long: `List models visible to your identity, including the rate card
 (USD per million input/output/cached-input tokens) where one applies.
 
-Reads /lux/v1/models and /lux/v1/rates with your identity. Requires the
-llm.read scope.`,
+Reads /lux/v1/models and /lux/v1/rates with your identity.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, bearer, err := luxClient(cmd.Context(), *luxURL, *authURL, *token)
+			c, _, err := luxClient(cmd.Context(), *luxURL, *authURL, *token)
 			if err != nil {
-				return err
-			}
-			if err := ensureLuxScope(bearer, []string{"llm.read", "llm.invoke"}, "list models"); err != nil {
 				return err
 			}
 			var models luxCatalogResponse
@@ -382,14 +377,11 @@ func newLuxCatalogCmd(name, path, what string, luxURL, authURL, token *string) *
 	cmd := &cobra.Command{
 		Use:   name,
 		Short: "List " + what + ".",
-		Long:  fmt.Sprintf("List %s.\n\nReads %s with your identity. Requires the llm.read scope.", what, path),
+		Long:  fmt.Sprintf("List %s.\n\nReads %s with your identity.", what, path),
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, bearer, err := luxClient(cmd.Context(), *luxURL, *authURL, *token)
+			c, _, err := luxClient(cmd.Context(), *luxURL, *authURL, *token)
 			if err != nil {
-				return err
-			}
-			if err := ensureLuxScope(bearer, []string{"llm.read", "llm.invoke"}, "list "+name); err != nil {
 				return err
 			}
 			var resp luxCatalogResponse
@@ -719,8 +711,7 @@ func newLuxUsageCmd(luxURL, authURL, token *string) *cobra.Command {
 total, a per-model (or per-provider) breakdown, and a cost-over-time
 bar chart.
 
-Reads /lux/v1/usage and /lux/v1/usage/series. Requires the llm.read
-scope.`,
+Reads /lux/v1/usage and /lux/v1/usage/series.`,
 		Example: `  latere lux usage
   latere lux usage --period week
   latere lux usage --period year --by provider
@@ -734,11 +725,8 @@ scope.`,
 			if groupBy != "model" && groupBy != "provider" {
 				return fmt.Errorf("unknown --by %q; one of: model, provider", groupBy)
 			}
-			c, bearer, err := luxClient(cmd.Context(), *luxURL, *authURL, *token)
+			c, _, err := luxClient(cmd.Context(), *luxURL, *authURL, *token)
 			if err != nil {
-				return err
-			}
-			if err := ensureLuxScope(bearer, []string{"llm.read", "llm.invoke"}, "read usage"); err != nil {
 				return err
 			}
 
@@ -886,11 +874,8 @@ func newLuxAccessShowCmd(luxURL, authURL, token *string) *cobra.Command {
 		Long:  "Print your access profile: bindings, allowlist, spend cap, rate limits (GET /lux/v1/me/profile).",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, bearer, err := luxClient(cmd.Context(), *luxURL, *authURL, *token)
+			c, _, err := luxClient(cmd.Context(), *luxURL, *authURL, *token)
 			if err != nil {
-				return err
-			}
-			if err := ensureLuxScope(bearer, []string{"llm.read", "llm.invoke"}, "read your access profile"); err != nil {
 				return err
 			}
 			var out json.RawMessage
@@ -914,19 +899,16 @@ func newLuxAccessSetCmd(luxURL, authURL, token *string) *cobra.Command {
 		Long: `Bind a client-facing model to a provider key so paid calls resolve.
 
 PATCHes /lux/v1/me/profile with a single-target 'fallback' binding.
-Requires the llm.invoke scope. The provider key must be one you can use
-(your own registered key, or a platform key).`,
+The provider key must be one you can use (your own registered key, or a
+platform key).`,
 		Example: `  latere lux access set --model gpt-5 --provider openai --provider-key <provider-key-id>`,
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if model == "" || provider == "" || providerKey == "" {
 				return errors.New("--model, --provider, and --provider-key are required")
 			}
-			c, bearer, err := luxClient(cmd.Context(), *luxURL, *authURL, *token)
+			c, _, err := luxClient(cmd.Context(), *luxURL, *authURL, *token)
 			if err != nil {
-				return err
-			}
-			if err := ensureLuxScope(bearer, []string{"llm.invoke"}, "set your access profile"); err != nil {
 				return err
 			}
 			bindings := map[string]any{
@@ -995,7 +977,7 @@ func authIdentityToken(ctx context.Context, luxURL, authURLFlag string) (access,
 	authTok, err := api.LoadAuthToken()
 	if err != nil {
 		if errors.Is(err, api.ErrNoToken) {
-			return "", "", errors.New("not signed in for Lux; run `latere login` (it grants the llm.* scopes Lux needs)")
+			return "", "", errors.New("not signed in for Lux; run `latere login`")
 		}
 		return "", "", err
 	}
@@ -1093,8 +1075,8 @@ func inferInvokeProvider(ctx context.Context, luxURL, authURL, token, model stri
 }
 
 // luxClient builds an authenticated API client pointed at Lux, using the
-// resolved identity bearer (not the stored Cella token). Returns the
-// bearer too so callers can preflight scopes.
+// resolved identity bearer (not the stored Cella token). The bearer is
+// also returned for callers that need to present it directly.
 func luxClient(ctx context.Context, luxURL, authURL, tokenFlag string) (*api.Client, string, error) {
 	bearer, err := luxBearer(ctx, tokenFlag, luxURL, authURL)
 	if err != nil {
@@ -1137,33 +1119,7 @@ func luxPostJSON(ctx context.Context, url, bearer string, headers map[string]str
 	return respBody, nil
 }
 
-// ---- scope preflight + friendly errors ----
-
-// ensureLuxScope returns a friendly, specific error when the bearer is
-// missing every scope in anyOf (llm.admin always satisfies). When the
-// token can't be introspected (not a JWT, e.g. an opaque pasted token),
-// the check is skipped and Lux remains the authority.
-func ensureLuxScope(bearer string, anyOf []string, action string) error {
-	claims := decodeJWTClaims(bearer)
-	if claims == nil {
-		return nil // can't introspect; defer to the server
-	}
-	scopes := scopesClaim(claims)
-	want := append([]string{"llm.admin"}, anyOf...)
-	for _, s := range scopes {
-		for _, w := range want {
-			if s == w {
-				return nil
-			}
-		}
-	}
-	missing := strings.Join(anyOf, " or ")
-	return fmt.Errorf(
-		"your Lux token is missing the %s scope needed to %s.\n"+
-			"Re-run `latere login` and approve LLM access when prompted. If your organization hasn't\n"+
-			"enabled LLM access for the CLI yet, ask an admin to grant llm.read / llm.invoke to the \"latere-cli\" client.",
-		missing, action)
-}
+// ---- friendly errors ----
 
 // wrapLuxErr turns Lux's forbidden / not-bound envelopes into actionable
 // guidance, leaving other errors untouched.
@@ -1173,10 +1129,10 @@ func wrapLuxErr(err error) error {
 		return err
 	}
 	switch {
-	case apiErr.Code == "auth.forbidden" || (apiErr.Status == http.StatusForbidden && strings.Contains(apiErr.Message, "missing llm")):
+	case apiErr.Code == "auth.forbidden":
 		return fmt.Errorf(
-			"Lux rejected the token for missing an llm.* scope (%s).\n"+
-				"Re-run `latere login` and approve LLM access, or ask an admin to grant llm.read / llm.invoke to the \"latere-cli\" client.",
+			"Lux denied access (%s).\n"+
+				"Your login may not have access here. Run `latere login` to refresh your session, or ask a Latere admin for access.",
 			apiErr.Message)
 	case strings.Contains(apiErr.Code, "provider_not_bound"):
 		return fmt.Errorf(

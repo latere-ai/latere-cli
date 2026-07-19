@@ -59,9 +59,8 @@ topos with model calls routed via Lux (lux.latere.ai), authenticated by
 your retained Latere identity bearer, so critic cost is tracked on your
 Latere account with no provider key needed locally.
 
-Run 'latere login' first (it grants the llm.invoke scope the
-critics need). The proposer additionally needs the 'claude' CLI
-installed and authenticated.
+Run 'latere login' first to sign in. The proposer additionally needs
+the 'claude' CLI installed and authenticated.
 
 By default it reviews the most recent session under the working
 directory; pass --session <id> to pick a specific one.
@@ -110,18 +109,14 @@ func runReview(ctx context.Context, cmd *cobra.Command, o *reviewOpts) error {
 	}
 
 	// Resolve the identity bearer up front: validates that the user is
-	// signed in for Lux and lets us preflight the llm.invoke scope before
-	// spending a proposer round. The same closure is handed to topos so it
-	// re-fetches (and refreshes) the bearer on each model call, since a
-	// debate can outlive a single short-lived token.
+	// signed in for Lux before spending a proposer round. The same closure
+	// is handed to topos so it re-fetches (and refreshes) the bearer on each
+	// model call, since a debate can outlive a single short-lived token.
 	bearerFn := func(ctx context.Context) (string, error) {
 		return luxIdentityBearer(ctx, o.token, o.luxURL, o.authURL)
 	}
 	bearer, err := bearerFn(ctx)
 	if err != nil {
-		return err
-	}
-	if err := ensureLuxScope(bearer, []string{"llm.invoke"}, "run review critics"); err != nil {
 		return err
 	}
 	if err := ensureBearerFresh(bearer); err != nil {
@@ -225,11 +220,11 @@ func gitToplevel(ctx context.Context, cwd string) string {
 }
 
 // ensureBearerFresh fails fast with an actionable message when the Lux
-// identity bearer is an expired JWT. ensureLuxScope decodes claims but does
-// not check expiry, and the auth identity token can be short-lived with no
-// refresh token; without this an expired token passes preflight and surfaces
-// later as a raw 401 from deep inside the topos critic. Opaque (non-JWT)
-// tokens and tokens without an exp claim are skipped: Lux stays the authority.
+// identity bearer is an expired JWT. The auth identity token can be
+// short-lived with no refresh token; without this check an expired token
+// surfaces later as a raw 401 from deep inside the topos critic. Opaque
+// (non-JWT) tokens and tokens without an exp claim are skipped: Lux stays
+// the authority.
 func ensureBearerFresh(bearer string) error {
 	claims := decodeJWTClaims(bearer)
 	if claims == nil {

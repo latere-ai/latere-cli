@@ -71,7 +71,7 @@ func TestProdE2EServeAndCall(t *testing.T) {
 	// confirming the tunnel registered through the live server.
 	if !waitForCatalog(t, hc, luxURL, token, model, 30*time.Second) {
 		t.Fatalf("model %q never appeared as local/ in %s/lux/v1/models within 30s "+
-			"(is the tunnel feature enabled on the target and does the token carry llm.serve?)", model, luxURL)
+			"(is the tunnel feature enabled on the target and is the token permitted to serve?)", model, luxURL)
 	}
 
 	// Call it through Lux and assert a real completion comes back.

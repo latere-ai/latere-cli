@@ -84,8 +84,8 @@ func Run(ctx context.Context, opts Options) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		// A non-retryable error (not signed in, missing llm.serve, feature
-		// disabled) returns immediately so the user sees one clear message
+		// A non-retryable error (not signed in, not permitted to serve,
+		// feature disabled) returns immediately so the user sees one clear message
 		// instead of an endless reconnect loop.
 		if isFatal(err) {
 			return err
@@ -132,7 +132,7 @@ func runSession(ctx context.Context, opts Options) error {
 			case http.StatusNotFound:
 				return fatal(fmt.Errorf("the local-model tunnel is not enabled on %s yet. Ask your operator to turn it on (LUX_TUNNEL_ENABLED).", opts.LuxURL))
 			case http.StatusUnauthorized, http.StatusForbidden:
-				return fatal(fmt.Errorf("your login may not serve models here (it needs the llm.serve scope). Run `latere login` to refresh your scopes, then try again."))
+				return fatal(fmt.Errorf("your login may not serve models here. Run `latere login` to refresh your session, then try again."))
 			}
 		}
 		return fmt.Errorf("dial %s: %w", wsURL, err)

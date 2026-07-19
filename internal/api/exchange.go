@@ -19,7 +19,7 @@ import (
 // device-code login and on every refresh. One definition keeps the two
 // paths identical: a refresh that silently narrowed scopes would strand
 // sandbox commands until the next full login.
-const LoginScopes = "openid email profile offline_access read:sandbox write:sandbox exec:sandbox attach:sandbox llm.read llm.invoke llm.serve run:agents read:agents write:agents"
+const LoginScopes = "openid email profile offline_access read:sandbox write:sandbox exec:sandbox attach:sandbox run:agents read:agents write:agents"
 
 // ErrActorAudienceMismatch signals the legacy auth behaviour where a
 // device token stamped with sandboxd's audience is rejected on

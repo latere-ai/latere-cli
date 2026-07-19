@@ -78,7 +78,7 @@ func TestLuxHelpText(t *testing.T) {
 		{[]string{"lux", "--help"}, []string{"lux.latere.ai", "allocating an API key", "LUX_API_URL", "latere login"}},
 		{[]string{"lux", "env", "--help"}, []string{"stock SDK at a Lux route", "ANTHROPIC_AUTH_TOKEN", "--ttl"}},
 		{[]string{"lux", "invoke", "--help"}, []string{"diagnostic, not an assistant", "latere topos -p", "--model"}},
-		{[]string{"lux", "access", "set", "--help"}, []string{"provider key", "llm.invoke"}},
+		{[]string{"lux", "access", "set", "--help"}, []string{"provider key", "fallback"}},
 	}
 	for _, tc := range cases {
 		got, err := executeForHelp(NewRoot("test"), tc.args...)
@@ -270,28 +270,6 @@ func TestLuxIdentityBearerRefreshesWhenExpired(t *testing.T) {
 	}
 }
 
-// ---- scope preflight ----
-
-func TestEnsureLuxScope(t *testing.T) {
-	read := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"llm.read"}})
-	if err := ensureLuxScope(read, []string{"llm.read", "llm.invoke"}, "list models"); err != nil {
-		t.Errorf("llm.read token should pass: %v", err)
-	}
-	admin := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"llm.admin"}})
-	if err := ensureLuxScope(admin, []string{"llm.invoke"}, "set profile"); err != nil {
-		t.Errorf("llm.admin should satisfy any scope: %v", err)
-	}
-	none := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"read:other"}})
-	err := ensureLuxScope(none, []string{"llm.read", "llm.invoke"}, "list models")
-	if err == nil || !strings.Contains(err.Error(), "latere login") {
-		t.Errorf("missing scope should give re-login hint, got %v", err)
-	}
-	// Opaque (non-JWT) token: skip preflight, defer to server.
-	if err := ensureLuxScope("opaque-token", []string{"llm.read"}, "list models"); err != nil {
-		t.Errorf("opaque token should skip preflight: %v", err)
-	}
-}
-
 // ---- discovery ----
 
 func TestLuxModelsCallsEndpoint(t *testing.T) {
@@ -384,20 +362,27 @@ func TestLuxInvokeChatAlias(t *testing.T) {
 	}
 }
 
-func TestLuxModelsScopePreflightBlocks(t *testing.T) {
-	// Server should never be hit; preflight fails first.
+// TestLuxModelsAllowsNonLLMToken proves the CLI no longer preflights
+// llm.* scopes: a pure-OIDC login (no llm scopes) reaches Lux, which is
+// now the sole authority on access. Previously this token was blocked
+// client-side before any request left the machine.
+func TestLuxModelsAllowsNonLLMToken(t *testing.T) {
+	var hit bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Error("server should not be called when preflight fails")
+		hit = true
+		_ = json.NewEncoder(w).Encode(map[string]any{"items": []map[string]any{}})
 	}))
 	defer srv.Close()
-	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"read:other"}})
+	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"openid", "email"}})
 	root := NewRoot("test")
 	root.SetOut(&strings.Builder{})
 	root.SetErr(&strings.Builder{})
 	root.SetArgs([]string{"lux", "models", "--lux-url", srv.URL, "--token", tok})
-	err := root.Execute()
-	if err == nil || !strings.Contains(err.Error(), "llm.read") {
-		t.Fatalf("want scope error, got %v", err)
+	if err := root.Execute(); err != nil {
+		t.Fatalf("non-llm token must reach the server, got %v", err)
+	}
+	if !hit {
+		t.Error("server was never called; a client-side scope gate is still blocking")
 	}
 }
 
