@@ -89,6 +89,24 @@ func providerSpecs() map[string]providerSpec {
 	}
 }
 
+// localProviderName is the route serving `lux serve` tunnels. Its catalog
+// rows are listed under the prefixed id `local/<model>` while the
+// /local/v1 surface resolves the bare runtime id, so the prefix is
+// stripped on the wire (see localWireModel).
+const localProviderName = "local"
+
+// localWireModel returns the model id to put on the wire for a route. The
+// local surface matches tunnels by their bare runtime id, so a `local/`
+// prefix (the id shown by `lux models`, hence the id users type) is
+// dropped. Every other route is passed through untouched: openrouter ids
+// are legitimately slash-qualified.
+func localWireModel(provider, model string) string {
+	if provider == localProviderName {
+		return strings.TrimPrefix(model, localProviderName+"/")
+	}
+	return model
+}
+
 func lookupProvider(name string) (providerSpec, error) {
 	p, ok := providerSpecs()[name]
 	if !ok {
@@ -561,10 +579,14 @@ The request goes through Lux with your identity as the bearer, so cost
 is tracked on your identity and no key is allocated. The inference path
 enforces no scope, so this works with any valid identity.
 
-Supported providers: openai, openrouter (OpenAI chat/completions) and
-anthropic (Messages API).`,
+Supported providers: openai, openrouter, local (OpenAI
+chat/completions) and anthropic (Messages API).
+
+Pass a model id exactly as 'latere lux models' lists it. A tunneled
+model listed as local/<model> can be called either way.`,
 		Example: `  latere lux invoke --model openai/gpt-4o-mini "Say hi"
-  latere lux invoke --provider anthropic --model claude-sonnet-4-6 "Say hi"`,
+  latere lux invoke --provider anthropic --model claude-sonnet-4-6 "Say hi"
+  latere lux invoke --model local/gemma4 "Say hi"`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if model == "" {
@@ -593,6 +615,7 @@ anthropic (Messages API).`,
 				return err
 			}
 			base := strings.TrimRight(resolveLuxURL(*luxURL), "/")
+			model = localWireModel(spec.name, model)
 
 			var body map[string]any
 			headers := map[string]string{}
@@ -1059,6 +1082,21 @@ func inferInvokeProvider(ctx context.Context, luxURL, authURL, token, model stri
 			}
 		}
 	}
+	// Nothing matched the id as typed: the catalog lists a tunneled model
+	// under the prefixed id `local/<model>` (its row id), and that is the
+	// id a user copies. Resolve it to the local route. Exact model matches
+	// win first, so a provider whose model id genuinely contains a slash
+	// (openrouter's `anthropic/claude-...`) is never shadowed.
+	if len(providers) == 0 && strings.HasPrefix(model, localProviderName+"/") {
+		bare := strings.TrimPrefix(model, localProviderName+"/")
+		for _, it := range resp.Items {
+			p, _ := it["provider"].(string)
+			if m, _ := it["model"].(string); p == localProviderName && m == bare {
+				providers = append(providers, localProviderName)
+				break
+			}
+		}
+	}
 	switch len(providers) {
 	case 0:
 		return "", fmt.Errorf("model %q is not in your catalog; run `latere lux models` to see what you can call", model)
@@ -1114,6 +1152,28 @@ func luxPostJSON(ctx context.Context, url, bearer string, headers map[string]str
 	if resp.StatusCode/100 != 2 {
 		e := &api.APIError{Status: resp.StatusCode, Message: strings.TrimSpace(string(respBody))}
 		_ = json.Unmarshal(respBody, e)
+		if e.Code == "" {
+			// Provider-shaped envelope ({"error":{"type","code","message"}}),
+			// which the inference routes emit. Without this the caller sees
+			// the raw JSON blob instead of the code and message.
+			var nested struct {
+				Error struct {
+					Code    string `json:"code"`
+					Type    string `json:"type"`
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+			if json.Unmarshal(respBody, &nested) == nil {
+				if nested.Error.Code != "" {
+					e.Code = nested.Error.Code
+				} else if nested.Error.Type != "" {
+					e.Code = nested.Error.Type
+				}
+				if nested.Error.Message != "" {
+					e.Message = nested.Error.Message
+				}
+			}
+		}
 		return nil, e
 	}
 	return respBody, nil
@@ -1133,6 +1193,11 @@ func wrapLuxErr(err error) error {
 		return fmt.Errorf(
 			"Lux denied access (%s).\n"+
 				"Your login may not have access here. Run `latere login` to refresh your session, or ask a Latere admin for access.",
+			apiErr.Message)
+	case apiErr.Code == "tunnel.offline":
+		return fmt.Errorf(
+			"no live tunnel serves this model (%s).\n"+
+				"Start it on the machine that hosts the runtime with `latere lux serve`, then check `latere lux models`.",
 			apiErr.Message)
 	case strings.Contains(apiErr.Code, "provider_not_bound"):
 		return fmt.Errorf(

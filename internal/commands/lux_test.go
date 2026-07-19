@@ -958,3 +958,141 @@ func TestFmtRateRoundsFloatArtifacts(t *testing.T) {
 		}
 	}
 }
+
+// A tunneled model is listed as `local/<model>`, so that is the id users
+// type. It must route to /local/v1 and reach the tunnel under the bare
+// runtime id the local surface matches on.
+func TestLuxInvokeStripsLocalPrefix(t *testing.T) {
+	var invokedPath, wireModel string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/lux/v1/models":
+			_ = json.NewEncoder(w).Encode(map[string]any{"items": []map[string]any{
+				{"id": "local/gemma4", "model": "gemma4", "provider": "local"},
+			}})
+		case "/local/v1/chat/completions":
+			invokedPath = r.URL.Path
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			wireModel, _ = body["model"].(string)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"choices": []map[string]any{{"message": map[string]any{"content": "hi"}}},
+			})
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"openid"}})
+	out, err := captureStdout(func() error {
+		root := NewRoot("test")
+		root.SetErr(&strings.Builder{})
+		root.SetArgs([]string{"lux", "invoke", "--lux-url", srv.URL, "--token", tok, "--model", "local/gemma4", "hi"})
+		return root.Execute()
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if invokedPath != "/local/v1/chat/completions" {
+		t.Errorf("routed to %q, want the local route", invokedPath)
+	}
+	if wireModel != "gemma4" {
+		t.Errorf("wire model = %q, want the bare runtime id %q", wireModel, "gemma4")
+	}
+	if !strings.Contains(out, "hi") {
+		t.Errorf("out = %q", out)
+	}
+}
+
+// The bare runtime id keeps working, prefixed or not.
+func TestLuxInvokeBareLocalModelStillWorks(t *testing.T) {
+	var wireModel string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/lux/v1/models":
+			_ = json.NewEncoder(w).Encode(map[string]any{"items": []map[string]any{
+				{"id": "local/gemma4", "model": "gemma4", "provider": "local"},
+			}})
+		case "/local/v1/chat/completions":
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			wireModel, _ = body["model"].(string)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"choices": []map[string]any{{"message": map[string]any{"content": "hi"}}},
+			})
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"openid"}})
+	if _, err := captureStdout(func() error {
+		root := NewRoot("test")
+		root.SetErr(&strings.Builder{})
+		root.SetArgs([]string{"lux", "invoke", "--lux-url", srv.URL, "--token", tok, "--model", "gemma4", "hi"})
+		return root.Execute()
+	}); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if wireModel != "gemma4" {
+		t.Errorf("wire model = %q, want %q", wireModel, "gemma4")
+	}
+}
+
+// An explicit --provider local also strips, and an offline tunnel says so
+// in words plus the command that fixes it.
+func TestLuxInvokeOfflineTunnelIsActionable(t *testing.T) {
+	var wireModel string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/local/v1/chat/completions" {
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		wireModel, _ = body["model"].(string)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{
+			"message": `model "gemma4" has no live tunnel`,
+			"type":    "tunnel.offline",
+			"code":    "tunnel.offline",
+		}})
+	}))
+	defer srv.Close()
+
+	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"openid"}})
+	root := NewRoot("test")
+	root.SetOut(&strings.Builder{})
+	root.SetErr(&strings.Builder{})
+	root.SetArgs([]string{"lux", "invoke", "--lux-url", srv.URL, "--token", tok,
+		"--provider", "local", "--model", "local/gemma4", "hi"})
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("want an offline error")
+	}
+	if wireModel != "gemma4" {
+		t.Errorf("wire model = %q, want the bare runtime id", wireModel)
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "no live tunnel") || !strings.Contains(msg, "latere lux serve") {
+		t.Errorf("offline error is not actionable: %q", msg)
+	}
+}
+
+// Regression: an openrouter model id that legitimately carries a slash
+// must never be treated as a local prefix.
+func TestLocalWireModelLeavesOtherRoutesAlone(t *testing.T) {
+	if got := localWireModel("openrouter", "anthropic/claude-sonnet-5"); got != "anthropic/claude-sonnet-5" {
+		t.Errorf("openrouter model rewritten to %q", got)
+	}
+	if got := localWireModel("local", "local/qwen2.5:0.5b"); got != "qwen2.5:0.5b" {
+		t.Errorf("local model = %q", got)
+	}
+	if got := localWireModel("local", "qwen2.5:0.5b"); got != "qwen2.5:0.5b" {
+		t.Errorf("bare local model = %q", got)
+	}
+}
