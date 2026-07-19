@@ -25,14 +25,9 @@ import (
 )
 
 // Lux is the Latere model gateway at lux.latere.ai. These commands let
-// the CLI call models with the user's identity (or a sandbox service
-// identity) instead of an allocated key: cost is tracked on the
-// identity. See lux/specs/11-cli-keyless-access.md.
-
-// sandboxTokenFile is where Cella projects a sandbox's trust-plane
-// egress token. When present (and no explicit token is given), `latere
-// lux` uses it as a service identity — overridable for testing.
-var sandboxTokenFile = "/run/cella/sandbox-token/token"
+// the CLI call models with the user's identity instead of an allocated
+// key: cost is tracked on the identity. See
+// lux/specs/11-cli-keyless-access.md.
 
 // ---- provider surface ----
 
@@ -112,10 +107,8 @@ func newLuxCmd() *cobra.Command {
 		Long: `Call models through Latere Lux (lux.latere.ai) using your identity.
 
 Lux is the Latere model gateway. Instead of allocating an API key, the
-CLI presents your identity — your user login, or a sandbox's service
-token — and Lux tracks cost on that identity. Inside a sandbox with a
-'lux' trust plane, the projected token at /run/cella/sandbox-token/token
-is used automatically.
+CLI presents your identity (your user login) and Lux tracks cost on that
+identity.
 
 Run 'latere login' first (it now requests the llm.read / llm.invoke
 scopes Lux needs). The base URL defaults to https://lux.latere.ai and
@@ -132,7 +125,7 @@ models'.`,
 	}
 	cmd.PersistentFlags().StringVar(&luxURL, "lux-url", "", "override Lux base URL (overrides LUX_API_URL)")
 	cmd.PersistentFlags().StringVar(&authURL, "auth-url", "", "override auth base URL (default derived from the Lux URL)")
-	cmd.PersistentFlags().StringVar(&token, "token", "", "present this bearer to Lux instead of minting one (e.g. a sandbox token)")
+	cmd.PersistentFlags().StringVar(&token, "token", "", "present this bearer to Lux instead of minting one (e.g. a service token)")
 
 	cmd.AddCommand(newLuxModelsCmd(&luxURL, &authURL, &token))
 	// Deprecated: rates ride `lux models` now, and every model row names
@@ -247,7 +240,7 @@ func localRuntimeStartHint(rt string) string {
 }
 
 // bearerHasOrg reports whether a JWT bearer carries a non-empty org_id
-// claim. A non-JWT (e.g. sandbox) token returns false.
+// claim. A non-JWT (opaque) token returns false.
 func bearerHasOrg(bearer string) bool {
 	return strings.TrimSpace(stringClaim(decodeJWTClaims(bearer), "org_id")) != ""
 }
@@ -437,11 +430,11 @@ func printLuxItems(items []map[string]any) {
 // ---- SDK enablement: env / token ----
 
 // luxEnvBearer resolves the credential lux env embeds, and says what it
-// is: a passthrough token (flag/env/sandbox file), a minted actor token
+// is: a passthrough token (flag/env), a minted actor token
 // bounded by ttl, or the refreshed login identity token with its expiry.
 func luxEnvBearer(ctx context.Context, tokenFlag, luxURL, authURLFlag string, ttl time.Duration) (bearer, provenance string, err error) {
 	if t, ok := passthroughToken(tokenFlag); ok {
-		return t, "passthrough token (--token, $LATERE_LUX_TOKEN, or sandbox)", nil
+		return t, "passthrough token (--token or $LATERE_LUX_TOKEN)", nil
 	}
 	access, authBase, err := authIdentityToken(ctx, luxURL, authURLFlag)
 	if err != nil {
@@ -567,15 +560,14 @@ func newLuxChatCmd(luxURL, authURL, token *string) *cobra.Command {
 		Long: `Send one raw prompt to a model through Lux and print the reply.
 
 This is a diagnostic, not an assistant: no tools, no session, no
-workspace — the built-in equivalent of a curl against the gateway. Use
+workspace (the built-in equivalent of a curl against the gateway). Use
 it to verify a model responds through your identity after 'lux access
 set' or a provider binding. For actual assistant work, use
 'latere topos -p "<prompt>"'.
 
 The request goes through Lux with your identity as the bearer, so cost
 is tracked on your identity and no key is allocated. The inference path
-enforces no scope, so this works with any valid identity (including a
-sandbox service token).
+enforces no scope, so this works with any valid identity.
 
 Supported providers: openai, openrouter (OpenAI chat/completions) and
 anthropic (Messages API).`,
@@ -981,8 +973,7 @@ func resolveLuxURL(flagURL string) string {
 }
 
 // passthroughToken returns a caller-supplied bearer and true when one is
-// available: an explicit --token, then LATERE_LUX_TOKEN, then a sandbox
-// service-identity token at /run/cella/sandbox-token/token. These are
+// available: an explicit --token, then LATERE_LUX_TOKEN. These are
 // presented to Lux verbatim (Lux validates them). When none is present,
 // the bearer is derived from the retained auth login.
 func passthroughToken(tokenFlag string) (string, bool) {
@@ -991,11 +982,6 @@ func passthroughToken(tokenFlag string) (string, bool) {
 	}
 	if t := strings.TrimSpace(os.Getenv("LATERE_LUX_TOKEN")); t != "" {
 		return t, true
-	}
-	if b, err := os.ReadFile(sandboxTokenFile); err == nil {
-		if t := strings.TrimSpace(string(b)); t != "" {
-			return t, true
-		}
 	}
 	return "", false
 }
@@ -1172,12 +1158,6 @@ func ensureLuxScope(bearer string, anyOf []string, action string) error {
 		}
 	}
 	missing := strings.Join(anyOf, " or ")
-	if stringClaim(claims, "kind") == "sandbox" {
-		return fmt.Errorf(
-			"this is a sandbox/service identity (scope trust-plane:egress): it can invoke models but can't %s, which needs %s.\n"+
-				"Use a user login (`latere login`) for catalog, usage, and access commands.",
-			action, missing)
-	}
 	return fmt.Errorf(
 		"your Lux token is missing the %s scope needed to %s.\n"+
 			"Re-run `latere login` and approve LLM access when prompted. If your organization hasn't\n"+

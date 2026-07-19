@@ -34,14 +34,11 @@ func TestBearerHasOrg(t *testing.T) {
 	}
 }
 
-// isolateBearer clears the ambient bearer sources (env + sandbox file)
-// so luxBearer's resolution is deterministic in tests.
+// isolateBearer clears the ambient bearer source (env) so luxBearer's
+// resolution is deterministic in tests.
 func isolateBearer(t *testing.T) {
 	t.Helper()
 	t.Setenv("LATERE_LUX_TOKEN", "")
-	old := sandboxTokenFile
-	sandboxTokenFile = filepath.Join(t.TempDir(), "no-sandbox-token")
-	t.Cleanup(func() { sandboxTokenFile = old })
 }
 
 func writeAuthTokenFile(t *testing.T, access, refresh string, expiresAt time.Time) {
@@ -128,23 +125,11 @@ func TestLuxBearerPassthroughPrecedence(t *testing.T) {
 			t.Fatalf("got %q, err %v", got, err)
 		}
 	})
-	t.Run("env over sandbox/mint", func(t *testing.T) {
+	t.Run("env over mint", func(t *testing.T) {
 		isolateBearer(t)
 		t.Setenv("LATERE_LUX_TOKEN", "env-token")
 		got, err := luxBearer(t.Context(), "", "", "")
 		if err != nil || got != "env-token" {
-			t.Fatalf("got %q, err %v", got, err)
-		}
-	})
-	t.Run("sandbox file over mint", func(t *testing.T) {
-		isolateBearer(t)
-		f := filepath.Join(t.TempDir(), "sbtok")
-		if err := os.WriteFile(f, []byte("  sandbox-token\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		sandboxTokenFile = f
-		got, err := luxBearer(t.Context(), "", "", "")
-		if err != nil || got != "sandbox-token" {
 			t.Fatalf("got %q, err %v", got, err)
 		}
 	})
@@ -296,15 +281,10 @@ func TestEnsureLuxScope(t *testing.T) {
 	if err := ensureLuxScope(admin, []string{"llm.invoke"}, "set profile"); err != nil {
 		t.Errorf("llm.admin should satisfy any scope: %v", err)
 	}
-	none := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"read:sandbox"}})
+	none := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"read:other"}})
 	err := ensureLuxScope(none, []string{"llm.read", "llm.invoke"}, "list models")
 	if err == nil || !strings.Contains(err.Error(), "latere login") {
 		t.Errorf("missing scope should give re-login hint, got %v", err)
-	}
-	sandbox := fakeJWT(t, map[string]any{"sub": "u", "kind": "sandbox", "scp": []string{"trust-plane:egress"}})
-	err = ensureLuxScope(sandbox, []string{"llm.read"}, "list models")
-	if err == nil || !strings.Contains(err.Error(), "sandbox/service identity") {
-		t.Errorf("sandbox token should get tailored message, got %v", err)
 	}
 	// Opaque (non-JWT) token: skip preflight, defer to server.
 	if err := ensureLuxScope("opaque-token", []string{"llm.read"}, "list models"); err != nil {
@@ -410,7 +390,7 @@ func TestLuxModelsScopePreflightBlocks(t *testing.T) {
 		t.Error("server should not be called when preflight fails")
 	}))
 	defer srv.Close()
-	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"read:sandbox"}})
+	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"read:other"}})
 	root := NewRoot("test")
 	root.SetOut(&strings.Builder{})
 	root.SetErr(&strings.Builder{})

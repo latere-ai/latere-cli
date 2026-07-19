@@ -1,6 +1,6 @@
 # Models (Lux)
 
-`latere lux` calls language models through [Lux](https://lux.latere.ai), the Latere model gateway. You do not allocate or manage an API key: the CLI presents your Latere identity (your `latere login`), and usage is tracked on that identity. Inside a Cella sandbox that is allowed to reach Lux, the sandbox's own token is used automatically.
+`latere lux` calls language models through [Lux](https://lux.latere.ai), the Latere model gateway. You do not allocate or manage an API key: the CLI presents your Latere identity (your `latere login`), and usage is tracked on that identity.
 
 Run `latere login` first (see the [main README](../README.md#sign-in)).
 
