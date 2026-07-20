@@ -80,6 +80,24 @@ against the real login. Six new tests cover routes, eval-clean stdout,
 `--ttl` minting (ttl_seconds forwarded), `--raw`, the expiry note, and
 the hidden alias.
 
+## Superseded, in part (2026-07-20)
+
+This spec keyed `env` on the **route**, treating "which provider" and
+"which dialect" as one axis with `openai` as the default. They are two
+axes: the compat surfaces (`/compat/openai/v1`, `/compat/anthropic`)
+speak a dialect while reaching *any* model Lux routes, and this design
+had no way to name them.
+
+`--compat [openai|anthropic|lux]` now selects the dialect, the
+positional argument stays a provider passthrough, and the two cannot be
+combined (env vars carry a base URL, not a model, so a provider has
+nowhere to sit on a compat route). The `openai` default is gone: it
+read as "the way to reach Lux" while silently pinning the caller to one
+vendor's models, so a bare `lux env` now errors and names both axes.
+
+Everything else here stands: token provenance, `--ttl`, `--raw`, and
+the hidden `--provider` alias are unchanged.
+
 ## Non-goals
 
 - A local credential-injecting proxy (would fix expiry properly but is

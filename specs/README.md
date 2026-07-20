@@ -9,7 +9,7 @@ specs/
   review-local-subcommand.md     (implemented — latere review local Cobra subcommand; critics via Lux/topos)
   auth-unification-migration.md  (complete, leaf — adopts pkg/authkit DeviceCodeClient + FileTokenStore)
   flatten-auth-commands.md       (implemented — latere login/logout/whoami/print-token/org as top-level verbs)
-  lux-env-redesign.md            (implemented — lux env keyed by route, token provenance/TTL, folds lux token)
+  lux-env-redesign.md            (implemented — lux env keyed by dialect + provider, token provenance/TTL, folds lux token)
   drive-subcommand.md            (implemented — latere drive: 8 orthogonal file-plane verbs over Drive /api/v1)
 ```
 
@@ -22,7 +22,7 @@ All five are archive candidates:
 - `auth-unification-migration.md`: authkit DeviceCodeClient + FileTokenStore in use.
 - `review-local-subcommand.md`: `latere review` ships.
 - `flatten-auth-commands.md`: session verbs are top-level (`latere login/logout/whoami/print-token/org`).
-- `lux-env-redesign.md`: `latere lux env` is keyed by route with token provenance/TTL.
+- `lux-env-redesign.md`: `latere lux env` takes a --compat dialect or a provider passthrough, with token provenance/TTL.
 - `drive-subcommand.md`: `latere drive` file-plane verbs ship over Drive `/api/v1`.
 
 ## Recorded decisions

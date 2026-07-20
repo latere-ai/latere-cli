@@ -77,11 +77,12 @@ When you export your identity for a stock SDK, the default is your
 longer-lived identity token so an SDK session survives:
 
 ```sh
-eval "$(latere lux env)"          # exports the identity token (lasts the login session)
-eval "$(latere lux env --ttl 1h)" # exports a short-lived actor token instead (CI)
+eval "$(latere lux env --compat openai)"          # identity token (lasts the login session)
+eval "$(latere lux env --compat openai --ttl 1h)" # a short-lived actor token instead (CI)
 ```
 
-See the "Models (Lux)" page for the full `lux env` surface.
+`lux env` needs a surface: either `--compat <dialect>` or a passthrough
+provider argument. See the "Models (Lux)" page for the full surface.
 
 ### Drive
 

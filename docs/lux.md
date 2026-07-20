@@ -15,19 +15,39 @@ command you need.
 
 ## Point a stock SDK at Lux
 
-No key to paste: export your identity and use the SDK normally:
+No key to paste: export your identity and use the SDK normally.
+
+Two independent choices. **Which dialect you speak** is `--compat`, and it reaches any model Lux can route for you:
 
 ```sh
-eval "$(latere lux env)"             # OpenAI SDK -> the openai route
-eval "$(latere lux env anthropic)"   # Anthropic SDK -> the anthropic route
+eval "$(latere lux env --compat openai)"      # OpenAI SDK, any model
+eval "$(latere lux env --compat anthropic)"   # Anthropic SDK, any model
+eval "$(latere lux env --compat lux)"         # Latere SDK, the native dialect
 # a normal SDK call is now routed through Lux, billed to your identity
 ```
 
-The route argument is `openai` (default), `openrouter`, `anthropic`, or `local` (your `lux serve` tunnels); the OpenAI-dialect routes all emit `OPENAI_BASE_URL`/`OPENAI_API_KEY` with different base URLs. The command reports on stderr which credential it embedded and when it expires: by default your login identity token, which lasts the sign-in session. Two variants:
+On a compat surface the provider is not in the route, so name it in the model id when a bare name would be ambiguous. This is how you reach an OpenAI model through the Anthropic SDK:
 
 ```sh
-eval "$(latere lux env --ttl 1h)"    # CI: a short-lived actor token instead
-TOKEN=$(latere lux env --raw)        # bare token for curl/scripts
+eval "$(latere lux env --compat anthropic)"
+# then call model "openai/gpt-5"
+```
+
+**Which provider serves you** is the positional argument, a passthrough: the provider *is* the route, so only models it serves are reachable, in its own dialect.
+
+```sh
+eval "$(latere lux env openai)"       # -> /openai/v1
+eval "$(latere lux env anthropic)"    # -> /anthropic
+eval "$(latere lux env local)"        # -> /local/v1, your 'lux serve' tunnels
+```
+
+Run `latere lux providers` for the current list. The two cannot be combined: env vars carry a base URL, not a model, so a provider on a compat surface has nowhere to go.
+
+The command reports on stderr which credential it embedded and when it expires: by default your login identity token, which lasts the sign-in session.
+
+```sh
+eval "$(latere lux env --compat openai --ttl 1h)"  # CI: a short-lived actor token
+TOKEN=$(latere lux env --raw)                      # bare token for curl/scripts
 ```
 
 ## Verify access with a raw call
