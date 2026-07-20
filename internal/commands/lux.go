@@ -74,6 +74,24 @@ func providerSpecs() map[string]providerSpec {
 			// bare /anthropic prefix. ANTHROPIC_AUTH_TOKEN -> bearer.
 			envBaseVar: "ANTHROPIC_BASE_URL", envKeyVar: "ANTHROPIC_AUTH_TOKEN", envBaseURL: "/anthropic",
 		},
+		"moonshot": {
+			// OpenAI-compatible (Kimi families).
+			name: "moonshot", chatPath: "/moonshot/v1/chat/completions",
+			envBaseVar: "OPENAI_BASE_URL", envKeyVar: "OPENAI_API_KEY", envBaseURL: "/moonshot/v1",
+		},
+		"xai": {
+			// OpenAI-compatible (Grok families).
+			name: "xai", chatPath: "/xai/v1/chat/completions",
+			envBaseVar: "OPENAI_BASE_URL", envKeyVar: "OPENAI_API_KEY", envBaseURL: "/xai/v1",
+		},
+		"zhipu": {
+			// OpenAI-compatible (GLM families). The /v1 here is the Lux
+			// route, not Zhipu's: upstream serves /api/paas/v4, and the
+			// gateway rewrites the path, so callers address it like any
+			// other provider.
+			name: "zhipu", chatPath: "/zhipu/v1/chat/completions",
+			envBaseVar: "OPENAI_BASE_URL", envKeyVar: "OPENAI_API_KEY", envBaseURL: "/zhipu/v1",
+		},
 		"gemini": {
 			// Reachable via `lux invoke`-style direct call is non-trivial
 			// (generateContent), and the Gemini SDK has no bearer path,

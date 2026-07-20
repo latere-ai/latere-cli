@@ -748,6 +748,11 @@ func TestLuxEnvPositionalRoute(t *testing.T) {
 		{"openrouter", "export OPENAI_BASE_URL=https://lux.example/openrouter/v1", "export OPENAI_API_KEY="},
 		{"local", "export OPENAI_BASE_URL=https://lux.example/local/v1", "export OPENAI_API_KEY="},
 		{"anthropic", "export ANTHROPIC_BASE_URL=https://lux.example/anthropic", "export ANTHROPIC_AUTH_TOKEN="},
+		{"moonshot", "export OPENAI_BASE_URL=https://lux.example/moonshot/v1", "export OPENAI_API_KEY="},
+		{"xai", "export OPENAI_BASE_URL=https://lux.example/xai/v1", "export OPENAI_API_KEY="},
+		// /zhipu/v1 is the Lux route; the gateway rewrites it to Zhipu's
+		// /api/paas/v4 upstream, so the SDK env looks like any other.
+		{"zhipu", "export OPENAI_BASE_URL=https://lux.example/zhipu/v1", "export OPENAI_API_KEY="},
 	}
 	for _, tc := range cases {
 		t.Run(tc.route, func(t *testing.T) {
