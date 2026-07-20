@@ -505,6 +505,36 @@ func TestLuxEnvAnthropicUsesAuthToken(t *testing.T) {
 	}
 }
 
+// The native route emits the gateway root with no path suffix: the
+// luxsdk clients append /lux/v1/generate themselves, so a suffix here
+// would produce a doubled path on every call.
+func TestLuxEnvNativeRouteEmitsBareBase(t *testing.T) {
+	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"openid"}})
+	out, err := captureStdout(func() error {
+		root := NewRoot("test")
+		root.SetErr(&strings.Builder{})
+		root.SetArgs([]string{"lux", "env", "lux", "--lux-url", "https://lux.example", "--token", tok})
+		return root.Execute()
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out, "export LUX_BASE_URL=https://lux.example\n") {
+		t.Errorf("native base must carry no path suffix:\n%s", out)
+	}
+	if !strings.Contains(out, "export LUX_API_KEY="+tok) {
+		t.Errorf("missing native key export:\n%s", out)
+	}
+	// A vendor variable here would silently retarget an OpenAI or
+	// Anthropic SDK living in the same shell, and LUX_API_URL would
+	// retarget the CLI itself from an eval'd subshell.
+	for _, v := range []string{"OPENAI_BASE_URL", "ANTHROPIC_BASE_URL", "LUX_API_URL"} {
+		if strings.Contains(out, v) {
+			t.Errorf("native route must not emit %s:\n%s", v, out)
+		}
+	}
+}
+
 func TestLuxEnvGeminiUnsupported(t *testing.T) {
 	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"openid"}})
 	root := NewRoot("test")

@@ -105,6 +105,23 @@ func providerSpecs() map[string]providerSpec {
 			name: "local", chatPath: "/local/v1/chat/completions",
 			envBaseVar: "OPENAI_BASE_URL", envKeyVar: "OPENAI_API_KEY", envBaseURL: "/local/v1",
 		},
+		luxNativeRoute: luxNativeSpec(),
+	}
+}
+
+// luxNativeRoute is the first-party dialect (lux spec 33), not a
+// provider: it is a surface every provider is reachable through, so the
+// provider is named in the model id rather than in the route.
+const luxNativeRoute = "lux"
+
+// luxNativeSpec points pkg/luxsdk (and its TypeScript/Python siblings)
+// at the gateway. envBaseURL is empty because those SDKs append
+// /lux/v1/generate themselves, and chatPath is empty because `lux
+// invoke` speaks the borrowed vendor shapes, not the native one.
+func luxNativeSpec() providerSpec {
+	return providerSpec{
+		name:       luxNativeRoute,
+		envBaseVar: "LUX_BASE_URL", envKeyVar: "LUX_API_KEY", envBaseURL: "",
 	}
 }
 
@@ -211,6 +228,9 @@ func resolveProviderSpecs(ctx context.Context, luxURL, authURL, token string) ma
 		}
 		specs[id] = deriveProviderSpec(id, dialect, prefix)
 	}
+	// The native route is ours, not the server's provider list. Re-assert
+	// it so a provider that ever shipped under this id cannot shadow it.
+	specs[luxNativeRoute] = luxNativeSpec()
 	return specs
 }
 
@@ -612,9 +632,14 @@ identity as the credential — no key allocation.
 
     eval "$(latere lux env)"            # OpenAI SDK -> the openai route
     eval "$(latere lux env anthropic)"  # Anthropic SDK -> the anthropic route
+    eval "$(latere lux env lux)"        # Latere SDK -> the native dialect
 
 Routes and their SDK dialect:
 
+    lux         Latere SDK      (LUX_BASE_URL, LUX_API_KEY) — the native
+                dialect, POST /lux/v1/generate. Reaches any model Lux
+                routes; name the provider in the model id when it is not
+                unambiguous, e.g. "anthropic/claude-sonnet-5"
     openai      OpenAI SDK      (OPENAI_BASE_URL, OPENAI_API_KEY)
     openrouter  OpenAI SDK      (same variables, OpenRouter route)
     local       OpenAI SDK      (your 'lux serve' tunnels)
@@ -630,6 +655,7 @@ lasts the login session. For CI, --ttl mints a short-lived actor token
 instead, bounding the blast radius of a leaked export.`,
 		Example: `  eval "$(latere lux env)"
   eval "$(latere lux env anthropic)"
+  eval "$(latere lux env lux)"
   eval "$(latere lux env --ttl 1h)"
   TOKEN=$(latere lux env --raw)`,
 		Args: cobra.MaximumNArgs(1),
