@@ -995,14 +995,18 @@ func newLuxAccessCmd(luxURL, authURL, token *string) *cobra.Command {
 		Short: "View or set your Lux access profile (model bindings).",
 		Long: `Inspect and self-provision your Lux access profile.
 
-A model resolves only when your identity is bound to a provider key —
-your own registered key, or a Latere platform key you hold a grant on.
-'show' prints the current profile; 'set' binds a model to a provider
-key. Platform-granted models need no binding here; they appear in
-'latere lux models' automatically.`,
+A model resolves through a provider key you can reach: one you registered
+yourself, or a Latere platform key you hold a grant on. Bindings are a
+routing override on top of that, not a permission. If you own exactly one
+key, you likely need no bindings at all.
+
+'show' prints the current profile, 'set' pins one model to a provider key,
+'clear' removes every binding. Platform-granted models need no binding
+here; they appear in 'latere lux models' automatically.`,
 	}
 	cmd.AddCommand(newLuxAccessShowCmd(luxURL, authURL, token))
 	cmd.AddCommand(newLuxAccessSetCmd(luxURL, authURL, token))
+	cmd.AddCommand(newLuxAccessClearCmd(luxURL, authURL, token))
 	return cmd
 }
 
@@ -1078,6 +1082,49 @@ platform key).`,
 	cmd.Flags().StringVar(&provider, "provider", "", "provider for the target, e.g. openai (required)")
 	cmd.Flags().StringVar(&providerKey, "provider-key", "", "provider key id to route through (required)")
 	return cmd
+}
+
+// newLuxAccessClearCmd is the inverse of 'set'.
+//
+// It clears the whole bindings map rather than one model, which mirrors
+// how 'set' already behaves: the PATCH replaces bindings wholesale, so a
+// 'set' overwrites every existing binding anyway. Removing a single model
+// would need a read-modify-write with a lost-update race, and would be
+// finer-grained than the only command that writes bindings.
+//
+// Clearing is safe for a principal since spec 043: an unbound model falls
+// through to an owned provider key. A virtual key's bindings are its
+// containment boundary, but those are fixed at mint time and not
+// reachable through this endpoint.
+func newLuxAccessClearCmd(luxURL, authURL, token *string) *cobra.Command {
+	return &cobra.Command{
+		Use:   "clear",
+		Short: "Clear every model binding from your access profile.",
+		Long: `Remove all model bindings, leaving routing to your own provider keys.
+
+PATCHes /lux/v1/me/profile with an empty bindings map. Your provider keys,
+spend cap, and rate limits are untouched; only the routing overrides go.
+
+Models keep working: an unbound model resolves through a provider key you
+own. Bindings only matter when you need to choose between several keys,
+order failover, or alias a model name.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, _, err := luxClient(cmd.Context(), *luxURL, *authURL, *token)
+			if err != nil {
+				return err
+			}
+			patch := map[string]any{"bindings": map[string]any{}}
+			b, _ := json.Marshal(patch)
+			var out json.RawMessage
+			if err := c.Do(cmd.Context(), http.MethodPatch, "/lux/v1/me/profile",
+				bytes.NewReader(b), "application/json", &out); err != nil {
+				return wrapLuxErr(err)
+			}
+			fmt.Fprintln(os.Stderr, "Cleared all model bindings.")
+			return printJSON(out)
+		},
+	}
 }
 
 // ---- bearer acquisition ----

@@ -562,6 +562,51 @@ func TestLuxAccessSetPatchesBindings(t *testing.T) {
 	}
 }
 
+// ---- access clear ----
+
+// TestLuxAccessClearEmptiesBindings pins the inverse of 'set'.
+//
+// The body must carry an explicit empty object, not an omitted field: the
+// server upserts with COALESCE($3, access_profiles.bindings), so a null or
+// absent bindings key preserves the existing row and the clear silently
+// does nothing.
+func TestLuxAccessClearEmptiesBindings(t *testing.T) {
+	var gotMethod, gotPath string
+	var gotBody struct {
+		Bindings json.RawMessage `json:"bindings"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		_ = json.NewEncoder(w).Encode(map[string]any{"bindings": map[string]any{}})
+	}))
+	defer srv.Close()
+
+	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"openid"}})
+	_, err := captureStdout(func() error {
+		root := NewRoot("test")
+		root.SetErr(&strings.Builder{})
+		root.SetArgs([]string{"lux", "access", "clear", "--lux-url", srv.URL, "--token", tok})
+		return root.Execute()
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if gotMethod != http.MethodPatch || gotPath != "/lux/v1/me/profile" {
+		t.Fatalf("request = %s %s, want PATCH /lux/v1/me/profile", gotMethod, gotPath)
+	}
+	if len(gotBody.Bindings) == 0 {
+		t.Fatal("bindings field absent; COALESCE would keep the existing row")
+	}
+	var models map[string]any
+	if err := json.Unmarshal(gotBody.Bindings, &models); err != nil {
+		t.Fatalf("bindings not a JSON object: %v (%s)", err, gotBody.Bindings)
+	}
+	if len(models) != 0 {
+		t.Fatalf("bindings = %s, want an empty object", gotBody.Bindings)
+	}
+}
+
 func TestLuxProvidersHidden(t *testing.T) {
 	for _, c := range newLuxCmd().Commands() {
 		if c.Name() == "providers" {
