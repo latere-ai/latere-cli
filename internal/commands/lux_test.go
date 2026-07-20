@@ -76,7 +76,7 @@ func TestLuxHelpText(t *testing.T) {
 		want []string
 	}{
 		{[]string{"lux", "--help"}, []string{"lux.latere.ai", "allocating an API key", "LUX_API_URL", "latere login"}},
-		{[]string{"lux", "env", "--help"}, []string{"stock SDK at a Lux route", "ANTHROPIC_AUTH_TOKEN", "--ttl"}},
+		{[]string{"lux", "env", "--help"}, []string{"stock SDK at a Lux surface", "ANTHROPIC_AUTH_TOKEN", "--ttl"}},
 		{[]string{"lux", "invoke", "--help"}, []string{"diagnostic, not an assistant", "latere topos -p", "--model"}},
 		{[]string{"lux", "access", "set", "--help"}, []string{"provider key", "fallback"}},
 	}
@@ -505,33 +505,127 @@ func TestLuxEnvAnthropicUsesAuthToken(t *testing.T) {
 	}
 }
 
-// The native route emits the gateway root with no path suffix: the
-// luxsdk clients append /lux/v1/generate themselves, so a suffix here
-// would produce a doubled path on every call.
-func TestLuxEnvNativeRouteEmitsBareBase(t *testing.T) {
+// A compat surface carries no provider in its route: that is the whole
+// point, since it reaches any model Lux routes rather than one vendor's.
+// A provider-bearing base here would silently re-pin the caller.
+func TestLuxEnvCompatDialects(t *testing.T) {
+	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"openid"}})
+	cases := []struct {
+		dialect  string
+		wantBase string
+		wantKey  string
+		// absent guards against emitting a second SDK's variables, which
+		// would retarget an unrelated client living in the same shell.
+		absent []string
+	}{
+		{
+			dialect:  "openai",
+			wantBase: "export OPENAI_BASE_URL=https://lux.example/compat/openai/v1\n",
+			wantKey:  "export OPENAI_API_KEY=" + tok,
+			absent:   []string{"ANTHROPIC_BASE_URL", "LUX_BASE_URL"},
+		},
+		{
+			// The Anthropic SDK appends /v1/messages itself.
+			dialect:  "anthropic",
+			wantBase: "export ANTHROPIC_BASE_URL=https://lux.example/compat/anthropic\n",
+			wantKey:  "export ANTHROPIC_AUTH_TOKEN=" + tok,
+			absent:   []string{"ANTHROPIC_API_KEY", "OPENAI_BASE_URL", "LUX_BASE_URL"},
+		},
+		{
+			// luxsdk appends /lux/v1/generate itself, so any suffix here
+			// would produce a doubled path on every call. LUX_API_URL is
+			// the CLI's own knob: emitting it would let an eval'd subshell
+			// retarget the CLI.
+			dialect:  "lux",
+			wantBase: "export LUX_BASE_URL=https://lux.example\n",
+			wantKey:  "export LUX_API_KEY=" + tok,
+			absent:   []string{"OPENAI_BASE_URL", "ANTHROPIC_BASE_URL", "LUX_API_URL"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.dialect, func(t *testing.T) {
+			out, err := captureStdout(func() error {
+				root := NewRoot("test")
+				root.SetErr(&strings.Builder{})
+				root.SetArgs([]string{"lux", "env", "--compat", tc.dialect,
+					"--lux-url", "https://lux.example", "--token", tok})
+				return root.Execute()
+			})
+			if err != nil {
+				t.Fatalf("Execute: %v", err)
+			}
+			if !strings.Contains(out, tc.wantBase) {
+				t.Errorf("missing base %q:\n%s", tc.wantBase, out)
+			}
+			if !strings.Contains(out, tc.wantKey) {
+				t.Errorf("missing key %q:\n%s", tc.wantKey, out)
+			}
+			for _, v := range tc.absent {
+				if strings.Contains(out, v) {
+					t.Errorf("must not emit %s:\n%s", v, out)
+				}
+			}
+		})
+	}
+}
+
+// `lux env` used to default to the OpenAI passthrough, which reads as
+// "the default way to reach Lux" while silently pinning the caller to
+// one vendor's models. The choice is now required.
+func TestLuxEnvRequiresSurface(t *testing.T) {
+	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"openid"}})
+	root := NewRoot("test")
+	root.SetOut(&strings.Builder{})
+	root.SetErr(&strings.Builder{})
+	root.SetArgs([]string{"lux", "env", "--lux-url", "https://lux.example", "--token", tok})
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("bare `lux env` must not silently pick a provider")
+	}
+	// The error is the only place a user learns the two axes exist, so it
+	// carries both rather than just naming the omission.
+	for _, want := range []string{"latere lux env openai", "--compat anthropic", "--compat lux", "providers:"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error missing %q:\n%s", want, err)
+		}
+	}
+}
+
+// The two axes cannot be combined: a compat route has no provider
+// segment, so a provider argument there would be silently ignored.
+func TestLuxEnvProviderWithCompatErrors(t *testing.T) {
+	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"openid"}})
+	root := NewRoot("test")
+	root.SetOut(&strings.Builder{})
+	root.SetErr(&strings.Builder{})
+	root.SetArgs([]string{"lux", "env", "openai", "--compat", "anthropic",
+		"--lux-url", "https://lux.example", "--token", tok})
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("provider + --compat must error rather than drop one axis")
+	}
+	// Naming the model-id form makes the error actionable: that is where
+	// the provider lives on a compat surface.
+	if !strings.Contains(err.Error(), "openai/MODEL") {
+		t.Errorf("error must point at the model-id form:\n%s", err)
+	}
+}
+
+// --raw emits a bearer only, so it needs no surface and must keep
+// working with no arguments.
+func TestLuxEnvRawNeedsNoSurface(t *testing.T) {
 	tok := fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"openid"}})
 	out, err := captureStdout(func() error {
 		root := NewRoot("test")
 		root.SetErr(&strings.Builder{})
-		root.SetArgs([]string{"lux", "env", "lux", "--lux-url", "https://lux.example", "--token", tok})
+		root.SetArgs([]string{"lux", "env", "--raw", "--token", tok})
 		return root.Execute()
 	})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if !strings.Contains(out, "export LUX_BASE_URL=https://lux.example\n") {
-		t.Errorf("native base must carry no path suffix:\n%s", out)
-	}
-	if !strings.Contains(out, "export LUX_API_KEY="+tok) {
-		t.Errorf("missing native key export:\n%s", out)
-	}
-	// A vendor variable here would silently retarget an OpenAI or
-	// Anthropic SDK living in the same shell, and LUX_API_URL would
-	// retarget the CLI itself from an eval'd subshell.
-	for _, v := range []string{"OPENAI_BASE_URL", "ANTHROPIC_BASE_URL", "LUX_API_URL"} {
-		if strings.Contains(out, v) {
-			t.Errorf("native route must not emit %s:\n%s", v, out)
-		}
+	if strings.TrimSpace(out) != tok {
+		t.Errorf("raw output = %q, want the bare token", out)
 	}
 }
 
@@ -808,7 +902,7 @@ func TestLuxEnvProvenanceOnStderrOnly(t *testing.T) {
 	out, err := captureStdout(func() error {
 		root := NewRoot("test")
 		root.SetErr(&errBuf)
-		root.SetArgs([]string{"lux", "env", "--lux-url", "https://lux.example", "--token", tok})
+		root.SetArgs([]string{"lux", "env", "openai", "--lux-url", "https://lux.example", "--token", tok})
 		return root.Execute()
 	})
 	if err != nil {
@@ -858,7 +952,7 @@ func TestLuxEnvTTLMintsActorToken(t *testing.T) {
 	out, err := captureStdout(func() error {
 		root := NewRoot("test")
 		root.SetErr(&errBuf)
-		root.SetArgs([]string{"lux", "env", "--ttl", "1h", "--lux-url", "https://lux.example", "--auth-url", authSrv.URL})
+		root.SetArgs([]string{"lux", "env", "openai", "--ttl", "1h", "--lux-url", "https://lux.example", "--auth-url", authSrv.URL})
 		return root.Execute()
 	})
 	if err != nil {
@@ -887,7 +981,7 @@ func TestLuxEnvIdentityExpiryNote(t *testing.T) {
 	_, err := captureStdout(func() error {
 		root := NewRoot("test")
 		root.SetErr(&errBuf)
-		root.SetArgs([]string{"lux", "env", "--lux-url", "https://lux.example"})
+		root.SetArgs([]string{"lux", "env", "openai", "--lux-url", "https://lux.example"})
 		return root.Execute()
 	})
 	if err != nil {

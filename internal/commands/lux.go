@@ -105,24 +105,65 @@ func providerSpecs() map[string]providerSpec {
 			name: "local", chatPath: "/local/v1/chat/completions",
 			envBaseVar: "OPENAI_BASE_URL", envKeyVar: "OPENAI_API_KEY", envBaseURL: "/local/v1",
 		},
-		luxNativeRoute: luxNativeSpec(),
 	}
 }
 
-// luxNativeRoute is the first-party dialect (lux spec 33), not a
-// provider: it is a surface every provider is reachable through, so the
-// provider is named in the model id rather than in the route.
-const luxNativeRoute = "lux"
+// compatDialect names a wire dialect a caller can speak, independently
+// of which provider ends up serving the call.
+type compatDialect string
 
-// luxNativeSpec points pkg/luxsdk (and its TypeScript/Python siblings)
-// at the gateway. envBaseURL is empty because those SDKs append
-// /lux/v1/generate themselves, and chatPath is empty because `lux
-// invoke` speaks the borrowed vendor shapes, not the native one.
-func luxNativeSpec() providerSpec {
-	return providerSpec{
-		name:       luxNativeRoute,
-		envBaseVar: "LUX_BASE_URL", envKeyVar: "LUX_API_KEY", envBaseURL: "",
+const (
+	// compatPassthrough pins the call to one provider's own surface. The
+	// provider is the route, so only models that provider serves are
+	// reachable.
+	compatPassthrough compatDialect = "passthrough"
+	compatOpenAI      compatDialect = "openai"
+	compatAnthropic   compatDialect = "anthropic"
+	// compatLux is the first-party dialect (lux spec 33). luxsdk and its
+	// TypeScript/Python siblings append /lux/v1/generate themselves, so
+	// the base carries no suffix.
+	compatLux compatDialect = "lux"
+)
+
+func compatDialects() []compatDialect {
+	return []compatDialect{compatPassthrough, compatOpenAI, compatAnthropic, compatLux}
+}
+
+// compatSpec is the env shape for a non-passthrough dialect. These
+// surfaces reach any model Lux routes rather than one provider's, so
+// they carry no provider in the path: a caller names the provider in
+// the model id ("openai/gpt-5") when a bare name would be ambiguous.
+func compatSpec(d compatDialect) (providerSpec, error) {
+	switch d {
+	case compatOpenAI:
+		return providerSpec{
+			name:       string(d),
+			envBaseVar: "OPENAI_BASE_URL", envKeyVar: "OPENAI_API_KEY", envBaseURL: "/compat/openai/v1",
+		}, nil
+	case compatAnthropic:
+		// The Anthropic SDK appends /v1/messages, so the base stops at
+		// the compat prefix.
+		return providerSpec{
+			name: string(d), anthropicStyle: true,
+			envBaseVar: "ANTHROPIC_BASE_URL", envKeyVar: "ANTHROPIC_AUTH_TOKEN", envBaseURL: "/compat/anthropic",
+		}, nil
+	case compatLux:
+		return providerSpec{
+			name:       string(d),
+			envBaseVar: "LUX_BASE_URL", envKeyVar: "LUX_API_KEY", envBaseURL: "",
+		}, nil
+	default:
+		return providerSpec{}, fmt.Errorf("unknown --compat %q; one of: %s",
+			d, strings.Join(compatDialectNames(), ", "))
 	}
+}
+
+func compatDialectNames() []string {
+	out := make([]string, 0, len(compatDialects()))
+	for _, d := range compatDialects() {
+		out = append(out, string(d))
+	}
+	return out
 }
 
 // localProviderName is the route serving `lux serve` tunnels. Its catalog
@@ -228,9 +269,6 @@ func resolveProviderSpecs(ctx context.Context, luxURL, authURL, token string) ma
 		}
 		specs[id] = deriveProviderSpec(id, dialect, prefix)
 	}
-	// The native route is ours, not the server's provider list. Re-assert
-	// it so a provider that ever shipped under this id cannot shadow it.
-	specs[luxNativeRoute] = luxNativeSpec()
 	return specs
 }
 
@@ -605,12 +643,63 @@ func luxEnvBearer(ctx context.Context, tokenFlag, luxURL, authURLFlag string, tt
 	return access, provenance, nil
 }
 
+// resolveEnvSurface applies the two axes: a [provider] argument selects
+// that provider's passthrough route, --compat selects a dialect surface
+// that carries no provider at all.
+//
+// Neither one is defaulted. `lux env` used to mean the OpenAI
+// passthrough, which reads as "the default way to reach Lux" when it is
+// really one vendor's route out of several, and silently pins a caller
+// to OpenAI's models. Requiring the choice costs one word and removes
+// the guess.
+func resolveEnvSurface(
+	ctx context.Context,
+	luxURL, authURL, token, provider string,
+	compat compatDialect,
+	raw bool,
+) (providerSpec, error) {
+	// --raw prints a bearer and nothing else, so no surface is involved.
+	if raw {
+		return providerSpec{}, nil
+	}
+	switch {
+	case provider != "" && compat != "" && compat != compatPassthrough:
+		return providerSpec{}, fmt.Errorf(
+			"cannot combine provider %q with --compat %s: a compat surface carries no provider in its "+
+				"route, so name it in the model id instead (e.g. %q). Drop the provider argument",
+			provider, compat, provider+"/MODEL")
+	case provider == "" && (compat == "" || compat == compatPassthrough):
+		return providerSpec{}, fmt.Errorf(
+			"specify a passthrough provider or a compat dialect\n\n"+
+				"  latere lux env openai              # OpenAI passthrough\n"+
+				"  latere lux env --compat openai     # OpenAI dialect, any model\n"+
+				"  latere lux env --compat anthropic  # Anthropic dialect, any model\n"+
+				"  latere lux env --compat lux        # native dialect, any model\n\n"+
+				"providers: %s",
+			strings.Join(knownProviderNames(resolveProviderSpecs(ctx, luxURL, authURL, token)), ", "))
+	case compat != "" && compat != compatPassthrough:
+		return compatSpec(compat)
+	}
+
+	spec, err := lookupProviderFor(ctx, luxURL, authURL, token, provider)
+	if err != nil {
+		return providerSpec{}, err
+	}
+	if spec.envBaseVar == "" {
+		return providerSpec{}, fmt.Errorf(
+			"`lux env` does not support %q (its SDK has no bearer path); use `lux invoke` or a --compat dialect",
+			provider)
+	}
+	return spec, nil
+}
+
 func newLuxEnvCmd(luxURL, authURL, token *string) *cobra.Command {
 	var provider string
+	var compat string
 	var ttl time.Duration
 	var raw bool
 	cmd := &cobra.Command{
-		Use: "env [route]",
+		Use: "env [provider] [--compat DIALECT]",
 		// Completion is served from the live provider list, not a literal,
 		// so a provider Lux adds is suggested without a CLI release.
 		ValidArgsFunction: func(cmd *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
@@ -627,24 +716,31 @@ func newLuxEnvCmd(luxURL, authURL, token *string) *cobra.Command {
 			return out, cobra.ShellCompDirectiveNoFileComp
 		},
 		Short: "Print shell exports that point a stock SDK at a Lux route (keyless).",
-		Long: `Print 'export' lines that point a stock SDK at a Lux route using your
-identity as the credential — no key allocation.
+		Long: `Print 'export' lines that point a stock SDK at a Lux surface using
+your identity as the credential — no key allocation.
 
-    eval "$(latere lux env)"            # OpenAI SDK -> the openai route
-    eval "$(latere lux env anthropic)"  # Anthropic SDK -> the anthropic route
-    eval "$(latere lux env lux)"        # Latere SDK -> the native dialect
+Two independent choices: who serves the call, and which dialect you
+speak to it in.
 
-Routes and their SDK dialect:
+    latere lux env openai               # OpenAI passthrough, /openai/v1
+    latere lux env --compat openai      # OpenAI dialect, any model Lux routes
+    latere lux env --compat anthropic   # Anthropic dialect, any model
+    latere lux env --compat lux         # native dialect, any model
 
-    lux         Latere SDK      (LUX_BASE_URL, LUX_API_KEY) — the native
-                dialect, POST /lux/v1/generate. Reaches any model Lux
-                routes; name the provider in the model id when it is not
-                unambiguous, e.g. "anthropic/claude-sonnet-5"
+A [provider] argument is a passthrough: the provider is the route, so
+only models it serves are reachable, and its own dialect applies.
+
     openai      OpenAI SDK      (OPENAI_BASE_URL, OPENAI_API_KEY)
     openrouter  OpenAI SDK      (same variables, OpenRouter route)
     local       OpenAI SDK      (your 'lux serve' tunnels)
     anthropic   Anthropic SDK   (ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN —
                 not ANTHROPIC_API_KEY, which sends x-api-key and Lux ignores)
+
+--compat drops the provider from the route entirely. Every model Lux
+can reach is available, phrased in the dialect you picked. Name the
+provider in the model id when a bare name would be ambiguous, e.g.
+"openai/gpt-5" on the anthropic surface. The two cannot be combined:
+env vars carry a base URL, not a model.
 
 Gemini's SDK has no bearer path; use 'latere lux invoke' or an
 OpenRouter route.
@@ -653,10 +749,10 @@ The embedded credential and its lifetime are reported on stderr (stdout
 stays eval-clean). By default it is your login identity token, which
 lasts the login session. For CI, --ttl mints a short-lived actor token
 instead, bounding the blast radius of a leaked export.`,
-		Example: `  eval "$(latere lux env)"
-  eval "$(latere lux env anthropic)"
-  eval "$(latere lux env lux)"
-  eval "$(latere lux env --ttl 1h)"
+		Example: `  eval "$(latere lux env openai)"
+  eval "$(latere lux env --compat anthropic)"
+  eval "$(latere lux env --compat lux)"
+  eval "$(latere lux env --compat openai --ttl 1h)"
   TOKEN=$(latere lux env --raw)`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -664,12 +760,9 @@ instead, bounding the blast radius of a leaked export.`,
 			if len(args) == 1 {
 				route = args[0]
 			}
-			spec, err := lookupProviderFor(cmd.Context(), *luxURL, *authURL, *token, route)
+			spec, err := resolveEnvSurface(cmd.Context(), *luxURL, *authURL, *token, route, compatDialect(compat), raw)
 			if err != nil {
 				return err
-			}
-			if !raw && spec.envBaseVar == "" {
-				return fmt.Errorf("`lux env` does not support %q (its SDK has no bearer path); use `lux invoke` or the openrouter route", route)
 			}
 			bearer, provenance, err := luxEnvBearer(cmd.Context(), *token, *luxURL, *authURL, ttl)
 			if err != nil {
@@ -687,8 +780,14 @@ instead, bounding the blast radius of a leaked export.`,
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&provider, "provider", "openai", "deprecated alias for the [route] argument")
+	cmd.Flags().StringVar(&provider, "provider", "", "deprecated alias for the [route] argument")
 	_ = cmd.Flags().MarkHidden("provider")
+	cmd.Flags().StringVar(&compat, "compat", "",
+		"dialect to speak instead of a provider passthrough: "+strings.Join(compatDialectNames(), ", "))
+	_ = cmd.RegisterFlagCompletionFunc("compat",
+		func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+			return compatDialectNames(), cobra.ShellCompDirectiveNoFileComp
+		})
 	cmd.Flags().DurationVar(&ttl, "ttl", 0, "mint a short-lived actor token instead of the identity token (e.g. 1h)")
 	cmd.Flags().BoolVar(&raw, "raw", false, "print the bare token only, no exports")
 	return cmd
