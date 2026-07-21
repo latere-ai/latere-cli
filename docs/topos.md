@@ -99,8 +99,8 @@ latere topos agents create --name "Build Bot" --kind worker \
 
 ## Where things run
 
-Your laptop is just the screen and keyboard. The agent's brain, its tools, and
-its workspace all live on the control plane, which is why a session survives a
+Your laptop is just the screen and keyboard. The agent's reasoning, its tools,
+and its workspace all live on the control plane, which is why a session survives a
 disconnect and why a teammate can watch the same session you are driving. The
 base URL defaults to `https://topos.latere.ai`; override it with `TOPOS_API_URL`
 or `--api-url` on any command.
