@@ -223,7 +223,7 @@ func TestGetJSONErrors(t *testing.T) {
 func TestRunSessionDiscoverError(t *testing.T) {
 	// An unreachable upstream makes discovery fail, so runSession returns
 	// before any dial.
-	err := runSession(context.Background(), Options{
+	_, err := runSession(context.Background(), Options{
 		LuxURL:      "http://127.0.0.1:1",
 		Bearer:      func(context.Context) (string, error) { return "t", nil },
 		Runtime:     RuntimeOllama,

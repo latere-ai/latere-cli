@@ -57,6 +57,11 @@ type Options struct {
 	NodeID      string
 	// HeartbeatInterval defaults to 10s (TTL/3 against luxd's 30s).
 	HeartbeatInterval time.Duration
+	// ReconnectBackoff is the delay before the first reconnect attempt; it
+	// doubles across consecutive failures to establish a tunnel, up to 30s,
+	// and returns to this value once a session has been established.
+	// Defaults to 1s.
+	ReconnectBackoff time.Duration
 	// Out receives human-readable status lines.
 	Out io.Writer
 }
@@ -77,12 +82,24 @@ func Run(ctx context.Context, opts Options) error {
 	if opts.Share == "" {
 		opts.Share = "owner"
 	}
+	if opts.ReconnectBackoff <= 0 {
+		opts.ReconnectBackoff = time.Second
+	}
 
-	backoff := time.Second
+	baseBackoff := opts.ReconnectBackoff
+	backoff := baseBackoff
 	for {
-		err := runSession(ctx, opts)
+		established, err := runSession(ctx, opts)
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+		// The delay grows only across consecutive failures to establish a
+		// tunnel. A session that came up and later dropped is not evidence
+		// that Lux is down, so it restarts from the base delay; otherwise a
+		// tunnel that flaps occasionally over a long run would creep up to
+		// the 30s cap and stay there.
+		if established {
+			backoff = baseBackoff
 		}
 		// A non-retryable error (not signed in, not permitted to serve,
 		// feature disabled) returns immediately so the user sees one clear message
@@ -104,21 +121,24 @@ func Run(ctx context.Context, opts Options) error {
 	}
 }
 
-func runSession(ctx context.Context, opts Options) error {
+// runSession runs one tunnel connection to completion. established reports
+// whether the tunnel ever became usable (the descriptor reached luxd), which
+// is what Run needs to tell a failed dial apart from a dropped session.
+func runSession(ctx context.Context, opts Options) (established bool, err error) {
 	hc := &http.Client{}
 
 	models, err := discover(ctx, hc, opts.Runtime, opts.UpstreamURL, opts.Models)
 	if err != nil {
-		return err
+		return established, err
 	}
 	if len(models) == 0 {
-		return fmt.Errorf("no models found at %s (is %s running?)", opts.UpstreamURL, opts.Runtime)
+		return established, fmt.Errorf("no models found at %s (is %s running?)", opts.UpstreamURL, opts.Runtime)
 	}
 
 	bearer, err := opts.Bearer(ctx)
 	if err != nil {
 		// No usable identity (e.g. not signed in). Retrying will not help.
-		return fatal(err)
+		return established, fatal(err)
 	}
 
 	wsURL := toWS(opts.LuxURL) + "/lux/v1/tunnel"
@@ -130,12 +150,12 @@ func runSession(ctx context.Context, opts Options) error {
 		if resp != nil {
 			switch resp.StatusCode {
 			case http.StatusNotFound:
-				return fatal(fmt.Errorf("the local-model tunnel is not enabled on %s yet. Ask your operator to turn it on (LUX_TUNNEL_ENABLED).", opts.LuxURL))
+				return established, fatal(fmt.Errorf("the local-model tunnel is not enabled on %s yet. Ask your operator to turn it on (LUX_TUNNEL_ENABLED).", opts.LuxURL))
 			case http.StatusUnauthorized, http.StatusForbidden:
-				return fatal(fmt.Errorf("your login may not serve models here. Run `latere login` to refresh your session, then try again."))
+				return established, fatal(fmt.Errorf("your login may not serve models here. Run `latere login` to refresh your session, then try again."))
 			}
 		}
-		return fmt.Errorf("dial %s: %w", wsURL, err)
+		return established, fmt.Errorf("dial %s: %w", wsURL, err)
 	}
 	defer c.CloseNow()
 	c.SetReadLimit(-1)
@@ -145,13 +165,13 @@ func runSession(ctx context.Context, opts Options) error {
 	nc := websocket.NetConn(sessCtx, c, websocket.MessageBinary)
 	sess, err := yamux.Client(nc, yamuxConfig())
 	if err != nil {
-		return err
+		return established, err
 	}
 	defer sess.Close()
 
 	ctrl, err := sess.OpenStream()
 	if err != nil {
-		return err
+		return established, err
 	}
 	desc := Descriptor{
 		NodeID:  opts.NodeID,
@@ -163,13 +183,18 @@ func runSession(ctx context.Context, opts Options) error {
 	}
 	line, _ := json.Marshal(desc)
 	if _, err := ctrl.Write(append(line, '\n')); err != nil {
-		return err
+		return established, err
 	}
 	fmt.Fprintf(opts.Out, "tunnel: connected; serving %d model(s) from %s (%s), share=%s\n",
 		len(models), opts.UpstreamURL, opts.Runtime, opts.Share)
 	for _, m := range models {
 		fmt.Fprintf(opts.Out, "  - %s  (call as local/%s via Lux)\n", m, m)
 	}
+	// The descriptor is on the wire, so luxd can route to this node: the
+	// tunnel is usable. Recording it here, at the single point where that
+	// becomes true, keeps every later exit path (session drop, accept error)
+	// from having to remember to report it.
+	established = true
 
 	go heartbeatLoop(sessCtx, ctrl, opts)
 
@@ -177,7 +202,7 @@ func runSession(ctx context.Context, opts Options) error {
 	for {
 		stream, err := sess.AcceptStream()
 		if err != nil {
-			return err // session closed
+			return established, err // session closed
 		}
 		go srv.handle(stream)
 	}
