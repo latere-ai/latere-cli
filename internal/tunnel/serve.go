@@ -246,7 +246,8 @@ type forwarder struct {
 // (discovery.go, release.go). It sits well above realistic
 // chat-completion request sizes; the body arrives from luxd, the trusted
 // intermediary, so this guards against a malformed or truncated read
-// rather than a hostile flood.
+// rather than a hostile flood. A body past the cap is refused with 413, never
+// trimmed to fit.
 const maxRequestBytes = 8 << 20 // 8 MiB
 
 func (f *forwarder) handle(stream net.Conn) {
@@ -265,11 +266,20 @@ func (f *forwarder) handle(stream net.Conn) {
 	started := time.Now()
 	var body []byte
 	if req.Body != nil {
-		body, err = io.ReadAll(io.LimitReader(req.Body, maxRequestBytes))
+		// Read one byte past the cap: a plain LimitReader at the cap returns
+		// a clean io.EOF, so an oversized body would look like a complete
+		// short one and be relayed with a matching ContentLength.
+		body, err = io.ReadAll(io.LimitReader(req.Body, maxRequestBytes+1))
 		_ = req.Body.Close()
 		if err != nil {
 			writeError(stream, err)
 			f.logTraffic(req.Method, req.URL.RequestURI(), peekModel(body), 0, time.Since(started), err)
+			return
+		}
+		if len(body) > maxRequestBytes {
+			err := fmt.Errorf("request body exceeds the %d byte limit", maxRequestBytes)
+			writeErrorStatus(stream, http.StatusRequestEntityTooLarge, "local.request_too_large", err)
+			f.logTraffic(req.Method, req.URL.RequestURI(), peekModel(body), http.StatusRequestEntityTooLarge, time.Since(started), err)
 			return
 		}
 	}
@@ -330,13 +340,21 @@ func (f *forwarder) logTraffic(method, path, model string, status int, dur time.
 		ts, method, path, model, status, dur.Milliseconds())
 }
 
+// writeError reports a failure to reach or read from the local runtime.
 func writeError(w io.Writer, err error) {
+	writeErrorStatus(w, http.StatusBadGateway, "local.unreachable", err)
+}
+
+// writeErrorStatus writes one error response in the OpenAI-compatible
+// envelope. Refusals raised by the forwarder itself (an oversized body) are
+// not upstream-reachability failures and must not be reported as 502.
+func writeErrorStatus(w io.Writer, status int, code string, err error) {
 	resp := &http.Response{
-		StatusCode: http.StatusBadGateway,
+		StatusCode: status,
 		ProtoMajor: 1, ProtoMinor: 1,
 		Header: http.Header{"Content-Type": {"application/json"}},
 		Body: io.NopCloser(strings.NewReader(
-			fmt.Sprintf(`{"error":{"code":"local.unreachable","message":%q}}`, err.Error()))),
+			fmt.Sprintf(`{"error":{"code":%q,"message":%q}}`, code, err.Error()))),
 	}
 	_ = resp.Write(w)
 }
