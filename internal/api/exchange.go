@@ -18,8 +18,15 @@ import (
 // LoginScopes is the single scope set the CLI requests from auth, at
 // device-code login and on every refresh. One definition keeps the two
 // paths identical: a refresh that silently narrowed scopes would strand
-// sandbox commands until the next full login.
-const LoginScopes = "openid email profile offline_access read:sandbox write:sandbox exec:sandbox attach:sandbox run:agents read:agents write:agents"
+// commands until the next full login.
+//
+// No sandbox scopes appear here. Cella issues its own token from this
+// identity and decides what that token may carry, so requesting *:sandbox
+// from auth would grant nothing cella reads (cella spec 131). Auth is a
+// standard OIDC provider for the sandbox surface: it says who the caller is.
+//
+// The agents scopes stay: topos still gates on scopes auth issues.
+const LoginScopes = "openid email profile offline_access run:agents read:agents write:agents"
 
 // ErrActorAudienceMismatch signals the legacy auth behaviour where a
 // device token stamped with sandboxd's audience is rejected on
