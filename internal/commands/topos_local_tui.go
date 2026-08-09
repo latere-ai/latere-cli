@@ -136,7 +136,7 @@ func (m *localTUI) rebuild(b models.Model) error {
 			m.prog.Send(localEventMsg{ev: e})
 		}
 	}
-	rn, err := topos.NewRunner(topos.Options{Brain: b, Sandbox: m.sb, Observer: obs})
+	rn, err := topos.NewRunner(topos.Options{Model: topos.ModelOptions{Client: b}, Sandbox: m.sb, Observer: obs})
 	if err != nil {
 		return err
 	}

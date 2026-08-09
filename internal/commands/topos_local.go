@@ -98,7 +98,7 @@ func runToposLocal(ctx context.Context, dir, modelName, oneShot, version string)
 	var runner *topos.Runner
 	var curModel string
 	rebuild := func(b models.Model) error {
-		rn, e := topos.NewRunner(topos.Options{Brain: b, Sandbox: sb, Observer: render.render})
+		rn, e := topos.NewRunner(topos.Options{Model: topos.ModelOptions{Client: b}, Sandbox: sb, Observer: render.render})
 		if e != nil {
 			return e
 		}

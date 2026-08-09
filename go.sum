@@ -112,3 +112,5 @@ latere.ai/x/pkg v0.31.0 h1:OcuBZKLUqpH9Df78skw458kHxURiTJwjvW9Rrf3iRfU=
 latere.ai/x/pkg v0.31.0/go.mod h1:ucgMG9lzz5IwQ986hCp3sutOu9Hg2nSbj9u8wZDHFjc=
 latere.ai/x/topos v0.2.1 h1:mqLvE4hKc0BRCNxzkWXO/mA6HuIypgL1bgTPxZ+Lf8A=
 latere.ai/x/topos v0.2.1/go.mod h1:67tE2HMJuj5sYp5Yf3X//mV8QAHFFbHBgCGTAin/zDk=
+latere.ai/x/topos v0.4.0 h1:l9OOYBzZ4WwB8aVR3KjdrxAZH6JkOevpvvpWCUZsRyc=
+latere.ai/x/topos v0.4.0/go.mod h1:nSy8z5Cp/CSpT/YcYc5WWfzfV40En2OBJvuvSSlchjs=

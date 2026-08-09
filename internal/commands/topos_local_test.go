@@ -117,7 +117,7 @@ func TestLocalLoopEndToEnd(t *testing.T) {
 
 	var toolOutput strings.Builder
 	runner, err := topos.NewRunner(topos.Options{
-		Brain:   fake.New(),
+		Model:   topos.ModelOptions{Client: fake.New()},
 		Sandbox: sb,
 		Observer: func(e topos.Event) {
 			if e.Name == topos.EventPostToolUse {
