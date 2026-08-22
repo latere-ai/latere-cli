@@ -50,8 +50,7 @@ func TestProdE2EServeAndCall(t *testing.T) {
 		t.Skipf("local Ollama not serving %q: %v", model, err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	// Start the real serve loop against the live Lux.
 	serveErr := make(chan error, 1)

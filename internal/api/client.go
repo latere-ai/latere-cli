@@ -32,8 +32,8 @@ type Token struct {
 	AccessToken  string    `json:"access_token"`
 	RefreshToken string    `json:"refresh_token,omitempty"`
 	TokenType    string    `json:"token_type,omitempty"`
-	ExpiresAt    time.Time `json:"expires_at,omitempty"`
-	IssuedAt     time.Time `json:"issued_at,omitempty"`
+	ExpiresAt    time.Time `json:"expires_at"`
+	IssuedAt     time.Time `json:"issued_at"`
 }
 
 // Client wraps the HTTP plumbing. Build with NewClient.

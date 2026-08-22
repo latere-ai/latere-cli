@@ -172,7 +172,7 @@ func TestHomeAbbrev(t *testing.T) {
 
 func TestLocalTUIScrolls(t *testing.T) {
 	m := newTestTUI(t)
-	for i := 0; i < 100; i++ { // fill well past one screen
+	for range 100 { // fill well past one screen
 		m.appendNotice("line", false)
 	}
 	m.refresh()

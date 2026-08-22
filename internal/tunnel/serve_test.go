@@ -227,8 +227,7 @@ func TestRunForwardsRequest(t *testing.T) {
 	}))
 	defer lux.Close()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	go func() {
 		_ = Run(ctx, Options{
 			LuxURL:      lux.URL,

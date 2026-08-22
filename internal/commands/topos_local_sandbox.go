@@ -68,8 +68,7 @@ func (h *hostSandbox) Exec(ctx context.Context, _ string, opts sandbox.ExecOptio
 	err := cmd.Run()
 	res := sandbox.ExecResult{Stdout: stdout.Bytes(), Stderr: stderr.Bytes(), Phase: "exited"}
 	if err != nil {
-		var ee *exec.ExitError
-		if errors.As(err, &ee) {
+		if ee, ok := errors.AsType[*exec.ExitError](err); ok {
 			res.ExitCode = ee.ExitCode()
 			return res, nil // a non-zero exit is a result, not a provider error
 		}

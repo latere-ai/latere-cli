@@ -504,10 +504,7 @@ func (m *localTUI) layout() {
 	// The banner now scrolls inside the viewport, so only the input box (rounded
 	// border: 3 rows) and the status line (1 row) are fixed chrome.
 	const inputH, statusH = 3, 1
-	vpH := m.height - inputH - statusH
-	if vpH < 3 {
-		vpH = 3
-	}
+	vpH := max(m.height-inputH-statusH, 3)
 	if !m.ready {
 		m.vp = viewport.New(m.width, vpH)
 		m.ready = true
@@ -573,10 +570,7 @@ func (m *localTUI) statusView() string {
 		left = m.spin.View() + " " + left
 	}
 	right := "↑↓ scroll · Ctrl+O expand · /model · Ctrl+D quit"
-	gap := m.width - leftGutter - lipgloss.Width(left) - lipgloss.Width(right)
-	if gap < 1 {
-		gap = 1
-	}
+	gap := max(m.width-leftGutter-lipgloss.Width(left)-lipgloss.Width(right), 1)
 	return strings.Repeat(" ", leftGutter) + styleDim.Render(left) + strings.Repeat(" ", gap) + styleDim.Render(right)
 }
 

@@ -495,8 +495,7 @@ func runDeviceFlow(ctx context.Context, opts deviceFlowOpts) error {
 	if err := dcc.Login(ctx); err != nil {
 		// Surface terminal RFC 8628 errors with the CLI's user-facing
 		// strings; everything else passes through with authkit's wrap.
-		var rerr *oauth2.RetrieveError
-		if errors.As(err, &rerr) {
+		if rerr, ok := errors.AsType[*oauth2.RetrieveError](err); ok {
 			switch rerr.ErrorCode {
 			case "expired_token":
 				return errors.New("device code expired before approval")

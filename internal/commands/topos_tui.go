@@ -165,10 +165,7 @@ func (m tuiModel) View() string {
 		body = append(append([]string{}, body...), "● "+live)
 	}
 	reserve := 3
-	visible := m.height - reserve
-	if visible < 1 {
-		visible = 1
-	}
+	visible := max(m.height-reserve, 1)
 	if len(body) > visible {
 		body = body[len(body)-visible:]
 	}

@@ -114,8 +114,7 @@ func TestServeSandboxDialsWSSAndServes(t *testing.T) {
 	hs := standInToposd(t, got)
 
 	t.Setenv("TOPOS_TOKEN", "dev-token")
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	allow := func(context.Context, string, sandbox.ExecOptions) error { return nil }
 	go func() { _ = runServeSandbox(ctx, hs.URL, root, allow) }()
 
@@ -147,8 +146,7 @@ func TestServeSandboxCommandExecute(t *testing.T) {
 	hs := standInToposd(t, got)
 
 	t.Setenv("TOPOS_TOKEN", "dev-token")
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	cmd := newToposServeSandboxCmd()
 	cmd.SetArgs([]string{"--yes", "--topos-url", hs.URL, "--root", root})

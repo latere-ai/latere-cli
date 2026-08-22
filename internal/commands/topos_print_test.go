@@ -101,8 +101,7 @@ func TestStreamPrintReturnsRunError(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "offline") {
 		t.Fatalf("err = %v, want offline", err)
 	}
-	var pe *printErr
-	if !errors.As(err, &pe) {
+	if _, ok := errors.AsType[*printErr](err); !ok {
 		t.Fatalf("err type = %T, want *printErr", err)
 	}
 }

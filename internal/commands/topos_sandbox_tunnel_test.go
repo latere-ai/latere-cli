@@ -41,8 +41,7 @@ func TestSandboxTunnelOverTCP(t *testing.T) {
 	defer ln.Close()
 
 	// Laptop side: dial the "control plane" and serve this workspace.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	go func() {
 		conn, derr := net.Dial("tcp", ln.Addr().String())
 		if derr != nil {

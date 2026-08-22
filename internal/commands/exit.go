@@ -26,8 +26,7 @@ func (e *unresolvedError) Error() string {
 // It lives next to the commands so the exit-code policy is shared with main
 // without main importing per-command error types.
 func HandleExitError(w io.Writer, err error) int {
-	var ue *unresolvedError
-	if errors.As(err, &ue) {
+	if _, ok := errors.AsType[*unresolvedError](err); ok {
 		return 2
 	}
 	fmt.Fprintln(w, err)

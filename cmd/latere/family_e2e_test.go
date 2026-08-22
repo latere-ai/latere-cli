@@ -143,7 +143,7 @@ func (fe *familyEnv) freshBearer(t *testing.T) string {
 	if err != nil {
 		return ""
 	}
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if _, v, ok := strings.Cut(strings.TrimSpace(line), "ANTHROPIC_AUTH_TOKEN="); ok {
 			return strings.TrimSpace(v)
 		}
@@ -159,7 +159,7 @@ func (fe *familyEnv) firstModel(t *testing.T) (model, provider string) {
 	if err != nil {
 		return "", ""
 	}
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		f := strings.Fields(line)
 		if len(f) >= 2 && f[0] == "model:" && model == "" {
 			model = f[1]
@@ -190,9 +190,9 @@ func TestFamilyE2E(t *testing.T) {
 		if !strings.Contains(out, "principal:") || !strings.Contains(out, "sub:") {
 			t.Fatalf("whoami output missing principal/sub:\n%s", out)
 		}
-		for _, line := range strings.Split(out, "\n") {
-			if strings.HasPrefix(strings.TrimSpace(line), "sub:") {
-				fe.sub = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "sub:"))
+		for line := range strings.SplitSeq(out, "\n") {
+			if after, ok := strings.CutPrefix(strings.TrimSpace(line), "sub:"); ok {
+				fe.sub = strings.TrimSpace(after)
 			}
 		}
 		if fe.sub == "" {
