@@ -56,6 +56,12 @@ lint: ## Stricter lint via golangci-lint (has pre-existing findings; not in `mak
 # so stderr is dropped and the decision rests on the patch alone.
 .PHONY: lint-modernize
 lint-modernize: ## Fail on code the standard library already covers
+	@for fixer in newexpr errorsastype; do \
+		$(GO) tool fix help 2>&1 | grep -q "^    $$fixer " || { \
+			echo "go fix no longer carries the $$fixer fixer, so -$$fixer=false is rejected and this check passes silently"; \
+			exit 1; \
+		}; \
+	done
 	@patch=$$($(GO) fix -diff -newexpr=false -errorsastype=false ./... 2>/dev/null); \
 	if [ -n "$$patch" ]; then \
 		echo "$$patch"; \
