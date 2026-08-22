@@ -42,9 +42,8 @@ func InferAuthURL(apiURL string) string {
 	}
 	if u, err := url.Parse(apiURL); err == nil && u.Host != "" {
 		// Replace the leading host label.
-		parts := strings.SplitN(u.Host, ".", 2)
-		if len(parts) == 2 {
-			u.Host = "auth." + parts[1]
+		if _, rest, ok := strings.Cut(u.Host, "."); ok {
+			u.Host = "auth." + rest
 			u.Path = ""
 			return u.String()
 		}
