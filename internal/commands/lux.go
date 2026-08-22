@@ -8,12 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"net/http"
 	"net/url"
 	"os"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -194,18 +194,9 @@ func lookupProvider(name string) (providerSpec, error) {
 	p, ok := providerSpecs()[name]
 	if !ok {
 		return providerSpec{}, fmt.Errorf("unknown provider %q; one of: %s",
-			name, strings.Join(knownProviderNames(providerSpecs()), ", "))
+			name, strings.Join(slices.Sorted(maps.Keys(providerSpecs())), ", "))
 	}
 	return p, nil
-}
-
-func knownProviderNames(specs map[string]providerSpec) []string {
-	out := make([]string, 0, len(specs))
-	for k := range specs {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
 }
 
 // deriveProviderSpec builds a spec from what Lux publishes about a provider:
@@ -287,7 +278,7 @@ func lookupProviderFor(ctx context.Context, luxURL, authURL, token, name string)
 	p, ok := specs[name]
 	if !ok {
 		return providerSpec{}, fmt.Errorf("unknown provider %q; one of: %s",
-			name, strings.Join(knownProviderNames(specs), ", "))
+			name, strings.Join(slices.Sorted(maps.Keys(specs)), ", "))
 	}
 	return p, nil
 }
@@ -676,7 +667,7 @@ func resolveEnvSurface(
 				"  latere lux env --compat anthropic  # Anthropic dialect, any model\n"+
 				"  latere lux env --compat lux        # native dialect, any model\n\n"+
 				"providers: %s",
-			strings.Join(knownProviderNames(resolveProviderSpecs(ctx, luxURL, authURL, token)), ", "))
+			strings.Join(slices.Sorted(maps.Keys(resolveProviderSpecs(ctx, luxURL, authURL, token))), ", "))
 	case compat != "" && compat != compatPassthrough:
 		return compatSpec(compat)
 	}
@@ -708,7 +699,7 @@ func newLuxEnvCmd(luxURL, authURL, token *string) *cobra.Command {
 			}
 			specs := resolveProviderSpecs(cmd.Context(), *luxURL, *authURL, *token)
 			out := make([]string, 0, len(specs))
-			for _, name := range knownProviderNames(specs) {
+			for _, name := range slices.Sorted(maps.Keys(specs)) {
 				if specs[name].envBaseVar != "" {
 					out = append(out, name)
 				}
