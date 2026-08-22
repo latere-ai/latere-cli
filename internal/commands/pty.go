@@ -122,8 +122,8 @@ func attachShell(ctx context.Context, c *api.Client, sandbox, session string) (i
 			cols, rows = 80, 24
 		}
 		var frame [4]byte
-		binary.BigEndian.PutUint16(frame[0:2], clampUint16(cols))
-		binary.BigEndian.PutUint16(frame[2:4], clampUint16(rows))
+		binary.BigEndian.PutUint16(frame[0:2], uint16(min(max(cols, 0), 0xffff)))
+		binary.BigEndian.PutUint16(frame[2:4], uint16(min(max(rows, 0), 0xffff)))
 		return writeFrame(ptyFrameResize, frame[:])
 	}
 	_ = sendResize()
@@ -237,14 +237,4 @@ func randomSessionID() string {
 		return "cli-" + hex.EncodeToString(b[:])
 	}
 	return fmt.Sprintf("cli-%d", time.Now().UnixNano())
-}
-
-func clampUint16(v int) uint16 {
-	if v < 0 {
-		return 0
-	}
-	if v > 0xffff {
-		return 0xffff
-	}
-	return uint16(v)
 }
