@@ -46,6 +46,23 @@ hooks: ## Install repository git hooks (pre-commit gofmt guard)
 lint: ## Stricter lint via golangci-lint (has pre-existing findings; not in `make build`)
 	golangci-lint run ./...
 
+# lint-modernize fails on code that a standard library call already covers.
+# It runs the toolchain modernizers, which overlap golangci-lint's modernize
+# linter but add three it does not carry: buildtag, hostport, and the
+# go:fix inline directives. newexpr and errorsastype are off for the reasons
+# recorded in .golangci.yml.
+# Only a non-empty patch fails the target. go fix also exits non-zero when a
+# package does not type-check, which is a build error rather than a finding,
+# so stderr is dropped and the decision rests on the patch alone.
+.PHONY: lint-modernize
+lint-modernize: ## Fail on code the standard library already covers
+	@patch=$$($(GO) fix -diff -newexpr=false -errorsastype=false ./... 2>/dev/null); \
+	if [ -n "$$patch" ]; then \
+		echo "$$patch"; \
+		echo "go fix: the diff above is already in the standard library; apply it with go fix"; \
+		exit 1; \
+	fi
+
 .PHONY: binary
 binary: ## Build the latere binary into ./latere
 	$(GO) build -o latere ./cmd/latere
