@@ -81,7 +81,7 @@ latere lux serve --upstream http://localhost:1234 --models llama3.1:8b
 latere lux serve --share org        # share with your whole org (default for org accounts)
 ```
 
-`serve` opens a long-lived outbound tunnel (no inbound port) and forwards requests only to the configured local runtime. It needs no special scope: any signed-in identity can serve, except a virtual key, which cannot open a tunnel. Run `latere login` if you are not signed in. Call the model by pointing a stock SDK at the `/local/v1` route: `eval "$(latere lux env local)"`, or call it directly with `latere lux invoke --model local/<model> "Say hi"` (the bare `<model>` works too). See the [Lux local-models guide](https://github.com/latere-ai/lux/blob/main/docs/lux/local-models.md).
+`serve` opens a long-lived outbound tunnel (no inbound port) and forwards requests only to the configured local runtime. It needs no special scope: any signed-in identity can serve, except a virtual key, which cannot open a tunnel. Run `latere login` if you are not signed in. Call the model by pointing a stock SDK at the `/local/v1` route: `eval "$(latere lux env local)"`, or call it directly with `latere lux invoke --model local/<model> "Say hi"` (the bare `<model>` works too).
 
 ## Configuration
 

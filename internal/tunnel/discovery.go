@@ -1,8 +1,8 @@
 // Package tunnel implements the serve side of the Lux local-runtime
-// reverse tunnel (latere-ai/lux spec 18). `latere lux serve` dials
-// lux.latere.ai over WSS, advertises the local runtime's models, and
-// forwards inbound request streams to the local server. luxd routes a
-// client's /local/v1 request back down the tunnel.
+// reverse tunnel. `latere lux serve` dials lux.latere.ai over WSS,
+// advertises the local runtime's models, and forwards inbound request
+// streams to the local server. The Lux gateway routes a client's
+// /local/v1 request back down the tunnel.
 //
 // The CLI is deliberately thin: it dials out, advertises a descriptor, and
 // relays bytes. All policy (auth, gates, load-balancing) lives in luxd.

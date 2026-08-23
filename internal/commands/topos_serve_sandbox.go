@@ -18,10 +18,10 @@ import (
 	"latere.ai/x/topos/sandbox"
 )
 
-// The sandbox-tunnel wire contract. These three literals are duplicated on the
-// toposd server (agents/internal/sandboxtunnel: Route, Subprotocol, Descriptor);
-// there is no shared module, so they are set deliberately on both sides and a
-// two-process smoke catches any drift.
+// The sandbox-tunnel wire contract. These three literals (route, subprotocol,
+// descriptor) are duplicated on the Topos control plane; there is no shared
+// module, so they are set deliberately on both sides and a two-process smoke
+// catches any drift.
 const (
 	sandboxTunnelRoute       = "/v1/sandbox/tunnel"
 	sandboxTunnelSubprotocol = "topos.sandbox.v1"

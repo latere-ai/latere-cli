@@ -6,12 +6,12 @@ import (
 )
 
 // TestDescriptorWireFormat pins the exact JSON the handshake descriptor
-// marshals to. luxd (latere-ai/lux internal/tunnel) has an identical golden
-// test against the SAME bytes; if either side renames or retags a field,
-// its golden breaks, catching a wire drift that the mock-based round-trip
-// tests (each side fakes the other) would miss.
+// marshals to. The Lux gateway holds an identical golden test against the
+// SAME bytes; if either side renames or retags a field, its golden breaks,
+// catching a wire drift that the mock-based round-trip tests (each side
+// fakes the other) would miss.
 //
-// THIS STRING MUST STAY BYTE-IDENTICAL TO luxd's golden.
+// THIS STRING MUST STAY BYTE-IDENTICAL TO THE GATEWAY'S GOLDEN.
 const goldenDescriptorJSON = `{"node_id":"node-1","runtime":"ollama","dialect":"openai-compat","base_url":"http://localhost:11434","models":["llama3.1:8b","qwen2.5:14b"],"share":"owner"}`
 
 func TestDescriptorWireFormat(t *testing.T) {

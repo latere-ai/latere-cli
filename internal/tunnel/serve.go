@@ -30,8 +30,8 @@ func isFatal(err error) bool {
 	return errors.As(err, &f)
 }
 
-// Descriptor is the handshake contract advertised to luxd (spec 18 Layer
-// 2). It must match latere-ai/lux internal/tunnel.Descriptor on the wire.
+// Descriptor is the handshake contract advertised to the Lux gateway. It
+// must match the gateway's tunnel descriptor byte for byte on the wire.
 type Descriptor struct {
 	NodeID  string   `json:"node_id"`
 	Runtime string   `json:"runtime"`
