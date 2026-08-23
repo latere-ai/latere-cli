@@ -1,5 +1,10 @@
 # latere
 
+[![ci](https://github.com/latere-ai/latere-cli/actions/workflows/ci.yaml/badge.svg)](https://github.com/latere-ai/latere-cli/actions/workflows/ci.yaml)
+[![release](https://img.shields.io/github/v/release/latere-ai/latere-cli)](https://github.com/latere-ai/latere-cli/releases)
+[![go](https://img.shields.io/badge/go-1.27-00ADD8?logo=go&logoColor=white)](go.mod)
+[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 Command-line interface for the Latere product family: one binary for [Cella](https://cella.latere.ai) sandboxes, [Lux](https://lux.latere.ai) model access, and adversarial code review.
 
 ## Install
@@ -127,9 +132,30 @@ latere review
 ## Development
 
 ```sh
-go test ./...
+make build          # tidy, vet, compile, govulncheck, test
+go test ./...       # unit and package tests only
 go run ./cmd/latere --help
 ```
+
+`go test ./...` runs the unit and package tests. The live end-to-end tests are
+opt-in and **skip silently without their environment variables**, so a green
+`go test ./...` does not mean they ran:
+
+| Test | Gate | What it exercises |
+|------|------|-------------------|
+| `TestFamilyE2E` | `LATERE_FAMILY_E2E=1` | Every product against production with your signed-in identity. Add `LATERE_FAMILY_E2E_WRITE=1` for write paths and `LATERE_FAMILY_E2E_LOGOUT=1` to end with a logout. |
+| `TestProdE2EServeAndCall` | `LATERE_LUX_E2E=1` plus `LATERE_LUX_TOKEN` | `latere lux serve` end to end, exposing a local Ollama model through Lux. |
+
+Run `make hooks` once per clone to install the pre-commit gofmt and
+standard-library guard.
+
+## Status
+
+Pre-1.0, released from git tags. Commands and flags are not removed outright:
+when a command moves, the old spelling stays as a hidden alias (`latere auth
+login` still resolves after the session verbs moved to the top level). Output
+formats are not frozen, so pin a version with `latere upgrade vX.Y.Z` and
+`latere upgrade --auto off` if you parse the output in a script.
 
 ## License
 
