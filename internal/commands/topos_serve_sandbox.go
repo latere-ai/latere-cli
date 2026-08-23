@@ -40,18 +40,18 @@ func newToposServeSandboxCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "serve-sandbox",
-		Short: "Serve this machine as a sandbox the control plane can drive (mode 2).",
-		Long: `Connect this machine to the Topos control plane as a sandbox (mode 2).
+		Short: "Serve this machine as a sandbox the Topos control plane can drive.",
+		Long: `Connect this machine to the Topos control plane as a sandbox it can drive.
 
-The edge dials the toposd sandbox-tunnel endpoint over WSS and serves the
-workspace root as a confined, consented sandbox.Provider: a remote interactive
+This machine dials the control plane's sandbox-tunnel endpoint over WSS and
+serves the workspace root as a confined, consented sandbox: a remote interactive
 session runs its tools here, on your real files. Every command a remote session
 wants to run is shown and prompted for (y/N) unless --yes is given, path access
 is confined to the root, and a built-in secret deny-list (.env, .ssh, *.pem, …)
 is never served.
 
 For local development, set TOPOS_TOKEN to any value and point --topos-url at a
-toposd started with dev auth; the token is then accepted without a login.`,
+Topos server started with dev auth; the token is then accepted without a login.`,
 		Example: `  latere topos serve-sandbox
   latere topos serve-sandbox --root ~/work/project --yes
   TOPOS_TOKEN=dev latere topos serve-sandbox --topos-url http://localhost:8080`,
@@ -89,7 +89,7 @@ func runServeSandbox(ctx context.Context, apiURL, root string, consent sandbox.C
 		HTTPHeader:   http.Header{"Authorization": {"Bearer " + bearer}},
 	})
 	if err != nil {
-		return fmt.Errorf("dial toposd sandbox tunnel %s: %w", wsURL, err)
+		return fmt.Errorf("dial Topos sandbox tunnel %s: %w", wsURL, err)
 	}
 	defer c.CloseNow() //nolint:errcheck
 	c.SetReadLimit(-1) // streams carry full request/response bodies.
