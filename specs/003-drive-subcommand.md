@@ -108,7 +108,7 @@ the SPA: streaming PUT ≤16 MiB, multipart above (16 MiB parts, ≤1000 parts,
 4 in flight, abort session on failure); `memory/**` requires CAS server-side
 (428) and the CLI surfaces "pass --if-match or --create-only".
 `share` flags (grantee / link, role, note) mirror the openapi `ShareCreate`
-schema — confirm exact fields against `../drive/docs/openapi.yaml` at
+schema — confirm exact fields against the Drive OpenAPI schema at
 implementation.
 
 ## Error Handling
@@ -150,7 +150,7 @@ flag on `share`) was already in the spec table. Commits: `19230df`
 `44a2fc0` (binary e2e).
 
 **What shipped.** `internal/drive/client.go` — typed client over the wire
-shapes extracted from `../drive/docs/openapi.yaml` (error envelope is a bare
+shapes extracted from the Drive OpenAPI schema (error envelope is a bare
 `{"error"}`; versions use `version_no`/`superseded_at`; trash purge returns
 a count). `internal/commands/drive.go` — the verbs, with
 `TestDriveVerbSet` pinning the command space so growth requires a spec

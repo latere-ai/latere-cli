@@ -2,10 +2,9 @@
 title: latere-cli — Auth Unification Migration
 status: complete
 depends_on:
-  - "auth/specs/auth-unification.md"
-  - "auth/specs/auth-unification/authkit-device-code-and-token-store.md"
-  - "auth/specs/auth-unification/authkit-cookie-and-env-compat.md"
-  - "auth/specs/auth-unification/integration-doc-rewrite.md"
+  - "auth service: unified device-code client and shared token store"
+  - "auth service: cookie and environment compatibility"
+  - "auth service: integration documentation rewrite"
 affects:
   - go.mod
   - internal/commands/auth.go
@@ -30,7 +29,7 @@ dispatched_task_id: null
 1. Bumps `latere.ai/x/pkg` from `v0.13.0` to the version containing `authkit.DeviceCodeClient` + `authkit.FileTokenStore`.
 2. Replaces the bespoke ~100-line device flow with `DeviceCodeClient.Login(ctx)`.
 3. Replaces ad-hoc token-file handling in `internal/api/client.go` with `FileTokenStore`.
-4. Adds a `latere auth org switch <id>` CLI subcommand using the auth service's refresh-grant org-switch (`auth/specs/refresh-token-org-switch.md`).
+4. Adds a `latere auth org switch <id>` CLI subcommand using the auth service's refresh-grant org-switch.
 5. Adds `latere auth org list` and `latere auth org switch ""` for personal-context switch.
 6. Updates the README and docs.
 
@@ -123,7 +122,7 @@ orgs, err := oidcClient.FetchOrgs(ctx, tok.AccessToken)
 
 ### `latere auth org switch <id>`
 
-New subcommand using auth's refresh-grant org-switch (per `auth/specs/refresh-token-org-switch.md` — verify implemented before relying on it):
+New subcommand using the auth service's refresh-grant org-switch (verify it is implemented before relying on it):
 
 ```go
 tok, _ := store.Load()
@@ -134,7 +133,7 @@ return store.Save(newTok)
 
 Personal context: `latere auth org switch ""` (or `latere auth org switch --personal`).
 
-If `auth/specs/refresh-token-org-switch.md` is not yet implemented, fall back to forcing the user through `latere auth login --org <id>` (a re-auth via device-code with `org_id` in extra params).
+If the refresh-grant org-switch is not yet implemented, fall back to forcing the user through `latere auth login --org <id>` (a re-auth via device-code with `org_id` in extra params).
 
 ### `oidc.Client.RefreshTokenWithExtra` (verify exists or add)
 
@@ -148,7 +147,7 @@ Drop any bespoke env reader if present; call `oidc.LoadConfig()` (no prefix need
 
 - `README.md`:
   - Rewrite the "Authentication" section around `latere auth login` (device-code) + `latere auth org list` / `switch`.
-  - Document the `~/.config/latere/token.json` file format (cross-link to `auth/INTEGRATION.md`).
+  - Document the `~/.config/latere/token.json` file format (cross-link to the auth service's integration guide).
   - Note that wallfacer local-mode shares the same token file.
 - `docs/*` (if any): update.
 - `specs/README.md` (new) — index file for the new `specs/` directory.
@@ -180,4 +179,4 @@ The pkg bump touches `go.mod` + the two auth files. Revert as a single commit if
 - **`RefreshTokenWithExtra` may not exist** in `pkg/oidc`. If not, this spec either adds it (small additive method) or falls back to forcing re-auth on org switch. Decide during implementation.
 - **`--token` access-only mode lacks refresh**. Document that the CLI cannot refresh paste-mode tokens; users must rerun `latere auth login` when the token expires.
 - **Shared token file with wallfacer local-mode**: per parent spec, both write to `~/.config/latere/token.json`. The CLI must record which issuer the token came from and refuse to refresh against a different issuer.
-- **`auth/specs/refresh-token-org-switch.md` dependency**: that spec is currently marked complete in auth's spec tree; verify the endpoint is live in production before shipping `latere auth org switch`.
+- **Refresh-grant org-switch dependency**: the auth service's design for it is marked complete; verify the endpoint is live in production before shipping `latere auth org switch`.

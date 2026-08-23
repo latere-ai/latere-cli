@@ -71,35 +71,33 @@ All user-facing hints change to the flat form: `run latere login` (grep for
 
 ## Landscape Impact
 
-`latere auth <verb>` appears in ~50 files across `../` (survey 2026-07-12;
-dominant forms: `login` ×45 incl. `--token`/`--org-id`, `print-token` ×16,
-`whoami` ×4, `logout` ×2). The hidden alias means **nothing breaks at
-flatten time**; the alias cannot be removed until the sweep below lands.
+`latere auth <verb>` is written into roughly fifty places across the Latere
+product surfaces (a July 2026 survey; dominant forms: `login` ×45 including
+`--token`/`--org-id`, `print-token` ×16, `whoami` ×4, `logout` ×2). The
+hidden alias means **nothing breaks at flatten time**; the alias cannot be
+removed until those places move to the flat form.
 
 By class, in migration order:
 
 1. **This repo** — commands, hints, README (part of this spec).
-2. **Executable dependency** — `sandbox/test/e2e-cli-credential-smoke.sh`
-   invokes `latere auth login` (the only script/CI caller found). Switch to
+2. **Executable dependency** — one credential smoke script invokes
+   `latere auth login` (the only script or CI caller found). It switches to
    `latere login` once a flattened CLI release is out.
-3. **Server-emitted remediation** — `sandbox/api/errors.go:94` tells API
-   callers to `Run \`latere auth login\``. Cella deploy must trail the CLI
-   release (old CLIs still understand the alias, so ordering is soft).
-4. **Product frontends (user-visible copy, en+zh)** — sandbox frontend
-   (ConsoleScreen, DetailPane, HeroDemo, i18n), drive frontend
-   (`onboarding.ts` + test, `CloneUrlBox.vue`), agents frontend (review
-   content).
-5. **Docs & marketing** — sandbox `docs/cella/*` (en+zh) + deploy docs, lux
-   `docs/lux/*`, drive README, auth `INTEGRATION.md`, wallfacer docs +
-   `internal/cli/auth.go` help text, latere-ai site (`developers.html`,
-   introducing-drive blog en+zh), `../specs/products/cli.md`.
+3. **Server-emitted remediation** — the Cella API's error envelope tells
+   callers to run `latere auth login`. Its deploy must trail the CLI release
+   (old CLIs still understand the alias, so ordering is soft).
+4. **Product frontends** — user-visible copy in the Cella, Drive, and Topos
+   consoles, in English and Chinese.
+5. **Docs and marketing** — product guides in English and Chinese, the
+   integration guide, the wallfacer docs and CLI help text, and the
+   latere.ai site pages and blog posts that show a sign-in command.
 6. **Not affected** — `pkg/oidclogin` ("latere auth" there names the auth
    *service*, not the CLI); archived specs stay as written; code comments
-   (auth `device.go:33`) are cosmetic.
+   are cosmetic.
 
-Classes 2-5 are per-repo follow-up commits in their own repos, not part of
-this spec's implementation; this spec is done when class 1 ships and the
-alias covers the rest.
+Classes 2-5 are per-surface follow-up commits owned by those surfaces, not
+part of this spec's implementation; this spec is done when class 1 ships and
+the alias covers the rest.
 
 ## Testing Strategy
 
@@ -143,10 +141,10 @@ UUID) to stdout so it is scriptable; org id + `--personal` together is an
 explicit error rather than silently preferring one; the alias prints no
 deprecation notice (scripts' stderr stays clean).
 
-**Follow-ups.** Landscape classes 2–5 (sandbox smoke script, cella
-remediation string, product frontends, cross-repo docs) land per-repo after
-a release ships, per the Landscape Impact section. specs/003-drive-subcommand.md
-is now unblocked.
+**Follow-ups.** Landscape classes 2-5 (the credential smoke script, the
+Cella remediation string, the product frontends, and the surrounding docs)
+land per-surface after a release ships, per the Landscape Impact section.
+`003-drive-subcommand.md` is now unblocked.
 
 ## Non-goals
 
