@@ -51,7 +51,7 @@ func TestRunDeviceFlowOpensVerificationURL(t *testing.T) {
 	err := runDeviceFlow(ctx, deviceFlowOpts{
 		AuthURL:  srv.URL,
 		ClientID: "latere-cli",
-		Scopes:   scopes.SandboxRead.Name,
+		Scopes:   api.LoginScopes,
 	})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("runDeviceFlow err = %v, want context.Canceled", err)
@@ -93,7 +93,7 @@ func TestRunDeviceFlowNoBrowserSkipsOpen(t *testing.T) {
 	err := runDeviceFlow(ctx, deviceFlowOpts{
 		AuthURL:   srv.URL,
 		ClientID:  "latere-cli",
-		Scopes:    scopes.SandboxRead.Name,
+		Scopes:    api.LoginScopes,
 		NoBrowser: true,
 	})
 	if !errors.Is(err, context.Canceled) {
@@ -197,7 +197,7 @@ func TestAuthWhoamiFallsBackToVerifiedJWTClaims(t *testing.T) {
 		"principal_type": "user",
 		"org_id":         "org-456",
 		"client_id":      "latere-cli",
-		"scp":            []string{scopes.SandboxRead.Name, scopes.SandboxWrite.Name},
+		"scp":            []string{scopes.AgentsRun.Name, scopes.AgentsRead.Name, scopes.AgentsWrite.Name},
 	})
 	tokenPath := filepath.Join(t.TempDir(), "token.json")
 	t.Setenv("LATERE_TOKEN_FILE", tokenPath)
@@ -234,7 +234,7 @@ func TestAuthWhoamiFallsBackToVerifiedJWTClaims(t *testing.T) {
 		"context:       org",
 		"org_id:        org-456",
 		"client_id:     latere-cli",
-		"scopes:        read:sandbox write:sandbox",
+		"scopes:        run:agents read:agents write:agents",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("output missing %q:\n%s", want, out)
