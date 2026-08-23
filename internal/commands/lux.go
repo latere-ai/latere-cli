@@ -27,8 +27,7 @@ import (
 
 // Lux is the Latere model gateway at lux.latere.ai. These commands let
 // the CLI call models with the user's identity instead of an allocated
-// key: cost is tracked on the identity. See
-// lux/specs/11-cli-keyless-access.md.
+// key: cost is tracked on the identity.
 
 // ---- provider surface ----
 

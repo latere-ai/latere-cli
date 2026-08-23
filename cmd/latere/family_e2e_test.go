@@ -18,7 +18,7 @@ package main
 //	                           round-trip, cross-product 401. Spends money;
 //	                           cleans up after itself.
 //	LATERE_FAMILY_E2E_LOGOUT=1 also: logout then reuse the old bearer ->
-//	                           401 (if-11). Destructive: ends the session.
+//	                           401. Destructive: ends the session.
 //
 // Identity comes from the logged-in CLI (~/.config/latere/token.json) or
 // LATERE_E2E_TOKEN. Run:
@@ -345,18 +345,18 @@ func (fe *familyEnv) runWriteTier(t *testing.T) {
 	})
 }
 
-// runLogoutTier proves server-side revocation (if-11): after logout, the
+// runLogoutTier proves server-side revocation: after logout, the
 // previously valid bearer no longer verifies. Destructive: it ends the
 // session, so it must be the last thing that runs.
 func (fe *familyEnv) runLogoutTier(t *testing.T) {
-	t.Run("if-11/logout-revokes", func(t *testing.T) {
+	t.Run("logout-revokes", func(t *testing.T) {
 		old := fe.token
 		if _, errOut, err := fe.run(t, 20*time.Second, "logout"); err != nil {
 			t.Fatalf("logout: %v\n%s", err, errOut)
 		}
 		status, _ := fe.get(t, fe.cellaURL+"/v1/sandboxes", old)
 		if status != http.StatusUnauthorized && status != http.StatusForbidden {
-			t.Errorf("reused bearer after logout = %d, want 401/403 (if-11 revocation)", status)
+			t.Errorf("reused bearer after logout = %d, want 401/403 (revocation)", status)
 		}
 	})
 }

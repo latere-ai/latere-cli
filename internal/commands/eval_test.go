@@ -365,7 +365,7 @@ func TestEvalCellsTable(t *testing.T) {
 		gotSuite = r.URL.Query().Get("suite")
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`[
-			{"id":"ce-1","task_id":"tk-1","tuple":{"model_id":"fable-5","model_route":"anthropic","harness":"claude-code","harness_version":"3.1.0","image_tag":"ghcr.io/latere-ai/eval:1.2.3","effort_configured":"high","gateway_surface":"native"},"state":"pending"}
+			{"id":"ce-1","task_id":"tk-1","tuple":{"model_id":"fable-5","model_route":"anthropic","harness":"claude-code","harness_version":"3.1.0","image_tag":"ghcr.io/example/harness:1.2.3","effort_configured":"high","gateway_surface":"native"},"state":"pending"}
 		]`))
 	}))
 	defer srv.Close()
