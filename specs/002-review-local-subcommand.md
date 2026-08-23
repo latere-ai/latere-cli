@@ -194,7 +194,7 @@ is cheaper to cover end-to-end than to fake.
 ## Lux routing detail
 
 topos's `ModelLux` kind routes the request through Lux in the gateway's native
-dialect (lux spec 33): `latere.ai/x/pkg/luxsdk` posts to Lux's
+dialect: `latere.ai/x/pkg/luxsdk` posts to Lux's
 `/lux/v1/generate` as `Authorization: Bearer`. The command sets `BearerSource`
 to `luxIdentityBearer`, the same identity-bearer path `latere lux env` /
 `lux serve` use; it returns a passthrough token when one is configured,

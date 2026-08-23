@@ -118,7 +118,7 @@ git clone https://x:${LATERE_TOKEN}@drive.latere.ai/git/<org-slug>/<repo>.git
 | **Drive** | Files on Latere Drive: upload/download (multipart for big files), trash and restore, version history, sharing by link or person. Repos clone over plain git (above). | [docs/drive.md](docs/drive.md) |
 | **Lux** | Call language models on your identity, no key to allocate: model discovery with rates, SDK enablement, usage, and serving your own local models (Ollama/vLLM/LM Studio/llama.cpp/MLX) through Lux. | [docs/lux.md](docs/lux.md) |
 | **Review** | Adversarial review of your latest Claude Code session: a proposer defends the diff, critics attack it through Lux, unresolved attacks surface. | [docs/review.md](docs/review.md) |
-| **Topos** | Remote coding-assistant sessions on the Latere agent platform: start an interactive session, detach and reattach with state intact, approve tool calls inline, or run one prompt headless with `-p`. | [docs/topos.md](docs/topos.md) |
+| **Topos** | Coding-assistant sessions, local or hosted. `latere topos --local` runs an agent on this machine against your own files with no control plane and no login; `latere topos` runs it on the Latere agent platform, where you can detach and reattach with state intact, approve tool calls inline, or run one prompt headless with `-p`. | [docs/topos.md](docs/topos.md) |
 
 ```sh
 latere cella apply -f sandbox.yaml
@@ -143,7 +143,7 @@ opt-in and **skip silently without their environment variables**, so a green
 
 | Test | Gate | What it exercises |
 |------|------|-------------------|
-| `TestFamilyE2E` | `LATERE_FAMILY_E2E=1` | Every product against production with your signed-in identity. Add `LATERE_FAMILY_E2E_WRITE=1` for write paths and `LATERE_FAMILY_E2E_LOGOUT=1` to end with a logout. |
+| `TestFamilyE2E` | `LATERE_FAMILY_E2E=1` | Every product against production with your signed-in identity. Add `LATERE_FAMILY_E2E_WRITE=1` for the write paths (this one spends money on real model calls; it cleans up after itself) and `LATERE_FAMILY_E2E_LOGOUT=1` to end by revoking your session. |
 | `TestProdE2EServeAndCall` | `LATERE_LUX_E2E=1` plus `LATERE_LUX_TOKEN` | `latere lux serve` end to end, exposing a local Ollama model through Lux. |
 
 Run `make hooks` once per clone to install the pre-commit gofmt and

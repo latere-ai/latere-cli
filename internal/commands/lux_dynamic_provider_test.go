@@ -110,8 +110,8 @@ func TestWireModelStripsProviderPrefix(t *testing.T) {
 // Every provider Lux routes should be reachable by name from `lux invoke`
 // and `lux env`. Gemini is the documented exception (its SDK has no bearer
 // path), and ollama/local are dev-loop routes. This pins that the
-// openai-chat family added by lux spec 035 is wired, since the failure mode
-// is silent: the provider simply is not offered.
+// openai-chat provider family is wired, since the failure mode is silent:
+// the provider simply is not offered.
 func TestProviderSpecsCoverTheOpenAIChatFamily(t *testing.T) {
 	specs := providerSpecs()
 	for _, name := range []string{"openai", "openrouter", "moonshot", "xai", "zhipu"} {
