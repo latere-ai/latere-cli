@@ -132,9 +132,9 @@ func anthropicDirect(credential string, oauth bool, modelName string) (models.Mo
 	return toposlux.NewFromCaller(d, lopts...), nil
 }
 
-// luxLocalModel routes inference through Latere Lux's native dialect
-// (POST <lux>/lux/v1/generate, lux spec 33), authenticated with the
-// caller's latere identity bearer per request (refreshed on expiry).
+// luxLocalModel routes inference through Latere Lux's first-party dialect
+// (POST <lux>/lux/v1/generate), authenticated with the caller's latere
+// identity bearer per request (refreshed on expiry).
 func luxLocalModel(modelName string) models.Model {
 	model := modelName
 	if model == "" {

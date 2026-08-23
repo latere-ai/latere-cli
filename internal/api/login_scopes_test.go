@@ -8,7 +8,7 @@ import (
 // The CLI must not request sandbox scopes from auth. Cella issues its own
 // token from the identity in this one and decides what that token may carry,
 // so a *:sandbox grant here would be inert vocabulary that auth still has to
-// keep issuing (cella spec 131).
+// keep issuing.
 //
 // Pinned as an exact set rather than a "does not contain" check: the failure
 // this guards against is someone re-adding a scope while widening the list for

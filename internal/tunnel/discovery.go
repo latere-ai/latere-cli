@@ -20,8 +20,8 @@ import (
 )
 
 // Runtime defaults: the local URL and discovery probe per recognized
-// runtime (spec 18). Every runtime speaks the openai-compat dialect; only
-// the default port and the model-list probe differ. An unknown runtime is
+// runtime. Every runtime speaks the openai-compat dialect; only the
+// default port and the model-list probe differ. An unknown runtime is
 // treated as generic openai-compat.
 const (
 	RuntimeOllama   = "ollama"

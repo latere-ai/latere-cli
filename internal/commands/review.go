@@ -27,7 +27,7 @@ import (
 // retained Latere identity bearer, so critic cost is tracked on the
 // Latere account and no provider key is needed locally.
 //
-// See latere-cli/specs/review-local-subcommand.md.
+// See specs/002-review-local-subcommand.md.
 
 // reviewOpts holds the resolved flags for one `latere review` invocation.
 type reviewOpts struct {

@@ -233,7 +233,7 @@ func heartbeatLoop(ctx context.Context, ctrl net.Conn, opts Options) {
 // forwarder relays one inbound request stream to the local runtime. Because
 // it builds the target URL from its own configured upstream (never from the
 // request's host), it can only ever reach that one server: the egress
-// allowlist is structural, not a check (spec 18 security).
+// allowlist is structural, not a check.
 type forwarder struct {
 	ctx      context.Context
 	client   *http.Client

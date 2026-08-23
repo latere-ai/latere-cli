@@ -22,8 +22,8 @@ import (
 //
 // No sandbox scopes appear here. Cella issues its own token from this
 // identity and decides what that token may carry, so requesting *:sandbox
-// from auth would grant nothing cella reads (cella spec 131). Auth is a
-// standard OIDC provider for the sandbox surface: it says who the caller is.
+// from auth would grant nothing Cella reads. Auth is a standard OIDC
+// provider for the sandbox surface: it says who the caller is.
 //
 // The agents scopes stay: topos still gates on scopes auth issues.
 const LoginScopes = "openid email profile offline_access run:agents read:agents write:agents"

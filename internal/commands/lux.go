@@ -98,9 +98,9 @@ func providerSpecs() map[string]providerSpec {
 			name: "gemini",
 		},
 		"local": {
-			// Local runtimes tunneled in via `lux serve` (spec 18). They
-			// speak the openai-compat dialect, so the OpenAI SDK pointed at
-			// the /local/v1 route just works. No upstream key.
+			// Local runtimes tunneled in via `lux serve`. They speak the
+			// openai-compat dialect, so the OpenAI SDK pointed at the
+			// /local/v1 route just works. No upstream key.
 			name: "local", chatPath: "/local/v1/chat/completions",
 			envBaseVar: "OPENAI_BASE_URL", envKeyVar: "OPENAI_API_KEY", envBaseURL: "/local/v1",
 		},
@@ -118,9 +118,9 @@ const (
 	compatPassthrough compatDialect = "passthrough"
 	compatOpenAI      compatDialect = "openai"
 	compatAnthropic   compatDialect = "anthropic"
-	// compatLux is the first-party dialect (lux spec 33). luxsdk and its
-	// TypeScript/Python siblings append /lux/v1/generate themselves, so
-	// the base carries no suffix.
+	// compatLux is the first-party Lux dialect. luxsdk and its TypeScript
+	// and Python siblings append /lux/v1/generate themselves, so the base
+	// carries no suffix.
 	compatLux compatDialect = "lux"
 )
 
@@ -339,7 +339,7 @@ func newLuxServeCmd(luxURL, authURL, token *string) *cobra.Command {
 		Short: "Expose a local model runtime (Ollama, vLLM, LM Studio, llama.cpp, MLX) through Lux.",
 		Long: `Open a reverse tunnel from this machine to Lux so your local models are
 callable through lux.latere.ai from anywhere, with your identity and the
-same gates and request log as any other Lux model (lux spec 18).
+same gates and request log as any other Lux model.
 
 This runs a long-lived outbound connection (no inbound port is opened) and
 forwards inbound requests only to the configured local runtime. Run
@@ -1225,10 +1225,10 @@ platform key).`,
 // would need a read-modify-write with a lost-update race, and would be
 // finer-grained than the only command that writes bindings.
 //
-// Clearing is safe for a principal since spec 043: an unbound model falls
-// through to an owned provider key. A virtual key's bindings are its
-// containment boundary, but those are fixed at mint time and not
-// reachable through this endpoint.
+// Clearing is safe for a principal: an unbound model falls through to an
+// owned provider key. A virtual key's bindings are its containment
+// boundary, but those are fixed at mint time and not reachable through
+// this endpoint.
 func newLuxAccessClearCmd(luxURL, authURL, token *string) *cobra.Command {
 	return &cobra.Command{
 		Use:   "clear",

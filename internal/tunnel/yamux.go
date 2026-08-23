@@ -26,8 +26,8 @@ func yamuxConfig() *yamux.Config {
 
 // NodeID returns a stable per-machine node id, persisted under the latere
 // config dir so a reconnect reuses it and overwrites its own registry
-// member instead of creating a duplicate (spec 18). A random id is
-// generated and saved on first use.
+// member instead of creating a duplicate. A random id is generated and
+// saved on first use.
 func NodeID() string {
 	p := nodeIDPath()
 	if p != "" {

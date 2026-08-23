@@ -40,7 +40,7 @@ func TestCeApplyFlag(t *testing.T) {
 
 // TestCeApplyPostsRawYAML proves the body the server sees is the
 // raw file bytes with Content-Type: application/yaml. This is the
-// soft-shim contract from sandbox spec 81 — same body as the
+// soft-shim contract the Cella API accepts — same body as the
 // dashboard's YAML tab and a curl with --data-binary.
 func TestCeApplyPostsRawYAML(t *testing.T) {
 	var gotBody []byte
