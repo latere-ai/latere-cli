@@ -40,6 +40,7 @@ fmt-check: ## Fail if any Go source is not gofmt-formatted
 .PHONY: hooks
 hooks: ## Install repository git hooks (pre-commit gofmt guard)
 	git config core.hooksPath .githooks
+	@[ -e CLAUDE.md ] || [ -L CLAUDE.md ] || ln -s AGENTS.md CLAUDE.md
 	@echo "installed git hooks (core.hooksPath=.githooks)"
 
 .PHONY: lint
