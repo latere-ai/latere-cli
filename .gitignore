@@ -30,3 +30,6 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Agent instructions live in AGENTS.md; CLAUDE.md is a local symlink to it.
+CLAUDE.md
