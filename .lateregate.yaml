@@ -1,0 +1,37 @@
+# The per-push gate configuration for latere-cli. Every check runs from
+# latere.ai/x/ci-gate, pinned in go.mod, so a gate that fails on a runner
+# fails the same way on a laptop.
+
+hermetic:
+  # One directory, for one binary. The host-sandbox tests run commands through
+  # sh, which is /bin/sh on both a laptop and a runner; with allow: [] three
+  # of them fail rather than skip, so the entry is measured rather than
+  # assumed. Nothing else is on PATH: the upgrade path is tested against a
+  # synthesised archive rather than by running one, and every network test
+  # talks to an httptest server.
+  allow: [/bin]
+
+modernize:
+  # newexpr rewrites pointer helpers to new(v) and inlines the call sites
+  # unevenly, leaving the helper with no callers and giving an untyped
+  # constant argument the wrong default type. errorsastype rewrites errors.As
+  # to errors.AsType[T], whose type parameter a local non-error interface
+  # target does not satisfy, so the rewrite does not compile. lateregate
+  # checks both fixers still exist, because `go fix` rejects an unknown
+  # -name=false and the gate would otherwise pass having run nothing.
+  disable: [newexpr, errorsastype]
+
+spec:
+  dir: specs
+  # Every spec here records a surface that shipped. `complete` and
+  # `implemented` are both in use and mean the same thing to a reader, so both
+  # stay until the tree is reconciled; nothing else is allowed in.
+  status: [complete, implemented]
+  require: [title, status]
+  # No index rule: specs/README.md describes the tree in prose and a fenced
+  # listing rather than a table, so there is no status cell for a spec to
+  # disagree with. It is excluded because it is not itself a spec.
+  exclude: [README.md]
+  # The specs use Markdown tables for their command surfaces, and a row whose
+  # cell count drifts renders as silently missing columns.
+  tables: true

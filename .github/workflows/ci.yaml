@@ -1,19 +1,22 @@
 name: ci
+
+# Every Go gate this repository has runs through latere-ai/ci's reusable
+# pipeline, which probes the Makefile and runs the targets it finds. The
+# checks live in latere.ai/x/ci-gate, pinned in go.mod, so each of them runs
+# identically from a laptop: `make test`, `make spec-lint`, `make validate`
+# and the rest need nothing but this checkout.
+#
+# The release is release.yaml, which the shared pipeline cannot host: it runs
+# on a tag and needs write access to publish.
+
 on:
   push:
     branches: [main]
   pull_request:
+
+permissions:
+  contents: read
+
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-      - run: go mod tidy -diff
-      - run: go vet ./...
-      - run: go build ./...
-      - run: make lint-modernize
-      - run: go test ./...
+  verify:
+    uses: latere-ai/ci/.github/workflows/go-verify.yml@v1

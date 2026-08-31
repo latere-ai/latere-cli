@@ -2,9 +2,9 @@
 title: latere-cli — Auth Unification Migration
 status: complete
 depends_on:
-  - "auth service: unified device-code client and shared token store"
-  - "auth service: cookie and environment compatibility"
-  - "auth service: integration documentation rewrite"
+  - latere-ai/auth/specs/.archive/043-authkit-device-code-and-token-store.md
+  - latere-ai/auth/specs/.archive/042-authkit-cookie-and-env-compat.md
+  - latere-ai/auth/specs/.archive/046-integration-doc-rewrite.md
 affects:
   - go.mod
   - internal/commands/auth.go

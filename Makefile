@@ -1,29 +1,38 @@
-# Verification entry points for latere-cli.
+# The verification contract for latere-cli.
 #
-# `make build` is the gate referenced in CLAUDE.md: lint + govulncheck + test.
-# It is a superset of CI (.github/workflows/ci.yaml runs tidy/vet/build/test),
-# adding govulncheck. Run it before committing.
+# Every target here is one latere-ai/ci's go-verify workflow probes for and
+# runs, so `make <target>` on a laptop is the same check the runner performs.
+# The gates themselves live in latere.ai/x/ci-gate, pinned in go.mod; what
+# each one asserts for this repository is in .lateregate.yaml.
+#
+# `make build` stays the local pre-commit gate: it is a superset of the
+# pipeline, adding the module-tidy and vulnerability checks.
 
 GO ?= go
 
 .PHONY: build
-build: tidy vet compile vuln test ## Full verification gate (run before committing)
+build: tidy compile fmt-check lint-modernize test vuln spec-lint ## Full verification gate (run before committing)
 
 .PHONY: tidy
 tidy: ## Fail if go.mod/go.sum are not tidy
 	$(GO) mod tidy -diff
-
-.PHONY: vet
-vet: ## go vet
-	$(GO) vet ./...
 
 .PHONY: compile
 compile: ## Compile all packages
 	$(GO) build ./...
 
 .PHONY: test
-test: ## Run tests
+test: ## go vet, then the suite
+	$(GO) vet ./...
 	$(GO) test ./...
+
+.PHONY: test-race
+test-race: ## The suite under the race detector
+	$(GO) test -race ./...
+
+.PHONY: test-hermetic
+test-hermetic: ## The suite with only the Go toolchain on PATH
+	@$(GO) tool lateregate hermetic
 
 .PHONY: vuln
 vuln: ## Scan for known vulnerabilities
@@ -35,7 +44,45 @@ fmt: ## Format all Go sources in place
 
 .PHONY: fmt-check
 fmt-check: ## Fail if any Go source is not gofmt-formatted
-	@out=$$(gofmt -l .); if [ -n "$$out" ]; then echo "gofmt: unformatted files:"; echo "$$out"; exit 1; fi
+	@$(GO) tool lateregate fmt-check
+
+# .golangci.yml is generated and gitignored: golangci-lint has no config
+# inheritance, so the org's set is rendered from latere.ai/x/ci-gate on every
+# run. Regenerating is what makes divergence impossible rather than merely
+# detectable.
+.PHONY: lint-config
+lint-config: ## Render .golangci.yml from the shared template
+	@$(GO) tool lateregate golangci
+
+GOLANGCI_VERSION ?= v2.13.1
+
+.PHONY: lint
+lint: lint-config ## Run the linter CI runs, against the config lint-config renders
+	@$(GO) run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_VERSION) run ./...
+
+# Fails on code a standard library call or a language builtin already covers.
+# Carries fixers golangci-lint's modernize linter does not, so it runs whether
+# or not the linter does.
+.PHONY: lint-modernize
+lint-modernize: ## Fail on code the standard library already covers
+	@$(GO) tool lateregate modernize
+
+# specs/ records why each surface has the shape it has. A spec tree nobody
+# checks drifts from the code within a milestone.
+.PHONY: spec-lint
+spec-lint: ## Check the spec tree agrees with itself
+	@$(GO) tool lateregate spec-lint
+
+# The repo-specific checks the shared pipeline cannot know about. `tidy` was a
+# step in the old workflow and would otherwise be lost; `vuln` was local-only,
+# and a dependency advisory is a fact about the module graph that nothing else
+# here reports.
+.PHONY: validate
+validate: tidy vuln ## Repo-specific consistency checks
+
+.PHONY: binary
+binary: ## Build the latere binary into ./latere
+	$(GO) build -o latere ./cmd/latere
 
 .PHONY: hooks
 hooks: ## Install repository git hooks (pre-commit gofmt guard)
@@ -43,38 +90,7 @@ hooks: ## Install repository git hooks (pre-commit gofmt guard)
 	@[ -e CLAUDE.md ] || [ -L CLAUDE.md ] || ln -s AGENTS.md CLAUDE.md
 	@echo "installed git hooks (core.hooksPath=.githooks)"
 
-.PHONY: lint
-lint: ## Stricter lint via golangci-lint (has pre-existing findings; not in `make build`)
-	golangci-lint run ./...
-
-# lint-modernize fails on code that a standard library call already covers.
-# It runs the toolchain modernizers, which overlap golangci-lint's modernize
-# linter but add three it does not carry: buildtag, hostport, and the
-# go:fix inline directives. newexpr and errorsastype are off for the reasons
-# recorded in .golangci.yml.
-# Only a non-empty patch fails the target. go fix also exits non-zero when a
-# package does not type-check, which is a build error rather than a finding,
-# so stderr is dropped and the decision rests on the patch alone.
-.PHONY: lint-modernize
-lint-modernize: ## Fail on code the standard library already covers
-	@for fixer in newexpr errorsastype; do \
-		$(GO) tool fix help 2>&1 | grep -q "^    $$fixer " || { \
-			echo "go fix no longer carries the $$fixer fixer, so -$$fixer=false is rejected and this check passes silently"; \
-			exit 1; \
-		}; \
-	done
-	@patch=$$($(GO) fix -diff -newexpr=false -errorsastype=false ./... 2>/dev/null); \
-	if [ -n "$$patch" ]; then \
-		echo "$$patch"; \
-		echo "go fix: the diff above is already in the standard library; apply it with go fix"; \
-		exit 1; \
-	fi
-
-.PHONY: binary
-binary: ## Build the latere binary into ./latere
-	$(GO) build -o latere ./cmd/latere
-
 .PHONY: help
 help: ## List targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
-		awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
+		awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'

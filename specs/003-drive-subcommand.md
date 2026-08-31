@@ -2,7 +2,7 @@
 title: latere drive subcommand
 status: implemented
 depends_on:
-  - flatten-auth-commands.md
+  - 004-flatten-auth-commands.md
 affects:
   - internal/commands/drive.go
   - internal/commands/root.go
