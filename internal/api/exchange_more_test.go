@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -239,8 +240,11 @@ func readAllString(r *http.Request) (string, error) {
 	for {
 		n, err := r.Body.Read(buf)
 		b = append(b, buf[:n]...)
-		if err != nil {
+		if errors.Is(err, io.EOF) {
 			return string(b), nil
+		}
+		if err != nil {
+			return string(b), err
 		}
 	}
 }

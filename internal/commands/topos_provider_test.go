@@ -120,7 +120,7 @@ func TestAuthPickerSelections(t *testing.T) {
 	enter := tea.KeyMsg{Type: tea.KeyEnter}
 
 	// Cursor 0 = Claude → authClaude.
-	if got := authModel(newAuthModel()).updated(enter).result; got.choice != authClaude {
+	if got := newAuthModel().updated(enter).result; got.choice != authClaude {
 		t.Fatalf("first option = %v, want authClaude", got.choice)
 	}
 

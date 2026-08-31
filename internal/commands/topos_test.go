@@ -332,7 +332,7 @@ func TestToposClientUsesAuthRootToken(t *testing.T) {
 	writeAuthTokenFile(t, "auth-root-token", "", time.Time{})
 	t.Setenv("TOPOS_TOKEN", "")
 
-	c, err := toposClient("http://localhost:8080")
+	c, err := toposClient(t.Context(), "http://localhost:8080")
 	if err != nil {
 		t.Fatalf("toposClient: %v", err)
 	}
@@ -350,7 +350,7 @@ func TestToposTokenEnvOverride(t *testing.T) {
 
 	t.Run("TOPOS_TOKEN satisfies auth without a token file", func(t *testing.T) {
 		t.Setenv("TOPOS_TOKEN", "dev-secret")
-		c, err := toposClient("http://localhost:8080")
+		c, err := toposClient(t.Context(), "http://localhost:8080")
 		if err != nil {
 			t.Fatalf("toposClient: %v", err)
 		}
@@ -361,7 +361,7 @@ func TestToposTokenEnvOverride(t *testing.T) {
 
 	t.Run("absent TOPOS_TOKEN still requires login", func(t *testing.T) {
 		t.Setenv("TOPOS_TOKEN", "")
-		if _, err := toposClient("http://localhost:8080"); err == nil {
+		if _, err := toposClient(t.Context(), "http://localhost:8080"); err == nil {
 			t.Error("expected not-logged-in error without a token file or TOPOS_TOKEN")
 		}
 	})

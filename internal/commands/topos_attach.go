@@ -124,7 +124,11 @@ func dialAttach(ctx context.Context, baseURL, token, sessionID string, since int
 	if token != "" {
 		opts.HTTPHeader = http.Header{"Authorization": []string{"Bearer " + token}}
 	}
-	ws, _, err := websocket.Dial(dctx, wsURLFromBase(baseURL, sessionID, since, readonly), opts)
+	// The handshake response is never the caller's to close. websocket.Dial
+	// leaves it nil on success, where the connection owns the underlying
+	// socket and closing would tear down the upgraded stream, and has already
+	// closed it on failure.
+	ws, _, err := websocket.Dial(dctx, wsURLFromBase(baseURL, sessionID, since, readonly), opts) //nolint:bodyclose
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("attach: %w", err)

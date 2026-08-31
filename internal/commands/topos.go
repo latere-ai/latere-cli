@@ -169,7 +169,7 @@ they are never sent by the client. Requires the write:agents scope.`,
 			if name == "" || kind == "" {
 				return fmt.Errorf("--name and --kind are required")
 			}
-			c, err := toposClient(apiURL)
+			c, err := toposClient(cmd.Context(), apiURL)
 			if err != nil {
 				return err
 			}
@@ -243,7 +243,7 @@ completes. Requires the run:agents scope.`,
 			if prompt == "" {
 				return fmt.Errorf("--prompt is required")
 			}
-			c, err := toposClient(apiURL)
+			c, err := toposClient(cmd.Context(), apiURL)
 			if err != nil {
 				return err
 			}
@@ -273,8 +273,8 @@ func printSessionResult(r sessionResultDTO) {
 	printWrappedField("tool_calls", fmt.Sprintf("%d", r.ToolCalls))
 	printWrappedField("tokens", fmt.Sprintf("%d in / %d out", r.Usage.InputTokens, r.Usage.OutputTokens))
 	if r.Output != "" {
-		fmt.Fprintln(os.Stdout)
-		fmt.Fprintln(os.Stdout, r.Output)
+		fprintln(os.Stdout)
+		fprintln(os.Stdout, r.Output)
 	}
 }
 
@@ -291,7 +291,7 @@ func newToposAgentsListCmd() *cobra.Command {
 		Example: `  latere topos agents list
   latere topos agents list --json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := toposClient(apiURL)
+			c, err := toposClient(cmd.Context(), apiURL)
 			if err != nil {
 				return err
 			}
@@ -303,7 +303,7 @@ func newToposAgentsListCmd() *cobra.Command {
 				return printJSON(resp.Agents)
 			}
 			if len(resp.Agents) == 0 {
-				fmt.Fprintln(os.Stdout, "No agents are visible to this token.")
+				fprintln(os.Stdout, "No agents are visible to this token.")
 				return nil
 			}
 			printAgentList(resp.Agents)
@@ -325,7 +325,7 @@ func newToposAgentsGetCmd() *cobra.Command {
 		Example: `  latere topos agents get agent_01hxy`,
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := toposClient(apiURL)
+			c, err := toposClient(cmd.Context(), apiURL)
 			if err != nil {
 				return err
 			}
@@ -366,13 +366,13 @@ func resolveToposURL(flagURL string) string {
 // `latere login` now requests run:agents and the topos audience for),
 // NOT the Cella-audience token `latere cella` uses — so the Topos path uses the
 // auth root token, refreshed when expired.
-func toposClient(apiURL string) (*api.Client, error) {
+func toposClient(ctx context.Context, apiURL string) (*api.Client, error) {
 	c := api.NewClient(resolveToposURL(apiURL))
 	if v := os.Getenv("TOPOS_TOKEN"); v != "" {
 		c.Token = v
 		return c, nil
 	}
-	bearer, err := toposIdentityBearer()
+	bearer, err := toposIdentityBearer(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -384,7 +384,7 @@ func toposClient(apiURL string) (*api.Client, error) {
 // auth root token, refreshed when within a minute of expiry. It mirrors Lux's
 // authIdentityToken but is kept separate so the Topos path has its own clear
 // error messages.
-func toposIdentityBearer() (string, error) {
+func toposIdentityBearer(ctx context.Context) (string, error) {
 	authTok, err := api.LoadAuthToken()
 	if err != nil {
 		if errors.Is(err, api.ErrNoToken) {
@@ -395,11 +395,11 @@ func toposIdentityBearer() (string, error) {
 	access := authTok.AccessToken
 	if authTok.RefreshToken != "" && !authTok.ExpiresAt.IsZero() &&
 		time.Now().After(authTok.ExpiresAt.Add(-60*time.Second)) {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		rctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		defer cancel()
-		refreshed, rerr := api.RefreshAuthToken(ctx, toposAuthBase(), authTok.RefreshToken)
+		refreshed, rerr := api.RefreshAuthToken(rctx, toposAuthBase(), authTok.RefreshToken)
 		if rerr != nil {
-			return "", fmt.Errorf("auth token expired and refresh failed (%v); run `latere login`", rerr)
+			return "", fmt.Errorf("auth token expired and refresh failed (%w); run `latere login`", rerr)
 		}
 		access = refreshed.AccessToken
 	}
@@ -424,7 +424,7 @@ func agentPath(id string) string {
 func printAgentList(agents []agentDTO) {
 	for i, a := range agents {
 		if i > 0 {
-			fmt.Fprintln(os.Stdout)
+			fprintln(os.Stdout)
 		}
 		printAgent(a)
 	}

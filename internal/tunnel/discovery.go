@@ -132,7 +132,7 @@ func getJSON(ctx context.Context, hc *http.Client, url string, dst any) error {
 	if err != nil {
 		return fmt.Errorf("reach local runtime at %s: %w", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("local runtime %s returned %d", url, resp.StatusCode)
 	}

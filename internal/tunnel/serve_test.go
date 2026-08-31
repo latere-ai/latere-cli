@@ -96,6 +96,7 @@ func TestForwarderRejectsTruncatedBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read forwarder response: %v", err)
 	}
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusBadGateway {
 		t.Errorf("status = %d, want 502", resp.StatusCode)
 	}
@@ -222,6 +223,7 @@ func TestRunForwardsRequest(t *testing.T) {
 		if err != nil {
 			return
 		}
+		defer func() { _ = resp.Body.Close() }()
 		b, _ := io.ReadAll(resp.Body)
 		done <- result{status: resp.StatusCode, body: string(b), desc: desc}
 	}))

@@ -89,16 +89,16 @@ for every other host are untouched. Re-running setup is idempotent;
 				if err := gitConfigUnsetAll(cmd.Context(), key); err != nil {
 					return err
 				}
-				fmt.Fprintf(errw, "Removed %s from the global git config.\n", key)
+				fprintf(errw, "Removed %s from the global git config.\n", key)
 				return nil
 			}
 			if err := writeDriveGitHelperConfig(cmd.Context()); err != nil {
 				return err
 			}
-			fmt.Fprintf(errw, "Configured the global git config:\n")
-			fmt.Fprintf(errw, "  %s=                          (resets inherited helpers)\n", key)
-			fmt.Fprintf(errw, "  %s=!latere git-credential\n\n", key)
-			fmt.Fprintf(errw, "git clone https://%s/git/me/<repo>.git now authenticates\nwith the token from `latere login`.\n", driveHost())
+			fprintf(errw, "Configured the global git config:\n")
+			fprintf(errw, "  %s=                          (resets inherited helpers)\n", key)
+			fprintf(errw, "  %s=!latere git-credential\n\n", key)
+			fprintf(errw, "git clone https://%s/git/me/<repo>.git now authenticates\nwith the token from `latere login`.\n", driveHost())
 			return nil
 		},
 	}
@@ -147,11 +147,11 @@ func autoConfigureDriveGit(ctx context.Context, errw io.Writer) {
 	}
 	if !driveGitHelperConfigured(ctx) {
 		if err := writeDriveGitHelperConfig(ctx); err != nil {
-			fmt.Fprintf(errw, "  warning: could not configure git for %s (%v); run `latere git-credential setup` manually\n", driveHost(), err)
+			fprintf(errw, "  warning: could not configure git for %s (%v); run `latere git-credential setup` manually\n", driveHost(), err)
 			return
 		}
 	}
-	fmt.Fprintf(errw, "git is configured for %s (clone with git clone https://%s/git/<handle>/<repo>.git)\n", driveHost(), driveHost())
+	fprintf(errw, "git is configured for %s (clone with git clone https://%s/git/<handle>/<repo>.git)\n", driveHost(), driveHost())
 }
 
 // gitConfig runs `git config --global <args>`. Tests point it at a scratch
@@ -191,11 +191,7 @@ func newGitCredentialGetCmd() *cobra.Command {
 		Short: "Emit the saved Latere login for a Drive git request (called by git).",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			attrs, err := parseCredentialAttrs(cmd.InOrStdin())
-			if err != nil {
-				return nil
-			}
-			if !driveCredentialRequest(attrs) {
+			if !isDriveCredentialRequest(cmd.InOrStdin()) {
 				return nil
 			}
 			access, ok := driveCredentialToken(cmd.Context(), authURL)
@@ -204,7 +200,7 @@ func newGitCredentialGetCmd() *cobra.Command {
 			}
 			// Drive's git endpoint reads the Basic password as the bearer
 			// token; the username is ignored, `token` by convention.
-			fmt.Fprintf(cmd.OutOrStdout(), "username=token\npassword=%s\n\n", access)
+			fprintf(cmd.OutOrStdout(), "username=token\npassword=%s\n\n", access)
 			return nil
 		},
 	}
@@ -259,6 +255,18 @@ func driveCredentialToken(ctx context.Context, authURL string) (string, bool) {
 // parseCredentialAttrs reads git's credential-helper attribute block: one
 // `key=value` per line, terminated by a blank line or EOF. Values may
 // contain `=`; lines without one are ignored, matching git's tolerance.
+// isDriveCredentialRequest reports whether git is asking for a credential
+// this helper answers. Every miss reads the same -- an unreadable request as
+// much as another host -- because a credential helper must never break
+// `git fetch`: the command then prints nothing, exits 0, and git prompts.
+func isDriveCredentialRequest(r io.Reader) bool {
+	attrs, err := parseCredentialAttrs(r)
+	if err != nil {
+		return false
+	}
+	return driveCredentialRequest(attrs)
+}
+
 func parseCredentialAttrs(r io.Reader) (map[string]string, error) {
 	attrs := make(map[string]string)
 	sc := bufio.NewScanner(r)

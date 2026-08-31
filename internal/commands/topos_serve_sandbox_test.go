@@ -37,7 +37,7 @@ func TestToWSURL(t *testing.T) {
 
 func TestToposTunnelBearerDevOverride(t *testing.T) {
 	t.Setenv("TOPOS_TOKEN", "dev-token")
-	got, err := toposTunnelBearer()
+	got, err := toposTunnelBearer(t.Context())
 	if err != nil || got != "dev-token" {
 		t.Fatalf("toposTunnelBearer with TOPOS_TOKEN = (%q, %v), want dev-token", got, err)
 	}
@@ -63,7 +63,10 @@ func standInToposd(t *testing.T, got chan tunnelOutcome) *httptest.Server {
 		}
 		defer c.CloseNow() //nolint:errcheck
 		c.SetReadLimit(-1)
-		ctx, cancel := context.WithCancel(context.Background())
+		// r.Context(), not Background: the handler owns the upgraded
+		// connection for as long as it runs, so the request's context is the
+		// one whose lifetime matches the tunnel it is serving.
+		ctx, cancel := context.WithCancel(r.Context())
 		defer cancel()
 		nc := websocket.NetConn(ctx, c, websocket.MessageBinary)
 		sess, err := yamux.Server(nc, yamux.DefaultConfig())
@@ -169,7 +172,7 @@ func TestServeSandboxBearerError(t *testing.T) {
 	t.Setenv("TOPOS_TOKEN", "")
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // no token on file → toposIdentityBearer errors
 
-	if _, err := toposTunnelBearer(); err == nil {
+	if _, err := toposTunnelBearer(t.Context()); err == nil {
 		t.Fatal("toposTunnelBearer must error when no token is available")
 	}
 	err := runServeSandbox(context.Background(), "http://127.0.0.1:0", t.TempDir(),

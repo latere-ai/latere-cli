@@ -57,11 +57,6 @@ type policyDTO struct {
 	UpdatedAt          time.Time `json:"updated_at,omitzero"`
 }
 
-// fallbackWorkdir is the path the CLI assumes when a sandbox DTO
-// arrives without a workdir field (older sandboxd before the workdir
-// contract shipped).
-const fallbackWorkdir = "/workspace"
-
 type commandDTO struct {
 	CommandID string    `json:"command_id"`
 	Phase     string    `json:"phase"`
@@ -302,7 +297,7 @@ cellas returned by the backend, including warm-pool cellas.`,
 				return printJSON(sbs)
 			}
 			if len(sbs) == 0 {
-				fmt.Fprintln(os.Stdout, "No cellas are visible to this token.")
+				fprintln(os.Stdout, "No cellas are visible to this token.")
 				return nil
 			}
 			printSandboxList(sbs)
@@ -377,8 +372,8 @@ func runPolicyList(ctx context.Context, apiURL string, jsonF bool) error {
 		return printJSON(policies)
 	}
 	if len(policies) == 0 {
-		fmt.Fprintln(os.Stdout, "No policy profiles are visible to this token.")
-		fmt.Fprintln(os.Stdout, "Ask your Latere admin to assign a selectable policy, then re-run `latere cella apply` with `spec.policy` set in your Manifest.")
+		fprintln(os.Stdout, "No policy profiles are visible to this token.")
+		fprintln(os.Stdout, "Ask your Latere admin to assign a selectable policy, then re-run `latere cella apply` with `spec.policy` set in your Manifest.")
 		return nil
 	}
 	printPolicies(policies)
@@ -388,7 +383,7 @@ func runPolicyList(ctx context.Context, apiURL string, jsonF bool) error {
 func printPolicies(policies []policyDTO) {
 	for i, p := range policies {
 		if i > 0 {
-			fmt.Fprintln(os.Stdout)
+			fprintln(os.Stdout)
 		}
 		printWrappedField("policy", p.Name)
 		printWrappedField("label", p.Label)
@@ -441,9 +436,12 @@ func newCeRenameCmd() *cobra.Command {
 				return err
 			}
 			var sb sandboxDTO
-			body := map[string]any{"name": args[1]}
+			body, err := jsonReader(map[string]any{"name": args[1]})
+			if err != nil {
+				return err
+			}
 			if err := c.Do(cmd.Context(), http.MethodPatch, sbPath(args[0]),
-				jsonReader(body), "application/json", &sb); err != nil {
+				body, "application/json", &sb); err != nil {
 				return err
 			}
 			printSandbox(sb)
@@ -462,7 +460,7 @@ func simpleAction(verb, short string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   verb + " <name|id>",
 		Short: short,
-		Long:  fmt.Sprintf("%s a cella by slug or id.", strings.Title(verb)),
+		Long:  fmt.Sprintf("%s a cella by slug or id.", strings.ToUpper(verb[:1])+verb[1:]),
 		Example: fmt.Sprintf(`  latere cella %s dev
   latere cella %s sb-019dc976-2b28-7c55-8778-bf7d5ae6c58d`, verb, verb),
 		Args: cobra.ExactArgs(1),
@@ -855,7 +853,10 @@ to stdout. Pass --output to write the archive to a local file.`,
 				body["paths"] = args[1:]
 			}
 			path := sbPath(args[0]) + "/files/export"
-			b, _ := json.Marshal(body)
+			b, err := json.Marshal(body)
+			if err != nil {
+				return err
+			}
 			resp, err := c.DoRaw(cmd.Context(), http.MethodPost, path,
 				bytes.NewReader(b), "application/json")
 			if err != nil {
@@ -1157,7 +1158,10 @@ only applies to ephemeral cellas.`,
 				}
 				body["auto_delete_hours"] = hours
 			}
-			b, _ := json.Marshal(body)
+			b, err := json.Marshal(body)
+			if err != nil {
+				return err
+			}
 			var sb sandboxDTO
 			path := sbPath(args[0]) + "/extend"
 			if err := c.Do(cmd.Context(), http.MethodPost, path,
@@ -1210,7 +1214,10 @@ explicit.`,
 				}
 				body["auto_delete_hours"] = hours
 			}
-			b, _ := json.Marshal(body)
+			b, err := json.Marshal(body)
+			if err != nil {
+				return err
+			}
 			var sb sandboxDTO
 			path := sbPath(args[0]) + "/convert"
 			if err := c.Do(cmd.Context(), http.MethodPost, path,
@@ -1254,7 +1261,10 @@ Only persistent cellas can be resized.`,
 			if err != nil {
 				return err
 			}
-			b, _ := json.Marshal(map[string]any{"disk_gb": diskGB})
+			b, err := json.Marshal(map[string]any{"disk_gb": diskGB})
+			if err != nil {
+				return err
+			}
 			var sb sandboxDTO
 			path := sbPath(args[0]) + "/resize"
 			if err := c.Do(cmd.Context(), http.MethodPost, path,
@@ -1331,10 +1341,13 @@ func newCeWriteCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			b, _ := json.Marshal(map[string]any{
+			b, err := json.Marshal(map[string]any{
 				"path":    args[1],
 				"content": base64.StdEncoding.EncodeToString(content),
 			})
+			if err != nil {
+				return err
+			}
 			return c.Do(cmd.Context(), http.MethodPut, sbPath(args[0])+"/files",
 				bytes.NewReader(b), "application/json", nil)
 		},
@@ -1503,7 +1516,10 @@ func newCeMkdirCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			b, _ := json.Marshal(map[string]any{"path": args[1]})
+			b, err := json.Marshal(map[string]any{"path": args[1]})
+			if err != nil {
+				return err
+			}
 			return c.Do(cmd.Context(), http.MethodPost, sbPath(args[0])+"/files/mkdir",
 				bytes.NewReader(b), "application/json", nil)
 		},
@@ -1546,7 +1562,10 @@ func newCeMvCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			b, _ := json.Marshal(map[string]any{"from": args[1], "to": args[2]})
+			b, err := json.Marshal(map[string]any{"from": args[1], "to": args[2]})
+			if err != nil {
+				return err
+			}
 			return c.Do(cmd.Context(), http.MethodPost, sbPath(args[0])+"/files/move",
 				bytes.NewReader(b), "application/json", nil)
 		},
@@ -1824,9 +1843,12 @@ func parseKV(items []string) (map[string]string, error) {
 	return m, nil
 }
 
-func jsonReader(v any) io.Reader {
-	b, _ := json.Marshal(v)
-	return bytes.NewReader(b)
+func jsonReader(v any) (io.Reader, error) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	return bytes.NewReader(b), nil
 }
 
 func printJSON(v any) error {
@@ -1838,7 +1860,7 @@ func printJSON(v any) error {
 func printSandboxList(sbs []sandboxDTO) {
 	for i, s := range sbs {
 		if i > 0 {
-			fmt.Fprintln(os.Stdout)
+			fprintln(os.Stdout)
 		}
 		printSandbox(s)
 	}
@@ -1915,13 +1937,13 @@ func printWrappedField(label, value string) {
 	prefix := fmt.Sprintf("%-*s", labelWidth, label+":")
 	lines := wrapText(value, maxWidth-labelWidth)
 	if len(lines) == 0 {
-		fmt.Fprintln(os.Stdout, prefix)
+		fprintln(os.Stdout, prefix)
 		return
 	}
-	fmt.Fprintln(os.Stdout, prefix+lines[0])
+	fprintln(os.Stdout, prefix+lines[0])
 	indent := strings.Repeat(" ", labelWidth)
 	for _, line := range lines[1:] {
-		fmt.Fprintln(os.Stdout, indent+line)
+		fprintln(os.Stdout, indent+line)
 	}
 }
 

@@ -64,7 +64,7 @@ func ResolveLatest(ctx context.Context, client *http.Client) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	loc := resp.Header.Get("Location")
 	if loc == "" {
@@ -133,11 +133,11 @@ func fetch(ctx context.Context, client *http.Client, url, label string) ([]byte,
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("GET %s: status %d", url, resp.StatusCode)
 	}
-	var body io.Reader = io.LimitReader(resp.Body, maxArchiveBytes)
+	body := io.LimitReader(resp.Body, maxArchiveBytes)
 	if label != "" && isTerminalStderr() {
 		p := &progressReader{r: body, w: progressDst, label: label, total: resp.ContentLength}
 		defer p.clear()
@@ -180,13 +180,13 @@ func (p *progressReader) render() {
 		return
 	}
 	p.last = line
-	fmt.Fprintf(p.w, "\r\033[K%s", line)
+	fprintf(p.w, "\r\033[K%s", line)
 }
 
 // clear erases the bar so the next message starts on a clean line.
 func (p *progressReader) clear() {
 	if p.last != "" {
-		fmt.Fprint(p.w, "\r\033[K")
+		fprint(p.w, "\r\033[K")
 	}
 }
 
@@ -214,7 +214,7 @@ func extractBinary(archive []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open archive: %w", err)
 	}
-	defer gz.Close()
+	defer func() { _ = gz.Close() }()
 	tr := tar.NewReader(gz)
 	for {
 		hdr, err := tr.Next()

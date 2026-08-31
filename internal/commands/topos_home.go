@@ -26,7 +26,7 @@ func runToposHome(ctx context.Context, apiURL string) error {
 		return err
 	}
 	for {
-		c, err := toposClient(apiURL)
+		c, err := toposClient(ctx, apiURL)
 		if err != nil {
 			return err
 		}
@@ -73,7 +73,7 @@ func ensureToposLogin(ctx context.Context, apiURL string) error {
 	if os.Getenv("TOPOS_TOKEN") != "" {
 		return nil
 	}
-	if _, err := toposIdentityBearer(); err == nil {
+	if _, err := toposIdentityBearer(ctx); err == nil {
 		return nil
 	}
 	fmt.Fprintln(os.Stderr, "Sign in to Topos to continue.")
@@ -87,10 +87,10 @@ func ensureToposLogin(ctx context.Context, apiURL string) error {
 // printHomeText is the non-TTY fallback: a plain listing of sessions.
 func printHomeText(sessions []interactiveSessionDTO) error {
 	if len(sessions) == 0 {
-		fmt.Fprintln(os.Stdout, "No sessions yet. Run `latere topos` in a terminal to start one.")
+		fprintln(os.Stdout, "No sessions yet. Run `latere topos` in a terminal to start one.")
 		return nil
 	}
-	fmt.Fprintln(os.Stdout, "Sessions:")
+	fprintln(os.Stdout, "Sessions:")
 	for _, s := range sessions {
 		fmt.Fprintf(os.Stdout, "  %s  %s\n", s.ID, friendlyStatus(s.Status)) //nolint:errcheck
 	}

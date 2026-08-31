@@ -76,7 +76,7 @@ func autoUpgradeWanted() bool {
 }
 
 func printNotice(w io.Writer, current, latest string) {
-	fmt.Fprintf(w, "\nA new release of latere is available: %s -> %s\nRun `latere upgrade` to update.\n",
+	fprintf(w, "\nA new release of latere is available: %s -> %s\nRun `latere upgrade` to update.\n",
 		display(current), display(latest))
 }
 
@@ -100,21 +100,21 @@ func performAutoUpgrade(current string, w io.Writer) {
 	if !Newer(current, tag) {
 		return // cache was stale; nothing to do
 	}
-	fmt.Fprintf(w, "Auto-upgrading latere %s -> %s...\n", display(current), display(tag))
+	fprintf(w, "Auto-upgrading latere %s -> %s...\n", display(current), display(tag))
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 	bin, err := DownloadBinary(ctx, downloadClient(), tag)
 	if err != nil {
-		fmt.Fprintf(w, "auto-upgrade failed: %v\n", err)
+		fprintf(w, "auto-upgrade failed: %v\n", err)
 		return
 	}
 	if err := replace(bin); err != nil {
-		fmt.Fprintf(w, "auto-upgrade failed: %v\n", err)
+		fprintf(w, "auto-upgrade failed: %v\n", err)
 		return
 	}
-	fmt.Fprintf(w, "Updated to latere %s. Continuing.\n", display(tag))
+	fprintf(w, "Updated to latere %s. Continuing.\n", display(tag))
 	if err := reExec(); err != nil {
-		fmt.Fprintln(w, "Restart latere to use the new version.")
+		fprintln(w, "Restart latere to use the new version.")
 	}
 }
 
@@ -160,11 +160,11 @@ func Run(ctx context.Context, current, target string, checkOnly bool, out io.Wri
 	// the whole point of a rollback).
 	atLatest := target == "" && isRelease(current) && !Newer(current, tag)
 	if atLatest {
-		fmt.Fprintf(out, "latere %s is already the latest release.\n", display(current))
+		fprintf(out, "latere %s is already the latest release.\n", display(current))
 		return nil
 	}
 	if checkOnly {
-		fmt.Fprintf(out, "A new release of latere is available: %s -> %s\nRun `latere upgrade` to update.\n",
+		fprintf(out, "A new release of latere is available: %s -> %s\nRun `latere upgrade` to update.\n",
 			display(current), display(tag))
 		return nil
 	}
@@ -172,7 +172,7 @@ func Run(ctx context.Context, current, target string, checkOnly bool, out io.Wri
 		return fmt.Errorf("in-place upgrade is not supported on this platform; "+
 			"download latere %s from https://github.com/%s/releases", display(tag), repoSlug)
 	}
-	fmt.Fprintf(out, "%s latere %s...\n", installVerb(current, tag), display(tag))
+	fprintf(out, "%s latere %s...\n", installVerb(current, tag), display(tag))
 	bin, err := DownloadBinary(ctx, downloadClient(), tag)
 	if err != nil {
 		return fmt.Errorf("install latere %s: %w (does that release exist? see https://github.com/%s/releases)",
@@ -181,7 +181,7 @@ func Run(ctx context.Context, current, target string, checkOnly bool, out io.Wri
 	if err := replace(bin); err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "Now on latere %s.\n", display(tag))
+	fprintf(out, "Now on latere %s.\n", display(tag))
 	return nil
 }
 

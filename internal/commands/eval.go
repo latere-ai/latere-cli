@@ -2,6 +2,7 @@ package commands
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -116,8 +117,8 @@ func newEvalClient(apiURL, token string) (*evalClient, error) {
 // do issues one authenticated request and decodes the JSON response
 // into out. Non-2xx responses are rendered from evald's error
 // envelope {"error":{"code","message"}} as "code: message".
-func (c *evalClient) do(method, path string, body io.Reader, contentType string, out any) error {
-	req, err := http.NewRequest(method, c.baseURL+path, body)
+func (c *evalClient) do(ctx context.Context, method, path string, body io.Reader, contentType string, out any) error {
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
 	if err != nil {
 		return err
 	}
@@ -153,13 +154,13 @@ func (c *evalClient) do(method, path string, body io.Reader, contentType string,
 }
 
 // doJSON issues a GET-style request and decodes the JSON response.
-func (c *evalClient) doJSON(method, path string, out any) error {
-	return c.do(method, path, nil, "", out)
+func (c *evalClient) doJSON(ctx context.Context, method, path string, out any) error {
+	return c.do(ctx, method, path, nil, "", out)
 }
 
 // doYAML POSTs a YAML manifest body and decodes the JSON response.
-func (c *evalClient) doYAML(method, path string, body []byte, out any) error {
-	return c.do(method, path, bytes.NewReader(body), "application/yaml", out)
+func (c *evalClient) doYAML(ctx context.Context, method, path string, body []byte, out any) error {
+	return c.do(ctx, method, path, bytes.NewReader(body), "application/yaml", out)
 }
 
 // ---- top-level ----
@@ -244,7 +245,7 @@ Use --dry-run to see the full reconciliation diff without writing.`,
 				path += "?dry_run=1"
 			}
 			var res evalApplyResultDTO
-			if err := c.doYAML(http.MethodPost, path, body, &res); err != nil {
+			if err := c.doYAML(cmd.Context(), http.MethodPost, path, body, &res); err != nil {
 				return err
 			}
 			printEvalApplyResult(cmd.OutOrStdout(), res)
@@ -310,9 +311,9 @@ func resolvePromptRefs(manifest []byte, baseDir string) ([]byte, error) {
 // cell counts, per-comparison lines, then warnings.
 func printEvalApplyResult(w io.Writer, res evalApplyResultDTO) {
 	if res.DryRun {
-		fmt.Fprintln(w, "dry run — no changes written")
+		fprintln(w, "dry run — no changes written")
 	}
-	fmt.Fprintf(w, "suite %s (%s)\n", res.Suite.Name, res.Suite.Status)
+	fprintf(w, "suite %s (%s)\n", res.Suite.Name, res.Suite.Status)
 	for _, t := range res.Tasks {
 		h := t.PromptHash
 		if len(h) > 12 {
@@ -322,20 +323,20 @@ func printEvalApplyResult(w io.Writer, res evalApplyResultDTO) {
 		if t.LineageID != nil && *t.LineageID != "" {
 			line += fmt.Sprintf(" (lineage %s)", *t.LineageID)
 		}
-		fmt.Fprintln(w, line)
+		fprintln(w, line)
 	}
-	fmt.Fprintf(w, "cells: %d created, %d exists, %d unmanaged\n",
+	fprintf(w, "cells: %d created, %d exists, %d unmanaged\n",
 		res.Cells.Created, res.Cells.Exists, res.Cells.Unmanaged)
 	for _, c := range res.Comparisons {
 		status := c.Status
 		if len(c.Confounds) > 0 && !strings.HasPrefix(status, "confounded") {
 			status = fmt.Sprintf("confounded(%s)", strings.Join(c.Confounds, ", "))
 		}
-		fmt.Fprintf(w, "  comparison %s: %s, %s, %d members\n",
+		fprintf(w, "  comparison %s: %s, %s, %d members\n",
 			c.Name, c.Outcome, status, c.Members)
 	}
 	for _, warn := range res.Warnings {
-		fmt.Fprintf(w, "warning: %s\n", warn)
+		fprintf(w, "warning: %s\n", warn)
 	}
 }
 
@@ -357,17 +358,17 @@ func newEvalSuitesCmd() *cobra.Command {
 				return err
 			}
 			var suites []evalSuiteDTO
-			if err := c.doJSON(http.MethodGet, "/api/v1/suites", &suites); err != nil {
+			if err := c.doJSON(cmd.Context(), http.MethodGet, "/api/v1/suites", &suites); err != nil {
 				return err
 			}
 			if len(suites) == 0 {
-				fmt.Fprintln(cmd.OutOrStdout(), "No suites.")
+				fprintln(cmd.OutOrStdout(), "No suites.")
 				return nil
 			}
 			tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
-			fmt.Fprintln(tw, "ID\tNAME\tORG\tBUDGET\tSTATE")
+			fprintln(tw, "ID\tNAME\tORG\tBUDGET\tSTATE")
 			for _, s := range suites {
-				fmt.Fprintf(tw, "%s\t%s\t%s\t$%.2f\t%s\n",
+				fprintf(tw, "%s\t%s\t%s\t$%.2f\t%s\n",
 					s.ID, s.Name, s.Org, s.BudgetCapUSD, s.State)
 			}
 			return tw.Flush()
@@ -397,17 +398,17 @@ func newEvalCellsCmd() *cobra.Command {
 			}
 			var cells []evalCellDTO
 			path := "/api/v1/cells?suite=" + url.QueryEscape(suite)
-			if err := c.doJSON(http.MethodGet, path, &cells); err != nil {
+			if err := c.doJSON(cmd.Context(), http.MethodGet, path, &cells); err != nil {
 				return err
 			}
 			if len(cells) == 0 {
-				fmt.Fprintln(cmd.OutOrStdout(), "No cells in this suite.")
+				fprintln(cmd.OutOrStdout(), "No cells in this suite.")
 				return nil
 			}
 			tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
-			fmt.Fprintln(tw, "MODEL\tROUTE\tHARNESS\tVERSION\tEFFORT\tSURFACE\tSTATE")
+			fprintln(tw, "MODEL\tROUTE\tHARNESS\tVERSION\tEFFORT\tSURFACE\tSTATE")
 			for _, cl := range cells {
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 					cl.Tuple.ModelID, cl.Tuple.ModelRoute, cl.Tuple.Harness,
 					cl.Tuple.HarnessVersion, cl.Tuple.EffortConfigured,
 					cl.Tuple.GatewaySurface, cl.State)

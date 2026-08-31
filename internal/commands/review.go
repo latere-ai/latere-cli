@@ -126,7 +126,7 @@ func runReview(ctx context.Context, cmd *cobra.Command, o *reviewOpts) error {
 	// Locate the session to fork. The proposer needs a real Claude session
 	// ID; without one there is nothing to --resume.
 	sessionID := o.session
-	transcriptPath := ""
+	var transcriptPath string
 	home, herr := os.UserHomeDir()
 	if herr != nil {
 		return fmt.Errorf("resolve home dir: %w", herr)
@@ -137,7 +137,7 @@ func runReview(ctx context.Context, cmd *cobra.Command, o *reviewOpts) error {
 			return merr
 		}
 		sessionID, transcriptPath = id, path
-		fmt.Fprintf(cmd.ErrOrStderr(), "[review] reviewing most recent session %s\n", sessionID)
+		fprintf(cmd.ErrOrStderr(), "[review] reviewing most recent session %s\n", sessionID)
 	} else {
 		path, perr := input.LocateTranscript(home, cwd, sessionID, "")
 		if perr != nil {
@@ -154,12 +154,12 @@ func runReview(ctx context.Context, cmd *cobra.Command, o *reviewOpts) error {
 	}
 	if diff.ChangedLines == 0 {
 		if fb, fbErr := input.Compute(ctx, input.DiffSpec{From: "HEAD~1", To: "HEAD", Cwd: cwd}); fbErr == nil && fb.ChangedLines > 0 {
-			fmt.Fprintln(cmd.ErrOrStderr(), "[review] working tree clean; falling back to HEAD~1..HEAD")
+			fprintln(cmd.ErrOrStderr(), "[review] working tree clean; falling back to HEAD~1..HEAD")
 			diff = fb
 		}
 	}
 	if input.Trivial(diff, 0) {
-		fmt.Fprintln(cmd.ErrOrStderr(), "[review] no substantive diff to review")
+		fprintln(cmd.ErrOrStderr(), "[review] no substantive diff to review")
 		return nil
 	}
 
@@ -283,7 +283,7 @@ func printReviewSummary(cmd *cobra.Command, s *adversarial.Summary) {
 		printWrappedField("session_dir", s.SessionDir)
 	}
 	if s.Headline != "" {
-		fmt.Fprintln(out)
-		fmt.Fprintln(out, s.Headline)
+		fprintln(out)
+		fprintln(out, s.Headline)
 	}
 }

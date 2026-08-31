@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -61,11 +62,7 @@ func TestErrorEnvelopeDecoding(t *testing.T) {
 }
 
 func asDriveErr(err error, out **Error) bool {
-	e, ok := err.(*Error)
-	if ok {
-		*out = e
-	}
-	return ok
+	return errors.As(err, out)
 }
 
 func TestListPaginatesWithCursor(t *testing.T) {

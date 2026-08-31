@@ -79,12 +79,15 @@ Topos server started with dev auth; the token is then accepted without a login.`
 // cancelled. It is the production transport that wraps serveSandboxTunnel: a WSS
 // NetConn in place of the localhost TCP conn the tests use.
 func runServeSandbox(ctx context.Context, apiURL, root string, consent sandbox.ConsentFunc) error {
-	bearer, err := toposTunnelBearer()
+	bearer, err := toposTunnelBearer(ctx)
 	if err != nil {
 		return err
 	}
 	wsURL := toWSURL(resolveToposURL(apiURL)) + sandboxTunnelRoute
-	c, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
+	// The handshake response is never the caller's to close: websocket.Dial
+	// leaves it nil on success (the connection owns the socket) and has
+	// already closed it on failure.
+	c, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{ //nolint:bodyclose
 		Subprotocols: []string{sandboxTunnelSubprotocol},
 		HTTPHeader:   http.Header{"Authorization": {"Bearer " + bearer}},
 	})
@@ -102,11 +105,11 @@ func runServeSandbox(ctx context.Context, apiURL, root string, consent sandbox.C
 // toposTunnelBearer returns the bearer the sandbox tunnel dials with: the
 // TOPOS_TOKEN dev override first (matching toposClient), else the auth-issued
 // identity bearer. So TOPOS_TOKEN=dev + a dev-auth toposd is a one-step run.
-func toposTunnelBearer() (string, error) {
+func toposTunnelBearer(ctx context.Context) (string, error) {
 	if v := os.Getenv("TOPOS_TOKEN"); v != "" {
 		return v, nil
 	}
-	return toposIdentityBearer()
+	return toposIdentityBearer(ctx)
 }
 
 // toWSURL rewrites an http(s) base URL to its ws(s) form for a websocket dial.

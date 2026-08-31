@@ -32,8 +32,8 @@ func selfReplaceWritable() bool {
 		return false
 	}
 	name := f.Name()
-	f.Close()
-	os.Remove(name)
+	_ = f.Close()
+	_ = os.Remove(name)
 	return true
 }
 
@@ -68,14 +68,14 @@ func replaceFile(exe string, newBin []byte) error {
 		return fmt.Errorf("prepare upgrade in %s: %w", dir, err)
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName) // no-op once renamed
+	defer func() { _ = os.Remove(tmpName) }() // no-op once renamed
 
 	if _, err := tmp.Write(newBin); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return fmt.Errorf("write new binary: %w", err)
 	}
 	if err := tmp.Chmod(0o755); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return fmt.Errorf("chmod new binary: %w", err)
 	}
 	if err := tmp.Close(); err != nil {

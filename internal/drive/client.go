@@ -599,7 +599,7 @@ func (c *Client) MultipartUpload(ctx context.Context, owner, path string, r io.R
 	}
 	wg.Wait()
 	if firstErr != nil {
-		c.abortUpload(sess.UploadID)
+		c.abortUpload(ctx, sess.UploadID)
 		return nil, firstErr
 	}
 
@@ -607,10 +607,14 @@ func (c *Client) MultipartUpload(ctx context.Context, owner, path string, r io.R
 	for i, etag := range etags {
 		parts[i] = map[string]any{"n": i + 1, "etag": etag}
 	}
-	b, _ := json.Marshal(map[string]any{"parts": parts})
+	b, err := json.Marshal(map[string]any{"parts": parts})
+	if err != nil {
+		c.abortUpload(ctx, sess.UploadID)
+		return nil, err
+	}
 	req, err := c.req(ctx, http.MethodPost, "/api/v1/uploads/"+url.PathEscape(sess.UploadID)+"/complete", nil, bytes.NewReader(b))
 	if err != nil {
-		c.abortUpload(sess.UploadID)
+		c.abortUpload(ctx, sess.UploadID)
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -619,7 +623,7 @@ func (c *Client) MultipartUpload(ctx context.Context, owner, path string, r io.R
 	if err := c.do(req, &out); err != nil {
 		// 412/413 already discard the session server-side; abort is a
 		// harmless no-op (404) then.
-		c.abortUpload(sess.UploadID)
+		c.abortUpload(ctx, sess.UploadID)
 		return nil, err
 	}
 	return &out, nil
@@ -651,10 +655,16 @@ func putPart(ctx context.Context, httpc *http.Client, presignedURL string, body 
 
 // abortUpload discards a multipart session. Best-effort cleanup on a
 // fresh context: the upload context may already be canceled.
-func (c *Client) abortUpload(id string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+// abortUpload discards a half-finished multipart session server-side.
+//
+// It runs on WithoutCancel: every caller reaches it on a failure path, and the
+// commonest failure is the caller's own context being cancelled. Inheriting
+// that context would make the abort a no-op and leave the session, and the
+// parts already uploaded, on the server until it expires them.
+func (c *Client) abortUpload(ctx context.Context, id string) {
+	actx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 	defer cancel()
-	req, err := c.req(ctx, http.MethodDelete, "/api/v1/uploads/"+url.PathEscape(id), nil, nil)
+	req, err := c.req(actx, http.MethodDelete, "/api/v1/uploads/"+url.PathEscape(id), nil, nil)
 	if err != nil {
 		return
 	}

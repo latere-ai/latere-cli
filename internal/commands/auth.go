@@ -136,9 +136,9 @@ func showOrgContext(cmd *cobra.Command) error {
 		return err
 	}
 	if info.OrgID == "" {
-		fmt.Fprintln(cmd.OutOrStdout(), "personal")
+		fprintln(cmd.OutOrStdout(), "personal")
 	} else {
-		fmt.Fprintln(cmd.OutOrStdout(), info.OrgID)
+		fprintln(cmd.OutOrStdout(), info.OrgID)
 	}
 	return nil
 }
@@ -191,7 +191,7 @@ func switchOrgContext(cmd *cobra.Command, authURL, clientID, orgID string) error
 	if err != nil {
 		return fmt.Errorf("token endpoint: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("token endpoint: %s: %s", resp.Status, strings.TrimSpace(string(body)))
@@ -222,9 +222,9 @@ func switchOrgContext(cmd *cobra.Command, authURL, clientID, orgID string) error
 		return fmt.Errorf("save auth token: %w", err)
 	}
 	if orgID == "" {
-		fmt.Fprintln(cmd.ErrOrStderr(), "Switched to personal context.")
+		fprintln(cmd.ErrOrStderr(), "Switched to personal context.")
 	} else {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Switched to org %s.\n", orgID)
+		fprintf(cmd.ErrOrStderr(), "Switched to org %s.\n", orgID)
 	}
 	return nil
 }
@@ -772,7 +772,7 @@ local sign-out still completes.`,
 			if err := api.ClearAuthToken(); err != nil {
 				return err
 			}
-			fmt.Fprintln(cmd.ErrOrStderr(), "Logged out.")
+			fprintln(cmd.ErrOrStderr(), "Logged out.")
 			return nil
 		},
 	}
@@ -800,10 +800,10 @@ func revokeCellaTokenServerSide(ctx context.Context, apiURL string, errw io.Writ
 	}
 	var apiErr *api.APIError
 	if errors.As(err, &apiErr) && (apiErr.Status == http.StatusNotFound || apiErr.Status == http.StatusForbidden) {
-		fmt.Fprintf(errw, "  note: server-side token revocation unavailable (%d); the token expires on its own\n", apiErr.Status)
+		fprintf(errw, "  note: server-side token revocation unavailable (%d); the token expires on its own\n", apiErr.Status)
 		return
 	}
-	fmt.Fprintf(errw, "  warning: could not revoke the cella token server-side (%v); it remains valid until expiry\n", err)
+	fprintf(errw, "  warning: could not revoke the cella token server-side (%v); it remains valid until expiry\n", err)
 }
 
 // revokeAuthRefreshToken best-effort revokes the retained auth refresh
@@ -834,19 +834,19 @@ func revokeAuthRefreshToken(ctx context.Context, apiURL, authURL string, errw io
 	defer cancel()
 	req, err := http.NewRequestWithContext(rctx, http.MethodPost, authBase+"/revoke", strings.NewReader(form.Encode()))
 	if err != nil {
-		fmt.Fprintf(errw, "  warning: could not revoke the auth refresh token (%v)\n", err)
+		fprintf(errw, "  warning: could not revoke the auth refresh token (%v)\n", err)
 		return
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
 	if err != nil {
-		fmt.Fprintf(errw, "  warning: could not revoke the auth refresh token (%v); it remains valid until expiry\n", err)
+		fprintf(errw, "  warning: could not revoke the auth refresh token (%v); it remains valid until expiry\n", err)
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.Copy(io.Discard, resp.Body)
 	if resp.StatusCode/100 != 2 {
-		fmt.Fprintf(errw, "  warning: auth refresh-token revocation returned %d; it may remain valid until expiry\n", resp.StatusCode)
+		fprintf(errw, "  warning: auth refresh-token revocation returned %d; it may remain valid until expiry\n", resp.StatusCode)
 	}
 }
 
@@ -867,7 +867,10 @@ func readAll(r interface {
 			}
 		}
 		if err != nil {
-			break
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return "", err
 		}
 	}
 	return string(buf), nil

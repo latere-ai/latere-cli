@@ -52,7 +52,7 @@ func serveSandboxTunnel(ctx context.Context, conn net.Conn, root string, consent
 	if err != nil {
 		return fmt.Errorf("sandbox tunnel: yamux: %w", err)
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 
 	// The edge opens the control stream (the control plane opens the work
 	// streams), matching the Lux tunnel's directionality.
@@ -61,13 +61,16 @@ func serveSandboxTunnel(ctx context.Context, conn net.Conn, root string, consent
 		return fmt.Errorf("sandbox tunnel: control stream: %w", err)
 	}
 	node := sandboxNodeID()
-	line, _ := json.Marshal(SandboxDescriptor{NodeID: node, Root: root})
+	line, err := json.Marshal(SandboxDescriptor{NodeID: node, Root: root})
+	if err != nil {
+		return fmt.Errorf("sandbox tunnel: encode descriptor: %w", err)
+	}
 	if _, err := ctrl.Write(append(line, '\n')); err != nil {
 		return fmt.Errorf("sandbox tunnel: write descriptor: %w", err)
 	}
 	// Echo the machine name: a session binds with edge "" ("my edge") when this
 	// is your only connected machine, and by this name when it is not.
-	fmt.Fprintf(out, "sandbox tunnel: connected as %q; serving %s\n", node, root)
+	fprintf(out, "sandbox tunnel: connected as %q; serving %s\n", node, root)
 
 	for {
 		stream, err := sess.AcceptStream()
@@ -128,7 +131,7 @@ func serveHostSandbox(ctx context.Context, conn io.ReadWriteCloser, root string,
 // trust protection #3; a session-scoped "allow all" is a follow-on.
 func promptExecConsent(in io.Reader, out io.Writer) sandbox.ConsentFunc {
 	return func(_ context.Context, _ string, opts sandbox.ExecOptions) error {
-		fmt.Fprintf(out, "remote session wants to run: %s\nallow? [y/N] ", strings.Join(opts.Argv, " "))
+		fprintf(out, "remote session wants to run: %s\nallow? [y/N] ", strings.Join(opts.Argv, " "))
 		var answer string
 		_, _ = fmt.Fscanln(in, &answer)
 		switch strings.ToLower(strings.TrimSpace(answer)) {

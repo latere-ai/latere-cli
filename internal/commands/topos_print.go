@@ -34,7 +34,7 @@ func handlePrintFrame(fr attachFrame, out, errOut io.Writer) (done bool, err err
 		return false, nil
 	case "error":
 		// A protocol/auth error frame (distinct from an agent RunError).
-		fmt.Fprintln(errOut, "error:", fr.Message)
+		fprintln(errOut, "error:", fr.Message)
 		return false, nil
 	case "event":
 		return handlePrintEvent(fr, out, errOut)
@@ -48,7 +48,7 @@ func handlePrintEvent(fr attachFrame, out, errOut io.Writer) (bool, error) {
 	case "AssistantMessage":
 		var p assistantMessagePayload
 		if json.Unmarshal(fr.Payload, &p) == nil && p.Text != "" {
-			fmt.Fprintln(out, p.Text)
+			fprintln(out, p.Text)
 		}
 	case "PostToolUse":
 		var p postToolUsePayload

@@ -108,7 +108,7 @@ func Run(ctx context.Context, opts Options) error {
 			return err
 		}
 		if err != nil {
-			fmt.Fprintf(opts.Out, "tunnel: disconnected (%v); reconnecting in %s\n", err, backoff)
+			fprintf(opts.Out, "tunnel: disconnected (%v); reconnecting in %s\n", err, backoff)
 		}
 		select {
 		case <-ctx.Done():
@@ -142,7 +142,11 @@ func runSession(ctx context.Context, opts Options) (established bool, err error)
 	}
 
 	wsURL := toWS(opts.LuxURL) + "/lux/v1/tunnel"
-	c, resp, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
+	// resp is read for its status when the handshake fails and is never
+	// closed here: websocket.Dial leaves it nil on success, where the
+	// connection owns the underlying socket, and has already closed and
+	// buffered it on failure.
+	c, resp, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{ //nolint:bodyclose
 		Subprotocols: []string{"lux.tunnel.v1"},
 		HTTPHeader:   http.Header{"Authorization": {"Bearer " + bearer}},
 	})
@@ -150,14 +154,14 @@ func runSession(ctx context.Context, opts Options) (established bool, err error)
 		if resp != nil {
 			switch resp.StatusCode {
 			case http.StatusNotFound:
-				return established, fatal(fmt.Errorf("the local-model tunnel is not enabled on %s yet. Ask your operator to turn it on (LUX_TUNNEL_ENABLED).", opts.LuxURL))
+				return established, fatal(fmt.Errorf("the local-model tunnel is not enabled on %s yet. Ask your operator to turn it on (LUX_TUNNEL_ENABLED)", opts.LuxURL))
 			case http.StatusUnauthorized, http.StatusForbidden:
-				return established, fatal(fmt.Errorf("your login may not serve models here. Run `latere login` to refresh your session, then try again."))
+				return established, fatal(errors.New("your login may not serve models here. Run `latere login` to refresh your session, then try again"))
 			}
 		}
 		return established, fmt.Errorf("dial %s: %w", wsURL, err)
 	}
-	defer c.CloseNow()
+	defer func() { _ = c.CloseNow() }()
 	c.SetReadLimit(-1)
 
 	sessCtx, cancel := context.WithCancel(ctx)
@@ -167,7 +171,7 @@ func runSession(ctx context.Context, opts Options) (established bool, err error)
 	if err != nil {
 		return established, err
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 
 	ctrl, err := sess.OpenStream()
 	if err != nil {
@@ -181,14 +185,17 @@ func runSession(ctx context.Context, opts Options) (established bool, err error)
 		Models:  models,
 		Share:   opts.Share,
 	}
-	line, _ := json.Marshal(desc)
+	line, err := json.Marshal(desc)
+	if err != nil {
+		return established, fmt.Errorf("encode descriptor: %w", err)
+	}
 	if _, err := ctrl.Write(append(line, '\n')); err != nil {
 		return established, err
 	}
-	fmt.Fprintf(opts.Out, "tunnel: connected; serving %d model(s) from %s (%s), share=%s\n",
+	fprintf(opts.Out, "tunnel: connected; serving %d model(s) from %s (%s), share=%s\n",
 		len(models), opts.UpstreamURL, opts.Runtime, opts.Share)
 	for _, m := range models {
-		fmt.Fprintf(opts.Out, "  - %s  (call as local/%s via Lux)\n", m, m)
+		fprintf(opts.Out, "  - %s  (call as local/%s via Lux)\n", m, m)
 	}
 	// The descriptor is on the wire, so luxd can route to this node: the
 	// tunnel is usable. Recording it here, at the single point where that
@@ -222,7 +229,14 @@ func heartbeatLoop(ctx context.Context, ctrl net.Conn, opts Options) {
 			if tok, err := opts.Bearer(ctx); err == nil {
 				frame["token"] = tok
 			}
-			line, _ := json.Marshal(frame)
+			line, err := json.Marshal(frame)
+			if err != nil {
+				// frame is a string map, so this cannot happen. Skipping the
+				// beat rather than returning keeps a hypothetical encoding
+				// fault from tearing down a working tunnel; luxd drops the
+				// node only after several missed heartbeats.
+				continue
+			}
 			if _, err := ctrl.Write(append(line, '\n')); err != nil {
 				return
 			}
@@ -251,7 +265,7 @@ type forwarder struct {
 const maxRequestBytes = 8 << 20 // 8 MiB
 
 func (f *forwarder) handle(stream net.Conn) {
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 	req, err := http.ReadRequest(bufio.NewReader(stream))
 	if err != nil {
 		return
@@ -303,7 +317,7 @@ func (f *forwarder) handle(stream net.Conn) {
 		f.logTraffic(req.Method, path, model, http.StatusBadGateway, time.Since(started), err)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	_ = resp.Write(stream)
 	f.logTraffic(req.Method, path, model, resp.StatusCode, time.Since(started), nil)
 }
@@ -332,11 +346,11 @@ func (f *forwarder) logTraffic(method, path, model string, status int, dur time.
 	}
 	ts := time.Now().Format("15:04:05")
 	if err != nil {
-		fmt.Fprintf(f.out, "%s  %s %s  model=%s  error: %v  (%dms)\n",
+		fprintf(f.out, "%s  %s %s  model=%s  error: %v  (%dms)\n",
 			ts, method, path, model, err, dur.Milliseconds())
 		return
 	}
-	fmt.Fprintf(f.out, "%s  %s %s  model=%s  %d  (%dms)\n",
+	fprintf(f.out, "%s  %s %s  model=%s  %d  (%dms)\n",
 		ts, method, path, model, status, dur.Milliseconds())
 }
 

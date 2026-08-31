@@ -29,6 +29,6 @@ func HandleExitError(w io.Writer, err error) int {
 	if _, ok := errors.AsType[*unresolvedError](err); ok {
 		return 2
 	}
-	fmt.Fprintln(w, err)
+	fprintln(w, err)
 	return 1
 }

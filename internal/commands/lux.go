@@ -189,15 +189,6 @@ func localWireModel(provider, model string) string {
 	return model
 }
 
-func lookupProvider(name string) (providerSpec, error) {
-	p, ok := providerSpecs()[name]
-	if !ok {
-		return providerSpec{}, fmt.Errorf("unknown provider %q; one of: %s",
-			name, strings.Join(slices.Sorted(maps.Keys(providerSpecs())), ", "))
-	}
-	return p, nil
-}
-
 // deriveProviderSpec builds a spec from what Lux publishes about a provider:
 // its route prefix and the wire dialect that route speaks. Everything the CLI
 // needs (chat path, request shape, SDK env vars) follows from those two, so a
@@ -475,7 +466,7 @@ Reads /lux/v1/models and /lux/v1/rates with your identity.`,
 			}
 			var rates luxCatalogResponse
 			if err := c.GetJSON(cmd.Context(), "/lux/v1/rates", &rates); err != nil {
-				fmt.Fprintf(cmd.ErrOrStderr(), "warning: rate card unavailable (%v)\n", err)
+				fprintf(cmd.ErrOrStderr(), "warning: rate card unavailable (%v)\n", err)
 			}
 			for _, m := range models.Items {
 				provider, _ := m["provider"].(string)
@@ -593,7 +584,7 @@ func newLuxCatalogCmd(name, path, what string, luxURL, authURL, token *string) *
 func printLuxItems(items []map[string]any) {
 	for i, it := range items {
 		if i > 0 {
-			fmt.Fprintln(os.Stdout)
+			fprintln(os.Stdout)
 		}
 		for _, k := range []string{"id", "model", "provider", "name", "status", "default_route_prefix",
 			"rate", "input_usd_per_m", "output_usd_per_m"} {
@@ -759,14 +750,14 @@ instead, bounding the blast radius of a leaked export.`,
 				return err
 			}
 			if raw {
-				fmt.Fprintln(cmd.OutOrStdout(), bearer)
-				fmt.Fprintf(cmd.ErrOrStderr(), "# %s\n", provenance)
+				fprintln(cmd.OutOrStdout(), bearer)
+				fprintf(cmd.ErrOrStderr(), "# %s\n", provenance)
 				return nil
 			}
 			base := strings.TrimRight(resolveLuxURL(*luxURL), "/")
-			fmt.Fprintf(cmd.OutOrStdout(), "export %s=%s\n", spec.envBaseVar, base+spec.envBaseURL)
-			fmt.Fprintf(cmd.OutOrStdout(), "export %s=%s\n", spec.envKeyVar, bearer)
-			fmt.Fprintf(cmd.ErrOrStderr(), "# %s\n", provenance)
+			fprintf(cmd.OutOrStdout(), "export %s=%s\n", spec.envBaseVar, base+spec.envBaseURL)
+			fprintf(cmd.OutOrStdout(), "export %s=%s\n", spec.envKeyVar, bearer)
+			fprintf(cmd.ErrOrStderr(), "# %s\n", provenance)
 			return nil
 		},
 	}
@@ -1043,10 +1034,10 @@ func renderLuxUsage(w io.Writer, period string, from, to time.Time, labelFmt str
 		totalCost += g.CostUSDMicro
 		totalCalls += g.Calls
 	}
-	fmt.Fprintf(w, "Usage last %s (%s – %s): %s, %d calls\n\n",
+	fprintf(w, "Usage last %s (%s – %s): %s, %d calls\n\n",
 		period, from.Format("Jan 02"), to.Format("Jan 02"), fmtUSDMicro(totalCost), totalCalls)
 	if totalCalls == 0 {
-		fmt.Fprintln(w, "No usage in this period.")
+		fprintln(w, "No usage in this period.")
 		return
 	}
 
@@ -1057,7 +1048,7 @@ func renderLuxUsage(w io.Writer, period string, from, to time.Time, labelFmt str
 	})
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
 	for _, g := range sortGroups {
-		fmt.Fprintf(tw, "  %s\t%s\t%d calls\t%s in / %s out\n",
+		fprintf(tw, "  %s\t%s\t%d calls\t%s in / %s out\n",
 			g.Group, fmtUSDMicro(g.CostUSDMicro), g.Calls, fmtTokens(g.TokensIn), fmtTokens(g.TokensOut))
 	}
 	_ = tw.Flush()
@@ -1087,14 +1078,14 @@ func renderLuxUsage(w io.Writer, period string, from, to time.Time, labelFmt str
 	if maxCost == 0 {
 		return
 	}
-	fmt.Fprintln(w)
+	fprintln(w)
 	const width = 28
 	for _, b := range buckets {
 		n := int(b.cost * width / maxCost)
 		if n == 0 && b.cost > 0 {
 			n = 1
 		}
-		fmt.Fprintf(w, "  %-12s %-*s %s\n", b.label, width, strings.Repeat("▇", n), fmtUSDMicro(b.cost))
+		fprintf(w, "  %-12s %-*s %s\n", b.label, width, strings.Repeat("▇", n), fmtUSDMicro(b.cost))
 	}
 }
 
@@ -1199,9 +1190,14 @@ platform key).`,
 					},
 				},
 			}
-			rawBindings, _ := json.Marshal(bindings)
-			patch := map[string]any{"bindings": json.RawMessage(rawBindings)}
-			b, _ := json.Marshal(patch)
+			rawBindings, err := json.Marshal(bindings)
+			if err != nil {
+				return err
+			}
+			b, err := json.Marshal(map[string]any{"bindings": json.RawMessage(rawBindings)})
+			if err != nil {
+				return err
+			}
 			var out json.RawMessage
 			if err := c.Do(cmd.Context(), http.MethodPatch, "/lux/v1/me/profile",
 				bytes.NewReader(b), "application/json", &out); err != nil {
@@ -1314,7 +1310,7 @@ func authIdentityToken(ctx context.Context, luxURL, authURLFlag string) (access,
 		time.Now().After(authTok.ExpiresAt.Add(-60*time.Second)) {
 		refreshed, rerr := api.RefreshAuthToken(ctx, authBase, authTok.RefreshToken)
 		if rerr != nil {
-			return "", "", fmt.Errorf("auth token expired and refresh failed (%v); run `latere login`", rerr)
+			return "", "", fmt.Errorf("auth token expired and refresh failed (%w); run `latere login`", rerr)
 		}
 		access = refreshed.AccessToken
 	}
@@ -1487,19 +1483,19 @@ func wrapLuxErr(err error) error {
 	switch {
 	case apiErr.Code == "auth.forbidden":
 		return fmt.Errorf(
-			"Lux denied access (%s).\n"+
-				"Your login may not have access here. Run `latere login` to refresh your session, or ask a Latere admin for access.",
+			"access denied by Lux (%s).\n"+
+				"Your login may not have access here. Run `latere login` to refresh your session, or ask a Latere admin for access",
 			apiErr.Message)
 	case apiErr.Code == "tunnel.offline":
 		return fmt.Errorf(
 			"no live tunnel serves this model (%s).\n"+
-				"Start it on the machine that hosts the runtime with `latere lux serve`, then check `latere lux models`.",
+				"Start it on the machine that hosts the runtime with `latere lux serve`, then check `latere lux models`",
 			apiErr.Message)
 	case strings.Contains(apiErr.Code, "provider_not_bound"):
 		return fmt.Errorf(
 			"no provider is bound for this model, so Lux can't route it (%s).\n"+
 				"Bind it with `latere lux access set --model <m> --provider <p> --provider-key <id>`,\n"+
-				"or ask a Latere admin for a platform grant that covers it.",
+				"or ask a Latere admin for a platform grant that covers it",
 			apiErr.Message)
 	}
 	return err

@@ -72,6 +72,7 @@ func TestForwarderDoesNotSilentlyTruncateOversizedBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read forwarder response: %v", err)
 	}
+	defer func() { _ = resp.Body.Close() }()
 	respBody, _ := io.ReadAll(resp.Body)
 	_ = client.Close()
 	// f.handle runs in its own goroutine and owns the recorder fields; wait

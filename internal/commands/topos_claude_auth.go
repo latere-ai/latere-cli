@@ -10,8 +10,10 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/url"
@@ -98,11 +100,14 @@ func newPKCE() (pkce, error) {
 
 // refreshClaudeToken renews an expired access token using the refresh token.
 func refreshClaudeToken(ctx context.Context, httpc *http.Client, refresh string) (claudeToken, error) {
-	body, _ := json.Marshal(map[string]string{
+	body, err := json.Marshal(map[string]string{
 		"grant_type":    "refresh_token",
 		"refresh_token": refresh,
 		"client_id":     claudeOAuthClientID,
 	})
+	if err != nil {
+		return claudeToken{}, fmt.Errorf("encode refresh request: %w", err)
+	}
 	return postClaudeToken(ctx, httpc, body)
 }
 
@@ -146,7 +151,8 @@ func loopbackClaudeLogin(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
 	if err != nil {
 		return fmt.Errorf("claude login: open loopback: %w", err)
 	}
@@ -178,7 +184,11 @@ func loopbackClaudeLogin(ctx context.Context) error {
 		resCh <- result{code: qq.Get("code"), state: qq.Get("state")}
 	})}
 	go func() { _ = srv.Serve(ln) }()
-	defer func() { _ = srv.Shutdown(context.Background()) }()
+	// WithoutCancel, not the caller's ctx: the flow reaches this deferred
+	// shutdown precisely when ctx is already done (the user pressed ctrl-c, or
+	// the code arrived and the select returned), and a cancelled context makes
+	// Shutdown return at once without closing the loopback listener.
+	defer func() { _ = srv.Shutdown(context.WithoutCancel(ctx)) }()
 
 	fmt.Fprintln(os.Stderr, "Opening your browser to sign in to Claude...")
 	fmt.Fprintln(os.Stderr, "If it doesn't open, visit:\n\n  "+authURL+"\n")
@@ -188,7 +198,7 @@ func loopbackClaudeLogin(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	case res := <-resCh:
-		body, _ := json.Marshal(map[string]string{
+		body, err := json.Marshal(map[string]string{
 			"grant_type":    "authorization_code",
 			"code":          res.code,
 			"state":         res.state,
@@ -196,6 +206,9 @@ func loopbackClaudeLogin(ctx context.Context) error {
 			"redirect_uri":  redirectURI,
 			"code_verifier": p.verifier,
 		})
+		if err != nil {
+			return fmt.Errorf("encode token request: %w", err)
+		}
 		tok, err := postClaudeToken(ctx, &http.Client{Timeout: 30 * time.Second}, body)
 		if err != nil {
 			return err
@@ -215,7 +228,13 @@ func loopbackClaudeLogin(ctx context.Context) error {
 func claudeOAuthBearer(ctx context.Context) (string, error) {
 	t, err := loadClaudeToken()
 	if err != nil {
-		return "", nil // not logged in
+		if errors.Is(err, fs.ErrNotExist) {
+			return "", nil // no stored login; the caller falls back or prompts
+		}
+		// An unreadable or malformed token file is not the same as no login.
+		// Reporting it as "not signed in" sends the user through a login that
+		// writes the same path and appears to do nothing.
+		return "", fmt.Errorf("read stored Claude login: %w", err)
 	}
 	if t.AccessToken == "" {
 		return "", nil
@@ -223,7 +242,7 @@ func claudeOAuthBearer(ctx context.Context) (string, error) {
 	if t.RefreshToken != "" && !t.ExpiresAt.IsZero() && time.Now().After(t.ExpiresAt.Add(-60*time.Second)) {
 		refreshed, rerr := refreshClaudeToken(ctx, &http.Client{Timeout: 30 * time.Second}, t.RefreshToken)
 		if rerr != nil {
-			return "", fmt.Errorf("claude token expired and refresh failed (%v); run `latere topos login`", rerr)
+			return "", fmt.Errorf("claude token expired and refresh failed (%w); run `latere topos login`", rerr)
 		}
 		if refreshed.RefreshToken == "" {
 			refreshed.RefreshToken = t.RefreshToken

@@ -52,7 +52,7 @@ stdout (for scripts and pipelines), then exits — like 'claude -p'.`,
   latere topos session start agent_01hxy -p "summarise README.md"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := toposClient(apiURL)
+			c, err := toposClient(cmd.Context(), apiURL)
 			if err != nil {
 				return err
 			}
@@ -104,7 +104,7 @@ exits.`,
   latere topos session attach sess_01hxy -p "now add a test"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := toposClient(apiURL)
+			c, err := toposClient(cmd.Context(), apiURL)
 			if err != nil {
 				return err
 			}
@@ -133,7 +133,7 @@ func newToposSessionLsCmd() *cobra.Command {
 		Example: `  latere topos session ls
   latere topos session ls --json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := toposClient(apiURL)
+			c, err := toposClient(cmd.Context(), apiURL)
 			if err != nil {
 				return err
 			}
@@ -145,7 +145,7 @@ func newToposSessionLsCmd() *cobra.Command {
 				return printJSON(resp.Sessions)
 			}
 			if len(resp.Sessions) == 0 {
-				fmt.Fprintln(os.Stdout, "No interactive sessions.")
+				fprintln(os.Stdout, "No interactive sessions.")
 				return nil
 			}
 			for _, s := range resp.Sessions {

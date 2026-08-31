@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -148,10 +149,14 @@ func TestDownloadBinaryHonorsContextDeadline(t *testing.T) {
 	sum := sha256.Sum256(archive)
 	checksums := fmt.Sprintf("%s  %s\n", hex.EncodeToString(sum[:]), asset)
 
-	var delay time.Duration
+	// The first request is still sleeping when the second phase sets a new
+	// delay, so the field is read from a server goroutine while the test
+	// writes it. Atomic, not a plain variable: the race detector reports the
+	// plain form and `make test-race` is the gate that runs it.
+	var delay atomic.Int64
 	mux := http.NewServeMux()
 	mux.HandleFunc("/"+repoSlug+"/releases/download/v9.9.9/"+asset, func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(delay)
+		time.Sleep(time.Duration(delay.Load()))
 		_, _ = w.Write(archive)
 	})
 	mux.HandleFunc("/"+repoSlug+"/releases/download/v9.9.9/checksums.txt", func(w http.ResponseWriter, r *http.Request) {
@@ -164,7 +169,7 @@ func TestDownloadBinaryHonorsContextDeadline(t *testing.T) {
 	defer func() { githubBase = old }()
 
 	// Server slower than the context deadline -> download fails on the context.
-	delay = 200 * time.Millisecond
+	delay.Store(int64(200 * time.Millisecond))
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 	if _, err := DownloadBinary(ctx, downloadClient(), "v9.9.9"); err == nil {
@@ -172,7 +177,7 @@ func TestDownloadBinaryHonorsContextDeadline(t *testing.T) {
 	}
 
 	// Server within the deadline -> download succeeds via the bounded context.
-	delay = 0
+	delay.Store(0)
 	ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel2()
 	got, err := DownloadBinary(ctx2, downloadClient(), "v9.9.9")

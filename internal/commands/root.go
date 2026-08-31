@@ -3,8 +3,9 @@ package commands
 import (
 	"fmt"
 
-	"github.com/latere-ai/latere-cli/internal/upgrade"
 	"github.com/spf13/cobra"
+
+	"github.com/latere-ai/latere-cli/internal/upgrade"
 )
 
 // NewRoot builds the full command tree. Version is injected from main.

@@ -58,7 +58,10 @@ func InferAuthURL(apiURL string) string {
 // audience "sandboxd", Lux for "lux.latere.ai" — Lux does not check the
 // audience but the short TTL bounds a leaked export).
 func MintActorToken(ctx context.Context, httpc *http.Client, authBase, bearer, audience string, ttlSeconds int) (string, error) {
-	body, _ := json.Marshal(map[string]any{"audience": audience, "ttl_seconds": ttlSeconds})
+	body, err := json.Marshal(map[string]any{"audience": audience, "ttl_seconds": ttlSeconds})
+	if err != nil {
+		return "", fmt.Errorf("encode actor-token request: %w", err)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, authBase+"/actor-tokens", strings.NewReader(string(body)))
 	if err != nil {
 		return "", err
@@ -95,7 +98,10 @@ func ExchangeAtCella(ctx context.Context, httpc *http.Client, apiBase, bearer st
 	if hostname == "" {
 		hostname = "CLI"
 	}
-	body, _ := json.Marshal(map[string]any{"label": "CLI on " + hostname})
+	body, err := json.Marshal(map[string]any{"label": "CLI on " + hostname})
+	if err != nil {
+		return "", fmt.Errorf("encode token-exchange request: %w", err)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiBase+"/v1/tokens/exchange", strings.NewReader(string(body)))
 	if err != nil {
 		return "", err

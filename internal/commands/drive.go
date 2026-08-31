@@ -148,9 +148,9 @@ func newDriveLsCmd(o *driveOpts) *cobra.Command {
 			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
 			for _, e := range entries {
 				if long {
-					fmt.Fprintf(w, "%d\t%s\t%s\t%s\n", e.Size, e.Modified, e.Checksum, e.Path)
+					fprintf(w, "%d\t%s\t%s\t%s\n", e.Size, e.Modified, e.Checksum, e.Path)
 				} else {
-					fmt.Fprintln(w, e.Path)
+					fprintln(w, e.Path)
 				}
 			}
 			return w.Flush()
@@ -179,7 +179,7 @@ func runLsTrashed(cmd *cobra.Command, c *drive.Client, o *driveOpts) error {
 	}
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
 	for _, e := range entries {
-		fmt.Fprintf(w, "%d\t%s\t%s\n", e.Size, e.DeletedAt, e.Path)
+		fprintf(w, "%d\t%s\t%s\n", e.Size, e.DeletedAt, e.Path)
 	}
 	return w.Flush()
 }
@@ -226,7 +226,7 @@ func newDriveGetCmd(o *driveOpts) *cobra.Command {
 			if err := f.Close(); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.ErrOrStderr(), "Downloaded %s to %s\n", args[0], dest)
+			fprintf(cmd.ErrOrStderr(), "Downloaded %s to %s\n", args[0], dest)
 			return nil
 		},
 	}
@@ -272,7 +272,7 @@ the current checksum to overwrite, or --create-only for new files.`,
 			if *o.jsonOut {
 				return printDriveJSON(cmd.OutOrStdout(), res)
 			}
-			fmt.Fprintf(cmd.ErrOrStderr(), "Uploaded %s (%d bytes, checksum %s)\n", res.Path, res.Size, res.Checksum)
+			fprintf(cmd.ErrOrStderr(), "Uploaded %s (%d bytes, checksum %s)\n", res.Path, res.Size, res.Checksum)
 			return nil
 		},
 	}
@@ -354,7 +354,7 @@ func newDriveMvCmd(o *driveOpts) *cobra.Command {
 			if *o.jsonOut {
 				return printDriveJSON(cmd.OutOrStdout(), res)
 			}
-			fmt.Fprintf(cmd.ErrOrStderr(), "Moved %s to %s\n", args[0], res.Path)
+			fprintf(cmd.ErrOrStderr(), "Moved %s to %s\n", args[0], res.Path)
 			return nil
 		},
 	}
@@ -392,11 +392,11 @@ func newDriveRmCmd(o *driveOpts) *cobra.Command {
 			}
 			switch {
 			case version > 0:
-				fmt.Fprintf(cmd.ErrOrStderr(), "Pruned version %d of %s\n", version, args[0])
+				fprintf(cmd.ErrOrStderr(), "Pruned version %d of %s\n", version, args[0])
 			case permanent:
-				fmt.Fprintf(cmd.ErrOrStderr(), "Permanently deleted %s\n", args[0])
+				fprintf(cmd.ErrOrStderr(), "Permanently deleted %s\n", args[0])
 			default:
-				fmt.Fprintf(cmd.ErrOrStderr(), "Trashed %s (restore with `latere drive restore %s`)\n", args[0], args[0])
+				fprintf(cmd.ErrOrStderr(), "Trashed %s (restore with `latere drive restore %s`)\n", args[0], args[0])
 			}
 			return nil
 		},
@@ -429,13 +429,13 @@ func newDriveRestoreCmd(o *driveOpts) *cobra.Command {
 				if *o.jsonOut {
 					return printDriveJSON(cmd.OutOrStdout(), res)
 				}
-				fmt.Fprintf(cmd.ErrOrStderr(), "Restored %s to version %d\n", res.Path, res.RestoredVersion)
+				fprintf(cmd.ErrOrStderr(), "Restored %s to version %d\n", res.Path, res.RestoredVersion)
 				return nil
 			}
 			if err := c.TrashRestore(cmd.Context(), *o.owner, args[0]); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.ErrOrStderr(), "Restored %s from trash\n", args[0])
+			fprintf(cmd.ErrOrStderr(), "Restored %s from trash\n", args[0])
 			return nil
 		},
 	}
@@ -477,7 +477,7 @@ func newDriveHistoryCmd(o *driveOpts) *cobra.Command {
 				if by == "" {
 					by = v.CreatedBy
 				}
-				fmt.Fprintf(w, "v%d\t%d\t%s\t%s\t%s\n", v.VersionNo, v.Size, v.SupersededAt, by, v.Checksum)
+				fprintf(w, "v%d\t%d\t%s\t%s\t%s\n", v.VersionNo, v.Size, v.SupersededAt, by, v.Checksum)
 			}
 			return w.Flush()
 		},
@@ -540,9 +540,9 @@ applies to person grants; links are always read-only.`,
 			if res.Existing {
 				state = "already exists"
 			}
-			fmt.Fprintf(cmd.ErrOrStderr(), "Share %s (%s, %s, id %s)\n", state, res.Status, res.Permission, res.ID)
+			fprintf(cmd.ErrOrStderr(), "Share %s (%s, %s, id %s)\n", state, res.Status, res.Permission, res.ID)
 			if res.URL != "" {
-				fmt.Fprintln(cmd.OutOrStdout(), drive.ResolveURL(*o.driveURL)+res.URL)
+				fprintln(cmd.OutOrStdout(), drive.ResolveURL(*o.driveURL)+res.URL)
 			}
 			return nil
 		},
@@ -595,7 +595,7 @@ func newDriveSharesCmd(o *driveOpts) *cobra.Command {
 				if who == "" {
 					who = s.GranteeType
 				}
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", s.ID, s.Status, s.Permission, who, s.PathPrefix)
+				fprintf(w, "%s\t%s\t%s\t%s\t%s\n", s.ID, s.Status, s.Permission, who, s.PathPrefix)
 			}
 			return w.Flush()
 		},
@@ -618,7 +618,7 @@ func newDriveUnshareCmd(o *driveOpts) *cobra.Command {
 			if err := c.RevokeShare(cmd.Context(), args[0]); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.ErrOrStderr(), "Revoked share %s\n", args[0])
+			fprintf(cmd.ErrOrStderr(), "Revoked share %s\n", args[0])
 			return nil
 		},
 	}

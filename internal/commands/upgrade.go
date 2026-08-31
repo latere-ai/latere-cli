@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/latere-ai/latere-cli/internal/upgrade"
 	"github.com/spf13/cobra"
+
+	"github.com/latere-ai/latere-cli/internal/upgrade"
 )
 
 func newUpgradeCmd(version string) *cobra.Command {
@@ -74,9 +75,9 @@ func setAutoUpgrade(cmd *cobra.Command, val string) error {
 	}
 	out := cmd.OutOrStdout()
 	if enabled {
-		fmt.Fprintln(out, "Auto-upgrade enabled. latere will update itself on the next run when a new release is available.")
+		fprintln(out, "Auto-upgrade enabled. latere will update itself on the next run when a new release is available.")
 	} else {
-		fmt.Fprintln(out, "Auto-upgrade disabled.")
+		fprintln(out, "Auto-upgrade disabled.")
 	}
 	return nil
 }
