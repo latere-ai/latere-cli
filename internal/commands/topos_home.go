@@ -45,7 +45,8 @@ func runToposHome(ctx context.Context, apiURL string) error {
 		if err != nil {
 			return err
 		}
-		switch res := fm.(homeModel).result; res.action {
+		// Run returns the model it was given, so this is the homeModel above.
+		switch res := fm.(homeModel).result; res.action { //nolint:errcheck // tea.Program.Run returns the same model it was started with
 		case homeQuit:
 			return nil
 		case homeRefresh:

@@ -170,5 +170,6 @@ func runModelPicker(ctx context.Context, list []string, current string) (string,
 	if err != nil {
 		return "", err
 	}
-	return fm.(modelPicker).chosen, nil
+	// Run returns the model it was given, so this is the modelPicker above.
+	return fm.(modelPicker).chosen, nil //nolint:errcheck // tea.Program.Run returns the same model it was started with
 }

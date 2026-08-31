@@ -157,6 +157,7 @@ func loopbackClaudeLogin(ctx context.Context) error {
 		return fmt.Errorf("claude login: open loopback: %w", err)
 	}
 	defer func() { _ = ln.Close() }()
+	//nolint:errcheck // the listener above is TCP, so its address is a *net.TCPAddr
 	redirectURI := fmt.Sprintf("http://localhost:%d/callback", ln.Addr().(*net.TCPAddr).Port)
 
 	q := url.Values{

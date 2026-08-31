@@ -142,7 +142,8 @@ func runAuthPicker(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	res := fm.(authModel).result
+	// Run returns the model it was given, so this is the authModel above.
+	res := fm.(authModel).result //nolint:errcheck // tea.Program.Run returns the same model it was started with
 	switch res.choice {
 	case authClaude:
 		return loopbackClaudeLogin(ctx)
