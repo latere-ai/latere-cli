@@ -16,8 +16,9 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 )
 
 // DefaultBaseURL is the production Drive deployment.
@@ -562,45 +563,25 @@ func (c *Client) MultipartUpload(ctx context.Context, owner, path string, r io.R
 	}
 
 	etags := make([]string, sess.PartCount)
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	var (
-		wg       sync.WaitGroup
-		mu       sync.Mutex
-		firstErr error
-	)
-	fail := func(err error) {
-		mu.Lock()
-		if firstErr == nil {
-			firstErr = err
-			cancel()
-		}
-		mu.Unlock()
-	}
-	sem := make(chan struct{}, partPutConcurrency)
+	// The group keeps the first part failure and cancels the rest; SetLimit
+	// bounds the parts in flight rather than the goroutines spawned.
+	g, partCtx := errgroup.WithContext(ctx)
+	g.SetLimit(partPutConcurrency)
 	for i := range sess.PartCount {
-		wg.Go(func() {
-			select {
-			case sem <- struct{}{}:
-				defer func() { <-sem }()
-			case <-ctx.Done():
-				return
-			}
+		g.Go(func() error {
 			off := int64(i) * int64(sess.PartSize)
 			n := min(size-off, int64(sess.PartSize))
-			etag, err := putPart(ctx, c.HTTP, sess.PartURLs[i], io.NewSectionReader(r, off, n), n)
+			etag, err := putPart(partCtx, c.HTTP, sess.PartURLs[i], io.NewSectionReader(r, off, n), n)
 			if err != nil {
-				fail(fmt.Errorf("part %d/%d: %w", i+1, sess.PartCount, err))
-				return
+				return fmt.Errorf("part %d/%d: %w", i+1, sess.PartCount, err)
 			}
 			etags[i] = etag
+			return nil
 		})
 	}
-	wg.Wait()
-	if firstErr != nil {
+	if err := g.Wait(); err != nil {
 		c.abortUpload(ctx, sess.UploadID)
-		return nil, firstErr
+		return nil, err
 	}
 
 	parts := make([]map[string]any, sess.PartCount)
