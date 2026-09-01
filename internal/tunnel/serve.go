@@ -15,6 +15,9 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/hashicorp/yamux"
+
+	"latere.ai/x/pkg/retry"
+	"latere.ai/x/pkg/wait"
 )
 
 // fatalErr marks an error that reconnecting cannot fix (not signed in,
@@ -86,8 +89,8 @@ func Run(ctx context.Context, opts Options) error {
 		opts.ReconnectBackoff = time.Second
 	}
 
-	baseBackoff := opts.ReconnectBackoff
-	backoff := baseBackoff
+	policy := retry.Policy{Base: opts.ReconnectBackoff, Max: 30 * time.Second}
+	failures := 0
 	for {
 		established, err := runSession(ctx, opts)
 		if ctx.Err() != nil {
@@ -99,7 +102,7 @@ func Run(ctx context.Context, opts Options) error {
 		// tunnel that flaps occasionally over a long run would creep up to
 		// the 30s cap and stay there.
 		if established {
-			backoff = baseBackoff
+			failures = 0
 		}
 		// A non-retryable error (not signed in, not permitted to serve,
 		// feature disabled) returns immediately so the user sees one clear message
@@ -107,16 +110,13 @@ func Run(ctx context.Context, opts Options) error {
 		if isFatal(err) {
 			return err
 		}
+		failures++
+		delay := policy.Delay(failures)
 		if err != nil {
-			fprintf(opts.Out, "tunnel: disconnected (%v); reconnecting in %s\n", err, backoff)
+			fprintf(opts.Out, "tunnel: disconnected (%v); reconnecting in %s\n", err, delay.Round(time.Millisecond))
 		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(backoff):
-		}
-		if backoff < 30*time.Second {
-			backoff *= 2
+		if err := wait.Sleep(ctx, delay); err != nil {
+			return err
 		}
 	}
 }
