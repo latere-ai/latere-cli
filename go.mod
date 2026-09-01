@@ -15,7 +15,7 @@ require (
 	golang.org/x/sync v0.22.0
 	golang.org/x/term v0.44.0
 	gopkg.in/yaml.v3 v3.0.1
-	latere.ai/x/pkg v0.47.0
+	latere.ai/x/pkg v0.48.0
 	latere.ai/x/topos v0.4.0
 )
 
