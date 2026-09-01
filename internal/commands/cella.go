@@ -22,6 +22,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/latere-ai/latere-cli/internal/api"
+
+	"latere.ai/x/pkg/relpath"
 )
 
 // ---- DTOs (subset of sandboxd's OpenAPI; keep loose so additive
@@ -1113,10 +1115,14 @@ func writeZipAsTar(dst io.Writer, name string, f *os.File) error {
 	return tw.Close()
 }
 
+// safeArchivePath accepts a zip entry name that names a file below the
+// archive root as written: not empty, not absolute, no NUL, no ".." element,
+// and nothing path.Clean would rewrite, because the name goes into the tar
+// header verbatim.
 func safeArchivePath(name string) bool {
 	name = strings.TrimPrefix(name, "./")
-	return name != "" && !filepath.IsAbs(name) && !strings.Contains(name, "\x00") &&
-		name != "." && !strings.HasPrefix(name, "../") && !strings.Contains(name, "/../")
+	clean, err := relpath.Clean(name)
+	return err == nil && clean == name && clean != "."
 }
 
 // ---- extend / convert ----
