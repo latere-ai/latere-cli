@@ -9,6 +9,8 @@ import (
 	"errors"
 	"sync"
 	"time"
+
+	"latere.ai/x/pkg/wait"
 )
 
 // errNotConnected is returned by frameStream.Send when no connection is live.
@@ -85,7 +87,7 @@ func (fs *frameStream) run() {
 				return
 			}
 			fs.emit(streamMsg{note: "reconnecting"})
-			if !sleepCtx(fs.ctx, reconnectBackoff) {
+			if wait.Sleep(fs.ctx, reconnectBackoff) != nil {
 				return
 			}
 			continue
@@ -135,17 +137,5 @@ func (fs *frameStream) emit(m streamMsg) {
 	select {
 	case fs.events <- m:
 	case <-fs.ctx.Done():
-	}
-}
-
-// sleepCtx sleeps for d or until ctx ends; returns false if ctx ended.
-func sleepCtx(ctx context.Context, d time.Duration) bool {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-t.C:
-		return true
-	case <-ctx.Done():
-		return false
 	}
 }
