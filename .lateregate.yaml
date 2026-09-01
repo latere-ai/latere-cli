@@ -26,7 +26,9 @@ spec:
   # Every spec here records a surface that shipped. `complete` and
   # `implemented` are both in use and mean the same thing to a reader, so both
   # stay until the tree is reconciled; nothing else is allowed in.
-  status: [complete, implemented]
+  # `archived` is the terminal status; the other two are shipped specs kept at
+  # the root as the live record.
+  status: [complete, implemented, archived]
   require: [title, status]
   # No index rule: specs/README.md describes the tree in prose and a fenced
   # listing rather than a table, so there is no status cell for a spec to
@@ -35,6 +37,9 @@ spec:
   # The specs use Markdown tables for their command surfaces, and a row whose
   # cell count drifts renders as silently missing columns.
   tables: true
+  archive:
+    dir: .archive
+    statuses: [archived]
 
 contract:
   # The gates this repository does not hold yet. Every entry is temporary by
