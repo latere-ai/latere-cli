@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/latere-ai/latere-cli/internal/config"
+	"latere.ai/x/pkg/atomicfile"
 )
 
 // checkInterval is how often the CLI refreshes its view of the latest
@@ -137,29 +138,11 @@ func stale(s checkState, now time.Time) bool {
 	return now.Sub(s.CheckedAt) >= checkInterval
 }
 
-// writeFileAtomic writes data to a temp file in the same directory and renames
-// it into place, so a process exiting mid-write never leaves a partial file.
+// writeFileAtomic creates the state directory and replaces path in one
+// rename, so a process exiting mid-write never leaves a partial file.
 func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(dir, ".tmp-*")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	defer func() { _ = os.Remove(tmpName) }() // no-op once renamed
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Chmod(perm); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmpName, path)
+	return atomicfile.Write(path, data, perm)
 }
