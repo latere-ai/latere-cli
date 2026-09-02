@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Latere AI
+// SPDX-License-Identifier: MIT
+
 package commands
 
 import (
@@ -12,6 +15,8 @@ import (
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
+
+	"latere.ai/x/pkg/otel"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -110,7 +115,7 @@ func newEvalClient(apiURL, token string) (*evalClient, error) {
 	return &evalClient{
 		baseURL: strings.TrimRight(apiURL, "/"),
 		token:   token,
-		http:    http.DefaultClient,
+		http:    otel.HTTPClient(),
 	}, nil
 }
 

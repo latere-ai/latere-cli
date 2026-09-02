@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Latere AI
+// SPDX-License-Identifier: MIT
+
 // Package tunnel implements the serve side of the Lux local-runtime
 // reverse tunnel. `latere lux serve` dials lux.latere.ai over WSS,
 // advertises the local runtime's models, and forwards inbound request
@@ -17,6 +20,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"latere.ai/x/pkg/otel"
 )
 
 // Runtime defaults: the local URL and discovery probe per recognized
@@ -118,7 +123,7 @@ func Preflight(ctx context.Context, runtime, upstreamURL string, allow []string)
 	if base == "" {
 		base = DefaultURL(runtime)
 	}
-	return discover(ctx, &http.Client{Timeout: 10 * time.Second}, runtime, base, allow)
+	return discover(ctx, &http.Client{Timeout: 10 * time.Second, Transport: otel.Transport(nil)}, runtime, base, allow)
 }
 
 func getJSON(ctx context.Context, hc *http.Client, url string, dst any) error {

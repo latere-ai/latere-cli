@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Latere AI
+// SPDX-License-Identifier: MIT
+
 package commands
 
 import (
@@ -14,6 +17,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"latere.ai/x/pkg/otel"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/oauth2"
@@ -186,7 +191,7 @@ func switchOrgContext(cmd *cobra.Command, authURL, clientID, orgID string) error
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 
-	httpc := &http.Client{Timeout: 15 * time.Second}
+	httpc := &http.Client{Timeout: 15 * time.Second, Transport: otel.Transport(nil)}
 	resp, err := httpc.Do(req)
 	if err != nil {
 		return fmt.Errorf("token endpoint: %w", err)
@@ -564,7 +569,7 @@ func exchangeForCellaToken(ctx context.Context, opts deviceFlowOpts, authToken s
 		apiBase = "https://cella.latere.ai"
 	}
 
-	httpc := &http.Client{Timeout: 15 * time.Second}
+	httpc := &http.Client{Timeout: 15 * time.Second, Transport: otel.Transport(nil)}
 
 	// 1. Mint an actor token at auth.
 	// Sandboxd validates auth-issued actor tokens against SANDBOXD_AUDIENCE.
@@ -838,7 +843,7 @@ func revokeAuthRefreshToken(ctx context.Context, apiURL, authURL string, errw io
 		return
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	resp, err := (&http.Client{Timeout: 10 * time.Second, Transport: otel.Transport(nil)}).Do(req)
 	if err != nil {
 		fprintf(errw, "  warning: could not revoke the auth refresh token (%v); it remains valid until expiry\n", err)
 		return

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Latere AI
+// SPDX-License-Identifier: MIT
+
 package commands
 
 import (
@@ -18,6 +21,8 @@ import (
 	"strings"
 	"text/tabwriter"
 	"time"
+
+	"latere.ai/x/pkg/otel"
 
 	"github.com/spf13/cobra"
 
@@ -609,7 +614,7 @@ func luxEnvBearer(ctx context.Context, tokenFlag, luxURL, authURLFlag string, tt
 		return "", "", err
 	}
 	if ttl > 0 {
-		httpc := &http.Client{Timeout: 15 * time.Second}
+		httpc := &http.Client{Timeout: 15 * time.Second, Transport: otel.Transport(nil)}
 		actor, err := api.MintActorToken(ctx, httpc, authBase, access, "lux.latere.ai", int(ttl.Seconds()))
 		if err != nil {
 			return "", "", fmt.Errorf("mint actor token: %w", err)
@@ -1343,7 +1348,7 @@ func luxBearer(ctx context.Context, tokenFlag, luxURL, authURL string) (string, 
 	if err != nil {
 		return "", err
 	}
-	httpc := &http.Client{Timeout: 15 * time.Second}
+	httpc := &http.Client{Timeout: 15 * time.Second, Transport: otel.Transport(nil)}
 	bearer, err := api.MintActorToken(ctx, httpc, authBase, access, "lux.latere.ai", 300)
 	if err != nil {
 		return "", fmt.Errorf("mint Lux token: %w; if this persists run `latere login`", err)
@@ -1435,7 +1440,7 @@ func luxPostJSON(ctx context.Context, url, bearer string, headers map[string]str
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
-	resp, err := (&http.Client{Timeout: 120 * time.Second}).Do(req)
+	resp, err := (&http.Client{Timeout: 120 * time.Second, Transport: otel.Transport(nil)}).Do(req)
 	if err != nil {
 		return nil, err
 	}

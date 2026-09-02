@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Latere AI
+// SPDX-License-Identifier: MIT
+
 package upgrade
 
 import (
@@ -15,6 +18,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"latere.ai/x/pkg/otel"
 )
 
 // maxArchiveBytes caps how much we read from a release archive, a guard
@@ -26,7 +31,7 @@ const maxArchiveBytes = 200 << 20 // 200 MiB
 var githubBase = "https://github.com"
 
 func httpClient() *http.Client {
-	return &http.Client{Timeout: 30 * time.Second}
+	return &http.Client{Timeout: 30 * time.Second, Transport: otel.Transport(nil)}
 }
 
 // downloadClient is the client for the binary download. It deliberately
@@ -38,7 +43,7 @@ func httpClient() *http.Client {
 // the download deadline. A generous fallback guards against a future caller
 // that forgets to set one, so the process can never hang forever.
 func downloadClient() *http.Client {
-	return &http.Client{Timeout: 10 * time.Minute}
+	return &http.Client{Timeout: 10 * time.Minute, Transport: otel.Transport(nil)}
 }
 
 // ResolveLatest returns the newest published release tag (e.g. "v0.2.30") by

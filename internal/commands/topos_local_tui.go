@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Latere AI
+// SPDX-License-Identifier: MIT
+
 // Copyright 2026 The Latere Authors. All rights reserved.
 // Use of this source code is governed by an Apache-2.0
 // license that can be found in the LICENSE file.
@@ -8,7 +11,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"strings"
@@ -613,7 +615,7 @@ var (
 func runLocalTUI(ctx context.Context, version, cwd string, sb sandbox.Provider, builtins *tools.Registry, brain models.Model) error {
 	// Alt-screen: a stray stdout/stderr write corrupts the display, so silence
 	// the SDK's logger for the session (failures still surface in the transcript).
-	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	slog.SetDefault(slog.New(slog.DiscardHandler))
 	m, err := newLocalTUI(ctx, version, cwd, sb, builtins, brain)
 	if err != nil {
 		return err

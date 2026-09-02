@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Latere AI
+// SPDX-License-Identifier: MIT
+
 // Package drive is a thin typed client for the Latere Drive API
 // (https://drive.latere.ai/api/v1). It mirrors internal/api's conventions
 // (Bearer auth, latere-cli User-Agent, typed non-2xx errors) but decodes
@@ -17,6 +20,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"latere.ai/x/pkg/otel"
 
 	"golang.org/x/sync/errgroup"
 )
@@ -52,7 +57,8 @@ func New(baseURL, token string) *Client {
 		BaseURL: strings.TrimRight(baseURL, "/"),
 		Token:   token,
 		HTTP: &http.Client{
-			Timeout: 60 * time.Second,
+			Transport: otel.Transport(nil),
+			Timeout:   60 * time.Second,
 			// Downloads 302 to presigned object-store URLs. Those carry
 			// their auth in the URL and reject requests that also present
 			// a bearer, and Go only auto-strips Authorization cross-host —

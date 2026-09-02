@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Latere AI
+// SPDX-License-Identifier: MIT
+
 package tunnel
 
 import (
@@ -12,6 +15,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"latere.ai/x/pkg/otel"
 
 	"github.com/coder/websocket"
 	"github.com/hashicorp/yamux"
@@ -125,7 +130,7 @@ func Run(ctx context.Context, opts Options) error {
 // whether the tunnel ever became usable (the descriptor reached luxd), which
 // is what Run needs to tell a failed dial apart from a dropped session.
 func runSession(ctx context.Context, opts Options) (established bool, err error) {
-	hc := &http.Client{}
+	hc := otel.HTTPClient()
 
 	models, err := discover(ctx, hc, opts.Runtime, opts.UpstreamURL, opts.Models)
 	if err != nil {

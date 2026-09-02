@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Latere AI
+// SPDX-License-Identifier: MIT
+
 // Copyright 2026 The Latere Authors. All rights reserved.
 // Use of this source code is governed by an Apache-2.0
 // license that can be found in the LICENSE file.
@@ -21,6 +24,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"latere.ai/x/pkg/otel"
 )
 
 // Claude (Anthropic) OAuth login for `latere topos --local`, the same PKCE flow
@@ -210,7 +215,7 @@ func loopbackClaudeLogin(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("encode token request: %w", err)
 		}
-		tok, err := postClaudeToken(ctx, &http.Client{Timeout: 30 * time.Second}, body)
+		tok, err := postClaudeToken(ctx, &http.Client{Timeout: 30 * time.Second, Transport: otel.Transport(nil)}, body)
 		if err != nil {
 			return err
 		}
@@ -241,7 +246,7 @@ func claudeOAuthBearer(ctx context.Context) (string, error) {
 		return "", nil
 	}
 	if t.RefreshToken != "" && !t.ExpiresAt.IsZero() && time.Now().After(t.ExpiresAt.Add(-60*time.Second)) {
-		refreshed, rerr := refreshClaudeToken(ctx, &http.Client{Timeout: 30 * time.Second}, t.RefreshToken)
+		refreshed, rerr := refreshClaudeToken(ctx, &http.Client{Timeout: 30 * time.Second, Transport: otel.Transport(nil)}, t.RefreshToken)
 		if rerr != nil {
 			return "", fmt.Errorf("claude token expired and refresh failed (%w); run `latere topos login`", rerr)
 		}

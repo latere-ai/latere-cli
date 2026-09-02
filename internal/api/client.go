@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Latere AI
+// SPDX-License-Identifier: MIT
+
 // Package api is the HTTP client every `latere sandbox …` command
 // shares. Uses the public sandboxd surface at cella.latere.ai. The
 // client carries a Bearer token loaded from ~/.config/latere/token.json,
@@ -18,6 +21,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"latere.ai/x/pkg/otel"
 
 	"github.com/latere-ai/latere-cli/internal/config"
 )
@@ -72,7 +77,7 @@ func NewClient(apiURL string) *Client {
 	c := &Client{
 		BaseURL:   apiURL,
 		Token:     tok.AccessToken,
-		HTTP:      &http.Client{Timeout: 60 * time.Second},
+		HTTP:      &http.Client{Timeout: 60 * time.Second, Transport: otel.Transport(nil)},
 		expiresAt: tok.ExpiresAt,
 	}
 	c.Refresh = func(ctx context.Context) (string, bool) {
@@ -106,7 +111,7 @@ func RefreshCellaToken(ctx context.Context, apiBase string) (string, bool) {
 		}
 		access = refreshed.AccessToken
 	}
-	httpc := &http.Client{Timeout: 15 * time.Second}
+	httpc := &http.Client{Timeout: 15 * time.Second, Transport: otel.Transport(nil)}
 	bearer, err := MintActorToken(ctx, httpc, authBase, access, "sandboxd", 60)
 	if errors.Is(err, ErrActorAudienceMismatch) {
 		// Legacy audience shape: the root token itself is accepted by
