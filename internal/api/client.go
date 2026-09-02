@@ -294,8 +294,26 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body io
 			c.expiresAt = time.Time{}
 		}
 	}
+	// A rewindable body is read once and each attempt gets its own reader.
+	// Seeking the caller's reader back after a 401 raced the transport,
+	// which may still be writing the first attempt when the response
+	// arrives, and the retry then sent whatever was left: nothing.
+	var buffered []byte
+	if body != nil {
+		if _, ok := body.(io.Seeker); ok {
+			b, err := io.ReadAll(body)
+			if err != nil {
+				return err
+			}
+			buffered = b
+		}
+	}
 	send := func() (*http.Response, error) {
-		req, err := c.req(ctx, method, path, body, contentType)
+		attempt := body
+		if buffered != nil {
+			attempt = bytes.NewReader(buffered)
+		}
+		req, err := c.req(ctx, method, path, attempt, contentType)
 		if err != nil {
 			return nil, err
 		}
@@ -309,11 +327,7 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body io
 		return err
 	}
 	if resp.StatusCode == http.StatusUnauthorized && c.Refresh != nil && !c.refreshed {
-		rewindable := body == nil
-		if s, ok := body.(io.Seeker); !rewindable && ok {
-			_, serr := s.Seek(0, io.SeekStart)
-			rewindable = serr == nil
-		}
+		rewindable := body == nil || buffered != nil
 		if rewindable {
 			c.refreshed = true
 			if t, ok := c.Refresh(ctx); ok {
