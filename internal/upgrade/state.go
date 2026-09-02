@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Latere AI
+// SPDX-License-Identifier: MIT
+
 package upgrade
 
 import (
@@ -7,8 +10,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/latere-ai/latere-cli/internal/config"
 	"latere.ai/x/pkg/atomicfile"
+
+	"github.com/latere-ai/latere-cli/internal/config"
 )
 
 // checkInterval is how often the CLI refreshes its view of the latest

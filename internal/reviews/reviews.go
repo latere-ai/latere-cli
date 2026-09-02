@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Latere AI
+// SPDX-License-Identifier: MIT
+
 // Package reviews resolves where `latere review` writes its review logs. It
 // mirrors internal/config's XDG resolution, but reviews are transient state
 // (not config), so they live under $XDG_STATE_HOME/latere/reviews, namespaced

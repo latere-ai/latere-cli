@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Latere AI
+// SPDX-License-Identifier: MIT
+
 // print.go holds this package's output helpers.
 //
 // A CLI writes most of what it produces to a stream it cannot recover from.

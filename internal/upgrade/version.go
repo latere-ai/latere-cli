@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Latere AI
+// SPDX-License-Identifier: MIT
+
 // Package upgrade keeps the latere CLI aware of newer GitHub releases and
 // can replace the running binary in place.
 //

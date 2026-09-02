@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Latere AI
+// SPDX-License-Identifier: MIT
+
 // Package config resolves the CLI's per-user config directory. It is a leaf
 // package with no internal imports so api, upgrade, and tunnel can all share
 // one definition of where latere keeps its state, instead of each carrying a
