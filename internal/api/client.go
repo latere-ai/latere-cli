@@ -299,14 +299,12 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body io
 	// which may still be writing the first attempt when the response
 	// arrives, and the retry then sent whatever was left: nothing.
 	var buffered []byte
-	if body != nil {
-		if _, ok := body.(io.Seeker); ok {
-			b, err := io.ReadAll(body)
-			if err != nil {
-				return err
-			}
-			buffered = b
+	if _, ok := body.(io.Seeker); ok {
+		b, err := io.ReadAll(body)
+		if err != nil {
+			return err
 		}
+		buffered = b
 	}
 	send := func() (*http.Response, error) {
 		attempt := body
