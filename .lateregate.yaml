@@ -11,25 +11,13 @@ hermetic:
   # talks to an httptest server.
   allow: [/bin]
 
-modernize:
-  # newexpr rewrites pointer helpers to new(v) and inlines the call sites
-  # unevenly, leaving the helper with no callers and giving an untyped
-  # constant argument the wrong default type. errorsastype rewrites errors.As
-  # to errors.AsType[T], whose type parameter a local non-error interface
-  # target does not satisfy, so the rewrite does not compile. lateregate
-  # checks both fixers still exist, because `go fix` rejects an unknown
-  # -name=false and the gate would otherwise pass having run nothing.
-  disable: [newexpr, errorsastype]
-
 spec:
-  dir: specs
   # Every spec here records a surface that shipped. `complete` and
   # `implemented` are both in use and mean the same thing to a reader, so both
   # stay until the tree is reconciled; nothing else is allowed in.
   # `archived` is the terminal status; the other two are shipped specs kept at
   # the root as the live record.
   status: [complete, implemented, archived]
-  require: [title, status]
   # No index rule: specs/README.md describes the tree in prose and a fenced
   # listing rather than a table, so there is no status cell for a spec to
   # disagree with. It is excluded because it is not itself a spec.
@@ -41,12 +29,19 @@ spec:
     dir: .archive
     statuses: [archived]
 
-contract:
-  # The gates this repository does not hold yet. Every entry is temporary by
-  # construction: lateregate fails once the date passes, so an exemption has to
-  # be retired or argued for again rather than quietly becoming permanent.
-  exempt:
-    cover:
-      reason: >-
-        the tree is at 66.1% against a 90% per-package floor; the command layer drives a terminal UI that the suite does not exercise yet
-      until: 2026-12-01
+license:
+  # The identifier every source file carries and the holder it names. There
+  # is no default: this is the decision the gate checks the tree against.
+  # `go tool lateregate license -w` writes the notice where it is missing.
+  spdx: MIT
+  holder: Latere AI
+  extensions: ['.go']
+  names: [Makefile]
+
+# Gates this repository does not run yet. Each entry is temporary by
+# construction: after the date the gate runs and fails on its own terms.
+waive:
+  cover:
+    reason: >-
+      the tree is at 66.1% against a 90% per-package floor; the command layer drives a terminal UI that the suite does not exercise yet
+    until: 2026-12-01

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Latere AI
+# SPDX-License-Identifier: MIT
+
 # The verification contract for latere-cli.
 #
 # Every target here is one latere-ai/ci's go-verify workflow probes for and
@@ -10,7 +13,7 @@
 
 GO ?= go
 
-.PHONY: build
+.PHONY: check build
 build: tidy compile fmt-check lint-modernize test vuln spec-lint ## Full verification gate (run before committing)
 
 .PHONY: tidy
@@ -23,12 +26,11 @@ compile: ## Compile all packages
 
 .PHONY: test
 test: ## go vet, then the suite
-	$(GO) vet ./...
-	$(GO) test ./...
+	@go tool lateregate test
 
 .PHONY: test-race
-test-race: ## The suite under the race detector
-	$(GO) test -race ./...
+test-race: ## The suite under the detector
+	@go tool lateregate race
 
 .PHONY: test-hermetic
 test-hermetic: ## The suite with only the Go toolchain on PATH
@@ -36,7 +38,7 @@ test-hermetic: ## The suite with only the Go toolchain on PATH
 
 .PHONY: vuln
 vuln: ## Scan for known vulnerabilities
-	$(GO) run golang.org/x/vuln/cmd/govulncheck@latest ./...
+	@go tool lateregate vuln
 
 .PHONY: fmt
 fmt: ## Format all Go sources in place
@@ -54,11 +56,9 @@ fmt-check: ## Fail if any Go source is not gofmt-formatted
 lint-config: ## Render .golangci.yml from the shared template
 	@$(GO) tool lateregate golangci
 
-GOLANGCI_VERSION ?= v2.13.1
-
 .PHONY: lint
-lint: lint-config ## Run the linter CI runs, against the config lint-config renders
-	@$(GO) run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_VERSION) run ./...
+lint: ## Run the linter CI runs, against the config renders
+	@go tool lateregate lint
 
 # Fails on code a standard library call or a language builtin already covers.
 # Carries fixers golangci-lint's modernize linter does not, so it runs whether
@@ -94,3 +94,9 @@ hooks: ## Install repository git hooks (pre-commit gofmt guard)
 help: ## List targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
 		awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
+
+# The whole shared bar. Every gate lives in lateregate, pinned as a tool in
+# go.mod; this target is a name for `go tool lateregate` and nothing else.
+# The plan: `go tool lateregate list`. One gate: `go tool lateregate <gate>`.
+check:
+	@go tool lateregate
