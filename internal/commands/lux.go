@@ -1443,7 +1443,7 @@ func luxPostJSON(ctx context.Context, url, bearer string, headers map[string]str
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
-	resp, err := (&http.Client{Timeout: 120 * time.Second, Transport: otel.Transport(nil)}).Do(req)
+	resp, err := (&http.Client{Timeout: 120 * time.Second, Transport: otel.Transport(nil), CheckRedirect: api.PreserveMethodOnRedirect}).Do(req)
 	if err != nil {
 		return nil, err
 	}

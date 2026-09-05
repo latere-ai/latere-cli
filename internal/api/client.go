@@ -80,16 +80,7 @@ func NewClient(apiURL string) *Client {
 		Token:   tok.AccessToken,
 		HTTP: &http.Client{
 			Timeout: 60 * time.Second, Transport: otel.Transport(nil),
-			CheckRedirect: func(req *http.Request, via []*http.Request) error {
-				if len(via) >= 10 {
-					return errors.New("stopped after 10 redirects")
-				}
-				// A write redirected to GET did not perform the requested action.
-				if previous := via[len(via)-1].Method; req.Method != previous {
-					return fmt.Errorf("redirect changed request method from %s to %s", previous, req.Method)
-				}
-				return nil
-			},
+			CheckRedirect: PreserveMethodOnRedirect,
 		},
 		expiresAt: tok.ExpiresAt,
 	}
@@ -97,6 +88,19 @@ func NewClient(apiURL string) *Client {
 		return RefreshCellaToken(ctx, c.BaseURL)
 	}
 	return c
+}
+
+// PreserveMethodOnRedirect is an http.Client.CheckRedirect callback that
+// retains the default ten-request limit and rejects redirects that change
+// the HTTP method, which could make a write appear successful after a GET.
+func PreserveMethodOnRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	if previous := via[len(via)-1].Method; req.Method != previous {
+		return fmt.Errorf("redirect changed request method from %s to %s", previous, req.Method)
+	}
+	return nil
 }
 
 // RefreshCellaToken re-derives the cella bearer from the retained auth
