@@ -207,7 +207,7 @@ func newGitCredentialGetCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&authURL, "auth-url", "", "auth service base URL used for token refresh (default https://auth.latere.ai)")
+	cmd.Flags().StringVar(&authURL, "auth-url", "", "auth service base URL used for token refresh (default $AUTH_URL or https://auth.latere.ai)")
 	return cmd
 }
 

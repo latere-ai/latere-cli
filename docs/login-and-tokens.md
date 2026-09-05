@@ -222,7 +222,9 @@ latere login --token <token>      # save a pasted access token (no refresh)
 Explicit URL flags take precedence over environment variables. Login uses
 the resolved Cella URL for both token exchange and verification. If neither
 `--auth-url` nor `AUTH_URL` is set, the auth URL is derived from that Cella URL.
-`whoami` also uses `AUTH_URL` when probing an auth-issued token.
+`whoami` also uses `AUTH_URL` when probing an auth-issued token. Lux commands
+and the Drive git credential helper use the same auth override precedence
+for refreshing the root token and minting product credentials.
 
 ## Related reading
 

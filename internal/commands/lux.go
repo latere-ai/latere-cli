@@ -304,7 +304,7 @@ models'.`,
   latere lux usage`,
 	}
 	cmd.PersistentFlags().StringVar(&luxURL, "lux-url", "", "override Lux base URL (overrides LUX_API_URL)")
-	cmd.PersistentFlags().StringVar(&authURL, "auth-url", "", "override auth base URL (default derived from the Lux URL)")
+	cmd.PersistentFlags().StringVar(&authURL, "auth-url", "", "override auth base URL (default $AUTH_URL or derived from the Lux URL)")
 	cmd.PersistentFlags().StringVar(&token, "token", "", "present this bearer to Lux instead of minting one (e.g. a service token)")
 
 	cmd.AddCommand(newLuxModelsCmd(&luxURL, &authURL, &token))
@@ -1301,11 +1301,7 @@ func authIdentityToken(ctx context.Context, luxURL, authURLFlag string) (access,
 		}
 		return "", "", err
 	}
-	authBase = authURLFlag
-	if authBase == "" {
-		authBase = api.InferAuthURL(resolveLuxURL(luxURL))
-	}
-	authBase = strings.TrimRight(authBase, "/")
+	authBase = resolveAuthURL(resolveLuxURL(luxURL), authURLFlag)
 
 	access = authTok.AccessToken
 	// Refresh when the token is known to be expired (or within a small
