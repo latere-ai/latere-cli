@@ -111,6 +111,32 @@ func TestStreamPrintReturnsRunError(t *testing.T) {
 	}
 }
 
+type failingPrintWriter struct{ err error }
+
+func (w failingPrintWriter) Write([]byte) (int, error) { return 0, w.err }
+
+func TestStreamPrintPropagatesOutputErrors(t *testing.T) {
+	for _, fr := range []attachFrame{
+		ev("AssistantMessage", `{"text":"answer"}`),
+		ev("PostToolUse", `{"tool_call":{"name":"test-tool"},"result":{}}`),
+		ev("PostToolUseFailure", `{"tool_call":{"name":"test-tool"}}`),
+	} {
+		t.Run(fr.Event, func(t *testing.T) {
+			fc := &fakePrintConn{frames: make(chan attachFrame, 2)}
+			fc.frames <- fr
+			fc.frames <- ev("Stop", `{}`)
+			writeErr := errors.New("output storage full")
+			writer := failingPrintWriter{err: writeErr}
+			if err := streamPrint(t.Context(), fc, writer, writer, ""); !errors.Is(err, writeErr) {
+				t.Fatalf("write failure lost: %v", err)
+			}
+			if len(fc.frames) != 1 {
+				t.Fatal("stream consumed completion after losing output")
+			}
+		})
+	}
+}
+
 func TestStreamPrintFailsWhenChannelClosesBeforeCompletion(t *testing.T) {
 	fc := &fakePrintConn{frames: make(chan attachFrame)}
 	close(fc.frames)

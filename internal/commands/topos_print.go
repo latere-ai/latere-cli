@@ -54,7 +54,9 @@ func handlePrintEvent(fr attachFrame, out, errOut io.Writer) (bool, error) {
 	case "AssistantMessage":
 		var p assistantMessagePayload
 		if json.Unmarshal(fr.Payload, &p) == nil && p.Text != "" {
-			fprintln(out, p.Text)
+			if _, err := fmt.Fprintln(out, p.Text); err != nil {
+				return false, fmt.Errorf("write assistant output: %w", err)
+			}
 		}
 	case "PostToolUse":
 		var p postToolUsePayload
@@ -63,12 +65,16 @@ func handlePrintEvent(fr attachFrame, out, errOut io.Writer) (bool, error) {
 			if p.Result.IsError {
 				status = "error"
 			}
-			fmt.Fprintf(errOut, "· %s [%s]\n", p.ToolCall.Name, status) //nolint:errcheck
+			if _, err := fmt.Fprintf(errOut, "· %s [%s]\n", p.ToolCall.Name, status); err != nil {
+				return false, fmt.Errorf("write tool output: %w", err)
+			}
 		}
 	case "PostToolUseFailure":
 		var p postToolUseFailurePayload
 		if json.Unmarshal(fr.Payload, &p) == nil {
-			fmt.Fprintf(errOut, "· %s [denied/failed]\n", p.ToolCall.Name) //nolint:errcheck
+			if _, err := fmt.Fprintf(errOut, "· %s [denied/failed]\n", p.ToolCall.Name); err != nil {
+				return false, fmt.Errorf("write tool output: %w", err)
+			}
 		}
 	case "RunError":
 		var p runErrorPayload
@@ -91,7 +97,8 @@ type printConn interface {
 // streamPrint runs a session in non-interactive print mode: it optionally
 // submits a turn, then streams frames to the writers until the turn completes,
 // the session closes, or the context ends. Returns a non-nil error if the agent
-// reported an error or the connection ended before completion was confirmed.
+// reported an error, output could not be written, or the connection ended
+// before completion was confirmed.
 func streamPrint(ctx context.Context, conn printConn, out, errOut io.Writer, turn string) error {
 	if turn != "" {
 		if err := conn.Send(ctx, attachControl{Type: "user_turn", Text: turn}); err != nil {
