@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -94,5 +95,63 @@ func TestMultipartUploadRejectsNonPositiveSize(t *testing.T) {
 	}
 	if calls.Load() != 0 {
 		t.Errorf("invalid size sent %d HTTP requests", calls.Load())
+	}
+}
+
+func TestMultipartUploadRejectsIncompleteResponses(t *testing.T) {
+	for _, stage := range []string{"create", "complete"} {
+		for _, state := range []string{"valid", "truncated", "extra JSON"} {
+			t.Run(stage+"/"+state, func(t *testing.T) {
+				var puts, completes, aborts atomic.Int32
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					var payload []byte
+					current := "create"
+					switch {
+					case r.Method == http.MethodDelete:
+						aborts.Add(1)
+						if r.URL.Path != "/api/v1/uploads/test-upload" {
+							t.Errorf("unexpected abort: %s", r.URL.Path)
+						}
+						w.WriteHeader(http.StatusNoContent)
+						return
+					case r.Method == http.MethodPut:
+						puts.Add(1)
+						_, _ = io.Copy(io.Discard, r.Body)
+						w.Header().Set("ETag", `"part-etag"`)
+						return
+					case strings.HasSuffix(r.URL.Path, "/complete"):
+						completes.Add(1)
+						current, payload = "complete", []byte(`{"path":"files/data","size":8}`)
+					default:
+						payload, _ = json.Marshal(uploadSession{UploadID: "test-upload", PartSize: 4, PartCount: 2, PartURLs: []string{"http://" + r.Host + "/part1", "http://" + r.Host + "/part2"}})
+					}
+					if current == stage {
+						if state == "truncated" {
+							w.Header().Set("Content-Length", strconv.Itoa(len(payload)+10))
+						}
+						if state == "extra JSON" {
+							payload = append(payload, []byte(" {}")...)
+						}
+					}
+					_, _ = w.Write(payload)
+				}))
+				defer server.Close()
+				_, err := New(server.URL, "test-token").MultipartUpload(t.Context(), "me", "files/data", strings.NewReader("12345678"), 8, PutOptions{})
+				invalid := state != "valid"
+				if (err != nil) != invalid {
+					t.Errorf("upload error = %v, invalid response=%t", err, invalid)
+				}
+				wantPuts, wantCompletes, wantAborts := int32(2), int32(1), int32(0)
+				if invalid {
+					wantAborts = 1
+					if stage == "create" {
+						wantPuts, wantCompletes = 0, 0
+					}
+				}
+				if puts.Load() != wantPuts || completes.Load() != wantCompletes || aborts.Load() != wantAborts {
+					t.Errorf("put/complete/abort calls=%d/%d/%d, want %d/%d/%d", puts.Load(), completes.Load(), aborts.Load(), wantPuts, wantCompletes, wantAborts)
+				}
+			})
+		}
 	}
 }

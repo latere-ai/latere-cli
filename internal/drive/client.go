@@ -236,7 +236,7 @@ func (c *Client) req(ctx context.Context, method, path string, query url.Values,
 	return req, nil
 }
 
-// do runs the request and decodes a JSON body into out (nil out = drain).
+// do requires a complete response and one JSON value in out (nil out = drain).
 // Non-2xx becomes *Error with Drive's {"error": "..."} message.
 func (c *Client) do(req *http.Request, out any) error {
 	resp, err := c.HTTP.Do(req)
@@ -248,10 +248,23 @@ func (c *Client) do(req *http.Request, out any) error {
 		return decodeErr(resp)
 	}
 	if out == nil {
-		_, _ = io.Copy(io.Discard, resp.Body)
-		return nil
+		_, err := io.Copy(io.Discard, resp.Body)
+		return err
 	}
-	return json.NewDecoder(resp.Body).Decode(out)
+	decoder := json.NewDecoder(resp.Body)
+	if err := decoder.Decode(out); err != nil {
+		return err
+	}
+	// The first value can decode before a transfer error is reported.
+	// Only whitespace and a clean EOF may follow it.
+	var extra json.RawMessage
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err != nil {
+			return err
+		}
+		return errors.New("drive: response contains multiple JSON values")
+	}
+	return nil
 }
 
 func decodeErr(resp *http.Response) error {
@@ -573,6 +586,11 @@ func (c *Client) MultipartUpload(ctx context.Context, owner, path string, r io.R
 	}
 	var sess uploadSession
 	if err := c.postJSON(ctx, "/api/v1/uploads", create, &sess); err != nil {
+		// A decoded session may precede an incomplete or invalid response
+		// tail. Release it even though its response cannot be accepted.
+		if sess.UploadID != "" {
+			c.abortUpload(ctx, sess.UploadID)
+		}
 		return nil, err
 	}
 	// Validate coverage before creating section readers: a missing part would
