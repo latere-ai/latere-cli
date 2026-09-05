@@ -6,6 +6,7 @@ package main
 import (
 	"archive/tar"
 	"archive/zip"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/latere-ai/latere-cli/internal/api"
 )
@@ -29,6 +31,15 @@ func TestCellaImportZipE2E(t *testing.T) {
 	runCellaImportE2E(t, "payload.zip", []archiveEntry{
 		{Name: "data/one.jsonl", Body: "{\"one\":true}\n"},
 		{Name: "two.txt", Body: "two\n"},
+	})
+}
+
+func TestCellaImportZipDirectoriesE2E(t *testing.T) {
+	runCellaImportE2E(t, "directories.zip", []archiveEntry{
+		{Name: "empty/"},
+		{Name: "data/"},
+		{Name: "data/nested/"},
+		{Name: "data/nested/one.txt", Body: "one\n"},
 	})
 }
 
@@ -92,6 +103,9 @@ func runCellaImportE2E(t *testing.T, inputName string, wantEntries []archiveEntr
 			if got := hdr.Name; got != want.Name {
 				t.Fatalf("tar entry %d = %q, want %q", i, got, want.Name)
 			}
+			if strings.HasSuffix(want.Name, "/") && hdr.Typeflag != tar.TypeDir {
+				t.Fatalf("tar entry %q has type %d, want directory", hdr.Name, hdr.Typeflag)
+			}
 			gotBody, err := io.ReadAll(tr)
 			if err != nil {
 				t.Fatal(err)
@@ -109,7 +123,9 @@ func runCellaImportE2E(t *testing.T, inputName string, wantEntries []archiveEntr
 	}))
 	defer srv.Close()
 
-	cmd := exec.Command("go", "run", ".", "cella", "import", "lively-ibis-5ev",
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "go", "run", ".", "cella", "import", "lively-ibis-5ev",
 		"--api-url", srv.URL,
 		"--input", inputPath,
 		"--dest", "/workspace",
@@ -117,6 +133,8 @@ func runCellaImportE2E(t *testing.T, inputName string, wantEntries []archiveEntr
 	)
 	cmd.Env = append(os.Environ(),
 		"LATERE_TOKEN_FILE="+tokenPath,
+		"LATERE_AUTH_TOKEN_FILE="+filepath.Join(dir, "absent-auth.json"),
+		"LATERE_NO_UPDATE_CHECK=1",
 		"OTEL_SDK_DISABLED=true",
 	)
 	out, err := cmd.CombinedOutput()

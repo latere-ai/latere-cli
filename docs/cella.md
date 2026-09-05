@@ -162,6 +162,8 @@ latere cella import <name|id> --input data.jsonl --dest /workspace
 latere cella import <name|id> --input payload.zip --dest /workspace
 ```
 
+ZIP imports preserve file paths and directory entries, including empty directories.
+
 To upload files or directory trees while preserving their paths:
 
 ```sh

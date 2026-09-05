@@ -10,6 +10,9 @@ func TestSafeArchivePath(t *testing.T) {
 		"a/b.txt":     true,
 		"./a/b.txt":   true,
 		"..hidden":    true,
+		"empty/":      true,
+		"a/b/":        true,
+		"./a/b/":      true,
 		"":            false,
 		".":           false,
 		"./":          false,
@@ -19,6 +22,13 @@ func TestSafeArchivePath(t *testing.T) {
 		"a/..":        false,
 		"a/./b":       false,
 		"a\x00b":      false,
+		"/":           false,
+		"../":         false,
+		"a/../":       false,
+		"a/./":        false,
+		"a//":         false,
+		"a//b/":       false,
+		"././a/":      false,
 	}
 	for name, want := range cases {
 		if got := safeArchivePath(name); got != want {

@@ -1113,12 +1113,12 @@ func writeZipAsTar(dst io.Writer, name string, f *os.File) error {
 	return tw.Close()
 }
 
-// safeArchivePath accepts a zip entry name that names a file below the
-// archive root as written: not empty, not absolute, no NUL, no ".." element,
-// and nothing path.Clean would rewrite, because the name goes into the tar
-// header verbatim.
+// safeArchivePath accepts file and directory names below the archive root.
+// One leading "./" and a trailing directory slash are allowed; the remaining
+// path must be clean, relative, nonempty, and free of NUL or ".." elements.
 func safeArchivePath(name string) bool {
 	name = strings.TrimPrefix(name, "./")
+	name = strings.TrimSuffix(name, "/")
 	clean, err := relpath.Clean(name)
 	return err == nil && clean == name && clean != "."
 }
