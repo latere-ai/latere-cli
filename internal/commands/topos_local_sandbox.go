@@ -54,7 +54,7 @@ func (h *hostSandbox) Destroy(_ context.Context, _ string) error { return nil }
 
 func (h *hostSandbox) Exec(ctx context.Context, _ string, opts sandbox.ExecOptions) (sandbox.ExecResult, error) {
 	if len(opts.Argv) == 0 {
-		return sandbox.ExecResult{}, nil
+		return sandbox.ExecResult{}, errors.New("host sandbox: exec: argv is empty")
 	}
 	cmd := exec.CommandContext(ctx, opts.Argv[0], opts.Argv[1:]...)
 	cmd.Dir = h.root
@@ -71,6 +71,9 @@ func (h *hostSandbox) Exec(ctx context.Context, _ string, opts sandbox.ExecOptio
 	err := cmd.Run()
 	res := sandbox.ExecResult{Stdout: stdout.Bytes(), Stderr: stderr.Bytes(), Phase: "exited"}
 	if err != nil {
+		if ctx.Err() != nil {
+			res.Phase = "killed"
+		}
 		if ee, ok := errors.AsType[*exec.ExitError](err); ok {
 			res.ExitCode = ee.ExitCode()
 			return res, nil // a non-zero exit is a result, not a provider error
