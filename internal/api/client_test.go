@@ -9,7 +9,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -69,5 +71,20 @@ func TestClientErrorsPreserveHTTPStatus(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestClientRedirectLoopRemainsBounded(t *testing.T) {
+	t.Setenv("LATERE_TOKEN_FILE", filepath.Join(t.TempDir(), "token.json"))
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Location", "/loop")
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer server.Close()
+	err := NewClient(server.URL).GetJSON(t.Context(), "/loop", nil)
+	if err == nil || !strings.Contains(err.Error(), "stopped after 10 redirects") || calls.Load() != 10 {
+		t.Errorf("redirect loop: %v, %d requests; want error after 10 requests", err, calls.Load())
 	}
 }

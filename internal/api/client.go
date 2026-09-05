@@ -76,9 +76,21 @@ func NewClient(apiURL string) *Client {
 	apiURL = strings.TrimRight(apiURL, "/")
 	tok, _ := LoadToken("")
 	c := &Client{
-		BaseURL:   apiURL,
-		Token:     tok.AccessToken,
-		HTTP:      &http.Client{Timeout: 60 * time.Second, Transport: otel.Transport(nil)},
+		BaseURL: apiURL,
+		Token:   tok.AccessToken,
+		HTTP: &http.Client{
+			Timeout: 60 * time.Second, Transport: otel.Transport(nil),
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				if len(via) >= 10 {
+					return errors.New("stopped after 10 redirects")
+				}
+				// A write redirected to GET did not perform the requested action.
+				if previous := via[len(via)-1].Method; req.Method != previous {
+					return fmt.Errorf("redirect changed request method from %s to %s", previous, req.Method)
+				}
+				return nil
+			},
+		},
 		expiresAt: tok.ExpiresAt,
 	}
 	c.Refresh = func(ctx context.Context) (string, bool) {
