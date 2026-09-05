@@ -1618,22 +1618,29 @@ func waitCommand(ctx context.Context, c *api.Client, sandbox, cmdID string, time
 	if timeout <= 0 {
 		timeout = 10 * time.Minute
 	}
-	deadline := time.Now().Add(timeout)
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	waitError := func(err error) error {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if waitCtx.Err() != nil {
+			return fmt.Errorf("wait timed out: %w", waitCtx.Err())
+		}
+		return err
+	}
 	for {
 		var cd commandDTO
 		path := sbPath(sandbox) + "/commands/" + url.PathEscape(cmdID)
-		if err := c.GetJSON(ctx, path, &cd); err != nil {
-			return cd, err
+		if err := c.GetJSON(waitCtx, path, &cd); err != nil {
+			return cd, waitError(err)
 		}
 		if cd.Phase != "running" {
 			return cd, nil
 		}
-		if time.Now().After(deadline) {
-			return cd, errors.New("wait timed out")
-		}
 		select {
-		case <-ctx.Done():
-			return cd, ctx.Err()
+		case <-waitCtx.Done():
+			return cd, waitError(waitCtx.Err())
 		case <-time.After(time.Second):
 		}
 	}
