@@ -331,7 +331,8 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body io
 		if rewindable {
 			c.refreshed = true
 			if t, ok := c.Refresh(ctx); ok {
-				_, _ = io.Copy(io.Discard, resp.Body)
+				// The rejected body is no longer needed. Draining it can
+				// block the retry indefinitely if the server stalls.
 				_ = resp.Body.Close()
 				c.Token = t
 				resp, err = send()
