@@ -18,10 +18,10 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
+	"latere.ai/x/pkg/atomicfile"
 	"latere.ai/x/pkg/otel"
 
 	"github.com/latere-ai/latere-cli/internal/config"
@@ -184,8 +184,9 @@ func LoadToken(path string) (Token, error) {
 	return t, nil
 }
 
-// SaveToken writes token.json with 0600 perms. Creates the directory
-// if missing. Empty path uses TokenPath().
+// SaveToken atomically replaces token.json with 0600 perms, syncing the write
+// before publishing it. Creates the directory if missing. Empty path uses
+// TokenPath(). Permissions are best-effort on Windows.
 func SaveToken(path string, t Token) error {
 	if path == "" {
 		path = TokenPath()
@@ -200,10 +201,7 @@ func SaveToken(path string, t Token) error {
 	if err != nil {
 		return err
 	}
-	// Permission bits aren't enforced on Windows; the WriteFile mode
-	// is best-effort cross-platform protection.
-	_ = runtime.GOOS // silence unused on platforms without chmod semantics
-	return os.WriteFile(path, b, 0o600)
+	return atomicfile.WriteSync(path, b, 0o600)
 }
 
 // LoadAuthToken reads the retained auth.latere.ai root token. Returns

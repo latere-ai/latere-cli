@@ -43,7 +43,10 @@ lifetimes, so they live in separate files. The root token can mint
 new per-product credentials long after any single product bearer has
 expired.
 
-Both files are written with `0600` permissions.
+Both files are replaced atomically with `0600` permissions on each save
+(best-effort on Windows), including when an existing file has broader access.
+Concurrent readers see a complete token file. A symlink at either token file
+path is replaced; its target is left unchanged.
 
 ## How each product gets its credential
 
