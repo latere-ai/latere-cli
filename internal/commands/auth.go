@@ -317,8 +317,7 @@ flow and store an access token directly.`,
 			// interactive terminal with no --token.
 			login := func() error {
 				if t := strings.TrimSpace(token); t != "" {
-					clearStaleAuthToken()
-					return saveAndVerify(ctx, apiURL, t)
+					return loginWithPastedToken(ctx, apiURL, t)
 				}
 				if stat, _ := os.Stdin.Stat(); (stat.Mode() & os.ModeCharDevice) == 0 {
 					b, err := readAll(os.Stdin)
@@ -326,8 +325,7 @@ flow and store an access token directly.`,
 						return err
 					}
 					if t := strings.TrimSpace(b); t != "" {
-						clearStaleAuthToken()
-						return saveAndVerify(ctx, apiURL, t)
+						return loginWithPastedToken(ctx, apiURL, t)
 					}
 				}
 				return runDeviceFlow(ctx, deviceFlowOpts{
@@ -366,8 +364,16 @@ flow and store an access token directly.`,
 	return cmd
 }
 
-// clearStaleAuthToken removes any retained auth.latere.ai root token before a
-// --token / stdin paste login. A pasted opaque token carries no refresh grant,
+func loginWithPastedToken(ctx context.Context, apiURL, token string) error {
+	if err := saveAndVerify(ctx, apiURL, token); err != nil {
+		return err
+	}
+	clearStaleAuthToken()
+	return nil
+}
+
+// clearStaleAuthToken removes any retained auth.latere.ai root token after a
+// successful --token / stdin paste login. A pasted opaque token carries no refresh grant,
 // so a leftover auth-token.json from a prior login is never the right identity:
 // `latere lux` reads it via api.LoadAuthToken and would silently attribute cost
 // to the wrong principal. Clearing it makes lux fall back to the truthful
@@ -379,23 +385,26 @@ func clearStaleAuthToken() {
 	}
 }
 
-// saveAndVerify stores the token and confirms it by listing sandboxes.
+// saveAndVerify confirms the candidate by listing sandboxes before storing it.
 // Shared by the --token fast path and the device-code happy path.
 func saveAndVerify(ctx context.Context, apiURL, token string) error {
+	c := api.NewClient(apiURL)
+	c.Token = token
+	// A refresh would verify a different bearer, potentially from the previous
+	// identity, and persist it even though the submitted token was rejected.
+	c.Refresh = nil
+	verifyCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	var ignored any
+	if err := c.GetJSON(verifyCtx, "/v1/sandboxes", &ignored); err != nil {
+		return fmt.Errorf("token rejected by Cella API: %w", err)
+	}
 	if err := api.SaveToken("", api.Token{
 		AccessToken: token,
 		TokenType:   "Bearer",
 		IssuedAt:    time.Now().UTC(),
 	}); err != nil {
 		return err
-	}
-	c := api.NewClient(apiURL)
-	verifyCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	var ignored any
-	if err := c.GetJSON(verifyCtx, "/v1/sandboxes", &ignored); err != nil {
-		_ = api.ClearToken("")
-		return fmt.Errorf("token rejected by Cella API: %w", err)
 	}
 	fmt.Fprintf(os.Stderr, "Logged in. Token saved to %s\n", api.TokenPath())
 	return nil

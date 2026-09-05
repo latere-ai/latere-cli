@@ -30,6 +30,13 @@ latere login --personal         # sign in in your personal context
 latere login --no-browser       # print the URL instead of opening a browser
 ```
 
+For a pre-issued Cella token, use `latere login --token <token>` or pipe the
+token to `latere login`. The CLI verifies that token before replacing the
+saved Cella credential. A rejected token, verification failure, or cancelled
+attempt leaves your saved credentials intact. After a successful pasted-token
+login, the CLI removes the previous auth root token to avoid using a different
+identity for other products.
+
 ## The two token files
 
 | File | What it is | Used for |
