@@ -1079,7 +1079,7 @@ func copyImportTar(dst io.Writer, src io.Reader) error {
 		if err != nil {
 			return err
 		}
-		defer reader.Close()
+		defer func() { _ = reader.Close() }() // Read through EOF below to verify the checksum.
 		decoded = reader
 	case bytes.HasPrefix(header, []byte("BZh")):
 		decoded = bzip2.NewReader(buffered)
