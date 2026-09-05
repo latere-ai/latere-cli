@@ -109,7 +109,7 @@ longer-lived identity token so an SDK session survives:
 
 ```sh
 eval "$(latere lux env --compat openai)"          # identity token (lasts the login session)
-eval "$(latere lux env --compat openai --ttl 1h)" # a short-lived actor token instead (CI)
+eval "$(latere lux env --compat openai --ttl 5m)" # a short-lived actor token instead (CI)
 ```
 
 `lux env` needs a surface: either `--compat <dialect>` or a passthrough

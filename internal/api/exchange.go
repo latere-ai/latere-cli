@@ -61,38 +61,47 @@ func InferAuthURL(apiURL string) string {
 // audience "sandboxd", Lux for "lux.latere.ai" — Lux does not check the
 // audience but the short TTL bounds a leaked export).
 func MintActorToken(ctx context.Context, httpc *http.Client, authBase, bearer, audience string, ttlSeconds int) (string, error) {
+	token, _, err := MintActorTokenWithLifetime(ctx, httpc, authBase, bearer, audience, ttlSeconds)
+	return token, err
+}
+
+// MintActorTokenWithLifetime also returns auth's expires_in value in seconds.
+// A missing or nonpositive lifetime must not be presented as a known expiry;
+// the requested TTL may differ from the lifetime auth actually grants.
+func MintActorTokenWithLifetime(ctx context.Context, httpc *http.Client, authBase, bearer, audience string, ttlSeconds int) (string, int64, error) {
 	body, err := json.Marshal(map[string]any{"audience": audience, "ttl_seconds": ttlSeconds})
 	if err != nil {
-		return "", fmt.Errorf("encode actor-token request: %w", err)
+		return "", 0, fmt.Errorf("encode actor-token request: %w", err)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, authBase+"/actor-tokens", strings.NewReader(string(body)))
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+bearer)
 	resp, err := httpc.Do(req)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode/100 != 2 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<14))
 		if resp.StatusCode == http.StatusUnauthorized && strings.Contains(string(b), "audience mismatch") {
-			return "", ErrActorAudienceMismatch
+			return "", 0, ErrActorAudienceMismatch
 		}
-		return "", fmt.Errorf("actor-tokens %d: %s", resp.StatusCode, b)
+		return "", 0, fmt.Errorf("actor-tokens %d: %s", resp.StatusCode, b)
 	}
 	var actor struct {
 		ActorToken string `json:"actor_token"`
+		ExpiresIn  int64  `json:"expires_in"`
 	}
 	if err := decodeJSONResponse(resp.Body, &actor); err != nil {
-		return "", fmt.Errorf("actor-tokens: %w", err)
+		return "", 0, fmt.Errorf("actor-tokens: %w", err)
 	}
 	if actor.ActorToken == "" {
-		return "", fmt.Errorf("actor-tokens: empty response")
+		return "", 0, fmt.Errorf("actor-tokens: empty response")
 	}
-	return actor.ActorToken, nil
+	return actor.ActorToken, actor.ExpiresIn, nil
 }
 
 // ExchangeAtCella trades an auth-issued bearer for a cella catalog

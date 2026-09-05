@@ -615,11 +615,18 @@ func luxEnvBearer(ctx context.Context, tokenFlag, luxURL, authURLFlag string, tt
 	}
 	if ttl > 0 {
 		httpc := &http.Client{Timeout: 15 * time.Second, Transport: otel.Transport(nil)}
-		actor, err := api.MintActorToken(ctx, httpc, authBase, access, "lux.latere.ai", int(ttl.Seconds()))
+		actor, expiresIn, err := api.MintActorTokenWithLifetime(ctx, httpc, authBase, access, "lux.latere.ai", int(ttl/time.Second))
 		if err != nil {
 			return "", "", fmt.Errorf("mint actor token: %w", err)
 		}
-		return actor, fmt.Sprintf("actor token, expires in %s", ttl), nil
+		if expiresIn > 0 {
+			unit := "seconds"
+			if expiresIn == 1 {
+				unit = "second"
+			}
+			return actor, fmt.Sprintf("actor token, expires in %d %s", expiresIn, unit), nil
+		}
+		return actor, "actor token, expiry not reported by auth", nil
 	}
 	provenance = "identity token"
 	if tok, lerr := api.LoadAuthToken(); lerr == nil && !tok.ExpiresAt.IsZero() {
@@ -734,14 +741,24 @@ OpenRouter route.
 The embedded credential and its lifetime are reported on stderr (stdout
 stays eval-clean). By default it is your login identity token, which
 lasts the login session. For CI, --ttl mints a short-lived actor token
-instead, bounding the blast radius of a leaked export.`,
+instead. Use a positive whole number of seconds, without --token or
+LATERE_LUX_TOKEN. Auth may shorten the requested lifetime; stderr reports
+the lifetime returned by auth.`,
 		Example: `  eval "$(latere lux env openai)"
   eval "$(latere lux env --compat anthropic)"
   eval "$(latere lux env --compat lux)"
-  eval "$(latere lux env --compat openai --ttl 1h)"
+  eval "$(latere lux env --compat openai --ttl 5m)"
   TOKEN=$(latere lux env --raw)`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if cmd.Flags().Changed("ttl") {
+				if ttl <= 0 || ttl%time.Second != 0 {
+					return errors.New("--ttl must be a positive whole number of seconds (e.g. 1s or 5m)")
+				}
+				if _, supplied := passthroughToken(*token); supplied {
+					return errors.New("--ttl cannot be combined with --token or LATERE_LUX_TOKEN; use your saved login to mint an actor token")
+				}
+			}
 			route := provider
 			if len(args) == 1 {
 				route = args[0]
@@ -774,7 +791,7 @@ instead, bounding the blast radius of a leaked export.`,
 		func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 			return compatDialectNames(), cobra.ShellCompDirectiveNoFileComp
 		})
-	cmd.Flags().DurationVar(&ttl, "ttl", 0, "mint a short-lived actor token instead of the identity token (e.g. 1h)")
+	cmd.Flags().DurationVar(&ttl, "ttl", 0, "request an actor token lifetime in whole seconds (e.g. 5m); auth may shorten it")
 	cmd.Flags().BoolVar(&raw, "raw", false, "print the bare token only, no exports")
 	return cmd
 }

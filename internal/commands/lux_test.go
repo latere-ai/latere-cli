@@ -946,7 +946,7 @@ func TestLuxEnvTTLMintsActorToken(t *testing.T) {
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		gotTTL, _ = body["ttl_seconds"].(float64)
-		_ = json.NewEncoder(w).Encode(map[string]any{"actor_token": "short-lived"})
+		_ = json.NewEncoder(w).Encode(map[string]any{"actor_token": "short-lived", "expires_in": 300})
 	}))
 	defer authSrv.Close()
 	writeAuthTokenFile(t, fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"openid"}}), "r", time.Now().Add(time.Hour))
@@ -967,7 +967,7 @@ func TestLuxEnvTTLMintsActorToken(t *testing.T) {
 	if !strings.Contains(out, "export OPENAI_API_KEY=short-lived") {
 		t.Errorf("exports must embed the actor token:\n%s", out)
 	}
-	if !strings.Contains(errBuf.String(), "actor token, expires in 1h") {
+	if !strings.Contains(errBuf.String(), "actor token, expires in 300 seconds") {
 		t.Errorf("stderr = %q", errBuf.String())
 	}
 }
