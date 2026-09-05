@@ -86,7 +86,10 @@ func MintActorToken(ctx context.Context, httpc *http.Client, authBase, bearer, a
 	var actor struct {
 		ActorToken string `json:"actor_token"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&actor); err != nil || actor.ActorToken == "" {
+	if err := decodeJSONResponse(resp.Body, &actor); err != nil {
+		return "", fmt.Errorf("actor-tokens: %w", err)
+	}
+	if actor.ActorToken == "" {
 		return "", fmt.Errorf("actor-tokens: empty response")
 	}
 	return actor.ActorToken, nil
@@ -123,7 +126,10 @@ func ExchangeAtCella(ctx context.Context, httpc *http.Client, apiBase, bearer st
 	var out struct {
 		AccessToken string `json:"access_token"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil || out.AccessToken == "" {
+	if err := decodeJSONResponse(resp.Body, &out); err != nil {
+		return "", fmt.Errorf("tokens/exchange: %w", err)
+	}
+	if out.AccessToken == "" {
 		return "", fmt.Errorf("tokens/exchange: empty response")
 	}
 	return out.AccessToken, nil

@@ -349,20 +349,7 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body io
 		_, err := io.Copy(io.Discard, resp.Body)
 		return err
 	}
-	decoder := json.NewDecoder(resp.Body)
-	if err := decoder.Decode(out); err != nil {
-		return err
-	}
-	// Decode can finish before the transport reports a truncated body.
-	// Require EOF after the value and any legal trailing whitespace.
-	var extra json.RawMessage
-	if err := decoder.Decode(&extra); err != io.EOF {
-		if err != nil {
-			return err
-		}
-		return errors.New("response from API contains multiple JSON values")
-	}
-	return nil
+	return decodeJSONResponse(resp.Body, out)
 }
 
 // DoRaw runs the request and returns the response so the caller can
@@ -415,6 +402,24 @@ func (c *Client) req(ctx context.Context, method, path string, body io.Reader, c
 	}
 	req.Header.Set("User-Agent", "latere-cli")
 	return req, nil
+}
+
+// decodeJSONResponse requires one JSON value followed by a clean end of body.
+func decodeJSONResponse(body io.Reader, out any) error {
+	decoder := json.NewDecoder(body)
+	if err := decoder.Decode(out); err != nil {
+		return err
+	}
+	// Decode can finish before the transport reports a truncated body.
+	// Require EOF after the value and any legal trailing whitespace.
+	var extra json.RawMessage
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err != nil {
+			return err
+		}
+		return errors.New("response from API contains multiple JSON values")
+	}
+	return nil
 }
 
 func parseAPIError(resp *http.Response) error {
