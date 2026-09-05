@@ -142,7 +142,9 @@ login` and `latere logout`, never in git's own credential store.
 ## Staying signed in
 
 The CLI refreshes tokens near expiry so a long session keeps working
-without re-login.
+without re-login. If a saved auth credential has expired and has no refresh
+token, run `latere login` again. The CLI does not export or send that expired
+credential.
 
 - **Auth root token.** When the root token is within a minute of
   expiry, the CLI refreshes it against auth using the stored refresh

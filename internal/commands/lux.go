@@ -1304,6 +1304,9 @@ func authIdentityToken(ctx context.Context, luxURL, authURLFlag string) (access,
 	authBase = resolveAuthURL(resolveLuxURL(luxURL), authURLFlag)
 
 	access = authTok.AccessToken
+	if authTok.RefreshToken == "" && !authTok.ExpiresAt.IsZero() && !time.Now().Before(authTok.ExpiresAt) {
+		return "", "", errors.New("auth token expired without a refresh token; run `latere login`")
+	}
 	// Refresh when the token is known to be expired (or within a small
 	// skew). A zero ExpiresAt means "unknown"; skip refresh and let the
 	// downstream call surface a re-login error if it is in fact expired.

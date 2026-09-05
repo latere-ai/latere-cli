@@ -397,6 +397,9 @@ func toposIdentityBearer(ctx context.Context) (string, error) {
 		return "", err
 	}
 	access := authTok.AccessToken
+	if authTok.RefreshToken == "" && !authTok.ExpiresAt.IsZero() && !time.Now().Before(authTok.ExpiresAt) {
+		return "", errors.New("auth token expired without a refresh token; run `latere login`")
+	}
 	if authTok.RefreshToken != "" && !authTok.ExpiresAt.IsZero() &&
 		time.Now().After(authTok.ExpiresAt.Add(-60*time.Second)) {
 		rctx, cancel := context.WithTimeout(ctx, 15*time.Second)

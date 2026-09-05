@@ -183,3 +183,45 @@ func TestRefreshCellaTokenAudienceMismatchFallsBackToRoot(t *testing.T) {
 		t.Errorf("exchange calls = %d, want 1", f.exchangeCalls.Load())
 	}
 }
+
+func TestRefreshCellaTokenWithoutRefreshGrant(t *testing.T) {
+	for _, state := range []string{"expired", "near expiry", "unknown expiry"} {
+		t.Run(state, func(t *testing.T) {
+			plane := &fakePlane{t: t}
+			server := httptest.NewServer(plane.handler())
+			defer server.Close()
+			t.Setenv("AUTH_URL", server.URL)
+			seedTokens(t, Token{AccessToken: "old-cella"}, "root-access")
+			var expiry time.Time
+			switch state {
+			case "expired":
+				expiry = time.Now().Add(-time.Hour)
+			case "near expiry":
+				expiry = time.Now().Add(45 * time.Second)
+			}
+			if err := SaveAuthToken(Token{AccessToken: "root-access", ExpiresAt: expiry}); err != nil {
+				t.Fatal(err)
+			}
+			got, ok := RefreshCellaToken(t.Context(), server.URL)
+			wantStored := "old-cella"
+			var wantCalls int32
+			if state == "expired" {
+				if ok || got != "" {
+					t.Error("refreshed from an expired root without a refresh grant")
+				}
+			} else {
+				wantCalls = 1
+				wantStored = "fresh-cella-tok"
+				if !ok || got != wantStored {
+					t.Error("root with usable or unknown expiry was rejected")
+				}
+			}
+			if plane.actorCalls.Load() != wantCalls || plane.exchangeCalls.Load() != wantCalls {
+				t.Errorf("actor/exchange calls = %d/%d, want %d each", plane.actorCalls.Load(), plane.exchangeCalls.Load(), wantCalls)
+			}
+			if stored, err := LoadToken(""); err != nil || stored.AccessToken != wantStored {
+				t.Errorf("stored Cella credential = %q (%v), want %q", stored.AccessToken, err, wantStored)
+			}
+		})
+	}
+}

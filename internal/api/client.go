@@ -99,6 +99,9 @@ func RefreshCellaToken(ctx context.Context, apiBase string) (string, bool) {
 	if err != nil || authTok.AccessToken == "" {
 		return "", false
 	}
+	if authTok.RefreshToken == "" && !authTok.ExpiresAt.IsZero() && !time.Now().Before(authTok.ExpiresAt) {
+		return "", false
+	}
 	authBase := strings.TrimRight(os.Getenv("AUTH_URL"), "/")
 	if authBase == "" {
 		authBase = InferAuthURL(apiBase)
