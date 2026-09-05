@@ -9,11 +9,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/latere-ai/latere-cli/internal/api"
 )
 
 // The session verbs live at the top level (specs/004-flatten-auth-commands.md);
@@ -135,9 +138,19 @@ func TestOrgSwitch(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			writeAuthTokenFile(t, fakeJWT(t, map[string]any{"sub": "u1"}), "refresh-1", time.Now().Add(time.Hour))
+			t.Setenv("LATERE_TOKEN_FILE", filepath.Join(t.TempDir(), "token.json"))
 
 			var gotOrg *string
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch r.URL.Path {
+				case "/actor-tokens":
+					_, _ = w.Write([]byte(`{"actor_token":"new-actor"}`))
+					return
+				case "/v1/tokens/exchange":
+					_, _ = w.Write([]byte(`{"access_token":"new-cella"}`))
+					return
+				}
 				if r.URL.Path != "/token" {
 					http.NotFound(w, r)
 					return
@@ -158,6 +171,7 @@ func TestOrgSwitch(t *testing.T) {
 				})
 			}))
 			defer srv.Close()
+			t.Setenv("SANDBOX_API_URL", srv.URL)
 
 			cmd := newOrgCmd()
 			var errBuf bytes.Buffer
@@ -187,6 +201,9 @@ func TestOrgSwitch(t *testing.T) {
 			}
 			if saved.AccessToken != "new-access" {
 				t.Errorf("saved access token = %q, want new-access", saved.AccessToken)
+			}
+			if cella, err := api.LoadToken(""); err != nil || cella.AccessToken != "new-cella" {
+				t.Errorf("Cella context was not replaced: %v", err)
 			}
 		})
 	}

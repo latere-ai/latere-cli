@@ -30,6 +30,13 @@ latere login --personal         # sign in in your personal context
 latere login --no-browser       # print the URL instead of opening a browser
 ```
 
+Use `latere org <org-uuid>` or `latere org --personal` to switch context
+without another browser approval. Switching updates the auth root token and
+replaces the Cella bearer so subsequent Cella commands use the selected context.
+If the Cella exchange fails, the command reports an error and removes the old
+Cella bearer; the new auth root token is retained. Retry the switch or log in
+again before using Cella.
+
 For a pre-issued Cella token, use `latere login --token <token>` or pipe the
 token to `latere login`. The CLI verifies that token before replacing the
 saved Cella credential. A rejected token, verification failure, or cancelled

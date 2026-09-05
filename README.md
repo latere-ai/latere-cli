@@ -75,7 +75,7 @@ latere org <org-uuid>             # scope the saved token to <org-uuid>
 latere org --personal             # scope the saved token to the personal context
 ```
 
-Switching uses the auth service's refresh-token grant: no device-code re-prompt, the saved refresh token is exchanged for a new access token scoped to the chosen org. The on-disk token file is replaced atomically.
+Switching uses the auth service's refresh-token grant: no device-code re-prompt, the saved refresh token is exchanged for a new access token scoped to the chosen org. The CLI also replaces the Cella bearer so Cella commands use the same context. Token files are replaced atomically.
 
 | Setting | Purpose |
 |---------|---------|

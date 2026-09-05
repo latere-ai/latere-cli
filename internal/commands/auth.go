@@ -226,12 +226,33 @@ func switchOrgContext(cmd *cobra.Command, authURL, clientID, orgID string) error
 	}); err != nil {
 		return fmt.Errorf("save auth token: %w", err)
 	}
+	if err := replaceCellaOrgToken(cmd.Context(), authBase, got.AccessToken); err != nil {
+		return fmt.Errorf("auth context changed, but Cella credentials could not be updated: %w; retry the org switch or run `latere login`", err)
+	}
 	if orgID == "" {
 		fprintln(cmd.ErrOrStderr(), "Switched to personal context.")
 	} else {
 		fprintf(cmd.ErrOrStderr(), "Switched to org %s.\n", orgID)
 	}
 	return nil
+}
+
+// replaceCellaOrgToken discards the previous scope before exchanging the new
+// root token. If exchange fails, later commands must not use the old scope.
+func replaceCellaOrgToken(ctx context.Context, authBase, rootToken string) error {
+	if err := api.ClearToken(""); err != nil {
+		return fmt.Errorf("remove previous Cella token: %w", err)
+	}
+	cellaBase := api.NewClient("").BaseURL
+	token, err := exchangeForCellaToken(ctx, deviceFlowOpts{AuthURL: authBase, APIURL: cellaBase}, rootToken)
+	if err != nil {
+		return err
+	}
+	return api.SaveToken("", api.Token{
+		AccessToken: token,
+		TokenType:   "Bearer",
+		IssuedAt:    time.Now().UTC(),
+	})
 }
 
 // newAuthPrintTokenCmd prints the saved access token to stdout so it
