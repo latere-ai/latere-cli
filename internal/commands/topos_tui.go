@@ -114,7 +114,9 @@ func (m tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case tea.KeyEsc:
 		if !m.readonly {
-			_ = m.sender.Send(attachControl{Type: "interrupt"})
+			if err := m.sender.Send(attachControl{Type: "interrupt"}); err != nil {
+				m.state.lines = append(m.state.lines, "⚠ could not send interrupt: "+err.Error())
+			}
 		}
 		return m, nil
 	case tea.KeyEnter:
@@ -122,14 +124,14 @@ func (m tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	// An outstanding approval: y/n decides it (when read-write).
 	if m.state.pending != nil && !m.readonly {
-		switch strings.ToLower(msg.String()) {
-		case "y":
-			id := m.state.resolvePending()
-			_ = m.sender.Send(attachControl{Type: "approval_reply", DecisionID: id, Approve: true})
-			return m, nil
-		case "n":
-			id := m.state.resolvePending()
-			_ = m.sender.Send(attachControl{Type: "approval_reply", DecisionID: id, Approve: false})
+		switch decision := strings.ToLower(msg.String()); decision {
+		case "y", "n":
+			ctrl := attachControl{Type: "approval_reply", DecisionID: m.state.pending.DecisionID, Approve: decision == "y"}
+			if err := m.sender.Send(ctrl); err != nil {
+				m.state.lines = append(m.state.lines, "⚠ could not send approval: "+err.Error())
+				return m, nil
+			}
+			m.state.resolvePending()
 			return m, nil
 		}
 	}
@@ -146,8 +148,11 @@ func (m tuiModel) handleEnter() (tea.Model, tea.Cmd) {
 	if text == "" {
 		return m, nil
 	}
+	if err := m.sender.Send(attachControl{Type: "user_turn", Text: text}); err != nil {
+		m.state.lines = append(m.state.lines, "⚠ could not send message: "+err.Error())
+		return m, nil
+	}
 	m.state.echoUser(text)
-	_ = m.sender.Send(attachControl{Type: "user_turn", Text: text})
 	m.input.Reset()
 	return m, nil
 }

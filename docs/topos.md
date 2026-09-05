@@ -58,7 +58,9 @@ latere topos session attach sess_01hxy --readonly
 ```
 
 If your connection drops, the client reconnects on its own and resumes from where
-you were — you should not have to do anything.
+you were. If sending a message, approval, or interrupt fails, the UI shows the
+error and preserves your typed message or pending approval. Once reconnected,
+press Enter, `y`/`n`, or Esc again to retry the action.
 
 ## Print mode (scripts and pipelines)
 

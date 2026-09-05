@@ -8,6 +8,7 @@
 package commands
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -15,9 +16,61 @@ import (
 )
 
 // recSender records control messages the model sends.
-type recSender struct{ sent []attachControl }
+type recSender struct {
+	sent []attachControl
+	err  error
+}
 
-func (r *recSender) Send(c attachControl) error { r.sent = append(r.sent, c); return nil }
+func (r *recSender) Send(c attachControl) error { r.sent = append(r.sent, c); return r.err }
+
+func TestTUIFailedSendPreservesInput(t *testing.T) {
+	for _, sendErr := range []error{errNotConnected, errors.New("websocket write failed")} {
+		for _, action := range []struct {
+			name    string
+			key     tea.KeyMsg
+			control attachControl
+		}{
+			{"message", tea.KeyMsg{Type: tea.KeyEnter}, attachControl{Type: "user_turn", Text: "hello"}},
+			{"approve", keyRunes("y"), attachControl{Type: "approval_reply", DecisionID: "d1", Approve: true}},
+			{"deny", keyRunes("n"), attachControl{Type: "approval_reply", DecisionID: "d1"}},
+			{"interrupt", tea.KeyMsg{Type: tea.KeyEsc}, attachControl{Type: "interrupt"}},
+		} {
+			t.Run(sendErr.Error()+"/"+action.name, func(t *testing.T) {
+				m, snd := newTestModel(false)
+				snd.err = sendErr
+				m.input.SetValue("  hello  ")
+				if action.control.Type == "approval_reply" {
+					m.state.apply(ev("ApprovalRequest", `{"decision_id":"d1","tool_id":"bash"}`))
+				}
+				pending := m.state.pending
+				status := m.state.status
+				updated, _ := m.Update(action.key)
+				m = updated.(tuiModel)
+				if m.input.Value() != "  hello  " || m.state.pending != pending || m.state.status != status {
+					t.Errorf("failed send discarded local state: input=%q pending=%v status=%q", m.input.Value(), m.state.pending, m.state.status)
+				}
+				if !strings.Contains(m.View(), sendErr.Error()) {
+					t.Errorf("send error missing from view: %s", m.View())
+				}
+				if strings.Contains(strings.Join(m.state.lines, "\n"), "› hello") {
+					t.Error("failed message was echoed as sent")
+				}
+				snd.err = nil
+				updated, _ = m.Update(action.key)
+				m = updated.(tuiModel)
+				if len(snd.sent) != 2 || snd.sent[0] != action.control || snd.sent[1] != action.control {
+					t.Fatalf("retry controls = %+v, want two attempts of %+v", snd.sent, action.control)
+				}
+				if action.control.Type == "user_turn" && (m.input.Value() != "" || strings.Count(strings.Join(m.state.lines, "\n"), "› hello") != 1) {
+					t.Errorf("successful message not committed once: input=%q lines=%v", m.input.Value(), m.state.lines)
+				}
+				if action.control.Type == "approval_reply" && m.state.pending != nil {
+					t.Error("successful approval still pending")
+				}
+			})
+		}
+	}
+}
 
 func newTestModel(readonly bool) (tuiModel, *recSender) {
 	snd := &recSender{}
