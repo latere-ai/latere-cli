@@ -275,9 +275,9 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("status %d: %s", e.Status, e.Message)
 }
 
-// Do executes the request and decodes a JSON response into out. out
-// may be nil for endpoints that return no body (or the caller wants
-// raw).
+// Do executes the request and decodes exactly one JSON value into out,
+// requiring a complete response. A nil out discards the response body
+// but still reports transfer errors. Use DoRaw for streaming responses.
 func (c *Client) Do(ctx context.Context, method, path string, body io.Reader, contentType string, out any) error {
 	return c.DoWithHeaders(ctx, method, path, body, contentType, nil, out)
 }
@@ -346,10 +346,23 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body io
 		return parseAPIError(resp)
 	}
 	if out == nil || resp.StatusCode == http.StatusNoContent {
-		_, _ = io.Copy(io.Discard, resp.Body)
-		return nil
+		_, err := io.Copy(io.Discard, resp.Body)
+		return err
 	}
-	return json.NewDecoder(resp.Body).Decode(out)
+	decoder := json.NewDecoder(resp.Body)
+	if err := decoder.Decode(out); err != nil {
+		return err
+	}
+	// Decode can finish before the transport reports a truncated body.
+	// Require EOF after the value and any legal trailing whitespace.
+	var extra json.RawMessage
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err != nil {
+			return err
+		}
+		return errors.New("response from API contains multiple JSON values")
+	}
+	return nil
 }
 
 // DoRaw runs the request and returns the response so the caller can
