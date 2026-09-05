@@ -62,10 +62,14 @@ func New(baseURL, token string) *Client {
 			// Downloads 302 to presigned object-store URLs. Those carry
 			// their auth in the URL and reject requests that also present
 			// a bearer, and Go only auto-strips Authorization cross-host —
-			// so strip it on every redirect.
+			// so strip it on every redirect. Reject method changes so a
+			// redirected write cannot become a successful-looking GET.
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				if len(via) >= 10 {
 					return errors.New("stopped after 10 redirects")
+				}
+				if previous := via[len(via)-1].Method; req.Method != previous {
+					return fmt.Errorf("drive: redirect changed request method from %s to %s", previous, req.Method)
 				}
 				req.Header.Del("Authorization")
 				return nil

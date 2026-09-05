@@ -155,3 +155,44 @@ func TestMultipartUploadRejectsIncompleteResponses(t *testing.T) {
 		}
 	}
 }
+
+func TestMultipartUploadAbortsOnMethodChangingRedirect(t *testing.T) {
+	for _, status := range []int{301, 302, 303} {
+		t.Run(strconv.Itoa(status), func(t *testing.T) {
+			var redirected, completes, aborts atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/v1/uploads":
+					_ = json.NewEncoder(w).Encode(uploadSession{UploadID: "test-upload", PartSize: 4, PartCount: 1, PartURLs: []string{"http://" + r.Host + "/part"}})
+				case "/part":
+					_, _ = io.Copy(io.Discard, r.Body)
+					w.Header().Set("Location", "/redirected")
+					w.WriteHeader(status)
+				case "/redirected":
+					redirected.Add(1)
+					w.Header().Set("ETag", `"not-an-upload"`)
+				case "/api/v1/uploads/test-upload/complete":
+					completes.Add(1)
+					_ = json.NewEncoder(w).Encode(FileWriteResult{Path: "files/test", Size: 4})
+				case "/api/v1/uploads/test-upload":
+					if r.Method != http.MethodDelete {
+						t.Errorf("unexpected cleanup method: %s", r.Method)
+					}
+					aborts.Add(1)
+					w.WriteHeader(http.StatusNoContent)
+				default:
+					t.Errorf("unexpected endpoint: %s", r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer server.Close()
+			_, err := New(server.URL, "test-token").MultipartUpload(t.Context(), "me", "files/test", strings.NewReader("data"), 4, PutOptions{})
+			if err == nil || !strings.Contains(err.Error(), "redirect changed request method") {
+				t.Errorf("redirected upload error=%v", err)
+			}
+			if redirected.Load() != 0 || completes.Load() != 0 || aborts.Load() != 1 {
+				t.Errorf("redirect/complete/abort calls=%d/%d/%d, want 0/0/1", redirected.Load(), completes.Load(), aborts.Load())
+			}
+		})
+	}
+}
