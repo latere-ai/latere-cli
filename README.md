@@ -137,6 +137,11 @@ go test ./...       # unit and package tests only
 go run ./cmd/latere --help
 ```
 
+The `internal/commands` test suite uses a temporary config directory and token
+files, overriding inherited `LATERE_TOKEN_FILE` and `LATERE_AUTH_TOKEN_FILE`.
+Tests that need a saved login must create synthetic credentials with `t.Setenv`
+and `t.TempDir`; they must not depend on the developer's signed-in session.
+
 `go test ./...` runs the unit and package tests. The live end-to-end tests are
 opt-in and **skip silently without their environment variables**, so a green
 `go test ./...` does not mean they ran:
