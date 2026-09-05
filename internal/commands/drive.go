@@ -232,15 +232,7 @@ func newDriveGetCmd(o *driveOpts) *cobra.Command {
 			if dest == "" {
 				dest = path.Base(args[0])
 			}
-			f, err := os.Create(dest)
-			if err != nil {
-				return err
-			}
-			if _, err := io.Copy(f, body); err != nil {
-				_ = f.Close()
-				return err
-			}
-			if err := f.Close(); err != nil {
+			if err := saveDownload(dest, body); err != nil {
 				return err
 			}
 			fprintf(cmd.ErrOrStderr(), "Downloaded %s to %s\n", args[0], dest)

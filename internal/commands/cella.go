@@ -868,16 +868,10 @@ to stdout. Pass --output to write the archive to a local file.`,
 				return err
 			}
 			defer func() { _ = resp.Body.Close() }()
-			var w io.Writer = os.Stdout
 			if out != "" && out != "-" {
-				f, err := os.Create(out)
-				if err != nil {
-					return err
-				}
-				defer func() { _ = f.Close() }()
-				w = f
+				return saveDownload(out, resp.Body)
 			}
-			_, err = io.Copy(w, resp.Body)
+			_, err = io.Copy(os.Stdout, resp.Body)
 			return err
 		},
 	}
