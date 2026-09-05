@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -504,5 +505,38 @@ func TestDriveVersionCommandsRequirePath(t *testing.T) {
 		if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "arg") {
 			t.Errorf("%s without a path: %v", verb, err)
 		}
+	}
+}
+
+func TestDrivePutEmptyFile(t *testing.T) {
+	t.Setenv("LATERE_TOKEN_FILE", writeTokenFile(t, t.TempDir(), "test-tok"))
+	src := filepath.Join(t.TempDir(), "empty.txt")
+	if err := os.WriteFile(src, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut || r.URL.Path != "/api/v1/files/me/files/empty.txt" {
+			t.Errorf("unexpected empty upload request: %s %s", r.Method, r.URL.Path)
+		}
+		if r.ContentLength < 0 {
+			w.WriteHeader(http.StatusLengthRequired)
+			_, _ = io.WriteString(w, `{"error":"Content-Length is required"}`)
+			return
+		}
+		if r.ContentLength != 0 || len(r.TransferEncoding) != 0 {
+			t.Errorf("empty upload length=%d encoding=%v", r.ContentLength, r.TransferEncoding)
+		}
+		if body, err := io.ReadAll(r.Body); err != nil || len(body) != 0 {
+			t.Errorf("empty upload body=%q, %v", body, err)
+		}
+		_, _ = io.WriteString(w, `{"path":"files/empty.txt","size":0,"checksum":"empty"}`)
+	}))
+	defer srv.Close()
+	_, stderr, err := execDrive(t, srv, "put", src)
+	if err != nil {
+		t.Fatalf("empty-file upload failed: %v", err)
+	}
+	if !strings.Contains(stderr, "Uploaded files/empty.txt (0 bytes") {
+		t.Fatalf("missing empty-upload success: %q", stderr)
 	}
 }

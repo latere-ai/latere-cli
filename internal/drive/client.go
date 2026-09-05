@@ -385,6 +385,15 @@ func (c *Client) Put(ctx context.Context, owner, path string, r io.Reader, size 
 		return nil, err
 	}
 	req.ContentLength = size
+	if size == 0 {
+		// With a non-nil reader, net/http treats length zero as unknown and
+		// sends chunked data. Drive requires an explicit Content-Length: 0.
+		if body := req.Body; body != nil {
+			defer func() { _ = body.Close() }()
+		}
+		req.Body = http.NoBody
+		req.GetBody = nil
+	}
 	opts.apply(req.Header)
 	var out FileWriteResult
 	if err := c.do(req, &out); err != nil {
