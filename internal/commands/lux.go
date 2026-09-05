@@ -906,15 +906,15 @@ model listed as local/<model> can be called either way.`,
 				return wrapLuxErr(err)
 			}
 			if jsonF {
-				fmt.Println(strings.TrimSpace(string(raw)))
-				return nil
+				_, err := fmt.Fprintln(os.Stdout, strings.TrimSpace(string(raw)))
+				return err
 			}
 			text, err := extractChatText(raw, spec.anthropicStyle)
 			if err != nil {
 				return err
 			}
-			fmt.Println(text)
-			return nil
+			_, err = fmt.Fprintln(os.Stdout, text)
+			return err
 		},
 	}
 	cmd.Flags().StringVar(&model, "model", "", "model id to call (required)")
