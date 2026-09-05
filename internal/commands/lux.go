@@ -777,8 +777,16 @@ the lifetime returned by auth.`,
 				return nil
 			}
 			base := strings.TrimRight(resolveLuxURL(*luxURL), "/")
-			fprintf(cmd.OutOrStdout(), "export %s=%s\n", spec.envBaseVar, base+spec.envBaseURL)
-			fprintf(cmd.OutOrStdout(), "export %s=%s\n", spec.envKeyVar, bearer)
+			baseValue, err := quoteShellValue(base + spec.envBaseURL)
+			if err != nil {
+				return err
+			}
+			keyValue, err := quoteShellValue(bearer)
+			if err != nil {
+				return err
+			}
+			fprintf(cmd.OutOrStdout(), "export %s=%s\n", spec.envBaseVar, baseValue)
+			fprintf(cmd.OutOrStdout(), "export %s=%s\n", spec.envKeyVar, keyValue)
 			fprintf(cmd.ErrOrStderr(), "# %s\n", provenance)
 			return nil
 		},
