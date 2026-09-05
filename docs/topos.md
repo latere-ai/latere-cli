@@ -76,6 +76,8 @@ Send a follow-up turn to an existing session the same way:
 latere topos session attach sess_01hxy -p "now write the tests"
 ```
 
+`--readonly` cannot be combined with `--print`/`-p`, which sends a new prompt.
+
 Print mode exits non-zero if the agent hits an error, so `&&` chains and CI steps
 behave as you would expect.
 

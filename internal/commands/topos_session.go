@@ -101,12 +101,15 @@ func newToposSessionAttachCmd() *cobra.Command {
 
 Opens the terminal UI by default. --readonly attaches as a viewer (no input).
 With --print/-p, sends one prompt non-interactively, streams the result, and
-exits.`,
+exits. --readonly cannot be combined with --print.`,
 		Example: `  latere topos session attach sess_01hxy
   latere topos session attach sess_01hxy --readonly
   latere topos session attach sess_01hxy -p "now add a test"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if readonly && print != "" {
+				return fmt.Errorf("--readonly cannot be combined with --print")
+			}
 			c, err := toposClient(cmd.Context(), apiURL)
 			if err != nil {
 				return err
