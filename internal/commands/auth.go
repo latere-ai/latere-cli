@@ -130,11 +130,13 @@ func newAuthOrgSwitchCmd() *cobra.Command {
 // the org UUID, bare, so it is scriptable.
 func showOrgContext(cmd *cobra.Command) error {
 	tok, err := api.LoadAuthToken()
-	if err != nil {
+	// Legacy logins may have only a Cella token. A damaged auth file must
+	// not silently select that credential's potentially different scope.
+	if errors.Is(err, api.ErrNoToken) {
 		tok, err = api.LoadToken("")
-		if err != nil {
-			return err
-		}
+	}
+	if err != nil {
+		return err
 	}
 	info, err := principalFromJWT(tok.AccessToken)
 	if err != nil {
