@@ -674,6 +674,9 @@ func putPart(ctx context.Context, httpc *http.Client, presignedURL string, body 
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<12))
 		return "", fmt.Errorf("object store HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
 	}
+	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+		return "", fmt.Errorf("read object store part response: %w", err)
+	}
 	etag := strings.Trim(resp.Header.Get("ETag"), `"`)
 	if etag == "" {
 		return "", errors.New("object store returned no ETag for part")
