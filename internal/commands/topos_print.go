@@ -15,7 +15,7 @@ import (
 )
 
 // printErr is returned by the print-mode stream when the agent reported an
-// infrastructure error, so the command can exit non-zero for scripts/CI.
+// infrastructure or protocol error, so the command exits non-zero for scripts/CI.
 type printErr struct{ msg string }
 
 func (e *printErr) Error() string { return e.msg }
@@ -37,8 +37,11 @@ func handlePrintFrame(fr attachFrame, out, errOut io.Writer) (done bool, err err
 		return false, nil
 	case "error":
 		// A protocol/auth error frame (distinct from an agent RunError).
-		fprintln(errOut, "error:", fr.Message)
-		return false, nil
+		message := fr.Message
+		if message == "" {
+			message = "session protocol error"
+		}
+		return true, &printErr{msg: message}
 	case "event":
 		return handlePrintEvent(fr, out, errOut)
 	default:
@@ -88,7 +91,7 @@ type printConn interface {
 // streamPrint runs a session in non-interactive print mode: it optionally
 // submits a turn, then streams frames to the writers until the turn completes,
 // the session closes, or the context ends. Returns a non-nil error if the agent
-// reported a RunError.
+// reported an error or the connection ended before completion was confirmed.
 func streamPrint(ctx context.Context, conn printConn, out, errOut io.Writer, turn string) error {
 	if turn != "" {
 		if err := conn.Send(ctx, attachControl{Type: "user_turn", Text: turn}); err != nil {
@@ -101,7 +104,10 @@ func streamPrint(ctx context.Context, conn printConn, out, errOut io.Writer, tur
 			return ctx.Err()
 		case fr, ok := <-conn.Frames():
 			if !ok {
-				return nil // connection closed
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				return fmt.Errorf("session disconnected before turn completed: %w", io.ErrUnexpectedEOF)
 			}
 			done, err := handlePrintFrame(fr, out, errOut)
 			if err != nil {

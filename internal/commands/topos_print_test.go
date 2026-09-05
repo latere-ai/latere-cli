@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 )
@@ -56,14 +57,15 @@ func TestHandlePrintFrame(t *testing.T) {
 		t.Fatal("closed status should signal done")
 	}
 
-	// A protocol error frame is printed but does not end the stream.
+	// A protocol error must fail the non-interactive command.
 	out.Reset()
 	errOut.Reset()
-	if done, _ := handlePrintFrame(attachFrame{Type: "error", Message: "nope"}, &out, &errOut); done {
-		t.Fatal("error frame should not end the stream")
+	done, err = handlePrintFrame(attachFrame{Type: "error", Message: "nope"}, &out, &errOut)
+	if !done || err == nil || err.Error() != "nope" {
+		t.Fatalf("protocol error: done=%v, err=%v", done, err)
 	}
-	if !strings.Contains(errOut.String(), "nope") {
-		t.Fatalf("stderr = %q, want the error message", errOut.String())
+	if errOut.Len() != 0 {
+		t.Fatal("returned protocol error must not also be printed")
 	}
 }
 
@@ -109,21 +111,26 @@ func TestStreamPrintReturnsRunError(t *testing.T) {
 	}
 }
 
-func TestStreamPrintStopsWhenChannelCloses(t *testing.T) {
+func TestStreamPrintFailsWhenChannelClosesBeforeCompletion(t *testing.T) {
 	fc := &fakePrintConn{frames: make(chan attachFrame)}
 	close(fc.frames)
 	var out, errOut bytes.Buffer
-	if err := streamPrint(context.Background(), fc, &out, &errOut, ""); err != nil {
-		t.Fatalf("closed channel should end cleanly, got %v", err)
+	if err := streamPrint(context.Background(), fc, &out, &errOut, ""); !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("closed channel must report incomplete turn, got %v", err)
 	}
 }
 
 func TestStreamPrintContextCancel(t *testing.T) {
-	fc := &fakePrintConn{frames: make(chan attachFrame)} // never sends
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	var out, errOut bytes.Buffer
-	if err := streamPrint(ctx, fc, &out, &errOut, ""); err == nil {
-		t.Fatal("want context error")
+	for _, closed := range []bool{false, true} {
+		fc := &fakePrintConn{frames: make(chan attachFrame)} // never sends
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		if closed {
+			close(fc.frames)
+		}
+		var out, errOut bytes.Buffer
+		if err := streamPrint(ctx, fc, &out, &errOut, ""); !errors.Is(err, context.Canceled) {
+			t.Fatalf("closed=%t: want context cancellation, got %v", closed, err)
+		}
 	}
 }
