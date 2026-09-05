@@ -187,6 +187,20 @@ func runLsTrashed(cmd *cobra.Command, c *drive.Client, o *driveOpts) error {
 	return w.Flush()
 }
 
+// driveVersionArgs keeps an explicitly requested revision from falling back
+// to the current file (or whole-file deletion) when the revision is invalid.
+func driveVersionArgs(version *int) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if err := cobra.ExactArgs(1)(cmd, args); err != nil {
+			return err
+		}
+		if cmd.Flags().Changed("version") && *version <= 0 {
+			return errors.New("--version must be a positive integer")
+		}
+		return nil
+	}
+}
+
 // ---- get ----
 
 func newDriveGetCmd(o *driveOpts) *cobra.Command {
@@ -198,7 +212,7 @@ func newDriveGetCmd(o *driveOpts) *cobra.Command {
 		Example: `  latere drive get files/reports/q2.pdf
   latere drive get files/notes.md -o -
   latere drive get files/notes.md --version 3 -o notes-v3.md`,
-		Args: cobra.ExactArgs(1),
+		Args: driveVersionArgs(&version),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := o.client(cmd.Context())
 			if err != nil {
@@ -375,7 +389,7 @@ func newDriveRmCmd(o *driveOpts) *cobra.Command {
 		Example: `  latere drive rm files/old.txt
   latere drive rm files/old.txt --permanent
   latere drive rm files/notes.md --version 2`,
-		Args: cobra.ExactArgs(1),
+		Args: driveVersionArgs(&version),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := o.client(cmd.Context())
 			if err != nil {
@@ -385,7 +399,7 @@ func newDriveRmCmd(o *driveOpts) *cobra.Command {
 			// A --permanent rm of an already-trashed file 404s on the
 			// files route; purge it from the trash instead.
 			var derr *drive.Error
-			if permanent && errors.As(err, &derr) && derr.Status == 404 {
+			if permanent && version == 0 && errors.As(err, &derr) && derr.Status == 404 {
 				if n, perr := c.TrashPurge(cmd.Context(), *o.owner, args[0]); perr == nil && n > 0 {
 					err = nil
 				}
@@ -418,7 +432,7 @@ func newDriveRestoreCmd(o *driveOpts) *cobra.Command {
 		Short: "Restore a file from the trash, or to a prior version with --version N.",
 		Example: `  latere drive restore files/old.txt
   latere drive restore files/notes.md --version 2`,
-		Args: cobra.ExactArgs(1),
+		Args: driveVersionArgs(&version),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := o.client(cmd.Context())
 			if err != nil {

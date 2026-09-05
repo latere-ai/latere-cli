@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/latere-ai/latere-cli/internal/drive"
@@ -441,5 +442,67 @@ func TestDriveOwnerFlagRoutesToSpace(t *testing.T) {
 	}
 	if gotPath != "/api/v1/files/org/files" {
 		t.Errorf("path = %q", gotPath)
+	}
+}
+
+func TestDriveRejectsNonPositiveVersion(t *testing.T) {
+	for _, verb := range []string{"get", "rm", "restore"} {
+		for _, version := range []string{"0", "-1"} {
+			t.Run(verb+"/"+version, func(t *testing.T) {
+				var calls atomic.Int32
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					calls.Add(1)
+					w.WriteHeader(http.StatusNoContent)
+				}))
+				defer srv.Close()
+				args := []string{verb, "files/a", "--version", version}
+				if verb == "get" {
+					args = append(args, "-o", "-")
+				}
+				_, _, err := execDrive(t, srv, args...)
+				if err == nil || !strings.Contains(err.Error(), "--version") {
+					t.Errorf("want version validation error, got %v", err)
+				}
+				if got := calls.Load(); got != 0 {
+					t.Errorf("invalid version made %d requests", got)
+				}
+			})
+		}
+	}
+}
+
+func TestDriveRmVersionNeverPurgesWholeFile(t *testing.T) {
+	var purges atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/trash" {
+			purges.Add(1)
+			fmt.Fprint(w, `{"purged":1}`)
+			return
+		}
+		if r.URL.Query().Get("version") != "2" {
+			t.Errorf("missing version in request: %s", r.URL.String())
+		}
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprint(w, `{"error":"version not found"}`)
+	}))
+	defer srv.Close()
+	_, stderr, err := execDrive(t, srv, "rm", "files/a", "--version", "2", "--permanent")
+	if err == nil {
+		t.Errorf("missing version reported success: %s", stderr)
+	}
+	if purges.Load() != 0 {
+		t.Fatal("version-scoped deletion purged the entire trash entry")
+	}
+}
+
+func TestDriveVersionCommandsRequirePath(t *testing.T) {
+	for _, verb := range []string{"get", "rm", "restore"} {
+		cmd := newDriveCmd()
+		cmd.SetOut(&bytes.Buffer{})
+		cmd.SetErr(&bytes.Buffer{})
+		cmd.SetArgs([]string{verb, "--version", "2"})
+		if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "arg") {
+			t.Errorf("%s without a path: %v", verb, err)
+		}
 	}
 }
