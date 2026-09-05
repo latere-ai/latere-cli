@@ -59,6 +59,9 @@ latere lux invoke --model openai/gpt-4o-mini "Say hi"
 latere lux invoke --provider anthropic --model claude-sonnet-4-6 "Say hi"
 ```
 
+Interrupted responses and responses larger than 8 MiB return an error without
+printing partial output. This applies to both text output and `--json`.
+
 ## Usage and access
 
 ```sh

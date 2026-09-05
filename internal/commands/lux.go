@@ -1446,8 +1446,13 @@ func luxPostJSON(ctx context.Context, url, bearer string, headers map[string]str
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	const maxResponse = 8 << 20
+	respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, maxResponse+1))
 	if resp.StatusCode/100 != 2 {
+		// Keep HTTP failures structured, with bounded diagnostic text.
+		if len(respBody) > maxResponse {
+			respBody = respBody[:maxResponse]
+		}
 		e := &api.APIError{Status: resp.StatusCode, Message: strings.TrimSpace(string(respBody))}
 		_ = json.Unmarshal(respBody, e)
 		if e.Code == "" {
@@ -1473,6 +1478,12 @@ func luxPostJSON(ctx context.Context, url, bearer string, headers map[string]str
 			}
 		}
 		return nil, e
+	}
+	if readErr != nil {
+		return nil, fmt.Errorf("read Lux response: %w", readErr)
+	}
+	if len(respBody) > maxResponse {
+		return nil, errors.New("response from Lux exceeds 8 MiB limit")
 	}
 	return respBody, nil
 }
