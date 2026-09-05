@@ -555,6 +555,9 @@ const partPutConcurrency = 4
 // The session is aborted (best-effort) on any failure so quota is not
 // held by orphaned parts.
 func (c *Client) MultipartUpload(ctx context.Context, owner, path string, r io.ReaderAt, size int64, opts PutOptions) (*FileWriteResult, error) {
+	if size <= 0 {
+		return nil, errors.New("drive: upload size must be positive")
+	}
 	create := map[string]any{"owner": owner, "path": path, "size": size}
 	if opts.ContentType != "" {
 		create["content_type"] = opts.ContentType
@@ -563,7 +566,14 @@ func (c *Client) MultipartUpload(ctx context.Context, owner, path string, r io.R
 	if err := c.postJSON(ctx, "/api/v1/uploads", create, &sess); err != nil {
 		return nil, err
 	}
-	if sess.PartSize <= 0 || sess.PartCount != len(sess.PartURLs) {
+	// Validate coverage before creating section readers: a missing part would
+	// otherwise let completion publish only a prefix of the requested file.
+	// Subtract before dividing to avoid overflowing on large declared sizes.
+	if sess.UploadID == "" || sess.PartSize <= 0 || sess.PartCount != len(sess.PartURLs) ||
+		int64(sess.PartCount) != 1+(size-1)/int64(sess.PartSize) {
+		if sess.UploadID != "" {
+			c.abortUpload(ctx, sess.UploadID)
+		}
 		return nil, fmt.Errorf("drive: malformed upload session (part_size=%d, part_count=%d, urls=%d)",
 			sess.PartSize, sess.PartCount, len(sess.PartURLs))
 	}
