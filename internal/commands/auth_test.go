@@ -224,6 +224,7 @@ func TestAuthWhoamiFallsBackToVerifiedJWTClaims(t *testing.T) {
 	}))
 	defer srv.Close()
 
+	t.Setenv("AUTH_URL", srv.URL)
 	cmd := newAuthWhoamiCmd()
 	cmd.SetArgs([]string{"--api-url", srv.URL})
 	out, err := captureStdout(func() error { return cmd.Execute() })

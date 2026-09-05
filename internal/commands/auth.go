@@ -444,14 +444,17 @@ type deviceFlowOpts struct {
 // exchange, and verification. Explicit flags override environment defaults.
 func (opts deviceFlowOpts) endpoints() (authBase, apiBase string) {
 	apiBase = api.NewClient(opts.APIURL).BaseURL
-	authBase = opts.AuthURL
+	return resolveAuthURL(apiBase, opts.AuthURL), apiBase
+}
+
+func resolveAuthURL(apiBase, authBase string) string {
 	if authBase == "" {
 		authBase = os.Getenv("AUTH_URL")
 	}
 	if authBase == "" {
 		authBase = api.InferAuthURL(apiBase)
 	}
-	return strings.TrimRight(authBase, "/"), apiBase
+	return strings.TrimRight(authBase, "/")
 }
 
 // captureStore holds the device-flow candidate in memory until Cella exchange,
@@ -646,10 +649,9 @@ Cella, then prints the identity claims embedded in the saved JWT.`,
 			if err := c.MustRequireAuth(); err != nil {
 				return err
 			}
-			// sandboxd doesn't have /me; auth does. Hit auth's
-			// /tokeninfo (best-effort issuer URL inferred from the
-			// API URL by swapping the leading host label cella → auth).
-			authURL := api.InferAuthURL(c.BaseURL)
+			// Use the same configured auth endpoint as login; only infer an
+			// issuer from the Cella URL when no AUTH_URL override is present.
+			authURL := resolveAuthURL(c.BaseURL, "")
 			req := *c
 			req.BaseURL = authURL
 			// The probe 401s by design for cella-issued tokens; a
