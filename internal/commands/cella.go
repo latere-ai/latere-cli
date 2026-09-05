@@ -929,6 +929,8 @@ directory.`,
 				}
 			}
 			pr, pw := io.Pipe()
+			// Request construction can fail before the transport owns the body.
+			defer func() { _ = pr.Close() }()
 			mw := multipart.NewWriter(pw)
 			go func() {
 				if dest != "" {
@@ -1478,6 +1480,8 @@ func newCeUploadCmd() *cobra.Command {
 				return err
 			}
 			pr, pw := io.Pipe()
+			// Request construction can fail before the transport owns the body.
+			defer func() { _ = pr.Close() }()
 			mw := multipart.NewWriter(pw)
 			contentType := mw.FormDataContentType()
 			go func() {
