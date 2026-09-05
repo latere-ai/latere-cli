@@ -153,3 +153,14 @@ func TestLocalLoopEndToEnd(t *testing.T) {
 		t.Fatalf("bash tool output %q should contain the echoed prompt (host exec ran)", toolOutput.String())
 	}
 }
+
+// TestLocalSystemPromptNamesNoTool keeps tool names out of the system
+// prompt: each tool's description already says what it does, and a name in
+// prose becomes a dangling reference the moment the tool set changes.
+func TestLocalSystemPromptNamesNoTool(t *testing.T) {
+	for _, def := range tools.Builtins().Defs() {
+		if strings.Contains(localSystemPrompt, def.Name) {
+			t.Errorf("localSystemPrompt names tool %q; describe the behavior instead", def.Name)
+		}
+	}
+}

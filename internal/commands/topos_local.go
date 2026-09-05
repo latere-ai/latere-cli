@@ -55,7 +55,7 @@ func quietSDKLogs() {
 // localSystemPrompt is the default instruction for `latere topos --local`: a
 // coding assistant working directly in the user's directory.
 const localSystemPrompt = `You are a coding assistant running on the user's local machine, in their working directory.
-Use the tools to read, search, edit, and run commands against their real files. Prefer read_file/edit_file/write_file for file changes and bash for commands. Be concise.`
+The tools operate on their real files. Edit files with the file tools rather than through shell commands, and use the shell to run and verify. Be concise.`
 
 // runToposLocal runs the agent loop entirely on this machine, like Claude Code:
 // the model is your local Claude credential, the workspace is your directory, and
