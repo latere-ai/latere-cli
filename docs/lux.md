@@ -43,7 +43,7 @@ eval "$(latere lux env local)"        # -> /local/v1, your 'lux serve' tunnels
 
 Run `latere lux providers` for the current list. The two cannot be combined: env vars carry a base URL, not a model, so a provider on a compat surface has nowhere to go.
 
-The command reports on stderr which credential it embedded and when it expires: by default your login identity token, which lasts the sign-in session.
+The command reports on stderr which credential it embedded and when it expires: by default your login identity token, which lasts the sign-in session. Missing or empty saved credentials cause an error before any exports are printed; run `latere login` to restore them.
 
 ```sh
 eval "$(latere lux env --compat openai --ttl 1h)"  # CI: a short-lived actor token

@@ -1318,6 +1318,9 @@ func authIdentityToken(ctx context.Context, luxURL, authURLFlag string) (access,
 		}
 		access = refreshed.AccessToken
 	}
+	if access == "" {
+		return "", "", errors.New("saved auth credential has no access token; run `latere login`")
+	}
 	return access, authBase, nil
 }
 
