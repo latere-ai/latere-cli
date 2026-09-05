@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -91,5 +92,49 @@ func TestLoginCancellationPreservesSavedToken(t *testing.T) {
 	}
 	if data, err := os.ReadFile(path); err != nil || string(data) != before {
 		t.Errorf("cancelled login changed saved token: %v", err)
+	}
+}
+
+func TestDiscardCellaAfterAuthFailure(t *testing.T) {
+	for _, mode := range []string{"saved token", "absent token", "cleanup blocked"} {
+		t.Run(mode, func(t *testing.T) {
+			root := t.TempDir()
+			path := filepath.Join(root, "token.json")
+			t.Setenv("LATERE_TOKEN_FILE", path)
+			t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(root, "auth-token.json"))
+			t.Setenv("XDG_CONFIG_HOME", root)
+			switch mode {
+			case "cleanup blocked":
+				if err := os.Mkdir(path, 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(path, "child"), nil, 0600); err != nil {
+					t.Fatal(err)
+				}
+			case "saved token":
+				if err := api.SaveToken("", api.Token{AccessToken: "new-cella"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cause := errors.New("auth storage failed")
+			err := discardCellaAfterAuthFailure(cause)
+			if !errors.Is(err, cause) {
+				t.Fatalf("original auth failure lost: %v", err)
+			}
+			if mode == "cleanup blocked" {
+				pathErr, ok := errors.AsType[*os.PathError](err)
+				if !ok || pathErr.Path != path {
+					t.Errorf("cleanup failure lost: %v", err)
+				}
+				if !strings.Contains(err.Error(), "run `latere logout`") {
+					t.Errorf("missing recovery instructions: %v", err)
+				}
+				if _, err := os.Stat(filepath.Join(path, "child")); err != nil {
+					t.Errorf("cleanup removed unexpected directory contents: %v", err)
+				}
+			} else if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("Cella token retained: %v", err)
+			}
+		})
 	}
 }

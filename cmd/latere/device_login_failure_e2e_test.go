@@ -58,20 +58,7 @@ func TestDeviceLoginPreservesSessionUntilCellaSucceedsE2E(t *testing.T) {
 				}
 			}
 			if tc.blockAuthSave {
-				if err := os.Chmod(authDir, 0500); err != nil {
-					t.Fatal(err)
-				}
-				t.Cleanup(func() {
-					if err := os.Chmod(authDir, 0700); err != nil {
-						t.Error(err)
-					}
-				})
-				probe := filepath.Join(authDir, "permission-probe")
-				if err := os.WriteFile(probe, nil, 0600); err == nil {
-					t.Skip("filesystem or user does not enforce directory write permissions")
-				} else if !errors.Is(err, os.ErrPermission) {
-					t.Fatal(err)
-				}
+				makeTokenDirectoryReadOnly(t, authDir)
 			}
 			assertUnchanged := func() {
 				for path, contents := range before {

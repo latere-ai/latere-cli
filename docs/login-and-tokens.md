@@ -42,7 +42,9 @@ token to `latere login`. The CLI verifies that token before replacing the
 saved Cella credential. A rejected token, verification failure, or cancelled
 attempt leaves your saved credentials intact. After a successful pasted-token
 login, the CLI removes the previous auth root token to avoid using a different
-identity for other products.
+identity for other products. If that removal fails, login reports an error and
+removes the newly saved Cella token. Fix the reported storage problem before
+retrying login.
 
 Device login reports success after saving both credentials. If saving the auth
 root fails after the Cella token was saved, the CLI removes that Cella token and

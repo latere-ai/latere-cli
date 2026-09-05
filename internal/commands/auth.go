@@ -390,22 +390,22 @@ func loginWithPastedToken(ctx context.Context, apiURL, token string) error {
 	if err := saveAndVerify(ctx, apiURL, token); err != nil {
 		return err
 	}
-	clearStaleAuthToken()
+	// A pasted token has no refresh grant. Retaining a previous root would
+	// let other products and automatic Cella refresh use another identity.
+	if err := api.ClearAuthToken(); err != nil {
+		return discardCellaAfterAuthFailure(fmt.Errorf("clear previous auth token: %w", err))
+	}
 	fmt.Fprintf(os.Stderr, "Logged in. Token saved to %s\n", api.TokenPath())
 	return nil
 }
 
-// clearStaleAuthToken removes any retained auth.latere.ai root token after a
-// successful --token / stdin paste login. A pasted opaque token carries no refresh grant,
-// so a leftover auth-token.json from a prior login is never the right identity:
-// `latere lux` reads it via api.LoadAuthToken and would silently attribute cost
-// to the wrong principal. Clearing it makes lux fall back to the truthful
-// not-signed-in state. Best-effort: a failure must not block a valid Cella
-// login, so it is warned and ignored.
-func clearStaleAuthToken() {
-	if err := api.ClearAuthToken(); err != nil {
-		fmt.Fprintf(os.Stderr, "  warning: could not clear stale auth token for lux (%v); `latere lux` may use a previous identity\n", err)
+// discardCellaAfterAuthFailure prevents a new Cella identity from remaining
+// paired with a previous auth root after login fails to update or clear it.
+func discardCellaAfterAuthFailure(cause error) error {
+	if err := api.ClearToken(""); err != nil {
+		return errors.Join(cause, fmt.Errorf("remove new Cella token: %w; credentials may use different accounts; run `latere logout` before retrying login", err))
 	}
+	return fmt.Errorf("%w; Cella credential removed; fix token file permissions or storage and retry `latere login`", cause)
 }
 
 // saveAndVerify confirms the candidate by listing sandboxes before storing it.
@@ -578,12 +578,7 @@ func runDeviceFlow(ctx context.Context, opts deviceFlowOpts) error {
 		return err
 	}
 	if err := store.persist(); err != nil {
-		// Never retain a new Cella identity alongside a previous auth root:
-		// automatic refresh could silently switch back to the old account.
-		if clearErr := api.ClearToken(""); clearErr != nil {
-			return errors.Join(err, fmt.Errorf("remove new Cella token: %w; credentials may use different accounts; run `latere logout` before retrying login", clearErr))
-		}
-		return fmt.Errorf("%w; Cella credential removed; fix token file permissions or storage and retry `latere login`", err)
+		return discardCellaAfterAuthFailure(err)
 	}
 	fmt.Fprintf(os.Stderr, "Logged in. Token saved to %s\n", api.TokenPath())
 	return nil

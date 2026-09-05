@@ -27,15 +27,32 @@ func TestPastedLoginPreservesSessionUntilVerifiedE2E(t *testing.T) {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 	for _, input := range []string{"flag", "stdin"} {
-		for _, status := range []int{http.StatusUnauthorized, http.StatusServiceUnavailable, http.StatusOK} {
-			t.Run(input+"/"+http.StatusText(status), func(t *testing.T) {
+		for _, tc := range []struct {
+			name           string
+			status         int
+			blockAuthClear bool
+		}{
+			{"rejected", http.StatusUnauthorized, false},
+			{"unavailable", http.StatusServiceUnavailable, false},
+			{"success", http.StatusOK, false},
+			{"auth_cleanup_failed", http.StatusOK, true},
+		} {
+			t.Run(input+"/"+tc.name, func(t *testing.T) {
+				status := tc.status
 				root := t.TempDir()
-				cellaPath, authPath := filepath.Join(root, "token.json"), filepath.Join(root, "auth-token.json")
+				authDir := filepath.Join(root, "auth")
+				if err := os.Mkdir(authDir, 0700); err != nil {
+					t.Fatal(err)
+				}
+				cellaPath, authPath := filepath.Join(root, "token.json"), filepath.Join(authDir, "auth-token.json")
 				cellaBefore, authBefore := `{"access_token":"old-cella"}`, `{"access_token":"old-auth"}`
 				for path, contents := range map[string]string{cellaPath: cellaBefore, authPath: authBefore} {
 					if err := os.WriteFile(path, []byte(contents), 0600); err != nil {
 						t.Fatal(err)
 					}
+				}
+				if tc.blockAuthClear {
+					makeTokenDirectoryReadOnly(t, authDir)
 				}
 				assertUnchanged := func() {
 					for path, before := range map[string]string{cellaPath: cellaBefore, authPath: authBefore} {
@@ -71,8 +88,24 @@ func TestPastedLoginPreservesSessionUntilVerifiedE2E(t *testing.T) {
 				if input == "stdin" {
 					command.Stdin = strings.NewReader("candidate-token\n")
 				}
-				command.Env = append(os.Environ(), "LATERE_TOKEN_FILE="+cellaPath, "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_URL="+server.URL, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
+				command.Env = append(os.Environ(), "LATERE_TOKEN_FILE="+cellaPath, "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_URL="+server.URL, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
 				out, err := command.CombinedOutput()
+				if tc.blockAuthClear {
+					if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 {
+						t.Errorf("auth cleanup failure exit = %v: %s", err, out)
+					}
+					if strings.Contains(string(out), "Logged in.") {
+						t.Errorf("failed login reported success: %s", out)
+					}
+					if _, err := os.Stat(cellaPath); !errors.Is(err, os.ErrNotExist) {
+						t.Errorf("auth cleanup failure retained the new Cella token: %v", err)
+					}
+					data, err := os.ReadFile(authPath)
+					if err != nil || string(data) != authBefore {
+						t.Errorf("failed auth cleanup changed the previous root credential: %v", err)
+					}
+					return
+				}
 				if status != http.StatusOK {
 					if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 {
 						t.Errorf("failed verification exit = %v; output: %s", err, out)
@@ -92,5 +125,24 @@ func TestPastedLoginPreservesSessionUntilVerifiedE2E(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// Verify permissions are enforced before using them to inject a storage failure.
+func makeTokenDirectoryReadOnly(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.Chmod(dir, 0500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chmod(dir, 0700); err != nil {
+			t.Error(err)
+		}
+	})
+	probe := filepath.Join(dir, "permission-probe")
+	if err := os.WriteFile(probe, nil, 0600); err == nil {
+		t.Skip("filesystem or user does not enforce directory write permissions")
+	} else if !errors.Is(err, os.ErrPermission) {
+		t.Fatal(err)
 	}
 }
