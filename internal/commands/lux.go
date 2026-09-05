@@ -1418,6 +1418,7 @@ func luxClient(ctx context.Context, luxURL, authURL, tokenFlag string) (*api.Cli
 		return nil, "", err
 	}
 	c := api.NewClient(resolveLuxURL(luxURL))
+	c.Refresh = nil  // luxBearer handles auth refresh; never exchange for Cella here.
 	c.Token = bearer // override NewClient's auto-loaded Cella token
 	return c, bearer, nil
 }

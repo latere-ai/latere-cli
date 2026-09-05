@@ -371,6 +371,7 @@ func resolveToposURL(flagURL string) string {
 // auth root token, refreshed when expired.
 func toposClient(ctx context.Context, apiURL string) (*api.Client, error) {
 	c := api.NewClient(resolveToposURL(apiURL))
+	c.Refresh = nil // Topos resolves its own auth bearer below, including refresh.
 	if v := os.Getenv("TOPOS_TOKEN"); v != "" {
 		c.Token = v
 		return c, nil

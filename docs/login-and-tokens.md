@@ -150,6 +150,11 @@ without re-login.
   near expiry) and writes the replacement bearer back. This happens at
   most once per command, transparently, before your call is retried.
 
+Lux and Topos refresh their auth credentials when needed before making a
+request. They do not exchange or replace your Cella credential. If either
+product rejects its bearer, the CLI reports that error without retrying with
+a Cella token.
+
 Because every product credential derives from the root token, keeping
 the root refreshed keeps every product reachable. The one exception is
 a paste-mode login (`latere login --token <token>`): that supplies an
