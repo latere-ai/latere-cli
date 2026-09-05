@@ -33,7 +33,7 @@ func TestRefreshAuthTokenPersistsAndPreservesRefreshToken(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	got, err := RefreshAuthToken(context.Background(), srv.URL, "old-refresh")
+	got, err := RefreshAuthToken(context.Background(), srv.URL, Token{RefreshToken: "old-refresh"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,7 +265,7 @@ func TestRefreshAuthTokenErrorPaths(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(dir, "auth-token.json"))
 
-	if _, err := RefreshAuthToken(context.Background(), "", "r"); err == nil {
+	if _, err := RefreshAuthToken(context.Background(), "", Token{RefreshToken: "r"}); err == nil {
 		t.Error("empty auth base: want error")
 	}
 
@@ -275,7 +275,55 @@ func TestRefreshAuthTokenErrorPaths(t *testing.T) {
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
-	if _, err := RefreshAuthToken(context.Background(), srv.URL, "r"); err == nil {
+	if _, err := RefreshAuthToken(context.Background(), srv.URL, Token{RefreshToken: "r"}); err == nil {
 		t.Error("500 from /token: want error")
+	}
+}
+
+func TestRefreshAuthTokenUsesIssuingClient(t *testing.T) {
+	for _, tc := range []struct {
+		name, saved, env, want string
+	}{
+		{"legacy default", "", "", "latere-cli"},
+		{"legacy environment", "", "legacy-cli", "legacy-cli"},
+		{"saved custom client", "custom-cli", "", "custom-cli"},
+		{"saved client overrides environment", "custom-cli", "unrelated-cli", "custom-cli"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(root, "auth-token.json"))
+			t.Setenv("LATERE_TOKEN_FILE", filepath.Join(root, "token.json"))
+			t.Setenv("XDG_CONFIG_HOME", root)
+			t.Setenv("AUTH_CLIENT_ID", tc.env)
+			previous := Token{AccessToken: "old-root", RefreshToken: "old-refresh", ClientID: tc.saved}
+			if err := SaveAuthToken(previous); err != nil {
+				t.Fatal(err)
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost || r.URL.Path != "/token" {
+					t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+				}
+				if err := r.ParseForm(); err != nil {
+					t.Error(err)
+					return
+				}
+				if got := r.PostForm.Get("client_id"); got != tc.want {
+					t.Errorf("client_id = %q, want %q", got, tc.want)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"access_token":"new-root","token_type":"Bearer","expires_in":3600}`))
+			}))
+			defer server.Close()
+			got, err := RefreshAuthToken(t.Context(), server.URL, previous)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.ClientID != tc.want || got.RefreshToken != previous.RefreshToken || got.AccessToken != "new-root" {
+				t.Errorf("refresh did not retain the client and refresh grant: %+v", got)
+			}
+			if saved, err := LoadAuthToken(); err != nil || saved.ClientID != got.ClientID || saved.AccessToken != got.AccessToken || saved.RefreshToken != got.RefreshToken {
+				t.Errorf("refreshed credential not persisted: %v", err)
+			}
+		})
 	}
 }

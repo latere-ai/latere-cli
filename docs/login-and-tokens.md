@@ -53,6 +53,11 @@ a new Cella account from being refreshed using a previous account's auth root.
 If removal also fails, the error reports it; repair storage and run
 `latere logout` before retrying login.
 
+For a custom OAuth client, pass `latere login --client-id <client-id>`. The CLI
+retains that client ID for refresh, organization switching, and logout, even
+if `AUTH_CLIENT_ID` later changes. Older token files without a saved client ID
+use `AUTH_CLIENT_ID`, falling back to `latere-cli`.
+
 ## The two token files
 
 | File | What it is | Used for |

@@ -400,7 +400,7 @@ func toposIdentityBearer(ctx context.Context) (string, error) {
 		time.Now().After(authTok.ExpiresAt.Add(-60*time.Second)) {
 		rctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		defer cancel()
-		refreshed, rerr := api.RefreshAuthToken(rctx, toposAuthBase(), authTok.RefreshToken)
+		refreshed, rerr := api.RefreshAuthToken(rctx, toposAuthBase(), authTok)
 		if rerr != nil {
 			return "", fmt.Errorf("auth token expired and refresh failed (%w); run `latere login`", rerr)
 		}

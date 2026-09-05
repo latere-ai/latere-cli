@@ -129,32 +129,47 @@ func ExchangeAtCella(ctx context.Context, httpc *http.Client, apiBase, bearer st
 	return out.AccessToken, nil
 }
 
+// AuthClientID resolves an explicit or saved OAuth client ID, falling back to
+// AUTH_CLIENT_ID and then the CLI default for credentials saved before client
+// IDs were retained. A refresh or revocation must use the issuing client.
+func AuthClientID(clientID string) string {
+	if clientID == "" {
+		clientID = os.Getenv("AUTH_CLIENT_ID")
+	}
+	if clientID == "" {
+		clientID = "latere-cli"
+	}
+	return clientID
+}
+
 // RefreshAuthToken refreshes the retained auth root token with the
 // full LoginScopes set and persists the result, preserving the previous
 // refresh token when the response omits a new one (a common OAuth
 // behaviour).
-func RefreshAuthToken(ctx context.Context, authBase, refreshToken string) (Token, error) {
+func RefreshAuthToken(ctx context.Context, authBase string, previous Token) (Token, error) {
+	clientID := AuthClientID(previous.ClientID)
 	client := oidc.New(oidc.Config{
 		AuthURL:  authBase,
-		ClientID: "latere-cli",
+		ClientID: clientID,
 		Scopes:   strings.Fields(LoginScopes),
 	})
 	if client == nil {
 		return Token{}, errors.New("oidc: missing AuthURL or ClientID")
 	}
-	tok, err := client.RefreshTokenContext(ctx, refreshToken)
+	tok, err := client.RefreshTokenContext(ctx, previous.RefreshToken)
 	if err != nil {
 		return Token{}, err
 	}
 	out := Token{
 		AccessToken:  tok.AccessToken,
 		RefreshToken: tok.RefreshToken,
+		ClientID:     clientID,
 		TokenType:    "Bearer",
 		ExpiresAt:    tok.Expiry,
 		IssuedAt:     time.Now().UTC(),
 	}
 	if out.RefreshToken == "" {
-		out.RefreshToken = refreshToken
+		out.RefreshToken = previous.RefreshToken
 	}
 	_ = SaveAuthToken(out) // best-effort; the in-memory token still works this run
 	return out, nil

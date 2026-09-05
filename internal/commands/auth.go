@@ -84,7 +84,7 @@ re-run device-code login.`,
 		},
 	}
 	cmd.Flags().StringVar(&authURL, "auth-url", "", "auth service base URL (default $AUTH_URL or https://auth.latere.ai)")
-	cmd.Flags().StringVar(&clientID, "client-id", "", "OAuth client id (default $AUTH_CLIENT_ID or latere-cli)")
+	cmd.Flags().StringVar(&clientID, "client-id", "", "OAuth client id (default saved login client, then $AUTH_CLIENT_ID or latere-cli)")
 	cmd.Flags().BoolVar(&personal, "personal", false, "switch to the personal context")
 	return cmd
 }
@@ -120,7 +120,7 @@ func newAuthOrgSwitchCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&authURL, "auth-url", "", "auth service base URL (default $AUTH_URL or https://auth.latere.ai)")
-	cmd.Flags().StringVar(&clientID, "client-id", "", "OAuth client id (default $AUTH_CLIENT_ID or latere-cli)")
+	cmd.Flags().StringVar(&clientID, "client-id", "", "OAuth client id (default saved login client, then $AUTH_CLIENT_ID or latere-cli)")
 	cmd.Flags().BoolVar(&personal, "personal", false, "switch to the personal context (equivalent to `switch \"\"`)")
 	return cmd
 }
@@ -167,13 +167,10 @@ func switchOrgContext(cmd *cobra.Command, authURL, clientID, orgID string) error
 		}
 	}
 	authBase = strings.TrimRight(authBase, "/")
-	cid := clientID
-	if cid == "" {
-		cid = os.Getenv("AUTH_CLIENT_ID")
-		if cid == "" {
-			cid = "latere-cli"
-		}
+	if clientID == "" {
+		clientID = tok.ClientID
 	}
+	cid := api.AuthClientID(clientID)
 
 	form := url.Values{
 		"grant_type":    {"refresh_token"},
@@ -221,6 +218,7 @@ func switchOrgContext(cmd *cobra.Command, authURL, clientID, orgID string) error
 	if err := api.SaveAuthToken(api.Token{
 		AccessToken:  got.AccessToken,
 		RefreshToken: got.RefreshToken,
+		ClientID:     cid,
 		TokenType:    "Bearer",
 		ExpiresAt:    expiry,
 		IssuedAt:     time.Now().UTC(),
@@ -462,11 +460,12 @@ func resolveAuthURL(apiBase, authBase string) string {
 // verification, and token storage succeed. A rejected login must not replace
 // the auth identity used by other commands while retaining the old Cella token.
 type captureStore struct {
-	disk *authkit.FileTokenStore
-	last *oauth2.Token
+	disk     *authkit.FileTokenStore
+	last     *oauth2.Token
+	clientID string
 }
 
-func newAuthTokenStore() (*captureStore, error) {
+func newAuthTokenStore(clientID string) (*captureStore, error) {
 	p := api.AuthTokenPath()
 	if p == "" {
 		return nil, errors.New("cannot determine auth token path")
@@ -475,7 +474,7 @@ func newAuthTokenStore() (*captureStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &captureStore{disk: disk}, nil
+	return &captureStore{disk: disk, clientID: clientID}, nil
 }
 
 func (s *captureStore) Save(t *oauth2.Token) error {
@@ -496,6 +495,7 @@ func (s *captureStore) persist() error {
 	if err := api.SaveAuthToken(api.Token{
 		AccessToken:  t.AccessToken,
 		RefreshToken: t.RefreshToken,
+		ClientID:     s.clientID,
 		TokenType:    "Bearer",
 		ExpiresAt:    t.Expiry,
 		IssuedAt:     time.Now().UTC(),
@@ -523,7 +523,7 @@ func runDeviceFlow(ctx context.Context, opts deviceFlowOpts) error {
 		return errors.New("oidc: missing AuthURL or ClientID")
 	}
 
-	store, err := newAuthTokenStore()
+	store, err := newAuthTokenStore(opts.ClientID)
 	if err != nil {
 		return err
 	}
@@ -870,10 +870,7 @@ func revokeAuthRefreshToken(ctx context.Context, apiURL, authURL string, errw io
 	if authBase == "" {
 		authBase = api.InferAuthURL(api.NewClient(apiURL).BaseURL)
 	}
-	cid := os.Getenv("AUTH_CLIENT_ID")
-	if cid == "" {
-		cid = "latere-cli"
-	}
+	cid := api.AuthClientID(tok.ClientID)
 	form := url.Values{
 		"token":           {tok.RefreshToken},
 		"token_type_hint": {"refresh_token"},

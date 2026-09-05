@@ -36,6 +36,7 @@ const DefaultAPIURL = "https://cella.latere.ai"
 type Token struct {
 	AccessToken  string    `json:"access_token"`
 	RefreshToken string    `json:"refresh_token,omitempty"`
+	ClientID     string    `json:"client_id,omitempty"`
 	TokenType    string    `json:"token_type,omitempty"`
 	ExpiresAt    time.Time `json:"expires_at"`
 	IssuedAt     time.Time `json:"issued_at"`
@@ -105,7 +106,7 @@ func RefreshCellaToken(ctx context.Context, apiBase string) (string, bool) {
 	access := authTok.AccessToken
 	if authTok.RefreshToken != "" && !authTok.ExpiresAt.IsZero() &&
 		time.Now().After(authTok.ExpiresAt.Add(-60*time.Second)) {
-		refreshed, rerr := RefreshAuthToken(ctx, authBase, authTok.RefreshToken)
+		refreshed, rerr := RefreshAuthToken(ctx, authBase, authTok)
 		if rerr != nil {
 			return "", false
 		}

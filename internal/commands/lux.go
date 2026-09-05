@@ -1313,7 +1313,7 @@ func authIdentityToken(ctx context.Context, luxURL, authURLFlag string) (access,
 	// downstream call surface a re-login error if it is in fact expired.
 	if authTok.RefreshToken != "" && !authTok.ExpiresAt.IsZero() &&
 		time.Now().After(authTok.ExpiresAt.Add(-60*time.Second)) {
-		refreshed, rerr := api.RefreshAuthToken(ctx, authBase, authTok.RefreshToken)
+		refreshed, rerr := api.RefreshAuthToken(ctx, authBase, authTok)
 		if rerr != nil {
 			return "", "", fmt.Errorf("auth token expired and refresh failed (%w); run `latere login`", rerr)
 		}
