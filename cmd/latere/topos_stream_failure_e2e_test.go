@@ -29,7 +29,7 @@ func TestToposPrintReportsFailedStreamsE2E(t *testing.T) {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 	for _, operation := range []string{"start", "attach"} {
-		for _, state := range []string{"completed", "closed session", "graceful disconnect", "abrupt disconnect", "protocol error", "error then stop", "empty error", "run error"} {
+		for _, state := range []string{"completed", "closed session", "graceful disconnect", "abrupt disconnect", "protocol error", "error then stop", "empty error", "run error", "malformed answer", "malformed tool", "malformed tool failure", "malformed run error", "empty run error"} {
 			t.Run(operation+"/"+state, func(t *testing.T) {
 				root := t.TempDir()
 				wantError, wantOutput := "", ""
@@ -66,6 +66,22 @@ func TestToposPrintReportsFailedStreamsE2E(t *testing.T) {
 				case "run error":
 					wantError = "agent unavailable"
 					frames = append(frames, `{"type":"event","event":"RunError","seq":5,"payload":{"error":"agent unavailable"}}`)
+				case "malformed answer", "malformed tool", "malformed tool failure", "malformed run error":
+					event, payload := "AssistantMessage", `{"text":42}`
+					switch state {
+					case "malformed tool":
+						event, payload = "PostToolUse", `{"tool_call":false}`
+					case "malformed tool failure":
+						event, payload = "PostToolUseFailure", `{"tool_call":false}`
+					case "malformed run error":
+						event, payload = "RunError", `{"error":42}`
+					}
+					wantError = "decode " + event + " payload"
+					frame, _ := json.Marshal(map[string]any{"type": "event", "event": event, "seq": 5, "payload": json.RawMessage(payload)})
+					frames = append(frames, string(frame), `{"type":"event","event":"Stop","seq":6,"payload":{}}`)
+				case "empty run error":
+					wantError = "agent reported an error"
+					frames = append(frames, `{"type":"event","event":"RunError","seq":5,"payload":{}}`)
 				}
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					if r.URL.Path == "/v1/sessions" {

@@ -10,6 +10,7 @@ package commands
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"strings"
@@ -161,6 +162,28 @@ func TestStreamPrintPropagatesOutputErrors(t *testing.T) {
 				t.Fatal("stream consumed completion after losing output")
 			}
 		})
+	}
+}
+
+func TestPrintRejectsMalformedEventPayloads(t *testing.T) {
+	for _, event := range []string{"AssistantMessage", "PostToolUse", "PostToolUseFailure", "RunError"} {
+		for _, payload := range []string{"", "{", "[]"} {
+			t.Run(event+"/"+payload, func(t *testing.T) {
+				var out, errOut bytes.Buffer
+				_, err := handlePrintFrame(ev(event, payload), &out, &errOut)
+				if err == nil || !strings.Contains(err.Error(), "decode "+event+" payload") {
+					t.Fatalf("malformed payload not reported: %v", err)
+				}
+				_, syntaxError := errors.AsType[*json.SyntaxError](err)
+				_, typeError := errors.AsType[*json.UnmarshalTypeError](err)
+				if !syntaxError && !typeError {
+					t.Fatalf("original decode error lost: %v", err)
+				}
+				if out.Len() != 0 || errOut.Len() != 0 {
+					t.Fatal("invalid payload produced output")
+				}
+			})
+		}
 	}
 }
 

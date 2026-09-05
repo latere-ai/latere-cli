@@ -53,32 +53,42 @@ func handlePrintEvent(fr attachFrame, out, errOut io.Writer) (bool, error) {
 	switch fr.Event {
 	case "AssistantMessage":
 		var p assistantMessagePayload
-		if json.Unmarshal(fr.Payload, &p) == nil && p.Text != "" {
+		if err := json.Unmarshal(fr.Payload, &p); err != nil {
+			return false, fmt.Errorf("decode %s payload: %w", fr.Event, err)
+		}
+		if p.Text != "" {
 			if _, err := fmt.Fprintln(out, p.Text); err != nil {
 				return false, fmt.Errorf("write assistant output: %w", err)
 			}
 		}
 	case "PostToolUse":
 		var p postToolUsePayload
-		if json.Unmarshal(fr.Payload, &p) == nil {
-			status := "ok"
-			if p.Result.IsError {
-				status = "error"
-			}
-			if _, err := fmt.Fprintf(errOut, "· %s [%s]\n", p.ToolCall.Name, status); err != nil {
-				return false, fmt.Errorf("write tool output: %w", err)
-			}
+		if err := json.Unmarshal(fr.Payload, &p); err != nil {
+			return false, fmt.Errorf("decode %s payload: %w", fr.Event, err)
+		}
+		status := "ok"
+		if p.Result.IsError {
+			status = "error"
+		}
+		if _, err := fmt.Fprintf(errOut, "· %s [%s]\n", p.ToolCall.Name, status); err != nil {
+			return false, fmt.Errorf("write tool output: %w", err)
 		}
 	case "PostToolUseFailure":
 		var p postToolUseFailurePayload
-		if json.Unmarshal(fr.Payload, &p) == nil {
-			if _, err := fmt.Fprintf(errOut, "· %s [denied/failed]\n", p.ToolCall.Name); err != nil {
-				return false, fmt.Errorf("write tool output: %w", err)
-			}
+		if err := json.Unmarshal(fr.Payload, &p); err != nil {
+			return false, fmt.Errorf("decode %s payload: %w", fr.Event, err)
+		}
+		if _, err := fmt.Fprintf(errOut, "· %s [denied/failed]\n", p.ToolCall.Name); err != nil {
+			return false, fmt.Errorf("write tool output: %w", err)
 		}
 	case "RunError":
 		var p runErrorPayload
-		_ = json.Unmarshal(fr.Payload, &p)
+		if err := json.Unmarshal(fr.Payload, &p); err != nil {
+			return false, fmt.Errorf("decode %s payload: %w", fr.Event, err)
+		}
+		if p.Error == "" {
+			p.Error = "agent reported an error"
+		}
 		return true, &printErr{msg: p.Error}
 	case "Stop":
 		// The turn completed.
