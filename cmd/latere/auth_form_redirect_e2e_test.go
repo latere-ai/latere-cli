@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-func TestAuthFormsPreserveMethodOnRedirectE2E(t *testing.T) {
+func TestAuthFormsRequireCompleteRequestsAndResponsesE2E(t *testing.T) {
 	if testing.Short() {
 		t.Skip("binary e2e skipped with -short")
 	}
@@ -28,8 +28,27 @@ func TestAuthFormsPreserveMethodOnRedirectE2E(t *testing.T) {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 	for _, operation := range []string{"org", "logout"} {
-		for _, status := range []int{301, 302, 303, 307, 308} {
-			t.Run(operation+"/"+strconv.Itoa(status), func(t *testing.T) {
+		for _, tc := range []struct {
+			name             string
+			redirect, status int
+			broken, chunked  bool
+		}{
+			{name: "301", redirect: 301},
+			{name: "302", redirect: 302},
+			{name: "303", redirect: 303},
+			{name: "307", redirect: 307},
+			{name: "308", redirect: 308},
+			{name: "complete"},
+			{name: "whitespace"},
+			{name: "short content length", broken: true},
+			{name: "interrupted chunks", broken: true, chunked: true},
+			{name: "incomplete error", status: 503, broken: true},
+			{name: "no content", status: 204},
+		} {
+			if operation == "org" && tc.status == 204 {
+				continue // A successful token response must contain an access token.
+			}
+			t.Run(operation+"/"+tc.name, func(t *testing.T) {
 				root := t.TempDir()
 				cellaPath, authPath := filepath.Join(root, "token.json"), filepath.Join(root, "auth-token.json")
 				before := map[string]string{
@@ -41,7 +60,17 @@ func TestAuthFormsPreserveMethodOnRedirectE2E(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				invalid := status < 307
+				invalidRedirect := tc.redirect != 0 && tc.redirect < 307
+				invalid := invalidRedirect || tc.broken || tc.status >= 400
+				wantError := ""
+				switch {
+				case invalidRedirect:
+					wantError = "redirect changed request method"
+				case tc.status >= 400:
+					wantError = strconv.Itoa(tc.status)
+				case tc.broken:
+					wantError = "unexpected EOF"
+				}
 				var initial, redirected, exchanges atomic.Int32
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					switch r.URL.Path {
@@ -81,12 +110,29 @@ func TestAuthFormsPreserveMethodOnRedirectE2E(t *testing.T) {
 					} else if r.PostForm.Get("token") != "old-refresh" || r.PostForm.Get("token_type_hint") != "refresh_token" {
 						t.Error("revocation request lost refresh token")
 					}
-					if r.URL.Path != "/redirected" {
+					if tc.redirect != 0 && r.URL.Path != "/redirected" {
 						w.Header().Set("Location", "/redirected")
-						w.WriteHeader(status)
+						w.WriteHeader(tc.redirect)
 						return
 					}
-					_, _ = w.Write([]byte(`{"access_token":"new-auth","refresh_token":"new-refresh","expires_in":3600}`))
+					payload := `{"access_token":"new-auth","refresh_token":"new-refresh","expires_in":3600}`
+					if tc.name == "whitespace" {
+						payload += " \r\n\t"
+					}
+					if tc.broken && !tc.chunked {
+						w.Header().Set("Content-Length", strconv.Itoa(len(payload)+10))
+					}
+					if tc.status != 0 {
+						w.WriteHeader(tc.status)
+						if tc.status == 204 {
+							return
+						}
+					}
+					_, _ = w.Write([]byte(payload))
+					if tc.chunked {
+						w.(http.Flusher).Flush()
+						panic(http.ErrAbortHandler)
+					}
 				}))
 				defer server.Close()
 				args := []string{"org", "new-org", "--auth-url", server.URL}
@@ -100,15 +146,15 @@ func TestAuthFormsPreserveMethodOnRedirectE2E(t *testing.T) {
 				out, err := command.CombinedOutput()
 				if operation == "org" && invalid {
 					if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 || strings.Contains(string(out), "Switched to") {
-						t.Errorf("invalid org redirect reported success: %v: %s", err, out)
+						t.Errorf("invalid org response reported success: %v: %s", err, out)
 					}
 				} else if err != nil {
 					t.Errorf("command failed: %v: %s", err, out)
 				}
-				if invalid != strings.Contains(string(out), "redirect changed request method") {
-					t.Errorf("unexpected redirect diagnostic: %s", out)
+				if wantError != "" && !strings.Contains(string(out), wantError) {
+					t.Errorf("missing failure diagnostic: %s", out)
 				}
-				if operation == "logout" && (!strings.Contains(string(out), "Logged out.") || invalid != strings.Contains(string(out), "warning: could not revoke the auth refresh token")) {
+				if operation == "logout" && (!strings.Contains(string(out), "Logged out.") || invalid != strings.Contains(string(out), "warning:")) {
 					t.Errorf("logout revocation warning or completion missing: %s", out)
 				}
 				for path, contents := range before {
@@ -119,7 +165,7 @@ func TestAuthFormsPreserveMethodOnRedirectE2E(t *testing.T) {
 						}
 					} else if invalid {
 						if err != nil || string(data) != contents {
-							t.Errorf("rejected org redirect changed credential: %s", filepath.Base(path))
+							t.Errorf("rejected org response changed credential: %s", filepath.Base(path))
 						}
 					} else {
 						var saved struct {
@@ -130,13 +176,15 @@ func TestAuthFormsPreserveMethodOnRedirectE2E(t *testing.T) {
 							want = "new-cella"
 						}
 						if err != nil || json.Unmarshal(data, &saved) != nil || saved.AccessToken != want {
-							t.Errorf("valid org redirect did not update credential: %s", filepath.Base(path))
+							t.Errorf("valid org response did not update credential: %s", filepath.Base(path))
 						}
 					}
 				}
 				wantRedirects, wantExchanges := int32(0), int32(0)
 				if !invalid {
-					wantRedirects = 1
+					if tc.redirect != 0 {
+						wantRedirects = 1
+					}
 					if operation == "org" {
 						wantExchanges = 2
 					}

@@ -195,9 +195,12 @@ func switchOrgContext(cmd *cobra.Command, authURL, clientID, orgID string) error
 		return fmt.Errorf("token endpoint: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	body, _ := io.ReadAll(resp.Body)
+	body, readErr := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("token endpoint: %s: %s", resp.Status, strings.TrimSpace(string(body)))
+	}
+	if readErr != nil {
+		return fmt.Errorf("read token response: %w", readErr)
 	}
 	var got struct {
 		AccessToken  string `json:"access_token"`
@@ -890,9 +893,11 @@ func revokeAuthRefreshToken(ctx context.Context, apiURL, authURL string, errw io
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
-	_, _ = io.Copy(io.Discard, resp.Body)
+	_, readErr := io.Copy(io.Discard, resp.Body)
 	if resp.StatusCode/100 != 2 {
 		fprintf(errw, "  warning: auth refresh-token revocation returned %d; it may remain valid until expiry\n", resp.StatusCode)
+	} else if readErr != nil {
+		fprintf(errw, "  warning: could not confirm auth refresh-token revocation (%v); it may remain valid until expiry\n", readErr)
 	}
 }
 
