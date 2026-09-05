@@ -128,6 +128,12 @@ client trust-plane credentials by catalog key. `--env KEY=VALUE` is only for
 non-secret configuration. `run` also accepts `--cwd /path`; one-shot runs also
 accept `--image`, `--disk`, `--timeout`, `--detach`, and `--json`.
 
+Foreground execution, `wait`, and followed logs return the remote command's
+exit code (0–255). Synchronous one-shot runs do this with `--json` too.
+If no valid exit code is available, or the run fails or is cancelled despite
+an exit code of 0, the CLI exits 1 and prints a diagnostic to stderr. This
+includes cleanup failures after a successful command.
+
 ```sh
 latere cella run demo --credential llm-primary -- sh -lc 'curl http://127.0.0.1:8888/upstreams/llm-primary/v1/models'
 ```

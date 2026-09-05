@@ -595,13 +595,13 @@ to start that one-shot run and return immediately with a run id.`,
 					return err
 				}
 				if printJSONOut {
-					return printJSON(out)
+					if err := printJSON(out); err != nil {
+						return err
+					}
+				} else {
+					printOneShotRun(out)
 				}
-				printOneShotRun(out)
-				if out.ExitCode != nil {
-					os.Exit(*out.ExitCode)
-				}
-				return nil
+				return commandExitError(out.State, out.ExitCode)
 			}
 			if follow {
 				return runAndStream(cmd.Context(), c, args[0], args[1:], env, cwd, credentialFlag)
@@ -815,10 +815,9 @@ func newCeWaitCmd() *cobra.Command {
 			fmt.Fprintf(os.Stderr, "phase=%s", cd.Phase)
 			if cd.ExitCode != nil {
 				fmt.Fprintf(os.Stderr, " exit_code=%d", *cd.ExitCode)
-				os.Exit(*cd.ExitCode)
 			}
 			fmt.Fprintln(os.Stderr)
-			return nil
+			return commandExitError(cd.Phase, cd.ExitCode)
 		},
 	}
 	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
@@ -1670,10 +1669,7 @@ func streamLogs(ctx context.Context, c *api.Client, sandbox, cmdID string, curso
 		}
 		cursor = out.NextCursor
 		if out.Phase != "running" {
-			if out.ExitCode != nil {
-				os.Exit(*out.ExitCode)
-			}
-			return nil
+			return commandExitError(out.Phase, out.ExitCode)
 		}
 		select {
 		case <-ctx.Done():
@@ -1694,10 +1690,7 @@ func streamOneShotRunLogs(ctx context.Context, c *api.Client, runID string, curs
 		}
 		cursor = out.NextCursor
 		if out.Phase != "creating" && out.Phase != "running" {
-			if out.ExitCode != nil {
-				os.Exit(*out.ExitCode)
-			}
-			return nil
+			return commandExitError(out.Phase, out.ExitCode)
 		}
 		select {
 		case <-ctx.Done():
