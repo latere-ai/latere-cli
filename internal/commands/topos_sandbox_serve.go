@@ -15,6 +15,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hashicorp/yamux"
@@ -49,13 +50,34 @@ func sandboxYamuxConfig() *yamux.Config {
 // confined+consented Provider-RPC channel against the local workspace
 // (serveHostSandbox). conn is a WSS NetConn in production and any net.Conn (a
 // localhost TCP link) for local verification — the transport is otherwise opaque.
-// It returns when the session ends or ctx is cancelled.
-func serveSandboxTunnel(ctx context.Context, conn net.Conn, root string, consent sandbox.ConsentFunc, out io.Writer) error {
-	sess, err := yamux.Client(conn, sandboxYamuxConfig())
+// It closes conn and waits for accepted work streams to stop when the session
+// ends or ctx is cancelled. Consent callbacks must honor their context.
+func serveSandboxTunnel(parent context.Context, conn net.Conn, root string, consent sandbox.ConsentFunc, out io.Writer) (retErr error) {
+	ctx, cancel := context.WithCancel(parent)
+	closed := make(chan struct{})
+	context.AfterFunc(ctx, func() {
+		_ = conn.SetDeadline(time.Now())
+		_ = conn.Close()
+		close(closed)
+	})
+	var workers sync.WaitGroup
+	var sess *yamux.Session
+	defer func() {
+		cancel()
+		<-closed
+		if sess != nil {
+			_ = sess.Close()
+		}
+		workers.Wait()
+		if parent.Err() != nil {
+			retErr = parent.Err()
+		}
+	}()
+	var err error
+	sess, err = yamux.Client(conn, sandboxYamuxConfig())
 	if err != nil {
 		return fmt.Errorf("sandbox tunnel: yamux: %w", err)
 	}
-	defer func() { _ = sess.Close() }()
 
 	// The edge opens the control stream (the control plane opens the work
 	// streams), matching the Lux tunnel's directionality.
@@ -80,7 +102,7 @@ func serveSandboxTunnel(ctx context.Context, conn net.Conn, root string, consent
 		if err != nil {
 			return err // session closed / ctx cancelled
 		}
-		go func() { _ = serveHostSandbox(ctx, stream, root, consent) }()
+		workers.Go(func() { _ = serveHostSandbox(ctx, stream, root, consent) })
 	}
 }
 
