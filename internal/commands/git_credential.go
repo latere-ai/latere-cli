@@ -236,10 +236,14 @@ func driveCredentialRequest(attrs map[string]string) bool {
 	if !strings.EqualFold(attrs["host"], driveHost()) {
 		return false
 	}
-	if p := attrs["protocol"]; p != "" && p != "https" && os.Getenv("DRIVE_HOST") == "" {
+	switch attrs["protocol"] {
+	case "https":
+		return true
+	case "http":
+		return strings.TrimSpace(os.Getenv("DRIVE_HOST")) != ""
+	default:
 		return false
 	}
-	return true
 }
 
 // driveCredentialToken resolves the bearer git presents to Drive: the
