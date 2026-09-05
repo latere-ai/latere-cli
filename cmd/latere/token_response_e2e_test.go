@@ -8,12 +8,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -28,7 +30,7 @@ func TestRefreshRejectsIncompleteTokenResponsesE2E(t *testing.T) {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 	for _, stage := range []string{"actor", "exchange"} {
-		for _, state := range []string{"complete", "whitespace", "short content length", "interrupted chunks", "extra JSON", "trailing garbage"} {
+		for _, state := range []string{"complete", "whitespace", "short content length", "interrupted chunks", "extra JSON", "trailing garbage", "301", "302", "303", "307", "308"} {
 			t.Run(stage+"/"+state, func(t *testing.T) {
 				root := t.TempDir()
 				cellaPath, authPath := filepath.Join(root, "token.json"), filepath.Join(root, "auth-token.json")
@@ -39,17 +41,28 @@ func TestRefreshRejectsIncompleteTokenResponsesE2E(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				invalid := state != "complete" && state != "whitespace"
+				redirectStatus, _ := strconv.Atoi(state)
+				invalid := state != "complete" && state != "whitespace" && redirectStatus != 307 && redirectStatus != 308
+				var redirects atomic.Int32
+				var originalBody atomic.Value
 				var mints, exchanges, requests atomic.Int32
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					w.Header().Set("Content-Type", "application/json")
 					var payload, current, bearer string
-					switch r.URL.Path {
+					redirected := strings.HasSuffix(r.URL.Path, "/redirected")
+					if redirected {
+						redirects.Add(1)
+					}
+					switch strings.TrimSuffix(r.URL.Path, "/redirected") {
 					case "/actor-tokens":
-						mints.Add(1)
+						if !redirected {
+							mints.Add(1)
+						}
 						current, bearer, payload = "actor", "auth-root", `{"actor_token":"new-actor"}`
 					case "/v1/tokens/exchange":
-						exchanges.Add(1)
+						if !redirected {
+							exchanges.Add(1)
+						}
 						current, bearer, payload = "exchange", "new-actor", `{"access_token":"new-cella"}`
 					case "/v1/sandboxes":
 						requests.Add(1)
@@ -74,6 +87,21 @@ func TestRefreshRejectsIncompleteTokenResponsesE2E(t *testing.T) {
 					}
 					if r.Method != http.MethodPost || r.Header.Get("Authorization") != "Bearer "+bearer {
 						t.Errorf("invalid %s request", current)
+					}
+					if current == stage && redirectStatus != 0 {
+						body, err := io.ReadAll(r.Body)
+						if err != nil {
+							t.Error(err)
+						}
+						if !redirected {
+							originalBody.Store(string(body))
+							w.Header().Set("Location", r.URL.Path+"/redirected")
+							w.WriteHeader(redirectStatus)
+							return
+						}
+						if string(body) != originalBody.Load() || len(body) == 0 || r.Header.Get("Content-Type") != "application/json" {
+							t.Error("redirect lost token request body or content type")
+						}
 					}
 					if current == stage {
 						switch state {
@@ -121,6 +149,13 @@ func TestRefreshRejectsIncompleteTokenResponsesE2E(t *testing.T) {
 					} else if !bytes.Equal(data, before) {
 						t.Errorf("unexpected credential change in %s", filepath.Base(path))
 					}
+				}
+				wantRedirects := int32(0)
+				if redirectStatus == 307 || redirectStatus == 308 {
+					wantRedirects = 1
+				}
+				if redirects.Load() != wantRedirects {
+					t.Errorf("redirect requests = %d, want %d", redirects.Load(), wantRedirects)
 				}
 				wantExchanges := int32(1)
 				if stage == "actor" && invalid {

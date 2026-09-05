@@ -79,7 +79,7 @@ func MintActorTokenWithLifetime(ctx context.Context, httpc *http.Client, authBas
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+bearer)
-	resp, err := httpc.Do(req)
+	resp, err := doTokenRequest(httpc, req)
 	if err != nil {
 		return "", 0, err
 	}
@@ -123,7 +123,7 @@ func ExchangeAtCella(ctx context.Context, httpc *http.Client, apiBase, bearer st
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+bearer)
-	resp, err := httpc.Do(req)
+	resp, err := doTokenRequest(httpc, req)
 	if err != nil {
 		return "", err
 	}
@@ -142,6 +142,22 @@ func ExchangeAtCella(ctx context.Context, httpc *http.Client, apiBase, bearer st
 		return "", fmt.Errorf("tokens/exchange: empty response")
 	}
 	return out.AccessToken, nil
+}
+
+// Token requests must retain their POST body across redirects. Copy the
+// client so callers can reuse it, and retain any stricter redirect policy.
+func doTokenRequest(httpc *http.Client, req *http.Request) (*http.Response, error) {
+	client := *httpc
+	client.CheckRedirect = func(next *http.Request, via []*http.Request) error {
+		if err := PreserveMethodOnRedirect(next, via); err != nil {
+			return err
+		}
+		if httpc.CheckRedirect != nil {
+			return httpc.CheckRedirect(next, via)
+		}
+		return nil
+	}
+	return client.Do(req)
 }
 
 // AuthClientID resolves an explicit or saved OAuth client ID, falling back to
