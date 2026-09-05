@@ -48,10 +48,13 @@ func (s *sessionState) apply(fr attachFrame) {
 	}
 	switch fr.Type {
 	case "status":
-		if fr.State == "closed" {
-			s.status = "closed"
-		} else if fr.State != "" {
+		if fr.State != "" {
 			s.status = fr.State
+			// Replayed requests can outlive their approval; current server
+			// status determines whether a decision is still outstanding.
+			if fr.State != "awaiting_approval" {
+				s.pending = nil
+			}
 		}
 	case "error":
 		s.lines = append(s.lines, "⚠ "+fr.Message)
@@ -120,12 +123,14 @@ func (s *sessionState) applyEvent(fr attachFrame) {
 		_ = json.Unmarshal(fr.Payload, &p)
 		s.lines = append(s.lines, "⚠ run error: "+p.Error)
 		s.status = "ready"
+		s.pending = nil
 	case "Stop":
 		// The turn completed; the in-flight buffer (if any) is now redundant.
 		s.turn.Reset()
-		if s.status == "working" {
+		if s.status == "working" || s.pending != nil {
 			s.status = "ready"
 		}
+		s.pending = nil
 	}
 }
 

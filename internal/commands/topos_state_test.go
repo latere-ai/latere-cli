@@ -74,6 +74,31 @@ func TestSessionStateApproval(t *testing.T) {
 	}
 }
 
+func TestSessionStateClearsFinishedApprovals(t *testing.T) {
+	for _, tc := range []struct {
+		name, status string
+		frame        attachFrame
+		pending      bool
+	}{
+		{"running", "running", attachFrame{Type: "status", State: "running"}, false},
+		{"idle", "awaiting_input", attachFrame{Type: "status", State: "awaiting_input"}, false},
+		{"closed", "closed", attachFrame{Type: "status", State: "closed"}, false},
+		{"still waiting", "awaiting_approval", attachFrame{Type: "status", State: "awaiting_approval"}, true},
+		{"empty status", "awaiting approval", attachFrame{Type: "status"}, true},
+		{"completed", "ready", ev("Stop", `{}`), false},
+		{"failed", "ready", ev("RunError", `{"error":"interrupted"}`), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newSessionState()
+			s.apply(ev("ApprovalRequest", `{"decision_id":"d1","tool_id":"test-tool"}`))
+			s.apply(tc.frame)
+			if (s.pending != nil) != tc.pending || s.status != tc.status {
+				t.Fatalf("pending=%v, status=%q; want pending=%t, status=%q", s.pending, s.status, tc.pending, tc.status)
+			}
+		})
+	}
+}
+
 func TestSessionStateErrorsAndStatus(t *testing.T) {
 	s := newSessionState()
 	s.apply(ev("RunError", `{"error":"model offline"}`))
