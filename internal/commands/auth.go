@@ -214,7 +214,12 @@ func switchOrgContext(cmd *cobra.Command, authURL, clientID, orgID string) error
 		return errors.New("token endpoint returned no access_token")
 	}
 
-	expiry := time.Now().Add(time.Duration(got.ExpiresIn) * time.Second).UTC()
+	// Match OAuth refresh handling: an absent or zero lifetime means the
+	// expiry is unknown, rather than that the new token expired immediately.
+	var expiry time.Time
+	if got.ExpiresIn != 0 {
+		expiry = time.Now().Add(time.Duration(got.ExpiresIn) * time.Second).UTC()
+	}
 	if got.RefreshToken == "" {
 		got.RefreshToken = tok.RefreshToken
 	}

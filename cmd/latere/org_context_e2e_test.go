@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -30,11 +31,16 @@ func TestOrgSwitchUpdatesCellaIdentityE2E(t *testing.T) {
 	}
 	for _, tc := range []struct {
 		name, org, authSuffix     string
+		expiryState               string
 		failExchange, failRefresh bool
 		authFromEnv               bool
 	}{
 		{name: "organization", org: "new-org"},
 		{name: "personal"},
+		{name: "organization without expiry", org: "new-org", expiryState: "missing"},
+		{name: "organization zero expiry", org: "new-org", expiryState: "zero"},
+		{name: "personal without expiry", expiryState: "missing"},
+		{name: "personal zero expiry", expiryState: "zero"},
 		{name: "exchange failure", org: "new-org", failExchange: true},
 		{name: "refresh failure", org: "new-org", failRefresh: true},
 		{name: "flag trailing slash", org: "new-org", authSuffix: "/"},
@@ -53,10 +59,12 @@ func TestOrgSwitchUpdatesCellaIdentityE2E(t *testing.T) {
 			}
 			claims, _ := json.Marshal(map[string]string{"org_id": tc.org, "sub": "test-user"})
 			newAuth := "e30." + base64.RawURLEncoding.EncodeToString(claims) + ".test-signature"
+			var refreshes atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				switch r.URL.Path {
 				case "/token":
+					refreshes.Add(1)
 					if r.Method != http.MethodPost {
 						t.Errorf("refresh method = %s, want POST", r.Method)
 					}
@@ -71,7 +79,14 @@ func TestOrgSwitchUpdatesCellaIdentityE2E(t *testing.T) {
 						_, _ = w.Write([]byte(`{"error":"access_denied"}`))
 						return
 					}
-					_ = json.NewEncoder(w).Encode(map[string]any{"access_token": newAuth, "refresh_token": "new-refresh", "expires_in": 3600})
+					reply := map[string]any{"access_token": newAuth, "refresh_token": "new-refresh", "expires_in": 3600}
+					switch tc.expiryState {
+					case "missing":
+						delete(reply, "expires_in")
+					case "zero":
+						reply["expires_in"] = 0
+					}
+					_ = json.NewEncoder(w).Encode(reply)
 				case "/actor-tokens":
 					if r.Header.Get("Authorization") != "Bearer "+newAuth {
 						t.Error("actor token minted from previous identity")
@@ -98,7 +113,7 @@ func TestOrgSwitchUpdatesCellaIdentityE2E(t *testing.T) {
 				}
 			}))
 			defer server.Close()
-			env := append(os.Environ(), "LATERE_TOKEN_FILE="+tokenPath, "LATERE_AUTH_TOKEN_FILE="+authPath, "SANDBOX_API_URL="+server.URL, "AUTH_URL="+server.URL+tc.authSuffix, "XDG_CONFIG_HOME="+root, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
+			env := append(os.Environ(), "LATERE_TOKEN_FILE="+tokenPath, "LATERE_AUTH_TOKEN_FILE="+authPath, "SANDBOX_API_URL="+server.URL, "AUTH_URL="+server.URL+tc.authSuffix, "XDG_CONFIG_HOME="+root, "LATERE_LUX_TOKEN=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
 			run := func(args ...string) ([]byte, error) {
 				ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 				defer cancel()
@@ -140,6 +155,12 @@ func TestOrgSwitchUpdatesCellaIdentityE2E(t *testing.T) {
 			if gotAuth.AccessToken != newAuth || gotAuth.RefreshToken != "new-refresh" {
 				t.Error("new root credential was not retained")
 			}
+			if tc.expiryState != "" && !gotAuth.ExpiresAt.IsZero() {
+				t.Errorf("unknown expiry saved as %s", gotAuth.ExpiresAt)
+			}
+			if tc.expiryState == "" && !gotAuth.ExpiresAt.After(time.Now().Add(50*time.Minute)) {
+				t.Error("known lifetime was not retained")
+			}
 			if tc.failExchange {
 				if _, err := os.Stat(tokenPath); !errors.Is(err, os.ErrNotExist) {
 					t.Error("failed exchange retained the previous organization's Cella token")
@@ -157,6 +178,13 @@ func TestOrgSwitchUpdatesCellaIdentityE2E(t *testing.T) {
 			}
 			if err != nil || strings.TrimSpace(string(out)) != want {
 				t.Errorf("shown context = %s (%v), want %s", out, err, want)
+			}
+			out, err = run("lux", "env", "--raw", "--auth-url", server.URL)
+			if err != nil || !strings.HasPrefix(string(out), newAuth+"\n") {
+				t.Errorf("next command could not use the new auth credential: %v: %s", err, out)
+			}
+			if refreshes.Load() != 1 {
+				t.Errorf("unnecessary refresh after org switch: got %d token requests, want 1", refreshes.Load())
 			}
 			if out, err := run("cella", "list"); err != nil {
 				t.Fatalf("Cella list: %v\n%s", err, out)
