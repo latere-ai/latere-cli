@@ -1297,7 +1297,7 @@ func authIdentityToken(ctx context.Context, luxURL, authURLFlag string) (access,
 	authTok, err := api.LoadAuthToken()
 	if err != nil {
 		if errors.Is(err, api.ErrNoToken) {
-			return "", "", errors.New("not signed in for Lux; run `latere login`")
+			return "", "", fmt.Errorf("cannot authenticate to Lux: %w", err)
 		}
 		return "", "", err
 	}

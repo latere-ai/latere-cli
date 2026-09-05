@@ -125,6 +125,11 @@ that host, it answers with your auth root identity token (refreshed if
 expired), which Drive validates as an auth-issued JWT. The `latere
 drive` file commands present the same identity token.
 
+If that auth credential cannot be read or refreshed, the git helper returns no
+credential so git can prompt, and Drive file commands report an authentication
+error. The CLI uses a pasted token only when the auth token file is absent; an
+existing auth failure never causes it to substitute the saved Cella token.
+
 ```sh
 latere git-credential setup             # wire the helper manually
 latere login --no-git                   # sign in without touching git config

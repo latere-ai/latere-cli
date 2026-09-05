@@ -243,11 +243,15 @@ func driveCredentialRequest(attrs map[string]string) bool {
 // driveCredentialToken resolves the bearer git presents to Drive: the
 // retained auth root token, refreshed when expired via the same
 // authIdentityToken path `latere lux` uses (Drive validates auth-issued
-// JWTs). Falls back to token.json for --token paste logins. Returns false
-// when no login is on file.
+// JWTs). Falls back to token.json only when the auth file is absent, as it is
+// after --token paste login. Existing auth failures must not change identity.
 func driveCredentialToken(ctx context.Context, authURL string) (string, bool) {
-	if access, _, err := authIdentityToken(ctx, "", authURL); err == nil && access != "" {
-		return access, true
+	access, _, err := authIdentityToken(ctx, "", authURL)
+	if err == nil {
+		return access, access != ""
+	}
+	if !errors.Is(err, api.ErrNoToken) {
+		return "", false
 	}
 	if tok, err := api.LoadToken(""); err == nil && tok.AccessToken != "" {
 		return tok.AccessToken, true
