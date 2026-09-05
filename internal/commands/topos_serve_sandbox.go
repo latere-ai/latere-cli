@@ -53,6 +53,10 @@ wants to run is shown and prompted for (y/N) unless --yes is given, path access
 is confined to the root, and a built-in secret deny-list (.env, .ssh, *.pem, …)
 is never served.
 
+Commands wait for approval one at a time. Enter y or yes on its own to approve.
+If a request disconnects while awaiting approval, its pending answer is discarded
+before the next command is prompted.
+
 File operations support relative symlinks whose targets stay within the root.
 Absolute symlinks and symlinks leading outside the root are rejected.
 

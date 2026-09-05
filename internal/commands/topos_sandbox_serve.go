@@ -133,21 +133,3 @@ func serveHostSandbox(ctx context.Context, conn io.ReadWriteCloser, root string,
 	provider := sandbox.Consent(sandbox.Confine(host, host.root), consent)
 	return rpc.Serve(ctx, conn, provider)
 }
-
-// promptExecConsent is the default edge-side consent decider: it prints the
-// command a remote session wants to run and blocks for a y/N answer read from in
-// (stdin in production). Any non-yes answer denies. It is the interactive form of
-// trust protection #3; a session-scoped "allow all" is a follow-on.
-func promptExecConsent(in io.Reader, out io.Writer) sandbox.ConsentFunc {
-	return func(_ context.Context, _ string, opts sandbox.ExecOptions) error {
-		fprintf(out, "remote session wants to run: %s\nallow? [y/N] ", strings.Join(opts.Argv, " "))
-		var answer string
-		_, _ = fmt.Fscanln(in, &answer)
-		switch strings.ToLower(strings.TrimSpace(answer)) {
-		case "y", "yes":
-			return nil
-		default:
-			return fmt.Errorf("user declined %q", strings.Join(opts.Argv, " "))
-		}
-	}
-}
