@@ -33,13 +33,22 @@ func TestToposPrintReportsFailedStreamsE2E(t *testing.T) {
 			t.Run(operation+"/"+state, func(t *testing.T) {
 				root := t.TempDir()
 				wantError, wantOutput := "", ""
-				frames := []string{`{"type":"caught_up","seq":0}`}
+				var frames []string
+				if operation == "attach" {
+					frames = append(frames,
+						`{"type":"event","event":"AssistantMessage","seq":1,"payload":{"text":"old answer"}}`,
+						`{"type":"event","event":"Stop","seq":2,"payload":{}}`,
+						`{"type":"event","event":"RunError","seq":3,"payload":{"error":"old failure"}}`,
+						`{"type":"event","event":"PostToolUse","seq":4,"payload":{"tool_call":{"name":"old-tool"},"result":{}}}`,
+					)
+				}
+				frames = append(frames, `{"type":"caught_up","seq":4}`)
 				switch state {
 				case "completed", "graceful disconnect", "abrupt disconnect":
 					wantOutput = "partial answer\n"
-					frames = append(frames, `{"type":"event","event":"AssistantMessage","seq":1,"payload":{"text":"partial answer"}}`)
+					frames = append(frames, `{"type":"event","event":"AssistantMessage","seq":5,"payload":{"text":"partial answer"}}`)
 					if state == "completed" {
-						frames = append(frames, `{"type":"event","event":"Stop","seq":2,"payload":{}}`)
+						frames = append(frames, `{"type":"event","event":"Stop","seq":6,"payload":{}}`)
 					} else {
 						wantError = "session disconnected before turn completed"
 					}
@@ -49,14 +58,14 @@ func TestToposPrintReportsFailedStreamsE2E(t *testing.T) {
 					wantError = "session rejected prompt"
 					frames = append(frames, `{"type":"error","message":"session rejected prompt"}`)
 					if state == "error then stop" {
-						frames = append(frames, `{"type":"event","event":"Stop","seq":2,"payload":{}}`)
+						frames = append(frames, `{"type":"event","event":"Stop","seq":6,"payload":{}}`)
 					}
 				case "empty error":
 					wantError = "session protocol error"
 					frames = append(frames, `{"type":"error"}`)
 				case "run error":
 					wantError = "agent unavailable"
-					frames = append(frames, `{"type":"event","event":"RunError","seq":1,"payload":{"error":"agent unavailable"}}`)
+					frames = append(frames, `{"type":"event","event":"RunError","seq":5,"payload":{"error":"agent unavailable"}}`)
 				}
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					if r.URL.Path == "/v1/sessions" {

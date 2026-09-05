@@ -100,7 +100,8 @@ type printConn interface {
 // reported an error, output could not be written, or the connection ended
 // before completion was confirmed.
 func streamPrint(ctx context.Context, conn printConn, out, errOut io.Writer, turn string) error {
-	if turn != "" {
+	replaying := turn != ""
+	if replaying {
 		if err := conn.Send(ctx, attachControl{Type: "user_turn", Text: turn}); err != nil {
 			return fmt.Errorf("send turn: %w", err)
 		}
@@ -115,6 +116,18 @@ func streamPrint(ctx context.Context, conn printConn, out, errOut io.Writer, tur
 					return err
 				}
 				return fmt.Errorf("session disconnected before turn completed: %w", io.ErrUnexpectedEOF)
+			}
+			// The server replays history before reading new input. A follow-up
+			// prompt must not render or finish on an earlier turn's events.
+			// With no new prompt, replay may contain the result of session start.
+			if replaying {
+				switch fr.Type {
+				case "caught_up":
+					replaying = false
+					continue
+				case "event":
+					continue
+				}
 			}
 			done, err := handlePrintFrame(fr, out, errOut)
 			if err != nil {

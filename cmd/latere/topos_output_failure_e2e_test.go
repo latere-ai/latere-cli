@@ -70,7 +70,7 @@ func TestToposPrintReportsOutputFailuresE2E(t *testing.T) {
 							}
 						}
 						frame, _ := json.Marshal(map[string]any{"type": "event", "event": event.name, "seq": 1, "payload": json.RawMessage(event.payload)})
-						for _, data := range [][]byte{frame, []byte(`{"type":"event","event":"Stop","seq":2,"payload":{}}`)} {
+						for _, data := range [][]byte{[]byte(`{"type":"caught_up","seq":0}`), frame, []byte(`{"type":"event","event":"Stop","seq":2,"payload":{}}`)} {
 							if err := conn.Write(r.Context(), websocket.MessageText, data); err != nil {
 								return
 							}

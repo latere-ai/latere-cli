@@ -83,6 +83,7 @@ func (f *fakePrintConn) Send(_ context.Context, ctrl attachControl) error {
 
 func TestStreamPrintSendsTurnAndStopsOnStop(t *testing.T) {
 	fc := &fakePrintConn{frames: make(chan attachFrame, 8)}
+	fc.frames <- attachFrame{Type: "caught_up"}
 	fc.frames <- ev("AssistantMessage", `{"text":"hi"}`)
 	fc.frames <- ev("Stop", `{}`)
 
@@ -95,6 +96,32 @@ func TestStreamPrintSendsTurnAndStopsOnStop(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "hi") {
 		t.Fatalf("stdout = %q", out.String())
+	}
+}
+
+func TestStreamPrintDistinguishesReplayFromNewTurn(t *testing.T) {
+	for _, turn := range []string{"", "new prompt"} {
+		t.Run(turn, func(t *testing.T) {
+			fc := &fakePrintConn{frames: make(chan attachFrame, 8)}
+			fc.frames <- ev("AssistantMessage", `{"text":"replayed answer"}`)
+			fc.frames <- ev("Stop", `{}`)
+			fc.frames <- ev("RunError", `{"error":"old failure"}`)
+			fc.frames <- ev("PostToolUse", `{"tool_call":{"name":"old-tool"},"result":{}}`)
+			fc.frames <- attachFrame{Type: "caught_up", Seq: 4}
+			fc.frames <- ev("AssistantMessage", `{"text":"new answer"}`)
+			fc.frames <- ev("Stop", `{}`)
+			var out, errOut bytes.Buffer
+			if err := streamPrint(t.Context(), fc, &out, &errOut, turn); err != nil {
+				t.Fatal(err)
+			}
+			want, wantSent := "replayed answer\n", 0
+			if turn != "" {
+				want, wantSent = "new answer\n", 1
+			}
+			if out.String() != want || errOut.Len() != 0 || len(fc.sent) != wantSent {
+				t.Errorf("output=%q, stderr=%q, sent=%d; want %q and %d sends", out.String(), errOut.String(), len(fc.sent), want, wantSent)
+			}
+		})
 	}
 }
 
