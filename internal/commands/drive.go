@@ -310,14 +310,26 @@ func drivePut(cmd *cobra.Command, c *drive.Client, owner, src, dest string, opts
 		return c.Put(cmd.Context(), owner, dest, strings.NewReader(string(b)), int64(len(b)), opts)
 	}
 
+	// Reject non-regular sources before opening: FIFOs can block and devices
+	// often report size zero. Stat follows symlinks to ordinary files.
+	st, err := os.Stat(src)
+	if err != nil {
+		return nil, err
+	}
+	if !st.Mode().IsRegular() {
+		return nil, fmt.Errorf("upload source %q is not a regular file; use '-' to read stdin", src)
+	}
 	f, err := os.Open(src)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = f.Close() }()
-	st, err := f.Stat()
+	st, err = f.Stat()
 	if err != nil {
 		return nil, err
+	}
+	if !st.Mode().IsRegular() {
+		return nil, fmt.Errorf("upload source %q is not a regular file", src)
 	}
 	if dest == "" {
 		dest = "files/" + path.Base(src)
