@@ -141,5 +141,15 @@ func getJSON(ctx context.Context, hc *http.Client, url string, dst any) error {
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("local runtime %s returned %d", url, resp.StatusCode)
 	}
-	return json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(dst)
+	// Read through EOF before trusting the model list. One extra byte
+	// distinguishes an oversized response from one exactly at the limit.
+	const maxDiscoveryBytes = 1 << 20
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxDiscoveryBytes+1))
+	if err != nil {
+		return fmt.Errorf("read local runtime %s: %w", url, err)
+	}
+	if len(body) > maxDiscoveryBytes {
+		return fmt.Errorf("local runtime %s response exceeds %d bytes", url, maxDiscoveryBytes)
+	}
+	return json.Unmarshal(body, dst)
 }
