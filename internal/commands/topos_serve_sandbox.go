@@ -53,6 +53,9 @@ wants to run is shown and prompted for (y/N) unless --yes is given, path access
 is confined to the root, and a built-in secret deny-list (.env, .ssh, *.pem, …)
 is never served.
 
+File operations support relative symlinks whose targets stay within the root.
+Absolute symlinks and symlinks leading outside the root are rejected.
+
 For local development, set TOPOS_TOKEN to any value and point --topos-url at a
 Topos server started with dev auth; the token is then accepted without a login.`,
 		Example: `  latere topos serve-sandbox

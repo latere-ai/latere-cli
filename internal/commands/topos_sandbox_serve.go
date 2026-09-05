@@ -120,11 +120,17 @@ func sanitizeNodeID(h string) string {
 // control-plane's concern, not the edge's. conn is any bidirectional stream (a
 // tunnel stream in production; an in-memory pipe in tests).
 func serveHostSandbox(ctx context.Context, conn io.ReadWriteCloser, root string, consent sandbox.ConsentFunc) error {
+	defer func() { _ = conn.Close() }()
 	host, err := newHostSandbox(root)
 	if err != nil {
 		return fmt.Errorf("serve sandbox: root %q: %w", root, err)
 	}
-	provider := sandbox.Consent(sandbox.Confine(host, root), consent)
+	host.fileRoot, err = os.OpenRoot(host.root)
+	if err != nil {
+		return fmt.Errorf("serve sandbox: open root %q: %w", root, err)
+	}
+	defer func() { _ = host.fileRoot.Close() }()
+	provider := sandbox.Consent(sandbox.Confine(host, host.root), consent)
 	return rpc.Serve(ctx, conn, provider)
 }
 

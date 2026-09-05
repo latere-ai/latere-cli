@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,6 +27,8 @@ import (
 // path uses Cella instead; this is deliberately unsandboxed local execution.
 type hostSandbox struct {
 	root string // absolute working directory the agent operates in
+	// Set only by serve-sandbox; local interactive execution uses host paths.
+	fileRoot *os.Root
 }
 
 func newHostSandbox(root string) (*hostSandbox, error) {
@@ -94,10 +97,27 @@ func (h *hostSandbox) StreamExec(ctx context.Context, id string, opts sandbox.Ex
 }
 
 func (h *hostSandbox) ReadFile(_ context.Context, _, path string) ([]byte, error) {
+	if h.fileRoot != nil {
+		rel, err := h.servedPath(path)
+		if err != nil {
+			return nil, err
+		}
+		return h.fileRoot.ReadFile(rel)
+	}
 	return os.ReadFile(h.resolve(path))
 }
 
 func (h *hostSandbox) WriteFile(_ context.Context, _, path string, data []byte) error {
+	if h.fileRoot != nil {
+		rel, err := h.servedPath(path)
+		if err != nil {
+			return err
+		}
+		if err := h.fileRoot.MkdirAll(filepath.Dir(rel), 0o755); err != nil {
+			return err
+		}
+		return h.fileRoot.WriteFile(rel, data, 0o644)
+	}
 	full := h.resolve(path)
 	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 		return err
@@ -106,7 +126,17 @@ func (h *hostSandbox) WriteFile(_ context.Context, _, path string, data []byte) 
 }
 
 func (h *hostSandbox) ListFiles(_ context.Context, _, path string) ([]sandbox.FileInfo, error) {
-	entries, err := os.ReadDir(h.resolve(path))
+	var entries []fs.DirEntry
+	var err error
+	if h.fileRoot != nil {
+		rel, pathErr := h.servedPath(path)
+		if pathErr != nil {
+			return nil, pathErr
+		}
+		entries, err = fs.ReadDir(h.fileRoot.FS(), filepath.ToSlash(rel))
+	} else {
+		entries, err = os.ReadDir(h.resolve(path))
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -121,6 +151,17 @@ func (h *hostSandbox) ListFiles(_ context.Context, _, path string) ([]sandbox.Fi
 		})
 	}
 	return out, nil
+}
+
+// servedPath preserves absolute paths within the advertised root while making
+// every file operation relative to its open directory handle. Root's operations
+// enforce containment even if a symlink changes after this lexical check.
+func (h *hostSandbox) servedPath(path string) (string, error) {
+	rel, err := filepath.Rel(h.root, h.resolve(path))
+	if err != nil || !filepath.IsLocal(rel) {
+		return "", sandbox.ErrConfined
+	}
+	return rel, nil
 }
 
 func (h *hostSandbox) HealthCheck(_ context.Context, _ string) error { return nil }
