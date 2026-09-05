@@ -391,6 +391,7 @@ func loginWithPastedToken(ctx context.Context, apiURL, token string) error {
 		return err
 	}
 	clearStaleAuthToken()
+	fmt.Fprintf(os.Stderr, "Logged in. Token saved to %s\n", api.TokenPath())
 	return nil
 }
 
@@ -428,7 +429,6 @@ func saveAndVerify(ctx context.Context, apiURL, token string) error {
 	}); err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "Logged in. Token saved to %s\n", api.TokenPath())
 	return nil
 }
 
@@ -488,11 +488,11 @@ func (s *captureStore) Save(t *oauth2.Token) error {
 
 // persist retains the verified login's root token for refresh and Lux access.
 // The caller must finish saving the Cella credential before invoking it.
-func (s *captureStore) persist() {
+func (s *captureStore) persist() error {
 	t := s.last
 	// Persist in the api.Token shape so `latere lux` (which reads via
 	// api.LoadAuthToken) finds the auth-issued root token where it
-	// expects it. Best-effort: lux access is additive to the Cella login.
+	// expects it. The root is also the source of future Cella refreshes.
 	if err := api.SaveAuthToken(api.Token{
 		AccessToken:  t.AccessToken,
 		RefreshToken: t.RefreshToken,
@@ -500,8 +500,9 @@ func (s *captureStore) persist() {
 		ExpiresAt:    t.Expiry,
 		IssuedAt:     time.Now().UTC(),
 	}); err != nil {
-		fmt.Fprintf(os.Stderr, "  warning: could not save auth token for lux (%v); `latere lux` may require re-login\n", err)
+		return fmt.Errorf("save auth token: %w", err)
 	}
+	return nil
 }
 
 func (s *captureStore) Load() (*oauth2.Token, error) { return s.disk.Load() }
@@ -576,7 +577,15 @@ func runDeviceFlow(ctx context.Context, opts deviceFlowOpts) error {
 	if err := saveAndVerify(ctx, opts.APIURL, candidate); err != nil {
 		return err
 	}
-	store.persist()
+	if err := store.persist(); err != nil {
+		// Never retain a new Cella identity alongside a previous auth root:
+		// automatic refresh could silently switch back to the old account.
+		if clearErr := api.ClearToken(""); clearErr != nil {
+			return errors.Join(err, fmt.Errorf("remove new Cella token: %w; credentials may use different accounts; run `latere logout` before retrying login", clearErr))
+		}
+		return fmt.Errorf("%w; Cella credential removed; fix token file permissions or storage and retry `latere login`", err)
+	}
+	fmt.Fprintf(os.Stderr, "Logged in. Token saved to %s\n", api.TokenPath())
 	return nil
 }
 

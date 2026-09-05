@@ -30,18 +30,23 @@ func TestDeviceLoginPreservesSessionUntilCellaSucceedsE2E(t *testing.T) {
 	for _, tc := range []struct {
 		name                      string
 		actorStatus, verifyStatus int
-		blockSave                 bool
+		blockSave, blockAuthSave  bool
 	}{
-		{"exchange_and_verification_rejected", 503, 401, false},
-		{"verification_rejected", 200, 401, false},
-		{"verification_unavailable", 200, 503, false},
-		{"cella_save_failed", 200, 200, true},
-		{"success", 200, 200, false},
-		{"legacy_success", 503, 200, false},
+		{"exchange_and_verification_rejected", 503, 401, false, false},
+		{"verification_rejected", 200, 401, false, false},
+		{"verification_unavailable", 200, 503, false, false},
+		{"cella_save_failed", 200, 200, true, false},
+		{"auth_save_failed", 200, 200, false, true},
+		{"success", 200, 200, false, false},
+		{"legacy_success", 503, 200, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
-			cellaPath, authPath := filepath.Join(root, "token.json"), filepath.Join(root, "auth-token.json")
+			authDir := filepath.Join(root, "auth")
+			if err := os.Mkdir(authDir, 0700); err != nil {
+				t.Fatal(err)
+			}
+			cellaPath, authPath := filepath.Join(root, "token.json"), filepath.Join(authDir, "auth-token.json")
 			before := map[string]string{cellaPath: `{"access_token":"old-cella"}`, authPath: `{"access_token":"old-auth","refresh_token":"old-refresh"}`}
 			for path, contents := range before {
 				if tc.blockSave && path == cellaPath {
@@ -49,6 +54,22 @@ func TestDeviceLoginPreservesSessionUntilCellaSucceedsE2E(t *testing.T) {
 						t.Fatal(err)
 					}
 				} else if err := os.WriteFile(path, []byte(contents), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.blockAuthSave {
+				if err := os.Chmod(authDir, 0500); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() {
+					if err := os.Chmod(authDir, 0700); err != nil {
+						t.Error(err)
+					}
+				})
+				probe := filepath.Join(authDir, "permission-probe")
+				if err := os.WriteFile(probe, nil, 0600); err == nil {
+					t.Skip("filesystem or user does not enforce directory write permissions")
+				} else if !errors.Is(err, os.ErrPermission) {
 					t.Fatal(err)
 				}
 			}
@@ -115,6 +136,22 @@ func TestDeviceLoginPreservesSessionUntilCellaSucceedsE2E(t *testing.T) {
 			out, err := command.CombinedOutput()
 			if verifications.Load() != 1 {
 				t.Errorf("verification calls = %d, want 1: %s", verifications.Load(), out)
+			}
+			if tc.blockAuthSave {
+				if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 {
+					t.Errorf("auth persistence failure exit = %v: %s", err, out)
+				}
+				if strings.Contains(string(out), "Logged in.") {
+					t.Errorf("failed login reported success: %s", out)
+				}
+				if _, err := os.Stat(cellaPath); !errors.Is(err, os.ErrNotExist) {
+					t.Errorf("auth save failure retained the new account's Cella token: %v", err)
+				}
+				data, err := os.ReadFile(authPath)
+				if err != nil || string(data) != before[authPath] {
+					t.Errorf("failed auth save modified previous root credential: %v", err)
+				}
+				return
 			}
 			if tc.verifyStatus != 200 || tc.blockSave {
 				if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 {

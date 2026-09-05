@@ -44,6 +44,13 @@ attempt leaves your saved credentials intact. After a successful pasted-token
 login, the CLI removes the previous auth root token to avoid using a different
 identity for other products.
 
+Device login reports success after saving both credentials. If saving the auth
+root fails after the Cella token was saved, the CLI removes that Cella token and
+reports an error. Fix the reported storage problem and log in again. This keeps
+a new Cella account from being refreshed using a previous account's auth root.
+If removal also fails, the error reports it; repair storage and run
+`latere logout` before retrying login.
+
 ## The two token files
 
 | File | What it is | Used for |
