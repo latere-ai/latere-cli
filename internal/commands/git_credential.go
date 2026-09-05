@@ -198,7 +198,9 @@ func newGitCredentialGetCmd() *cobra.Command {
 				return nil
 			}
 			access, ok := driveCredentialToken(cmd.Context(), authURL)
-			if !ok {
+			// Git values must fit one NUL-free line. Decline malformed tokens
+			// rather than letting their bytes become credential attributes.
+			if !ok || strings.ContainsAny(access, "\r\n\x00") {
 				return nil
 			}
 			// Drive's git endpoint reads the Basic password as the bearer
