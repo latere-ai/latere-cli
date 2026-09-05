@@ -198,6 +198,10 @@ latere login --token <token>      # save a pasted access token (no refresh)
 | `--api-url` / `SANDBOX_API_URL` | Override the Cella API base URL, from which the auth URL is derived. |
 | `DRIVE_HOST` | Override the Drive host the git credential helper answers for. |
 
+Explicit URL flags take precedence over environment variables. Login uses
+the resolved Cella URL for both token exchange and verification. If neither
+`--auth-url` nor `AUTH_URL` is set, the auth URL is derived from that Cella URL.
+
 ## Related reading
 
 - Auth: **"Identity, delegation, and token exchange"** covers the

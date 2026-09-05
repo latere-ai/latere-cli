@@ -440,6 +440,20 @@ type deviceFlowOpts struct {
 	NoBrowser                         bool
 }
 
+// Resolve the same configured endpoints for device authorization, token
+// exchange, and verification. Explicit flags override environment defaults.
+func (opts deviceFlowOpts) endpoints() (authBase, apiBase string) {
+	apiBase = api.NewClient(opts.APIURL).BaseURL
+	authBase = opts.AuthURL
+	if authBase == "" {
+		authBase = os.Getenv("AUTH_URL")
+	}
+	if authBase == "" {
+		authBase = api.InferAuthURL(apiBase)
+	}
+	return strings.TrimRight(authBase, "/"), apiBase
+}
+
 // captureStore holds the device-flow candidate in memory until Cella exchange,
 // verification, and token storage succeed. A rejected login must not replace
 // the auth identity used by other commands while retaining the old Cella token.
@@ -493,14 +507,10 @@ func (s *captureStore) Clear() error                 { return s.disk.Clear() }
 // auth.latere.ai via pkg/authkit.DeviceCodeClient, then trades the
 // resulting auth-issued token for a Cella-scoped one.
 func runDeviceFlow(ctx context.Context, opts deviceFlowOpts) error {
-	authBase := opts.AuthURL
-	if authBase == "" {
-		authBase = api.InferAuthURL(opts.APIURL)
-	}
-	authBase = strings.TrimRight(authBase, "/")
+	opts.AuthURL, opts.APIURL = opts.endpoints()
 
 	client := oidc.New(oidc.Config{
-		AuthURL:  authBase,
+		AuthURL:  opts.AuthURL,
 		ClientID: opts.ClientID,
 		Scopes:   strings.Fields(opts.Scopes),
 	})
@@ -597,15 +607,7 @@ func browserCommand(rawURL string) (string, []string, error) {
 // device token is still accepted by sandboxd, so use it directly for the
 // cella exchange instead of persisting the short-lived auth token.
 func exchangeForCellaToken(ctx context.Context, opts deviceFlowOpts, authToken string) (string, error) {
-	authBase := opts.AuthURL
-	if authBase == "" {
-		authBase = api.InferAuthURL(opts.APIURL)
-	}
-	authBase = strings.TrimRight(authBase, "/")
-	apiBase := strings.TrimRight(opts.APIURL, "/")
-	if apiBase == "" {
-		apiBase = "https://cella.latere.ai"
-	}
+	authBase, apiBase := opts.endpoints()
 
 	httpc := &http.Client{Timeout: 15 * time.Second, Transport: otel.Transport(nil)}
 
