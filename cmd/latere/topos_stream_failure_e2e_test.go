@@ -29,7 +29,7 @@ func TestToposPrintReportsFailedStreamsE2E(t *testing.T) {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 	for _, operation := range []string{"start", "attach"} {
-		for _, state := range []string{"completed", "closed session", "graceful disconnect", "abrupt disconnect", "protocol error", "error then stop", "empty error", "run error", "malformed answer", "malformed tool", "malformed tool failure", "malformed run error", "empty run error"} {
+		for _, state := range []string{"completed", "closed session", "graceful disconnect", "abrupt disconnect", "protocol error", "error then stop", "empty error", "run error", "malformed answer", "malformed tool", "malformed tool failure", "malformed run error", "empty run error", "approval required"} {
 			t.Run(operation+"/"+state, func(t *testing.T) {
 				root := t.TempDir()
 				wantError, wantOutput := "", ""
@@ -39,16 +39,17 @@ func TestToposPrintReportsFailedStreamsE2E(t *testing.T) {
 						`{"type":"event","event":"AssistantMessage","seq":1,"payload":{"text":"old answer"}}`,
 						`{"type":"event","event":"Stop","seq":2,"payload":{}}`,
 						`{"type":"event","event":"RunError","seq":3,"payload":{"error":"old failure"}}`,
-						`{"type":"event","event":"PostToolUse","seq":4,"payload":{"tool_call":{"name":"old-tool"},"result":{}}}`,
+						`{"type":"event","event":"ApprovalRequest","seq":4,"payload":{"decision_id":"old-decision","tool_id":"old-tool"}}`,
+						`{"type":"event","event":"PostToolUse","seq":5,"payload":{"tool_call":{"name":"old-tool"},"result":{}}}`,
 					)
 				}
-				frames = append(frames, `{"type":"caught_up","seq":4}`)
+				frames = append(frames, `{"type":"caught_up","seq":5}`)
 				switch state {
 				case "completed", "graceful disconnect", "abrupt disconnect":
 					wantOutput = "partial answer\n"
-					frames = append(frames, `{"type":"event","event":"AssistantMessage","seq":5,"payload":{"text":"partial answer"}}`)
+					frames = append(frames, `{"type":"event","event":"AssistantMessage","seq":6,"payload":{"text":"partial answer"}}`)
 					if state == "completed" {
-						frames = append(frames, `{"type":"event","event":"Stop","seq":6,"payload":{}}`)
+						frames = append(frames, `{"type":"event","event":"Stop","seq":7,"payload":{}}`)
 					} else {
 						wantError = "session disconnected before turn completed"
 					}
@@ -58,14 +59,14 @@ func TestToposPrintReportsFailedStreamsE2E(t *testing.T) {
 					wantError = "session rejected prompt"
 					frames = append(frames, `{"type":"error","message":"session rejected prompt"}`)
 					if state == "error then stop" {
-						frames = append(frames, `{"type":"event","event":"Stop","seq":6,"payload":{}}`)
+						frames = append(frames, `{"type":"event","event":"Stop","seq":7,"payload":{}}`)
 					}
 				case "empty error":
 					wantError = "session protocol error"
 					frames = append(frames, `{"type":"error"}`)
 				case "run error":
 					wantError = "agent unavailable"
-					frames = append(frames, `{"type":"event","event":"RunError","seq":5,"payload":{"error":"agent unavailable"}}`)
+					frames = append(frames, `{"type":"event","event":"RunError","seq":6,"payload":{"error":"agent unavailable"}}`)
 				case "malformed answer", "malformed tool", "malformed tool failure", "malformed run error":
 					event, payload := "AssistantMessage", `{"text":42}`
 					switch state {
@@ -77,11 +78,14 @@ func TestToposPrintReportsFailedStreamsE2E(t *testing.T) {
 						event, payload = "RunError", `{"error":42}`
 					}
 					wantError = "decode " + event + " payload"
-					frame, _ := json.Marshal(map[string]any{"type": "event", "event": event, "seq": 5, "payload": json.RawMessage(payload)})
-					frames = append(frames, string(frame), `{"type":"event","event":"Stop","seq":6,"payload":{}}`)
+					frame, _ := json.Marshal(map[string]any{"type": "event", "event": event, "seq": 6, "payload": json.RawMessage(payload)})
+					frames = append(frames, string(frame), `{"type":"event","event":"Stop","seq":7,"payload":{}}`)
+				case "approval required":
+					wantError = "approval required"
+					frames = append(frames, `{"type":"event","event":"ApprovalRequest","seq":6,"payload":{"decision_id":"decision-1","tool_id":"test-tool","args":{}}}`)
 				case "empty run error":
 					wantError = "agent reported an error"
-					frames = append(frames, `{"type":"event","event":"RunError","seq":5,"payload":{}}`)
+					frames = append(frames, `{"type":"event","event":"RunError","seq":6,"payload":{}}`)
 				}
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					if r.URL.Path == "/v1/sessions" {
@@ -108,6 +112,14 @@ func TestToposPrintReportsFailedStreamsE2E(t *testing.T) {
 							return // A fatal frame can make the CLI disconnect immediately.
 						}
 					}
+					if state == "approval required" {
+						// The server remains blocked on the decision. Print mode must
+						// disconnect without approving or denying on the user's behalf.
+						if _, data, err := conn.Read(r.Context()); err == nil {
+							t.Errorf("print mode sent an approval decision: %s", data)
+						}
+						return
+					}
 					if state != "abrupt disconnect" {
 						_ = conn.Close(websocket.StatusNormalClosure, "done")
 					}
@@ -130,6 +142,9 @@ func TestToposPrintReportsFailedStreamsE2E(t *testing.T) {
 					}
 				} else if err != nil || stderr.Len() != 0 {
 					t.Errorf("completed stream failed: %v: %s", err, stderr.String())
+				}
+				if state == "approval required" && !strings.Contains(stderr.String(), "attach without --print") {
+					t.Errorf("approval error lacks recovery instructions: %s", stderr.String())
 				}
 				if stdout.String() != wantOutput {
 					t.Errorf("stdout=%q, want %q", stdout.String(), wantOutput)

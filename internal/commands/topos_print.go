@@ -14,8 +14,8 @@ import (
 	"io"
 )
 
-// printErr is returned by the print-mode stream when the agent reported an
-// infrastructure or protocol error, so the command exits non-zero for scripts/CI.
+// printErr reports a session failure or required intervention in print mode,
+// so the command exits non-zero for scripts/CI.
 type printErr struct{ msg string }
 
 func (e *printErr) Error() string { return e.msg }
@@ -90,6 +90,16 @@ func handlePrintEvent(fr attachFrame, out, errOut io.Writer) (bool, error) {
 			p.Error = "agent reported an error"
 		}
 		return true, &printErr{msg: p.Error}
+	case "ApprovalRequest":
+		var p approvalRequestPayload
+		if err := json.Unmarshal(fr.Payload, &p); err != nil {
+			return false, fmt.Errorf("decode %s payload: %w", fr.Event, err)
+		}
+		message := "approval required"
+		if p.ToolID != "" {
+			message += fmt.Sprintf(" for %q", p.ToolID)
+		}
+		return true, &printErr{msg: message + "; attach without --print to review the request"}
 	case "Stop":
 		// The turn completed.
 		return true, nil

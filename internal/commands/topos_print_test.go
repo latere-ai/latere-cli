@@ -166,7 +166,7 @@ func TestStreamPrintPropagatesOutputErrors(t *testing.T) {
 }
 
 func TestPrintRejectsMalformedEventPayloads(t *testing.T) {
-	for _, event := range []string{"AssistantMessage", "PostToolUse", "PostToolUseFailure", "RunError"} {
+	for _, event := range []string{"AssistantMessage", "PostToolUse", "PostToolUseFailure", "RunError", "ApprovalRequest"} {
 		for _, payload := range []string{"", "{", "[]"} {
 			t.Run(event+"/"+payload, func(t *testing.T) {
 				var out, errOut bytes.Buffer
@@ -184,6 +184,28 @@ func TestPrintRejectsMalformedEventPayloads(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestStreamPrintReportsApprovalWithoutDeciding(t *testing.T) {
+	for _, payload := range []string{`{"decision_id":"d1","tool_id":"test-tool"}`, `{}`} {
+		t.Run(payload, func(t *testing.T) {
+			fc := &fakePrintConn{frames: make(chan attachFrame, 3)}
+			fc.frames <- attachFrame{Type: "caught_up"}
+			fc.frames <- ev("ApprovalRequest", payload)
+			fc.frames <- ev("Stop", `{}`)
+			var out, errOut bytes.Buffer
+			err := streamPrint(t.Context(), fc, &out, &errOut, "new prompt")
+			if err == nil || !strings.Contains(err.Error(), "approval required") || !strings.Contains(err.Error(), "attach without --print") {
+				t.Fatalf("approval not reported: %v", err)
+			}
+			if len(fc.sent) != 1 || fc.sent[0].Type != "user_turn" {
+				t.Fatalf("print mode sent an unsolicited approval reply: %v", fc.sent)
+			}
+			if out.Len() != 0 || errOut.Len() != 0 {
+				t.Fatal("approval request produced output instead of a returned error")
+			}
+		})
 	}
 }
 

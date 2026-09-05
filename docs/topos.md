@@ -80,6 +80,9 @@ Print mode waits through session replay and reports the response to your new pro
 
 `--readonly` cannot be combined with `--print`/`-p`, which sends a new prompt.
 
+If a tool needs your approval, print mode exits with an error. Attach to the
+session without `--print` to review the pending request and approve or deny it.
+
 Print mode exits non-zero if the agent reports an error, the server rejects the
 request, the connection ends before completion is confirmed, or streamed output
 cannot be written. Any text already streamed stays on stdout; check the exit
