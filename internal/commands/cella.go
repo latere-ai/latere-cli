@@ -1399,6 +1399,57 @@ func newCeLsCmd() *cobra.Command {
 	return cmd
 }
 
+type cellaUploadFile struct{ rel, local string }
+
+// collectCellaUploadFiles validates every source before the request starts.
+// Special files can block on open/read or silently upload an empty body.
+func collectCellaUploadFiles(sources []string) ([]cellaUploadFile, error) {
+	var files []cellaUploadFile
+	addFile := func(local, rel string) error {
+		info, err := os.Stat(local)
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("upload source %q is not a regular file", local)
+		}
+		files = append(files, cellaUploadFile{rel: filepath.ToSlash(rel), local: local})
+		return nil
+	}
+	for _, src := range sources {
+		info, err := os.Stat(src)
+		if err != nil {
+			return nil, err
+		}
+		if info.IsDir() {
+			parent := filepath.Dir(filepath.Clean(src))
+			if err := filepath.WalkDir(src, func(p string, d os.DirEntry, err error) error {
+				if err != nil {
+					return err
+				}
+				if d.IsDir() {
+					return nil
+				}
+				rel, err := filepath.Rel(parent, p)
+				if err != nil {
+					return err
+				}
+				return addFile(p, rel)
+			}); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		if err := addFile(src, filepath.Base(src)); err != nil {
+			return nil, err
+		}
+	}
+	if len(files) == 0 {
+		return nil, fmt.Errorf("no files to upload")
+	}
+	return files, nil
+}
+
 // newCeUploadCmd streams files and folders into the cella, preserving folder
 // structure. Each file is sent as a multipart part whose form-field name is its
 // path relative to the destination.
@@ -1422,37 +1473,9 @@ func newCeUploadCmd() *cobra.Command {
 			if c.HTTP != nil && timeout > 0 {
 				c.HTTP.Timeout = timeout
 			}
-			type upfile struct{ rel, local string }
-			var files []upfile
-			for _, src := range args[1:] {
-				info, err := os.Stat(src)
-				if err != nil {
-					return err
-				}
-				if info.IsDir() {
-					parent := filepath.Dir(filepath.Clean(src))
-					if werr := filepath.WalkDir(src, func(p string, d os.DirEntry, err error) error {
-						if err != nil {
-							return err
-						}
-						if d.IsDir() {
-							return nil
-						}
-						rel, err := filepath.Rel(parent, p)
-						if err != nil {
-							return err
-						}
-						files = append(files, upfile{rel: filepath.ToSlash(rel), local: p})
-						return nil
-					}); werr != nil {
-						return werr
-					}
-					continue
-				}
-				files = append(files, upfile{rel: filepath.Base(src), local: src})
-			}
-			if len(files) == 0 {
-				return fmt.Errorf("no files to upload")
+			files, err := collectCellaUploadFiles(args[1:])
+			if err != nil {
+				return err
 			}
 			pr, pw := io.Pipe()
 			mw := multipart.NewWriter(pw)

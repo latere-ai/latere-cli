@@ -162,6 +162,16 @@ latere cella import <name|id> --input data.jsonl --dest /workspace
 latere cella import <name|id> --input payload.zip --dest /workspace
 ```
 
+To upload files or directory trees while preserving their paths:
+
+```sh
+latere cella upload <name|id> ./dist config.json --dest /workspace
+```
+
+Upload checks every source before sending data. Regular files, empty files,
+and symlinks to regular files are supported. Devices, named pipes, and
+directory symlinks are rejected, including inside directory trees.
+
 ## Configuration
 
 | Setting | Purpose |
