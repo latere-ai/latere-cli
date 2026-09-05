@@ -189,7 +189,7 @@ func switchOrgContext(cmd *cobra.Command, authURL, clientID, orgID string) error
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 
-	httpc := &http.Client{Timeout: 15 * time.Second, Transport: otel.Transport(nil)}
+	httpc := &http.Client{Timeout: 15 * time.Second, Transport: otel.Transport(nil), CheckRedirect: api.PreserveMethodOnRedirect}
 	resp, err := httpc.Do(req)
 	if err != nil {
 		return fmt.Errorf("token endpoint: %w", err)
@@ -884,7 +884,7 @@ func revokeAuthRefreshToken(ctx context.Context, apiURL, authURL string, errw io
 		return
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	resp, err := (&http.Client{Timeout: 10 * time.Second, Transport: otel.Transport(nil)}).Do(req)
+	resp, err := (&http.Client{Timeout: 10 * time.Second, Transport: otel.Transport(nil), CheckRedirect: api.PreserveMethodOnRedirect}).Do(req)
 	if err != nil {
 		fprintf(errw, "  warning: could not revoke the auth refresh token (%v); it remains valid until expiry\n", err)
 		return
