@@ -405,3 +405,27 @@ func TestSkipUpdateCheckForGitCredential(t *testing.T) {
 		t.Error("skipUpdateCheck(git-credential get) = false, want true (git parses helper stdout; a notice or auto-upgrade must not interleave)")
 	}
 }
+
+func TestAutoGitSetupRepairsMissingDevelopmentHTTPHelper(t *testing.T) {
+	isolateDriveTokens(t)
+	setupGitConfigFile(t)
+	t.Setenv("DRIVE_HOST", "localhost:8080")
+	key := "credential.https://localhost:8080.helper"
+	if err := gitConfig(t.Context(), "--replace-all", key, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := gitConfig(t.Context(), "--add", key, "!latere git-credential"); err != nil {
+		t.Fatal(err)
+	}
+	if driveGitHelperConfigured(t.Context()) {
+		t.Error("HTTPS-only setup incorrectly considered complete for a development host")
+	}
+	autoConfigureDriveGit(t.Context(), io.Discard)
+	out, err := exec.Command("git", "config", "--global", "--get-all", "credential.http://localhost:8080.helper").Output()
+	if err != nil || string(out) != "\n!latere git-credential\n" {
+		t.Errorf("automatic setup did not repair HTTP helpers: %q (%v)", out, err)
+	}
+	if !driveGitHelperConfigured(t.Context()) {
+		t.Error("repaired setup not recognized")
+	}
+}

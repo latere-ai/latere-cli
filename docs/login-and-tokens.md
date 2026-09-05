@@ -136,8 +136,10 @@ latere login --no-git                   # sign in without touching git config
 ```
 
 The helper answers only for the Drive host over HTTPS. A nonblank
-`DRIVE_HOST` override also permits HTTP for development. Missing or other
-protocols receive no credential and do not trigger token refresh. `store` and `erase` are
+`DRIVE_HOST` override also permits HTTP for development. Setup registers both
+HTTPS and HTTP for that override; `setup --remove` removes both. Missing or
+other protocols receive no credential and do not trigger token refresh.
+`store` and `erase` are
 no-ops: your tokens live in `~/.config/latere`, managed by `latere
 login` and `latere logout`, never in git's own credential store.
 

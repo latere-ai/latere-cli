@@ -62,7 +62,7 @@ global git config, scoped to drive.latere.ai only.`,
 }
 
 // newGitCredentialSetupCmd wires the helper into the user's global git
-// config, scoped to the Drive host only. Two entries are written: an empty
+// config, scoped to the Drive host only. Each scheme gets two entries: an empty
 // helper first, which makes git discard credential helpers inherited from
 // broader config scopes (e.g. osxkeychain from the system gitconfig) for
 // this host — so no other helper caches or serves a stale Drive token —
@@ -81,27 +81,32 @@ through this helper:
 The empty first entry clears helpers inherited from wider git config
 scopes for the Drive host, so only this helper answers there. Helpers
 for every other host are untouched. Re-running setup is idempotent;
---remove deletes both entries.`,
+--remove deletes the entries for each scheme. A nonblank DRIVE_HOST
+override configures HTTP as well as HTTPS for that development host.`,
 		Example: `  latere git-credential setup
   latere git-credential setup --remove`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			key := driveGitHelperKey()
+			keys := driveGitHelperKeys()
 			errw := cmd.ErrOrStderr()
 			if remove {
-				if err := gitConfigUnsetAll(cmd.Context(), key); err != nil {
-					return err
+				for _, key := range keys {
+					if err := gitConfigUnsetAll(cmd.Context(), key); err != nil {
+						return err
+					}
+					fprintf(errw, "Removed %s from the global git config.\n", key)
 				}
-				fprintf(errw, "Removed %s from the global git config.\n", key)
 				return nil
 			}
 			if err := writeDriveGitHelperConfig(cmd.Context()); err != nil {
 				return err
 			}
 			fprintf(errw, "Configured the global git config:\n")
-			fprintf(errw, "  %s=                          (resets inherited helpers)\n", key)
-			fprintf(errw, "  %s=!latere git-credential\n\n", key)
-			fprintf(errw, "git clone https://%s/git/me/<repo>.git now authenticates\nwith the token from `latere login`.\n", driveHost())
+			for _, key := range keys {
+				fprintf(errw, "  %s=                          (resets inherited helpers)\n", key)
+				fprintf(errw, "  %s=!latere git-credential\n\n", key)
+			}
+			fprintf(errw, "Git now authenticates to %s with the token from `latere login`.\n", driveHost())
 			return nil
 		},
 	}
@@ -109,8 +114,13 @@ for every other host are untouched. Re-running setup is idempotent;
 	return cmd
 }
 
-func driveGitHelperKey() string {
-	return fmt.Sprintf("credential.https://%s.helper", driveHost())
+func driveGitHelperKeys() []string {
+	host := driveHost()
+	keys := []string{fmt.Sprintf("credential.https://%s.helper", host)}
+	if strings.TrimSpace(os.Getenv("DRIVE_HOST")) != "" {
+		keys = append(keys, fmt.Sprintf("credential.http://%s.helper", host))
+	}
+	return keys
 }
 
 // writeDriveGitHelperConfig writes the reset + helper entries for the Drive
@@ -118,21 +128,27 @@ func driveGitHelperKey() string {
 // entries into the single empty reset entry, making re-runs idempotent;
 // --add appends the real helper after it.
 func writeDriveGitHelperConfig(ctx context.Context) error {
-	key := driveGitHelperKey()
-	if err := gitConfig(ctx, "--replace-all", key, ""); err != nil {
-		return err
+	for _, key := range driveGitHelperKeys() {
+		if err := gitConfig(ctx, "--replace-all", key, ""); err != nil {
+			return err
+		}
+		if err := gitConfig(ctx, "--add", key, "!latere git-credential"); err != nil {
+			return err
+		}
 	}
-	return gitConfig(ctx, "--add", key, "!latere git-credential")
+	return nil
 }
 
 // driveGitHelperConfigured reports whether the global git config already
-// carries exactly the two entries setup writes (reset + helper).
+// carries the reset + helper pair for every scheme setup configures.
 func driveGitHelperConfigured(ctx context.Context) bool {
-	out, err := exec.CommandContext(ctx, "git", "config", "--global", "--get-all", driveGitHelperKey()).Output()
-	if err != nil {
-		return false
+	for _, key := range driveGitHelperKeys() {
+		out, err := exec.CommandContext(ctx, "git", "config", "--global", "--get-all", key).Output()
+		if err != nil || string(out) != "\n!latere git-credential\n" {
+			return false
+		}
 	}
-	return string(out) == "\n!latere git-credential\n"
+	return true
 }
 
 // configureDriveGitAfterLogin is the post-login hook `latere login`
