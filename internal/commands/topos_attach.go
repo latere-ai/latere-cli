@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -116,7 +117,7 @@ func wsURLFromBase(baseURL, sessionID string, since int64, readonly bool) string
 	if readonly {
 		q += "&mode=ro"
 	}
-	return u + "/v1/sessions/" + sessionID + "/attach" + q
+	return u + "/v1/sessions/" + url.PathEscape(sessionID) + "/attach" + q
 }
 
 // dialAttach opens an attach WebSocket and starts reading frames. The bearer is
