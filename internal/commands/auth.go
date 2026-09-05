@@ -817,11 +817,8 @@ local sign-out still completes.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			revokeCellaTokenServerSide(cmd.Context(), apiURL, cmd.ErrOrStderr())
 			revokeAuthRefreshToken(cmd.Context(), apiURL, authURL, cmd.ErrOrStderr())
-			if err := api.ClearToken(""); err != nil {
-				return err
-			}
-			// Also drop the retained auth root token used for lux.
-			if err := api.ClearAuthToken(); err != nil {
+			// Attempt both removals even if one fails, and report every failure.
+			if err := errors.Join(api.ClearToken(""), api.ClearAuthToken()); err != nil {
 				return err
 			}
 			fprintln(cmd.ErrOrStderr(), "Logged out.")

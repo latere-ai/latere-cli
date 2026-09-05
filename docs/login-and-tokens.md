@@ -168,8 +168,10 @@ Logout revokes your session on the server, not just the local files:
 
 Server-side revocation is best-effort. If a server cannot revoke (for
 example it is unreachable), the CLI prints a note, still clears your
-local files, and the affected token expires on its own. Local sign-out
-always completes.
+local files, and the affected token expires on its own. Logout attempts to
+remove both local files even if one removal fails. Any local removal failures
+make the command exit with an error identifying the affected paths. Fix their
+permissions or storage and run `latere logout` again to finish signing out.
 
 ## The invariant
 

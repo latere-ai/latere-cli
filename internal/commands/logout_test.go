@@ -217,7 +217,9 @@ func TestLogoutSurfacesFileClearErrors(t *testing.T) {
 	root := NewRoot("test")
 	root.SetOut(new(bytes.Buffer))
 	root.SetErr(new(bytes.Buffer))
-	root.SetArgs([]string{"logout"})
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+	root.SetArgs([]string{"logout", "--api-url", server.URL, "--auth-url", server.URL})
 	if err := root.Execute(); err == nil {
 		t.Fatal("logout with an undeletable token file: want error")
 	}
