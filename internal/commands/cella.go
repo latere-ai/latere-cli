@@ -920,6 +920,15 @@ destination directory.`,
 				inputKind    = importInputTar
 			)
 			if input != "" && input != "-" {
+				// Opening a FIFO can block before the HTTP timeout starts. Named
+				// inputs also need seeking for format detection and ZIP conversion.
+				info, err := os.Stat(input)
+				if err != nil {
+					return err
+				}
+				if !info.Mode().IsRegular() {
+					return fmt.Errorf("import input %q is not a regular file; use stdin for tar streams", input)
+				}
 				f, err := os.Open(input)
 				if err != nil {
 					return err
@@ -1001,8 +1010,8 @@ func classifyImportInput(name string, f *os.File) (importInputKind, error) {
 	if err != nil {
 		return importInputTar, err
 	}
-	if info.IsDir() {
-		return importInputTar, fmt.Errorf("input must be a file, got directory: %s", name)
+	if !info.Mode().IsRegular() {
+		return importInputTar, fmt.Errorf("import input %q is not a regular file; use stdin for tar streams", name)
 	}
 	if hasZipExtension(name) {
 		return importInputZip, nil
