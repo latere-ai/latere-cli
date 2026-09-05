@@ -48,6 +48,23 @@ func (h *hostSandbox) resolve(path string) string {
 	return filepath.Join(h.root, path)
 }
 
+// ResolvePath lets Confine check symlink targets using the served root handle,
+// including when the workspace directory has been renamed after startup.
+func (h *hostSandbox) ResolvePath(_ context.Context, _, path string) (string, error) {
+	if h.fileRoot == nil {
+		return h.resolve(path), nil
+	}
+	rel, err := h.servedPath(path)
+	if err != nil {
+		return "", err
+	}
+	rel, err = sandbox.ResolveRootPath(h.fileRoot, rel)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(h.root, rel), nil
+}
+
 func (h *hostSandbox) Create(_ context.Context, opts sandbox.CreateOptions) (sandbox.Sandbox, error) {
 	return sandbox.Sandbox{ID: "local", Name: opts.Name, State: sandbox.StateRunning, Tier: "local"}, nil
 }

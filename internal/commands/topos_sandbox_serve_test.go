@@ -152,6 +152,59 @@ func TestServeHostSandboxRejectsSymlinkEscape(t *testing.T) {
 	}
 }
 
+func TestServeHostSandboxRejectsSecretAliases(t *testing.T) {
+	for _, target := range []string{".env", ".ssh/id_ed25519", ".aws/credentials"} {
+		t.Run(target, func(t *testing.T) {
+			root := t.TempDir()
+			secret := filepath.Join(root, target)
+			if err := os.MkdirAll(filepath.Dir(secret), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(secret, []byte("private data"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(target, filepath.Join(root, "alias")); err != nil {
+				t.Skipf("symlinks unavailable: %v", err)
+			}
+			if err := os.Symlink("alias", filepath.Join(root, "chain")); err != nil {
+				t.Fatal(err)
+			}
+			client, stop := dialServedSandbox(t, root, nil)
+			defer stop()
+			ctx := t.Context()
+			sb, err := client.Create(ctx, sandbox.CreateOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := client.ReadFile(ctx, sb.ID, "alias"); !errors.Is(err, sandbox.ErrConfined) {
+				t.Errorf("read secret alias = %v, want ErrConfined", err)
+			}
+			if err := client.WriteFile(ctx, sb.ID, "alias", []byte("overwrite")); !errors.Is(err, sandbox.ErrConfined) {
+				t.Errorf("write secret alias = %v, want ErrConfined", err)
+			}
+			if _, err := client.ReadFile(ctx, sb.ID, "chain"); !errors.Is(err, sandbox.ErrConfined) {
+				t.Errorf("read chained secret alias = %v, want ErrConfined", err)
+			}
+			if dir := filepath.Dir(target); dir != "." {
+				if err := os.Symlink(dir, filepath.Join(root, "directory")); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := client.ReadFile(ctx, sb.ID, filepath.Join("directory", filepath.Base(target))); !errors.Is(err, sandbox.ErrConfined) {
+					t.Errorf("read through directory alias = %v, want ErrConfined", err)
+				}
+				if dir == ".ssh" {
+					if _, err := client.ListFiles(ctx, sb.ID, "directory"); !errors.Is(err, sandbox.ErrConfined) {
+						t.Errorf("list secret directory alias = %v, want ErrConfined", err)
+					}
+				}
+			}
+			if got, err := os.ReadFile(secret); err != nil || string(got) != "private data" {
+				t.Fatalf("secret was modified: %q, %v", got, err)
+			}
+		})
+	}
+}
+
 func TestServeHostSandboxRelativeRootAndInternalSymlink(t *testing.T) {
 	t.Chdir(t.TempDir())
 	root, err := os.Getwd()
@@ -227,6 +280,9 @@ func TestBoundHostSandboxRejectsOutsidePaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if got, err := host.ResolvePath(t.Context(), "local", "note.txt"); err != nil || got != filepath.Join(host.root, "note.txt") {
+		t.Fatalf("unbound resolved path = %q, %v", got, err)
+	}
 	host.fileRoot, err = os.OpenRoot(host.root)
 	if err != nil {
 		t.Fatal(err)
@@ -238,6 +294,9 @@ func TestBoundHostSandboxRejectsOutsidePaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := t.Context()
+	if _, err := host.ResolvePath(ctx, "local", path); !errors.Is(err, sandbox.ErrConfined) {
+		t.Errorf("bound resolution = %v, want ErrConfined", err)
+	}
 	if _, err := host.ReadFile(ctx, "local", path); !errors.Is(err, sandbox.ErrConfined) {
 		t.Errorf("bound read = %v, want ErrConfined", err)
 	}
