@@ -255,7 +255,7 @@ func ClearToken(path string) error {
 
 // APIError is a structured error from sandboxd's writeErr envelope.
 type APIError struct {
-	Status  int
+	Status  int    `json:"-"` // HTTP response status, never supplied by the JSON envelope.
 	Code    string `json:"code"`
 	Message string `json:"message"`
 	ReqID   string `json:"request_id,omitempty"`
