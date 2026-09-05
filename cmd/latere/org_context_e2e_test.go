@@ -29,13 +29,17 @@ func TestOrgSwitchUpdatesCellaIdentityE2E(t *testing.T) {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 	for _, tc := range []struct {
-		name, org                 string
+		name, org, authSuffix     string
 		failExchange, failRefresh bool
+		authFromEnv               bool
 	}{
-		{"organization", "new-org", false, false},
-		{"personal", "", false, false},
-		{"exchange failure", "new-org", true, false},
-		{"refresh failure", "new-org", false, true},
+		{name: "organization", org: "new-org"},
+		{name: "personal"},
+		{name: "exchange failure", org: "new-org", failExchange: true},
+		{name: "refresh failure", org: "new-org", failRefresh: true},
+		{name: "flag trailing slash", org: "new-org", authSuffix: "/"},
+		{name: "flag trailing slashes", org: "new-org", authSuffix: "///"},
+		{name: "environment trailing slash", org: "new-org", authSuffix: "/", authFromEnv: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -53,6 +57,9 @@ func TestOrgSwitchUpdatesCellaIdentityE2E(t *testing.T) {
 				w.Header().Set("Content-Type", "application/json")
 				switch r.URL.Path {
 				case "/token":
+					if r.Method != http.MethodPost {
+						t.Errorf("refresh method = %s, want POST", r.Method)
+					}
 					if err := r.ParseForm(); err != nil {
 						t.Error(err)
 					}
@@ -91,7 +98,7 @@ func TestOrgSwitchUpdatesCellaIdentityE2E(t *testing.T) {
 				}
 			}))
 			defer server.Close()
-			env := append(os.Environ(), "LATERE_TOKEN_FILE="+tokenPath, "LATERE_AUTH_TOKEN_FILE="+authPath, "SANDBOX_API_URL="+server.URL, "AUTH_URL="+server.URL, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
+			env := append(os.Environ(), "LATERE_TOKEN_FILE="+tokenPath, "LATERE_AUTH_TOKEN_FILE="+authPath, "SANDBOX_API_URL="+server.URL, "AUTH_URL="+server.URL+tc.authSuffix, "XDG_CONFIG_HOME="+root, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
 			run := func(args ...string) ([]byte, error) {
 				ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 				defer cancel()
@@ -99,7 +106,10 @@ func TestOrgSwitchUpdatesCellaIdentityE2E(t *testing.T) {
 				command.Env = env
 				return command.CombinedOutput()
 			}
-			args := []string{"org", "--auth-url", server.URL}
+			args := []string{"org"}
+			if !tc.authFromEnv {
+				args = append(args, "--auth-url", server.URL+tc.authSuffix)
+			}
 			if tc.org == "" {
 				args = append(args, "--personal")
 			} else {

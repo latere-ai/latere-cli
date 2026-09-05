@@ -161,11 +161,12 @@ func switchOrgContext(cmd *cobra.Command, authURL, clientID, orgID string) error
 
 	authBase := authURL
 	if authBase == "" {
-		authBase = strings.TrimRight(os.Getenv("AUTH_URL"), "/")
+		authBase = os.Getenv("AUTH_URL")
 		if authBase == "" {
 			authBase = "https://auth.latere.ai"
 		}
 	}
+	authBase = strings.TrimRight(authBase, "/")
 	cid := clientID
 	if cid == "" {
 		cid = os.Getenv("AUTH_CLIENT_ID")
