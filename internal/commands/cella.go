@@ -6,7 +6,10 @@ package commands
 import (
 	"archive/tar"
 	"archive/zip"
+	"bufio"
 	"bytes"
+	"compress/bzip2"
+	"compress/gzip"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -23,6 +26,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/ulikunitz/xz"
 
 	"github.com/latere-ai/latere-cli/internal/api"
 
@@ -893,9 +897,10 @@ func newCeImportCmd() *cobra.Command {
 		Short: "Upload files into the cella workspace (reads stdin or --input).",
 		Long: `Import files into a Cella workspace.
 
-Tar archives are extracted. Zip archives are converted to tar before
-upload. A regular file is copied as a single file into the destination
-directory.`,
+Tar archives are extracted. Gzip, bzip2, and XZ compression are decoded
+before upload, including when reading tar from stdin. Zip archives are
+converted to tar. A regular file is copied as a single file into the
+destination directory.`,
 		Example: `  latere cella import dev --input workspace.tar
   latere cella import dev --input app.zip --dest /workspace/app
   tar -cf - src package.json | latere cella import dev --dest /workspace/app`,
@@ -950,7 +955,7 @@ directory.`,
 				case importInputZip:
 					err = writeZipAsTar(fw, input, srcFile)
 				default:
-					_, err = io.Copy(fw, src)
+					err = copyImportTar(fw, src)
 				}
 				if err != nil {
 					_ = pw.CloseWithError(err)
@@ -1047,6 +1052,37 @@ func sniffImportInput(f *os.File) (importInputKind, error) {
 		return importInputTar, nil
 	}
 	return importInputRegularFile, nil
+}
+
+// copyImportTar sends plain tar to the API, detecting compression from the
+// stream so named archives and stdin behave identically. Copy through EOF to
+// surface decompression and checksum errors before completing the multipart body.
+func copyImportTar(dst io.Writer, src io.Reader) error {
+	buffered := bufio.NewReader(src)
+	header, err := buffered.Peek(6)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+	var decoded io.Reader = buffered
+	switch {
+	case bytes.HasPrefix(header, []byte{0x1f, 0x8b}):
+		reader, err := gzip.NewReader(buffered)
+		if err != nil {
+			return err
+		}
+		defer reader.Close()
+		decoded = reader
+	case bytes.HasPrefix(header, []byte("BZh")):
+		decoded = bzip2.NewReader(buffered)
+	case bytes.HasPrefix(header, []byte{0xfd, '7', 'z', 'X', 'Z', 0}):
+		reader, err := xz.NewReader(buffered)
+		if err != nil {
+			return err
+		}
+		decoded = reader
+	}
+	_, err = io.Copy(dst, decoded)
+	return err
 }
 
 func writeSingleFileTar(dst io.Writer, name string, f *os.File) error {

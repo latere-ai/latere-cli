@@ -163,6 +163,10 @@ latere cella import <name|id> --input payload.zip --dest /workspace
 ```
 
 ZIP imports preserve file paths and directory entries, including empty directories.
+Tar imports accept plain tar and gzip (`.tar.gz`, `.tgz`), bzip2 (`.tar.bz2`,
+`.tbz`, `.tbz2`), and XZ (`.tar.xz`, `.txz`) compression. Compressed tar is
+also accepted on stdin. Decompression streams to the server; no extracted
+copy is stored locally.
 
 To upload files or directory trees while preserving their paths:
 
