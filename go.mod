@@ -16,7 +16,7 @@ require (
 	golang.org/x/term v0.44.0
 	gopkg.in/yaml.v3 v3.0.1
 	latere.ai/x/pkg v0.50.1-0.20260905122732-8add66b8b7d1
-	latere.ai/x/topos v0.4.1-0.20260905144946-b8f601f8aae8
+	latere.ai/x/topos v0.4.1-0.20260905151029-79d4914f1a2a
 )
 
 require (
