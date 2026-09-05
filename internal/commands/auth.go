@@ -440,11 +440,9 @@ type deviceFlowOpts struct {
 	NoBrowser                         bool
 }
 
-// captureStore is a TokenStore whose Save also retains the saved token
-// in-memory so the caller can do post-flow work (Cella exchange) without
-// re-reading from disk. Wraps authkit.FileTokenStore at the auth-token
-// path so the saved on-disk format stays compatible with the rest of the
-// CLI's token plumbing.
+// captureStore holds the device-flow candidate in memory until Cella exchange,
+// verification, and token storage succeed. A rejected login must not replace
+// the auth identity used by other commands while retaining the old Cella token.
 type captureStore struct {
 	disk *authkit.FileTokenStore
 	last *oauth2.Token
@@ -467,10 +465,16 @@ func (s *captureStore) Save(t *oauth2.Token) error {
 		return errors.New("nil token")
 	}
 	s.last = t
+	return nil
+}
+
+// persist retains the verified login's root token for refresh and Lux access.
+// The caller must finish saving the Cella credential before invoking it.
+func (s *captureStore) persist() {
+	t := s.last
 	// Persist in the api.Token shape so `latere lux` (which reads via
 	// api.LoadAuthToken) finds the auth-issued root token where it
-	// expects it. Best-effort: a write failure is reported via a
-	// non-fatal warning above; lux access is additive.
+	// expects it. Best-effort: lux access is additive to the Cella login.
 	if err := api.SaveAuthToken(api.Token{
 		AccessToken:  t.AccessToken,
 		RefreshToken: t.RefreshToken,
@@ -480,7 +484,6 @@ func (s *captureStore) Save(t *oauth2.Token) error {
 	}); err != nil {
 		fmt.Fprintf(os.Stderr, "  warning: could not save auth token for lux (%v); `latere lux` may require re-login\n", err)
 	}
-	return nil
 }
 
 func (s *captureStore) Load() (*oauth2.Token, error) { return s.disk.Load() }
@@ -550,12 +553,17 @@ func runDeviceFlow(ctx context.Context, opts deviceFlowOpts) error {
 	// Best-effort: trade the auth-issued token for a cella-issued
 	// bearer. Falls back to the auth token during the deprecation
 	// window so installs without the cella catalog keep working.
+	candidate := tok.AccessToken
 	if cellaTok, err := exchangeForCellaToken(ctx, opts, tok.AccessToken); err == nil && cellaTok != "" {
-		return saveAndVerify(ctx, opts.APIURL, cellaTok)
+		candidate = cellaTok
 	} else if err != nil {
 		fmt.Fprintf(os.Stderr, "  cella token exchange unavailable (%v); using auth-issued token\n", err)
 	}
-	return saveAndVerify(ctx, opts.APIURL, tok.AccessToken)
+	if err := saveAndVerify(ctx, opts.APIURL, candidate); err != nil {
+		return err
+	}
+	store.persist()
+	return nil
 }
 
 var openBrowser = func(rawURL string) error {
