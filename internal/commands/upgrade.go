@@ -42,7 +42,7 @@ Set LATERE_NO_UPDATE_CHECK=1 to silence the passive update check.`,
   latere upgrade --auto on  # re-enable auto-upgrade`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if auto != "" {
+			if cmd.Flags().Changed("auto") {
 				if checkOnly {
 					return fmt.Errorf("--auto cannot be combined with --check")
 				}
