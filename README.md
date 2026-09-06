@@ -135,6 +135,8 @@ Nonempty `prompt_text` takes precedence over `prompt`, so resolved manifests can
 
 Eval manifests may be up to 256 KiB, including the YAML produced after inlining prompt files. Oversized input or resolved manifests are rejected before upload.
 
+Each apply accepts one YAML document. Extra documents and invalid trailing content are rejected before prompt files are read or any changes are submitted.
+
 Eval commands exit with an error if their results cannot be written to stdout. An output failure after apply does not undo the completed API request.
 
 Apply also rejects responses missing the suite identity, status, or dry-run mode, and responses whose dry-run mode differs from the request. These errors leave the apply outcome unknown; the CLI does not retry automatically.

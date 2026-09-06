@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -303,8 +304,16 @@ Use --dry-run to see the full reconciliation diff without writing.`,
 // validator, so everything else passes through untouched.
 func resolvePromptRefs(manifest []byte, baseDir string) ([]byte, error) {
 	var doc map[string]any
-	if err := yaml.Unmarshal(manifest, &doc); err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader(manifest))
+	if err := decoder.Decode(&doc); err != nil {
 		return nil, fmt.Errorf("manifest is not valid YAML: %w", err)
+	}
+	var extra yaml.Node
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		if err != nil {
+			return nil, fmt.Errorf("manifest is not valid YAML: %w", err)
+		}
+		return nil, fmt.Errorf("manifest must contain exactly one YAML document")
 	}
 	tasks, ok := doc["tasks"].([]any)
 	if !ok {
