@@ -929,6 +929,9 @@ destination directory.`,
   tar -cf - src package.json | latere cella import dev --dest /workspace/app`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if input == "" {
+				return errors.New("--input cannot be empty; use '-' for stdin")
+			}
 			if timeout < 0 {
 				return fmt.Errorf("--timeout must not be negative")
 			}
@@ -945,7 +948,7 @@ destination directory.`,
 				formFilename = "import.tar"
 				inputKind    = importInputTar
 			)
-			if input != "" && input != "-" {
+			if input != "-" {
 				// Opening a FIFO can block before the HTTP timeout starts. Named
 				// inputs also need seeking for format detection and ZIP conversion.
 				info, err := os.Stat(input)

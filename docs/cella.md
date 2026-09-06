@@ -208,6 +208,7 @@ copy is stored locally.
 
 `--input` requires a regular file (symlinks to regular files are accepted).
 To read a tar stream from a pipe, redirect it to stdin or use `--input -`.
+An explicitly empty `--input` is rejected before an upload starts.
 Named pipes, devices, and directories are rejected before an upload starts.
 
 To upload files or directory trees while preserving their paths:

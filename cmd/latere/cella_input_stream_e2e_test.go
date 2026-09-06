@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -41,7 +42,7 @@ func TestCellaConfiguredInputE2E(t *testing.T) {
 	}
 	for _, prefix := range []string{"cella", "sandbox"} {
 		for _, mode := range []string{"write", "import"} {
-			for _, input := range []string{"default", "dash"} {
+			for _, input := range []string{"default", "dash", "empty long", "empty short"} {
 				t.Run(prefix+"/"+mode+"/"+input, func(t *testing.T) {
 					var requests atomic.Int32
 					server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -99,8 +100,17 @@ func TestCellaConfiguredInputE2E(t *testing.T) {
 					if mode == "write" {
 						args = append(args, "/workspace/file")
 					}
-					if input == "dash" {
+					switch input {
+					case "dash":
 						args = append(args, "--input", "-")
+					case "empty long":
+						args = append(args, "--input=")
+					case "empty short":
+						flag := "-i"
+						if mode == "write" {
+							flag = "-f"
+						}
+						args = append(args, flag, "")
 					}
 					args = append(args, "--api-url", server.URL)
 					ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
@@ -108,11 +118,24 @@ func TestCellaConfiguredInputE2E(t *testing.T) {
 					command := exec.CommandContext(ctx, binary, args...)
 					command.Stdin = strings.NewReader("unrelated process stdin")
 					command.Env = append(os.Environ(), "LATERE_TOKEN_FILE="+token, "LATERE_AUTH_TOKEN_FILE="+filepath.Join(root, "absent-auth.json"), "XDG_CONFIG_HOME="+root, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "LATERE_TEST_CONFIGURED_INPUT="+source)
-					if out, err := command.CombinedOutput(); err != nil {
+					out, err := command.CombinedOutput()
+					wantRequests := int32(1)
+					if mode == "import" && strings.HasPrefix(input, "empty") {
+						wantRequests = 0
+						if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 {
+							t.Errorf("empty input: error=%v output=%q", err, out)
+						}
+						if !strings.Contains(string(out), "--input cannot be empty") {
+							t.Errorf("missing empty input diagnostic: %q", out)
+						}
+						if strings.Contains(string(out), `"imported"`) {
+							t.Errorf("unexpected import receipt: %q", out)
+						}
+					} else if err != nil {
 						t.Errorf("command: %v %s", err, out)
 					}
-					if requests.Load() != 1 {
-						t.Errorf("requests=%d", requests.Load())
+					if requests.Load() != wantRequests {
+						t.Errorf("requests=%d want=%d", requests.Load(), wantRequests)
 					}
 				})
 			}
