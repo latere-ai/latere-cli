@@ -34,6 +34,12 @@ func TestEvalResolvedPromptTextE2E(t *testing.T) {
 		for _, tc := range []struct{ name, ref, field, want string }{
 			{"resolved existing file", "existing.md", "prompt_text: pinned prompt", "pinned prompt"},
 			{"resolved missing file", "missing.md", "prompt_text: pinned prompt", "pinned prompt"},
+			{"integer text", "missing.md", "prompt_text: 001", "001"},
+			{"boolean text", "missing.md", "prompt_text: false", "false"},
+			{"float text", "existing.md", "prompt_text: 1.0", "1.0"},
+			{"exponent text", "existing.md", "prompt_text: 1e3", "1e3"},
+			{"date text", "missing.md", "prompt_text: 2026-09-06", "2026-09-06"},
+			{"null text", "existing.md", "prompt_text: null", "changed local prompt\n"},
 			{"unresolved file", "existing.md", `prompt_text: ""`, "changed local prompt\n"},
 		} {
 			t.Run(mode+"/"+tc.name, func(t *testing.T) {
@@ -43,7 +49,7 @@ func TestEvalResolvedPromptTextE2E(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				body := fmt.Sprintf("suite: test\ntasks:\n  - prompt: file://%s\n    %s\n  - prompt: file://fresh.md\n", tc.ref, tc.field)
+				body := fmt.Sprintf("suite: test\ntasks:\n  - &original\n    prompt: file://%s\n    %s\n  - &fresh\n    prompt: file://fresh.md\n  - <<: *fresh\n    prompt: 1e3\n", tc.ref, tc.field)
 				manifest := filepath.Join(dir, "suite.yaml")
 				if err := os.WriteFile(manifest, []byte(body), 0600); err != nil {
 					t.Fatal(err)
@@ -63,7 +69,7 @@ func TestEvalResolvedPromptTextE2E(t *testing.T) {
 					if err := yaml.NewDecoder(r.Body).Decode(&got); err != nil {
 						t.Error(err)
 					}
-					if len(got.Tasks) != 2 {
+					if len(got.Tasks) != 3 {
 						t.Errorf("tasks=%+v", got.Tasks)
 					} else {
 						if got.Tasks[0].Prompt != "file://"+tc.ref || got.Tasks[0].Text != tc.want {
@@ -71,6 +77,9 @@ func TestEvalResolvedPromptTextE2E(t *testing.T) {
 						}
 						if got.Tasks[1].Prompt != "file://fresh.md" || got.Tasks[1].Text != "freshly resolved prompt\n" {
 							t.Errorf("second task=%+v", got.Tasks[1])
+						}
+						if got.Tasks[2].Prompt != "1e3" || got.Tasks[2].Text != "" {
+							t.Errorf("merged inline task changed: %+v", got.Tasks[2])
 						}
 					}
 					_, _ = io.WriteString(w, `{"dry_run":false,"suite":{"id":"st-1","name":"test","status":"exists"}}`)

@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"text/tabwriter"
 
@@ -303,7 +304,7 @@ Use --dry-run to see the full reconciliation diff without writing.`,
 // itself is kept for provenance. The server is the authoritative
 // validator, so everything else passes through untouched.
 func resolvePromptRefs(manifest []byte, baseDir string) ([]byte, error) {
-	var doc map[string]any
+	var doc yaml.Node
 	decoder := yaml.NewDecoder(bytes.NewReader(manifest))
 	if err := decoder.Decode(&doc); err != nil {
 		return nil, fmt.Errorf("manifest is not valid YAML: %w", err)
@@ -315,21 +316,30 @@ func resolvePromptRefs(manifest []byte, baseDir string) ([]byte, error) {
 		}
 		return nil, fmt.Errorf("manifest must contain exactly one YAML document")
 	}
-	tasks, ok := doc["tasks"].([]any)
-	if !ok {
+	// Validate the full graph before following aliases, including duplicate
+	// keys and recursive or excessive aliases in fields we do not edit.
+	var validated map[string]any
+	if err := doc.Decode(&validated); err != nil {
+		return nil, fmt.Errorf("manifest is not valid YAML: %w", err)
+	}
+	if _, ok := validated["tasks"].([]any); !ok {
 		return manifest, nil
+	}
+	// Decode effective prompts from the original graph before adding text.
+	var parsed struct {
+		Tasks evalPromptTasks `yaml:"tasks"`
+	}
+	if err := doc.Decode(&parsed); err != nil {
+		return nil, fmt.Errorf("manifest is not valid YAML: %w", err)
 	}
 	resolved := false
 	remaining := evalMaxManifestBytes
-	for i, t := range tasks {
-		task, ok := t.(map[string]any)
-		if !ok {
+	for i, entry := range parsed.Tasks.entries {
+		task := entry.node
+		if task == nil || entry.text != "" {
 			continue
 		}
-		if text, _ := task["prompt_text"].(string); text != "" {
-			continue
-		}
-		prompt, _ := task["prompt"].(string)
+		prompt := entry.prompt
 		if !strings.HasPrefix(prompt, "file://") {
 			continue
 		}
@@ -342,14 +352,47 @@ func resolvePromptRefs(manifest []byte, baseDir string) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("tasks[%d]: resolve prompt %q: %w", i, prompt, err)
 		}
-		task["prompt_text"] = string(text)
+		// Keep anchored prototypes unchanged: later tasks may merge the
+		// prototype while overriding prompt. Put resolved text on this task.
+		original := parsed.Tasks.node.Content[i]
+		updated := *original
+		updated.Content = slices.Clone(original.Content)
+		preserveAnchors := original.Kind == yaml.AliasNode || original.Anchor != ""
+		for j := 0; j < len(original.Content); j += 2 {
+			key, value := original.Content[j], original.Content[j+1]
+			if key.Kind == yaml.AliasNode || (key.Value == "prompt_text" && value.Anchor != "") {
+				preserveAnchors = true
+			}
+		}
+		if preserveAnchors {
+			updated = yaml.Node{Kind: yaml.MappingNode, Content: []*yaml.Node{
+				{Kind: yaml.ScalarNode, Tag: "!!merge", Value: "<<"}, original,
+			}}
+		}
+		task = &updated
+		parsed.Tasks.node.Content[i] = task
+		value := &yaml.Node{}
+		if err := value.Encode(string(text)); err != nil {
+			return nil, fmt.Errorf("tasks[%d]: encode prompt: %w", i, err)
+		}
+		replaced := false
+		for j := 0; j < len(task.Content); j += 2 {
+			if task.Content[j].Value == "prompt_text" {
+				task.Content[j+1] = value
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			task.Content = append(task.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "prompt_text"}, value)
+		}
 		remaining -= len(text)
 		resolved = true
 	}
 	if !resolved {
 		return manifest, nil
 	}
-	out, err := yaml.Marshal(doc)
+	out, err := yaml.Marshal(&doc)
 	if err != nil {
 		return nil, fmt.Errorf("re-marshal manifest: %w", err)
 	}
@@ -357,6 +400,38 @@ func resolvePromptRefs(manifest []byte, baseDir string) ([]byte, error) {
 		return nil, fmt.Errorf("resolved manifest exceeds %d byte limit", evalMaxManifestBytes)
 	}
 	return out, nil
+}
+
+type evalPromptTasks struct {
+	node    *yaml.Node
+	entries []evalPromptTask
+}
+
+func (t *evalPromptTasks) UnmarshalYAML(node *yaml.Node) error {
+	t.node = node
+	return node.Decode(&t.entries)
+}
+
+// evalPromptTask retains the original mapping and decodes strings as evald
+// does: scalar spelling (e.g. 001) is text. YAML handles merges and aliases.
+type evalPromptTask struct {
+	node         *yaml.Node
+	prompt, text string
+}
+
+func (t *evalPromptTask) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind != yaml.MappingNode {
+		return nil
+	}
+	var values struct {
+		Prompt     string `yaml:"prompt"`
+		PromptText string `yaml:"prompt_text"`
+	}
+	if err := node.Decode(&values); err != nil {
+		return err
+	}
+	t.node, t.prompt, t.text = node, values.Prompt, values.PromptText
+	return nil
 }
 
 func readEvalPromptFile(path string, remaining int) ([]byte, error) {

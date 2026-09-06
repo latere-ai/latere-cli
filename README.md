@@ -131,7 +131,7 @@ latere review
 
 Use `latere eval apply -f suite.yaml --dry-run` to preview changes. Apply rejects redirects that change the request method or dry-run mode.
 
-Nonempty `prompt_text` takes precedence over `prompt`, so resolved manifests can be reapplied without their original prompt files. Otherwise, `file://` prompts are loaded relative to the manifest directory (the current directory for stdin).
+Nonempty `prompt_text` takes precedence over `prompt`, so resolved manifests can be reapplied without their original prompt files. Otherwise, `file://` prompts are loaded relative to the manifest directory (the current directory for stdin). Resolving a prompt file preserves other YAML values, including the spelling of scalar text such as `001` or `1e3`.
 
 Eval manifests may be up to 256 KiB, including the YAML produced after inlining prompt files. Oversized input or resolved manifests are rejected before upload.
 
