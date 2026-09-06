@@ -1545,6 +1545,7 @@ func newCeUploadCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			var uploadedBytes int64
 			upload, contentType := newMultipartUpload(func(mw *multipart.Writer) error {
 				if dest != "" {
 					if err := mw.WriteField("dest", dest); err != nil {
@@ -1561,7 +1562,9 @@ func newCeUploadCmd() *cobra.Command {
 						_ = f.Close()
 						return err
 					}
-					if _, err := io.Copy(part, f); err != nil {
+					n, err := io.Copy(part, f)
+					uploadedBytes += n
+					if err != nil {
 						_ = f.Close()
 						return err
 					}
@@ -1582,6 +1585,9 @@ func newCeUploadCmd() *cobra.Command {
 			}
 			if err := upload.finish(); err != nil {
 				return err
+			}
+			if resp.Files != len(files) || resp.Bytes != uploadedBytes {
+				return fmt.Errorf("upload receipt reports %d files (%d bytes); sent %d files (%d bytes)", resp.Files, resp.Bytes, len(files), uploadedBytes)
 			}
 			fmt.Printf("uploaded %d files (%d bytes) to %s\n", resp.Files, resp.Bytes, resp.Dest)
 			return nil
