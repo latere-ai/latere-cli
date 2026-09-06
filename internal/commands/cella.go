@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"mime/multipart"
 	"net/http"
 	"net/url"
@@ -813,6 +814,10 @@ func newCeWaitCmd() *cobra.Command {
   latere cella wait dev cmd_123 --timeout 1200`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			const maxTimeoutSeconds = int64(math.MaxInt64) / int64(time.Second)
+			if secs <= 0 || int64(secs) > maxTimeoutSeconds {
+				return fmt.Errorf("--timeout must be between 1 and %d seconds", maxTimeoutSeconds)
+			}
 			c, err := authedClient(apiURL)
 			if err != nil {
 				return err
@@ -830,7 +835,7 @@ func newCeWaitCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
-	cmd.Flags().IntVar(&secs, "timeout", 600, "max poll seconds")
+	cmd.Flags().IntVar(&secs, "timeout", 600, "max poll seconds (must be positive)")
 	return cmd
 }
 

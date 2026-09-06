@@ -139,6 +139,9 @@ latere cella logs <name|id> <command_id> --follow
 latere cella wait <name|id> <command_id> --timeout 600
 ```
 
+`wait --timeout` requires a positive number of seconds. Zero, negative values,
+and values too large to represent are rejected before polling.
+
 `create` and `run` accept repeatable `--credential <catalog-key>` to attach
 client trust-plane credentials by catalog key. `--env KEY=VALUE` is only for
 non-secret configuration. `run` also accepts `--cwd /path`; one-shot runs also
