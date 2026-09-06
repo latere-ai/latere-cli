@@ -269,8 +269,7 @@ func replaceCellaOrgToken(ctx context.Context, authBase, rootToken string) error
 
 // newAuthPrintTokenCmd prints the saved access token to stdout so it
 // can be embedded in shell scripts: `TOKEN=$(latere print-token)`.
-// Stays on stdout (without a trailing newline guaranteed by Println)
-// so command substitution gives a clean string.
+// Writes one trailing newline, which shell command substitution removes.
 func newAuthPrintTokenCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "print-token",
@@ -292,8 +291,8 @@ Useful for piping into shell tools without depending on jq:
 			if tok.AccessToken == "" {
 				return api.ErrNoToken
 			}
-			fmt.Println(tok.AccessToken)
-			return nil
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), tok.AccessToken)
+			return err
 		},
 	}
 }
