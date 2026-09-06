@@ -911,6 +911,9 @@ destination directory.`,
   tar -cf - src package.json | latere cella import dev --dest /workspace/app`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if timeout < 0 {
+				return fmt.Errorf("--timeout must not be negative")
+			}
 			c, err := authedClient(apiURL)
 			if err != nil {
 				return err
@@ -1550,11 +1553,14 @@ func newCeUploadCmd() *cobra.Command {
   latere cella upload dev a.txt b.txt --dest /tmp`,
 		Args: cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if timeout < 0 {
+				return fmt.Errorf("--timeout must not be negative")
+			}
 			c, err := authedClient(apiURL)
 			if err != nil {
 				return err
 			}
-			if c.HTTP != nil && timeout > 0 {
+			if c.HTTP != nil {
 				c.HTTP.Timeout = timeout
 			}
 			files, err := collectCellaUploadFiles(args[1:])
@@ -1612,7 +1618,7 @@ func newCeUploadCmd() *cobra.Command {
 	f := cmd.Flags()
 	f.StringVar(&apiURL, "api-url", "", "override Cella API base URL")
 	f.StringVar(&dest, "dest", "", "destination directory inside the cella; default /workspace")
-	f.DurationVar(&timeout, "timeout", 5*time.Minute, "upload timeout")
+	f.DurationVar(&timeout, "timeout", 5*time.Minute, "upload timeout (0 disables)")
 	return cmd
 }
 

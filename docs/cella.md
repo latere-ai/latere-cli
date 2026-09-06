@@ -215,6 +215,9 @@ Upload also checks that the server's file and byte counts match the transfer.
 If the server responds early, the command reports an error instead
 of confirming a transfer that did not finish.
 
+For upload and import, `--timeout 0` disables the HTTP timeout; negative values
+are rejected before sending a request.
+
 ## Configuration
 
 | Setting | Purpose |
