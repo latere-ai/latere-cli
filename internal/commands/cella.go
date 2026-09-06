@@ -884,6 +884,9 @@ to stdout. Pass --output to write the archive to a local file.`,
 				return err
 			}
 			defer func() { _ = resp.Body.Close() }()
+			if resp.StatusCode != http.StatusOK {
+				return fmt.Errorf("cella: expected HTTP 200 for a complete download, got HTTP %d", resp.StatusCode)
+			}
 			if out != "" && out != "-" {
 				return saveDownload(out, resp.Body)
 			}
@@ -1401,6 +1404,9 @@ func newCeCatCmd() *cobra.Command {
 				return err
 			}
 			defer func() { _ = resp.Body.Close() }()
+			if resp.StatusCode != http.StatusOK {
+				return fmt.Errorf("cella: expected HTTP 200 for a complete download, got HTTP %d", resp.StatusCode)
+			}
 			_, err = io.Copy(os.Stdout, resp.Body)
 			return err
 		},

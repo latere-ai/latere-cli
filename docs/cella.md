@@ -176,6 +176,8 @@ filename extension. Named compressed files that are not tar archives are copied
 unchanged.
 Legacy V7 tar archives are also detected without an extension.
 
+`cat` and `export` reject partial or unexpected success responses before writing bytes. Rejected responses leave existing export files intact and stdout empty. Valid empty files remain supported.
+
 Cella file transfer uses tar streams:
 
 ```sh
