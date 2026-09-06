@@ -29,7 +29,7 @@ func TestToposPrintReportsFailedStreamsE2E(t *testing.T) {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 	for _, operation := range []string{"start", "attach"} {
-		for _, state := range []string{"completed", "closed session", "graceful disconnect", "abrupt disconnect", "protocol error", "error then stop", "empty error", "run error", "malformed answer", "malformed tool", "malformed tool failure", "malformed run error", "empty run error", "approval required", "invalid frame JSON", "invalid frame type", "invalid frame sequence", "null frame", "missing frame type", "trailing frame JSON", "malformed replay frame"} {
+		for _, state := range []string{"completed", "closed session", "graceful disconnect", "abrupt disconnect", "protocol error", "error then stop", "empty error", "run error", "malformed answer", "malformed tool", "malformed tool failure", "malformed run error", "empty run error", "approval required", "invalid frame JSON", "invalid frame type", "invalid frame sequence", "null frame", "missing frame type", "trailing frame JSON", "malformed replay frame", "budget reached", "budget then stop", "malformed budget", "budget already exhausted"} {
 			t.Run(operation+"/"+state, func(t *testing.T) {
 				root := t.TempDir()
 				wantError, wantOutput := "", ""
@@ -45,6 +45,24 @@ func TestToposPrintReportsFailedStreamsE2E(t *testing.T) {
 				}
 				frames = append(frames, `{"type":"caught_up","seq":5}`)
 				switch state {
+				case "budget already exhausted":
+					wantError = "budget limit reached"
+					frames = append(frames, `{"type":"event","event":"Stop","seq":6,"payload":{"stop_reason":"budget_exceeded"}}`)
+				case "budget reached", "budget then stop", "malformed budget":
+					wantError = "budget limit reached: $2.5 spent (limit $2)"
+					payload := `{"leg":"usd","actual_usd":2.5,"limit_usd":2}`
+					if state == "malformed budget" {
+						wantError = "decode BudgetBreach payload"
+						payload = `{"limit_usd":false}`
+					}
+					wantOutput = "partial answer\n"
+					frames = append(frames, `{"type":"event","event":"AssistantMessage","seq":6,"payload":{"text":"partial answer"}}`,
+						`{"type":"event","event":"BudgetBreach","seq":7,"payload":`+payload+`}`)
+					if state == "budget then stop" || state == "malformed budget" {
+						frames = append(frames, `{"type":"event","event":"Stop","seq":8,"payload":{}}`)
+					} else {
+						frames = append(frames, `{"type":"event","event":"SessionStatus","seq":8,"payload":{"status":"awaiting_input"}}`)
+					}
 				case "invalid frame JSON", "invalid frame type", "invalid frame sequence", "null frame", "missing frame type", "trailing frame JSON", "malformed replay frame":
 					wantError = "decode session frame"
 					malformed := `{`
@@ -133,6 +151,10 @@ func TestToposPrintReportsFailedStreamsE2E(t *testing.T) {
 						if err := conn.Write(r.Context(), websocket.MessageText, []byte(frame)); err != nil {
 							return // A fatal frame can make the CLI disconnect immediately.
 						}
+					}
+					if state == "budget reached" {
+						_, _, _ = conn.Read(r.Context()) // Session remains attached after a cap stop.
+						return
 					}
 					if state == "approval required" {
 						// The server remains blocked on the decision. Print mode must

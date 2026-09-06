@@ -166,7 +166,7 @@ func TestStreamPrintPropagatesOutputErrors(t *testing.T) {
 }
 
 func TestPrintRejectsMalformedEventPayloads(t *testing.T) {
-	for _, event := range []string{"AssistantMessage", "PostToolUse", "PostToolUseFailure", "RunError", "ApprovalRequest"} {
+	for _, event := range []string{"AssistantMessage", "PostToolUse", "PostToolUseFailure", "RunError", "ApprovalRequest", "BudgetBreach"} {
 		for _, payload := range []string{"", "{", "[]"} {
 			t.Run(event+"/"+payload, func(t *testing.T) {
 				var out, errOut bytes.Buffer

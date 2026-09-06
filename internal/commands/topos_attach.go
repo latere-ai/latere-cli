@@ -48,6 +48,10 @@ type sessionStatusPayload struct {
 	Status string `json:"status"`
 }
 
+type stopPayload struct {
+	StopReason string `json:"stop_reason"`
+}
+
 type assistantMessagePayload struct {
 	Text string `json:"text"`
 	Turn int    `json:"turn"`

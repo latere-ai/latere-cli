@@ -87,6 +87,10 @@ Print mode waits through session replay and reports the response to your new pro
 If a tool needs your approval, print mode exits with an error. Attach to the
 session without `--print` to review the pending request and approve or deny it.
 
+When a session reaches its spending limit, the client reports
+`budget limit reached`, including the spend and limit when available. Print mode exits non-zero
+and preserves any output already printed.
+
 Print mode exits non-zero if the agent reports an error, the server rejects the
 request, a stream frame cannot be decoded, the connection ends before completion
 is confirmed, or streamed output cannot be written. Any text already streamed

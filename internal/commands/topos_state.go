@@ -31,6 +31,8 @@ type sessionState struct {
 	usage string
 	// turn accumulates the in-flight assistant turn's streamed text.
 	turn strings.Builder
+	// budgetStopped suppresses the Stop duplicate after a BudgetBreach event.
+	budgetStopped bool
 }
 
 func newSessionState() *sessionState {
@@ -66,6 +68,7 @@ func (s *sessionState) applyStatus(status string) {
 	switch status {
 	case "running":
 		s.status = "working"
+		s.budgetStopped = false
 	case "awaiting_input":
 		s.status = "ready"
 	case "awaiting_approval":
@@ -79,6 +82,16 @@ func (s *sessionState) applyStatus(status string) {
 
 func (s *sessionState) applyEvent(fr attachFrame) {
 	switch fr.Event {
+	case "BudgetBreach":
+		message, err := budgetBreachMessage(fr.Payload)
+		if err != nil {
+			message = err.Error()
+		}
+		s.lines = append(s.lines, "⚠ "+message)
+		s.budgetStopped = true
+		s.turn.Reset()
+		s.pending = nil
+		s.status = "ready"
 	case "SessionStatus":
 		var p sessionStatusPayload
 		if json.Unmarshal(fr.Payload, &p) == nil {
@@ -144,6 +157,11 @@ func (s *sessionState) applyEvent(fr attachFrame) {
 		s.status = "ready"
 		s.pending = nil
 	case "Stop":
+		var p stopPayload
+		if json.Unmarshal(fr.Payload, &p) == nil && p.StopReason == "budget_exceeded" && !s.budgetStopped {
+			s.lines = append(s.lines, "⚠ budget limit reached")
+			s.budgetStopped = true
+		}
 		// The turn completed; the in-flight buffer (if any) is now redundant.
 		s.turn.Reset()
 		if s.status == "working" || s.pending != nil {

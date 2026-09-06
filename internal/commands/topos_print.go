@@ -51,6 +51,12 @@ func handlePrintFrame(fr attachFrame, out, errOut io.Writer) (done bool, err err
 
 func handlePrintEvent(fr attachFrame, out, errOut io.Writer) (bool, error) {
 	switch fr.Event {
+	case "BudgetBreach":
+		message, err := budgetBreachMessage(fr.Payload)
+		if err != nil {
+			return false, err
+		}
+		return true, &printErr{msg: message}
 	case "AssistantMessage":
 		var p assistantMessagePayload
 		if err := json.Unmarshal(fr.Payload, &p); err != nil {
@@ -101,7 +107,15 @@ func handlePrintEvent(fr attachFrame, out, errOut io.Writer) (bool, error) {
 		}
 		return true, &printErr{msg: message + "; attach without --print to review the request"}
 	case "Stop":
-		// The turn completed.
+		var p stopPayload
+		if len(fr.Payload) != 0 {
+			if err := json.Unmarshal(fr.Payload, &p); err != nil {
+				return false, fmt.Errorf("decode Stop payload: %w", err)
+			}
+		}
+		if p.StopReason == "budget_exceeded" {
+			return true, &printErr{msg: "budget limit reached"}
+		}
 		return true, nil
 	}
 	return false, nil
