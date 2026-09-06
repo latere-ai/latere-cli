@@ -378,29 +378,41 @@ func runPolicyList(ctx context.Context, out io.Writer, apiURL string, jsonF bool
 	if jsonF {
 		return printJSON(out, policies)
 	}
-	if len(policies) == 0 {
-		fprintln(os.Stdout, "No policy profiles are visible to this token.")
-		fprintln(os.Stdout, "Ask your Latere admin to assign a selectable policy, then re-run `latere cella apply` with `spec.policy` set in your Manifest.")
-		return nil
-	}
-	printPolicies(policies)
-	return nil
+	return printPolicies(out, policies)
 }
 
-func printPolicies(policies []policyDTO) {
+func printPolicies(out io.Writer, policies []policyDTO) error {
+	if len(policies) == 0 {
+		const message = "No policy profiles are visible to this token.\n" +
+			"Ask your Latere admin to assign a selectable policy, then re-run `latere cella apply` with `spec.policy` set in your Manifest.\n"
+		if _, err := fmt.Fprint(out, message); err != nil {
+			return fmt.Errorf("write policy guidance: %w", err)
+		}
+		return nil
+	}
 	for i, p := range policies {
 		if i > 0 {
-			fprintln(os.Stdout)
+			if _, err := fmt.Fprintln(out); err != nil {
+				return fmt.Errorf("write policy separator: %w", err)
+			}
 		}
-		printWrappedField("policy", p.Name)
-		printWrappedField("label", p.Label)
-		printWrappedField("default", yesNo(p.IsDefault))
-		printWrappedField("selectable", yesNo(p.Selectable))
-		printWrappedField("sidecar", yesNo(p.SidecarRequired))
-		printWrappedField("capability", defaultStr(p.CapabilityProfile, "-"))
-		printWrappedField("source", defaultStr(p.AssignmentSource, "-"))
-		printWrappedField("description", defaultStr(p.Description, "-"))
+		var record strings.Builder
+		field := func(label, value string) {
+			record.WriteString(formatWrappedField(label, value))
+		}
+		field("policy", p.Name)
+		field("label", p.Label)
+		field("default", yesNo(p.IsDefault))
+		field("selectable", yesNo(p.Selectable))
+		field("sidecar", yesNo(p.SidecarRequired))
+		field("capability", defaultStr(p.CapabilityProfile, "-"))
+		field("source", defaultStr(p.AssignmentSource, "-"))
+		field("description", defaultStr(p.Description, "-"))
+		if _, err := fmt.Fprint(out, record.String()); err != nil {
+			return fmt.Errorf("write policy %q: %w", p.Name, err)
+		}
 	}
+	return nil
 }
 
 func newCeGetCmd() *cobra.Command {
