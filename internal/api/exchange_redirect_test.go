@@ -4,17 +4,22 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"golang.org/x/oauth2"
 )
 
 func TestTokenRedirectsPreserveCallerPolicy(t *testing.T) {
-	for _, operation := range []string{"actor", "exchange"} {
+	for _, operation := range []string{"actor", "exchange", "refresh"} {
 		for _, policy := range []string{"default", "deny"} {
 			t.Run(operation+"/"+policy, func(t *testing.T) {
+				t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(t.TempDir(), "auth-token.json"))
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					if r.URL.Path == "/ordinary" {
 						w.Header().Set("Location", "/done")
@@ -26,7 +31,8 @@ func TestTokenRedirectsPreserveCallerPolicy(t *testing.T) {
 						w.WriteHeader(http.StatusTemporaryRedirect)
 						return
 					}
-					_, _ = w.Write([]byte(`{"actor_token":"actor", "access_token":"cella"}`))
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(`{"actor_token":"actor", "access_token":"cella", "token_type":"Bearer"}`))
 				}))
 				defer server.Close()
 				client := server.Client()
@@ -39,10 +45,14 @@ func TestTokenRedirectsPreserveCallerPolicy(t *testing.T) {
 					}
 				}
 				var err error
-				if operation == "actor" {
+				switch operation {
+				case "actor":
 					_, err = MintActorToken(t.Context(), client, server.URL, "root", "sandboxd", 60)
-				} else {
+				case "exchange":
 					_, err = ExchangeAtCella(t.Context(), client, server.URL, "actor")
+				case "refresh":
+					ctx := context.WithValue(t.Context(), oauth2.HTTPClient, client)
+					_, err = RefreshAuthToken(ctx, server.URL, Token{RefreshToken: "old-refresh"})
 				}
 				if policy == "deny" {
 					if !errors.Is(err, denied) || calls != 1 {

@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/oauth2"
 	"latere.ai/x/pkg/oidc"
 )
 
@@ -144,9 +145,13 @@ func ExchangeAtCella(ctx context.Context, httpc *http.Client, apiBase, bearer st
 	return out.AccessToken, nil
 }
 
+func doTokenRequest(httpc *http.Client, req *http.Request) (*http.Response, error) {
+	return tokenHTTPClient(httpc).Do(req)
+}
+
 // Token requests must retain their POST body across redirects. Copy the
 // client so callers can reuse it, and retain any stricter redirect policy.
-func doTokenRequest(httpc *http.Client, req *http.Request) (*http.Response, error) {
+func tokenHTTPClient(httpc *http.Client) *http.Client {
 	client := *httpc
 	client.CheckRedirect = func(next *http.Request, via []*http.Request) error {
 		if err := PreserveMethodOnRedirect(next, via); err != nil {
@@ -157,7 +162,7 @@ func doTokenRequest(httpc *http.Client, req *http.Request) (*http.Response, erro
 		}
 		return nil
 	}
-	return client.Do(req)
+	return &client
 }
 
 // AuthClientID resolves an explicit or saved OAuth client ID, falling back to
@@ -187,6 +192,13 @@ func RefreshAuthToken(ctx context.Context, authBase string, previous Token) (Tok
 	if client == nil {
 		return Token{}, errors.New("oidc: missing AuthURL or ClientID")
 	}
+	// oauth2 selects its token-exchange client from the context. Preserve
+	// custom transports and timeouts while enforcing the token redirect policy.
+	httpc, _ := ctx.Value(oauth2.HTTPClient).(*http.Client)
+	if httpc == nil {
+		httpc = http.DefaultClient
+	}
+	ctx = context.WithValue(ctx, oauth2.HTTPClient, tokenHTTPClient(httpc))
 	tok, err := client.RefreshTokenContext(ctx, previous.RefreshToken)
 	if err != nil {
 		return Token{}, err
