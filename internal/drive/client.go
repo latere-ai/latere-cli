@@ -516,7 +516,13 @@ func (c *Client) TrashRestore(ctx context.Context, owner, path string) error {
 		Path   string `json:"path"`
 		Status string `json:"status"`
 	}
-	return c.postJSON(ctx, "/api/v1/trash/restore", map[string]string{"owner": owner, "path": path}, &out)
+	if err := c.postJSON(ctx, "/api/v1/trash/restore", map[string]string{"owner": owner, "path": path}, &out); err != nil {
+		return err
+	}
+	if out.Path == "" || out.Path != path || out.Status != "restored" {
+		return errors.New("drive: trash restore receipt does not confirm the requested path was restored; restore outcome is unknown")
+	}
+	return nil
 }
 
 // TrashPurge permanently removes one trashed path, or the whole visible
