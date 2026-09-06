@@ -4,13 +4,49 @@
 package commands
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"mime/multipart"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestUploadPartPreservesNames(t *testing.T) {
+	for _, name := range []string{"plain", "line\nbreak", "carriage\rreturn", "tab\tname", "quote\"back\\slash", "雪 + %0A", "invalid\xff"} {
+		t.Run(name, func(t *testing.T) {
+			var body bytes.Buffer
+			mw := multipart.NewWriter(&body)
+			part, err := createUploadPart(mw, "folder\r\n/"+name, name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := io.WriteString(part, "content"); err != nil {
+				t.Fatal(err)
+			}
+			if err := mw.Close(); err != nil {
+				t.Fatal(err)
+			}
+			mr := multipart.NewReader(&body, mw.Boundary())
+			got, err := mr.NextPart()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.FormName() != "folder\r\n/"+name || got.FileName() != filepath.Base(name) {
+				t.Errorf("names = (%q, %q), want (%q, %q)", got.FormName(), got.FileName(), "folder\r\n/"+name, filepath.Base(name))
+			}
+			data, err := io.ReadAll(got)
+			if err != nil || string(data) != "content" {
+				t.Errorf("content = %q, %v", data, err)
+			}
+			if _, err := mr.NextPart(); !errors.Is(err, io.EOF) {
+				t.Errorf("final boundary = %v, want EOF", err)
+			}
+		})
+	}
+}
 
 func TestMultipartUploadCompletion(t *testing.T) {
 	for _, fail := range []bool{false, true} {

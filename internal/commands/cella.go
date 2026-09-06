@@ -948,7 +948,7 @@ destination directory.`,
 						return err
 					}
 				}
-				fw, err := mw.CreateFormFile("tarball", formFilename)
+				fw, err := createUploadPart(mw, "tarball", formFilename)
 				if err != nil {
 					return err
 				}
@@ -1547,7 +1547,7 @@ func newCeUploadCmd() *cobra.Command {
 					if err != nil {
 						return err
 					}
-					part, err := mw.CreateFormFile(uf.rel, filepath.Base(uf.local))
+					part, err := createUploadPart(mw, uf.rel, filepath.Base(uf.local))
 					if err != nil {
 						_ = f.Close()
 						return err

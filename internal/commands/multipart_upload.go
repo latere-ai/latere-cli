@@ -7,8 +7,21 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"mime/multipart"
+	"net/textproto"
 )
+
+// createUploadPart uses MIME parameter encoding so the server's multipart
+// parser recovers control characters instead of treating %0A as a literal name.
+func createUploadPart(mw *multipart.Writer, name, filename string) (io.Writer, error) {
+	header := make(textproto.MIMEHeader)
+	header.Set("Content-Disposition", mime.FormatMediaType("form-data", map[string]string{
+		"name": name, "filename": filename,
+	}))
+	header.Set("Content-Type", "application/octet-stream")
+	return mw.CreatePart(header)
+}
 
 type multipartUpload struct {
 	*io.PipeReader

@@ -186,6 +186,9 @@ Uploading `.` puts the current directory's contents directly in the destination.
 Uploading `..` preserves the parent directory's name. Paths containing symlinks
 follow the local filesystem's meaning of `..` when selecting files.
 
+Upload paths and import archive names preserve quotes, Unicode, percent signs,
+and line breaks.
+
 Upload and import report success only after all file data has been sent.
 If the server responds early, the command reports an error instead
 of confirming a transfer that did not finish.
