@@ -152,11 +152,15 @@ func newToposSessionLsCmd() *cobra.Command {
 				return printJSON(cmd.OutOrStdout(), resp.Sessions)
 			}
 			if len(resp.Sessions) == 0 {
-				fprintln(os.Stdout, "No interactive sessions.")
+				if _, err := fmt.Fprintln(cmd.OutOrStdout(), "No interactive sessions."); err != nil {
+					return fmt.Errorf("write session list: %w", err)
+				}
 				return nil
 			}
 			for _, s := range resp.Sessions {
-				fmt.Fprintf(os.Stdout, "%s  %-16s  %s\n", s.ID, s.Status, s.AgentID) //nolint:errcheck
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s  %-16s  %s\n", s.ID, s.Status, s.AgentID); err != nil {
+					return fmt.Errorf("write session %q list entry: %w", s.ID, err)
+				}
 			}
 			return nil
 		},

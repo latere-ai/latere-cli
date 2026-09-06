@@ -261,8 +261,7 @@ completes. Requires the run:agents scope.`,
 			if jsonF {
 				return printJSON(cmd.OutOrStdout(), result)
 			}
-			printSessionResult(result)
-			return nil
+			return printSessionResult(cmd.OutOrStdout(), result)
 		},
 	}
 	cmd.Flags().StringVar(&apiURL, "api-url", "", "override the Topos API base URL")
@@ -271,16 +270,25 @@ completes. Requires the run:agents scope.`,
 	return cmd
 }
 
-func printSessionResult(r sessionResultDTO) {
-	printWrappedField("session", r.SessionID)
-	printWrappedField("sandbox", defaultStr(r.SandboxID, "-"))
-	printWrappedField("stop_reason", defaultStr(r.StopReason, "-"))
-	printWrappedField("tool_calls", fmt.Sprintf("%d", r.ToolCalls))
-	printWrappedField("tokens", fmt.Sprintf("%d in / %d out", r.Usage.InputTokens, r.Usage.OutputTokens))
-	if r.Output != "" {
-		fprintln(os.Stdout)
-		fprintln(os.Stdout, r.Output)
+func printSessionResult(out io.Writer, r sessionResultDTO) error {
+	var metadata strings.Builder
+	field := func(label, value string) {
+		metadata.WriteString(formatWrappedField(label, value))
 	}
+	field("session", r.SessionID)
+	field("sandbox", defaultStr(r.SandboxID, "-"))
+	field("stop_reason", defaultStr(r.StopReason, "-"))
+	field("tool_calls", fmt.Sprintf("%d", r.ToolCalls))
+	field("tokens", fmt.Sprintf("%d in / %d out", r.Usage.InputTokens, r.Usage.OutputTokens))
+	if _, err := fmt.Fprint(out, metadata.String()); err != nil {
+		return fmt.Errorf("write session %q metadata: %w", r.SessionID, err)
+	}
+	if r.Output != "" {
+		if _, err := fmt.Fprintf(out, "\n%s\n", r.Output); err != nil {
+			return fmt.Errorf("write session %q output: %w", r.SessionID, err)
+		}
+	}
+	return nil
 }
 
 // newToposAgentsListCmd implements `latere topos agents list`.
