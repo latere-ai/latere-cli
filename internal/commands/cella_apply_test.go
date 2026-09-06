@@ -71,7 +71,7 @@ spec:
 	}
 
 	c := &api.Client{BaseURL: srv.URL, Token: "test", HTTP: srv.Client()}
-	body, err := readManifestBody(manifestPath)
+	body, err := readManifestBody(manifestPath, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,13 +99,8 @@ func TestReadManifestBody_Stdin(t *testing.T) {
 		_, _ = w.WriteString(text)
 		_ = w.Close()
 	}()
-	// Swap os.Stdin with the read end of the pipe so readManifestBody("-")
-	// reads our test payload instead of the terminal.
-	orig := os.Stdin
-	os.Stdin = r
-	t.Cleanup(func() { os.Stdin = orig })
-
-	got, err := readManifestBody("-")
+	defer r.Close()
+	got, err := readManifestBody("-", r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +115,7 @@ func TestReadManifestBody_Empty(t *testing.T) {
 	if err := os.WriteFile(p, []byte("   \n\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := readManifestBody(p); err == nil {
+	if _, err := readManifestBody(p, nil); err == nil {
 		t.Fatal("expected error for whitespace-only manifest")
 	}
 }
@@ -131,7 +126,7 @@ func TestReadManifestBody_OverLimit(t *testing.T) {
 	if err := os.WriteFile(p, bytes.Repeat([]byte("x"), 64<<10+1), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, err := readManifestBody(p)
+	_, err := readManifestBody(p, nil)
 	if err == nil {
 		t.Fatal("expected error for manifest over 64 KiB limit")
 	}

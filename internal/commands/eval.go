@@ -252,7 +252,7 @@ Use --dry-run to see the full reconciliation diff without writing.`,
 			if strings.TrimSpace(file) == "" {
 				return fmt.Errorf("-f is required (path to a suite manifest, or - for stdin)")
 			}
-			body, err := readManifestBodyWithLimit(file, evalMaxManifestBytes)
+			body, err := readManifestBodyWithLimit(file, cmd.InOrStdin(), evalMaxManifestBytes)
 			if err != nil {
 				return err
 			}

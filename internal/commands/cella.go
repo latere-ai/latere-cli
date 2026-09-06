@@ -224,7 +224,7 @@ Full field reference: https://cella.latere.ai/docs/cella/manifest`,
 			if strings.TrimSpace(file) == "" {
 				return fmt.Errorf("-f is required (path to a Sandbox Manifest, or - for stdin)")
 			}
-			body, err := readManifestBody(file)
+			body, err := readManifestBody(file, cmd.InOrStdin())
 			if err != nil {
 				return err
 			}
@@ -253,15 +253,15 @@ Full field reference: https://cella.latere.ai/docs/cella/manifest`,
 }
 
 // readManifestBody reads the manifest from path or, if path is "-",
-// from stdin. Capped at 64 KiB to match the server's body limit.
-func readManifestBody(path string) ([]byte, error) {
-	return readManifestBodyWithLimit(path, 64<<10)
+// from the supplied stdin reader. Capped at 64 KiB to match the server's body limit.
+func readManifestBody(path string, stdin io.Reader) ([]byte, error) {
+	return readManifestBodyWithLimit(path, stdin, 64<<10)
 }
 
-func readManifestBodyWithLimit(path string, maxBytes int) ([]byte, error) {
+func readManifestBodyWithLimit(path string, stdin io.Reader, maxBytes int) ([]byte, error) {
 	var r io.Reader
 	if path == "-" {
-		r = os.Stdin
+		r = stdin
 	} else {
 		f, err := os.Open(path)
 		if err != nil {
