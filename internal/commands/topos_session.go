@@ -11,7 +11,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
+	"io"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
@@ -77,7 +77,7 @@ stdout (for scripts and pipelines), then exits — like 'claude -p'.`,
 			if print != "" {
 				// The session was created with the prompt, so the turn is already
 				// running; stream it read-only and exit.
-				return runPrintSession(cmd.Context(), c, created.ID, "")
+				return runPrintSession(cmd.Context(), c, created.ID, "", cmd.OutOrStdout(), cmd.ErrOrStderr())
 			}
 			return runInteractiveSession(cmd.Context(), c, created.ID, false)
 		},
@@ -116,7 +116,7 @@ exits. --readonly cannot be combined with --print.`,
 				return err
 			}
 			if print != "" {
-				return runPrintSession(cmd.Context(), c, args[0], print)
+				return runPrintSession(cmd.Context(), c, args[0], print, cmd.OutOrStdout(), cmd.ErrOrStderr())
 			}
 			return runInteractiveSession(cmd.Context(), c, args[0], readonly)
 		},
@@ -184,14 +184,14 @@ func runInteractiveSession(ctx context.Context, c *api.Client, sessionID string,
 	return errors.Join(err, fs.Err())
 }
 
-// runPrintSession streams a session non-interactively to stdout/stderr. When
+// runPrintSession streams a session non-interactively to the supplied writers. When
 // turn is non-empty it attaches read-write to send the turn; otherwise it
 // attaches read-only (the turn was started at create time).
-func runPrintSession(ctx context.Context, c *api.Client, sessionID, turn string) error {
+func runPrintSession(ctx context.Context, c *api.Client, sessionID, turn string, out, errOut io.Writer) error {
 	conn, err := dialAttach(ctx, c.BaseURL, c.Token, sessionID, 0, turn == "")
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
-	return streamPrint(ctx, conn, os.Stdout, os.Stderr, turn)
+	return streamPrint(ctx, conn, out, errOut, turn)
 }
