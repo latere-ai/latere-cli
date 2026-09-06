@@ -266,6 +266,9 @@ func (c *Client) do(req *http.Request, out any) error {
 		return decodeErr(resp)
 	}
 	if out == nil {
+		if resp.StatusCode == http.StatusAccepted {
+			return errors.New("drive: request accepted without confirming completion (HTTP 202); outcome is unknown")
+		}
 		_, err := io.Copy(io.Discard, resp.Body)
 		return err
 	}
@@ -276,7 +279,7 @@ func (c *Client) do(req *http.Request, out any) error {
 	// The first value can decode before a transfer error is reported.
 	// Only whitespace and a clean EOF may follow it.
 	var extra json.RawMessage
-	if err := decoder.Decode(&extra); err != io.EOF {
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
 		if err != nil {
 			return err
 		}

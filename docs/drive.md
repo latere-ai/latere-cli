@@ -33,6 +33,8 @@ Moves verify the source and destination in the server's response. Version restor
 
 `rm --permanent` also purges a file that is already in the trash. If that purge fails, the command reports the purge error so you can distinguish a missing file from a permission or service failure. A missing, null, or negative purge count leaves the deletion outcome unknown; the CLI reports an error without retrying.
 
+If Drive accepts a deletion or share revocation without confirming completion, the CLI reports that the outcome is unknown and does not retry.
+
 ## Uploads
 
 Files up to 16 MiB stream in a single request; larger files go through Drive's multipart plane automatically (16 MiB parts, four in flight, up to 16 GiB). Uploading from stdin is single-request and capped at 100 MB.
