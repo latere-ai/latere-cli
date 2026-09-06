@@ -36,6 +36,9 @@ Inside the session:
 - **Ctrl+C** detaches. The session keeps running on the server; the screen shows
   you the command to reattach.
 
+If a turn fails or is interrupted while text is streaming, the UI keeps the text
+already received, marked `(incomplete)`. The next response starts separately.
+
 ## Detach and reattach
 
 Detaching never stops the work. Reattach any time — from anywhere — and you get

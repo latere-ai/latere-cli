@@ -71,12 +71,24 @@ func (s *sessionState) applyStatus(status string) {
 		s.budgetStopped = false
 	case "awaiting_input":
 		s.status = "ready"
+		s.finishPartialText()
 	case "awaiting_approval":
 		s.status = "awaiting approval"
+	case "completed", "failed", "closed":
+		s.finishPartialText()
 	}
 	// Current server status supersedes any outstanding or replayed approval.
 	if status != "awaiting_approval" {
 		s.pending = nil
+	}
+}
+
+// finishPartialText retains streamed text when a turn ends without an assembled
+// AssistantMessage, as happens on interruption or a model stream failure.
+func (s *sessionState) finishPartialText() {
+	if s.turn.Len() > 0 {
+		s.lines = append(s.lines, "● "+s.turn.String()+" (incomplete)")
+		s.turn.Reset()
 	}
 }
 
@@ -153,6 +165,7 @@ func (s *sessionState) applyEvent(fr attachFrame) {
 	case "RunError":
 		var p runErrorPayload
 		_ = json.Unmarshal(fr.Payload, &p)
+		s.finishPartialText()
 		s.lines = append(s.lines, "⚠ run error: "+p.Error)
 		s.status = "ready"
 		s.pending = nil
