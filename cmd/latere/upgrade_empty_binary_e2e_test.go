@@ -151,6 +151,12 @@ func TestUpgradeEmptyBinaryHelperProcess(t *testing.T) {
 	root := commands.NewRoot("v1.0.0")
 	root.SetArgs(os.Args[3:])
 	root.SetOut(os.Stdout)
+	switch os.Getenv("LATERE_TEST_UPGRADE_OUTPUT_FAILURE") {
+	case "progress":
+		root.SetOut(&upgradeOutputFailureWriter{Writer: os.Stdout})
+	case "confirmation":
+		root.SetOut(&upgradeOutputFailureWriter{Writer: os.Stdout, successfulWrites: 1})
+	}
 	root.SetErr(io.Discard)
 	if err := root.Execute(); err != nil {
 		os.Exit(commands.HandleExitError(os.Stderr, err))

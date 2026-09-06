@@ -179,7 +179,9 @@ func Run(ctx context.Context, current, target string, checkOnly bool, out io.Wri
 		return fmt.Errorf("in-place upgrade is not supported on this platform; "+
 			"download latere %s from https://github.com/%s/releases", display(tag), repoSlug)
 	}
-	fprintf(out, "%s latere %s...\n", installVerb(current, tag), display(tag))
+	if _, err := fmt.Fprintf(out, "%s latere %s...\n", installVerb(current, tag), display(tag)); err != nil {
+		return fmt.Errorf("write upgrade progress: %w", err)
+	}
 	bin, err := DownloadBinary(ctx, downloadClient(), tag)
 	if err != nil {
 		return fmt.Errorf("install latere %s: %w (does that release exist? see https://github.com/%s/releases)",
@@ -188,7 +190,9 @@ func Run(ctx context.Context, current, target string, checkOnly bool, out io.Wri
 	if err := replace(bin); err != nil {
 		return err
 	}
-	fprintf(out, "Now on latere %s.\n", display(tag))
+	if _, err := fmt.Fprintf(out, "Now on latere %s.\n", display(tag)); err != nil {
+		return fmt.Errorf("latere %s was installed, but writing confirmation failed: %w", display(tag), err)
+	}
 	return nil
 }
 
