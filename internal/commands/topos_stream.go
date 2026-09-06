@@ -122,6 +122,9 @@ func (fs *frameStream) run() {
 		}
 		// The connection dropped without us stopping: reconnect from the cursor.
 		fs.emit(streamMsg{note: "reconnecting"})
+		if wait.Sleep(fs.ctx, reconnectBackoff) != nil {
+			return
+		}
 	}
 }
 

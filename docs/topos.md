@@ -62,10 +62,10 @@ Attach as a read-only viewer (watch without being able to type):
 latere topos session attach sess_01hxy --readonly
 ```
 
-If your connection drops, the client reconnects on its own and resumes from where
-you were. If sending a message, approval, or interrupt fails, the UI shows the
-error and preserves your typed message or pending approval. Once reconnected,
-press Enter, `y`/`n`, or Esc again to retry the action.
+If your connection drops, the client waits one second before reconnecting and
+resumes from where you were. If sending a message, approval, or interrupt fails,
+the UI shows the error and preserves your typed message or pending approval.
+Once reconnected, press Enter, `y`/`n`, or Esc again to retry the action.
 If connection retries are exhausted, the UI exits with an error that includes
 the final connection failure.
 
