@@ -487,7 +487,7 @@ Reads /lux/v1/models and /lux/v1/rates with your identity.`,
 				}
 			}
 			if jsonF {
-				return printJSON(models.Items)
+				return printJSON(cmd.OutOrStdout(), models.Items)
 			}
 			if len(models.Items) == 0 {
 				fmt.Println("No models.")
@@ -570,7 +570,7 @@ func newLuxCatalogCmd(name, path, what string, luxURL, authURL, token *string) *
 				return wrapLuxErr(err)
 			}
 			if jsonF {
-				return printJSON(resp.Items)
+				return printJSON(cmd.OutOrStdout(), resp.Items)
 			}
 			if len(resp.Items) == 0 {
 				fmt.Printf("No %s.\n", what)
@@ -1047,7 +1047,7 @@ Reads /lux/v1/usage and /lux/v1/usage/series.`,
 			}
 
 			if jsonF {
-				return printJSON(map[string]any{
+				return printJSON(cmd.OutOrStdout(), map[string]any{
 					"from": from, "to": to, "period": period, "group_by": groupBy,
 					"groups": groups.Items, "series": series.Items,
 				})
@@ -1185,7 +1185,7 @@ func newLuxAccessShowCmd(luxURL, authURL, token *string) *cobra.Command {
 			if err := c.GetJSON(cmd.Context(), "/lux/v1/me/profile", &out); err != nil {
 				return wrapLuxErr(err)
 			}
-			return printJSON(out)
+			return printJSON(cmd.OutOrStdout(), out)
 		},
 	}
 }
@@ -1240,7 +1240,7 @@ platform key).`,
 				return wrapLuxErr(err)
 			}
 			fmt.Fprintf(os.Stderr, "Bound %s -> %s (provider key %s).\n", model, provider, providerKey)
-			return printJSON(out)
+			return printJSON(cmd.OutOrStdout(), out)
 		},
 	}
 	cmd.Flags().StringVar(&model, "model", "", "client-facing model id (required)")
@@ -1287,7 +1287,7 @@ order failover, or alias a model name.`,
 				return wrapLuxErr(err)
 			}
 			fmt.Fprintln(os.Stderr, "Cleared all model bindings.")
-			return printJSON(out)
+			return printJSON(cmd.OutOrStdout(), out)
 		},
 	}
 }

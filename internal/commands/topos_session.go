@@ -149,7 +149,7 @@ func newToposSessionLsCmd() *cobra.Command {
 				return err
 			}
 			if jsonF {
-				return printJSON(resp.Sessions)
+				return printJSON(cmd.OutOrStdout(), resp.Sessions)
 			}
 			if len(resp.Sessions) == 0 {
 				fprintln(os.Stdout, "No interactive sessions.")

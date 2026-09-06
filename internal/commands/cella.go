@@ -307,7 +307,7 @@ cellas returned by the backend, including warm-pool cellas.`,
 				return err
 			}
 			if jsonF {
-				return printJSON(sbs)
+				return printJSON(cmd.OutOrStdout(), sbs)
 			}
 			if len(sbs) == 0 {
 				fprintln(os.Stdout, "No cellas are visible to this token.")
@@ -349,7 +349,7 @@ an admin to configure the sidecar client for your token.`,
   latere cella policy list
   latere cella policies --json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runPolicyList(cmd.Context(), apiURL, jsonF)
+			return runPolicyList(cmd.Context(), cmd.OutOrStdout(), apiURL, jsonF)
 		},
 	}
 	f := cmd.Flags()
@@ -363,7 +363,7 @@ an admin to configure the sidecar client for your token.`,
 		Example: `  latere cella policy list
   latere cella policy list --json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runPolicyList(cmd.Context(), apiURL, jsonF)
+			return runPolicyList(cmd.Context(), cmd.OutOrStdout(), apiURL, jsonF)
 		},
 	}
 	list.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
@@ -372,7 +372,7 @@ an admin to configure the sidecar client for your token.`,
 	return cmd
 }
 
-func runPolicyList(ctx context.Context, apiURL string, jsonF bool) error {
+func runPolicyList(ctx context.Context, out io.Writer, apiURL string, jsonF bool) error {
 	c, err := authedClient(apiURL)
 	if err != nil {
 		return err
@@ -382,7 +382,7 @@ func runPolicyList(ctx context.Context, apiURL string, jsonF bool) error {
 		return err
 	}
 	if jsonF {
-		return printJSON(policies)
+		return printJSON(out, policies)
 	}
 	if len(policies) == 0 {
 		fprintln(os.Stdout, "No policy profiles are visible to this token.")
@@ -427,7 +427,7 @@ func newCeGetCmd() *cobra.Command {
 			if err := c.GetJSON(cmd.Context(), sbPath(args[0]), &sb); err != nil {
 				return err
 			}
-			return printJSON(sb)
+			return printJSON(cmd.OutOrStdout(), sb)
 		},
 	}
 	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
@@ -593,7 +593,7 @@ to start that one-shot run and return immediately with a run id.`,
 						return err
 					}
 					if printJSONOut {
-						return printJSON(out)
+						return printJSON(cmd.OutOrStdout(), out)
 					}
 					return printStartedDetachedOneShotRun(cmd.OutOrStdout(), out)
 				}
@@ -602,7 +602,7 @@ to start that one-shot run and return immediately with a run id.`,
 					return err
 				}
 				if printJSONOut {
-					if err := printJSON(out); err != nil {
+					if err := printJSON(cmd.OutOrStdout(), out); err != nil {
 						return err
 					}
 				} else if err := printOneShotRun(cmd.OutOrStdout(), cmd.ErrOrStderr(), out); err != nil {
@@ -668,7 +668,7 @@ func newCeRunStatusCmd() *cobra.Command {
 				return err
 			}
 			if printJSONOut {
-				return printJSON(out)
+				return printJSON(cmd.OutOrStdout(), out)
 			}
 			printDetachedOneShotRun(out)
 			if out.ExitCode != nil {
@@ -747,7 +747,7 @@ func newCeRunCancelCmd() *cobra.Command {
 				return err
 			}
 			if printJSONOut {
-				return printJSON(out)
+				return printJSON(cmd.OutOrStdout(), out)
 			}
 			printDetachedOneShotRun(out)
 			return nil
@@ -1005,7 +1005,7 @@ destination directory.`,
 			if resp.Imported != string([]rune(formFilename)) || *resp.Bytes != payload.bytes {
 				return fmt.Errorf("import receipt reports %q (%d bytes); sent %q (%d bytes)", resp.Imported, *resp.Bytes, formFilename, payload.bytes)
 			}
-			return printJSON(resp)
+			return printJSON(cmd.OutOrStdout(), resp)
 		},
 	}
 	f := cmd.Flags()
@@ -2076,8 +2076,8 @@ func jsonReader(v any) (io.Reader, error) {
 	return bytes.NewReader(b), nil
 }
 
-func printJSON(v any) error {
-	enc := json.NewEncoder(os.Stdout)
+func printJSON(out io.Writer, v any) error {
+	enc := json.NewEncoder(out)
 	enc.SetIndent("", "  ")
 	return enc.Encode(v)
 }

@@ -186,7 +186,7 @@ they are never sent by the client. Requires the write:agents scope.`,
 				return err
 			}
 			if jsonF {
-				return printJSON(created)
+				return printJSON(cmd.OutOrStdout(), created)
 			}
 			fmt.Fprintf(os.Stdout, "Created agent %s\n\n", created.ID) //nolint:errcheck
 			printAgent(created)
@@ -257,7 +257,7 @@ completes. Requires the run:agents scope.`,
 				return err
 			}
 			if jsonF {
-				return printJSON(result)
+				return printJSON(cmd.OutOrStdout(), result)
 			}
 			printSessionResult(result)
 			return nil
@@ -303,7 +303,7 @@ func newToposAgentsListCmd() *cobra.Command {
 				return err
 			}
 			if jsonF {
-				return printJSON(resp.Agents)
+				return printJSON(cmd.OutOrStdout(), resp.Agents)
 			}
 			if len(resp.Agents) == 0 {
 				fprintln(os.Stdout, "No agents are visible to this token.")
@@ -336,7 +336,7 @@ func newToposAgentsGetCmd() *cobra.Command {
 			if err := c.GetJSON(cmd.Context(), agentPath(args[0]), &agent); err != nil {
 				return err
 			}
-			return printJSON(agent)
+			return printJSON(cmd.OutOrStdout(), agent)
 		},
 	}
 	cmd.Flags().StringVar(&apiURL, "api-url", "", "override the Topos API base URL")

@@ -51,7 +51,7 @@ func TestPolicyListPrintsCreateGuidanceFields(t *testing.T) {
 	defer srv.Close()
 
 	out := capturePolicyStdout(t, func() {
-		if err := runPolicyList(context.Background(), srv.URL, false); err != nil {
+		if err := runPolicyList(context.Background(), os.Stdout, srv.URL, false); err != nil {
 			t.Fatalf("runPolicyList: %v", err)
 		}
 	})
@@ -86,7 +86,7 @@ func TestPolicyListEmptyExplainsNextStep(t *testing.T) {
 	defer srv.Close()
 
 	out := capturePolicyStdout(t, func() {
-		if err := runPolicyList(context.Background(), srv.URL, false); err != nil {
+		if err := runPolicyList(context.Background(), os.Stdout, srv.URL, false); err != nil {
 			t.Fatalf("runPolicyList: %v", err)
 		}
 	})
