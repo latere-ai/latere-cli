@@ -111,6 +111,9 @@ latere cella run --ephemeral --rm -- sh -lc 'go test ./...'
 latere cella run --ephemeral --rm --timeout 900 -- sh -lc 'npm test'
 ```
 
+Synchronous one-shot runs also exit with an error if the command's stdout or
+stderr cannot be written locally.
+
 Detached one-shot execution returns immediately with a run id. The
 backend keeps the result and log tail for later inspection:
 

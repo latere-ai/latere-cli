@@ -602,8 +602,8 @@ to start that one-shot run and return immediately with a run id.`,
 					if err := printJSON(out); err != nil {
 						return err
 					}
-				} else {
-					printOneShotRun(out)
+				} else if err := printOneShotRun(cmd.OutOrStdout(), cmd.ErrOrStderr(), out); err != nil {
+					return err
 				}
 				return commandExitError(out.State, out.ExitCode)
 			}
@@ -1896,30 +1896,37 @@ func printStartedDetachedOneShotRun(out oneShotRunDTO) {
 	printDetachedOneShotRun(out)
 }
 
-func printOneShotRun(out oneShotRunDTO) {
+func printOneShotRun(stdout, stderr io.Writer, out oneShotRunDTO) error {
 	if out.Stdout != "" {
-		fmt.Print(out.Stdout)
+		if _, err := fmt.Fprint(stdout, out.Stdout); err != nil {
+			return fmt.Errorf("write command stdout: %w", err)
+		}
 	}
+	var diagnostic strings.Builder
 	if out.Stderr != "" {
-		fmt.Fprint(os.Stderr, out.Stderr)
+		diagnostic.WriteString(out.Stderr)
 	}
-	fmt.Fprintf(os.Stderr, "✓ cella created  %s  ·  %s\n", out.SandboxName, humanDurationMS(out.Timing.CreateMS))
+	fmt.Fprintf(&diagnostic, "✓ cella created  %s  ·  %s\n", out.SandboxName, humanDurationMS(out.Timing.CreateMS))
 	if out.ExitCode != nil {
-		fmt.Fprintf(os.Stderr, "✓ command exited %d  ·  %s\n", *out.ExitCode, humanDurationMS(out.Timing.ExecMS))
+		fmt.Fprintf(&diagnostic, "✓ command exited %d  ·  %s\n", *out.ExitCode, humanDurationMS(out.Timing.ExecMS))
 	} else {
-		fmt.Fprintf(os.Stderr, "✓ command %s  ·  %s\n", out.State, humanDurationMS(out.Timing.ExecMS))
+		fmt.Fprintf(&diagnostic, "✓ command %s  ·  %s\n", out.State, humanDurationMS(out.Timing.ExecMS))
 	}
 	if out.CleanupError != "" {
-		fmt.Fprintf(os.Stderr, "✗ sandbox cleanup failed  ·  %s\n", out.CleanupError)
+		fmt.Fprintf(&diagnostic, "✗ sandbox cleanup failed  ·  %s\n", out.CleanupError)
 	} else {
-		fmt.Fprintf(os.Stderr, "✓ cella deleted  ·  total %s\n", humanDurationMS(out.Timing.TotalMS))
+		fmt.Fprintf(&diagnostic, "✓ cella deleted  ·  total %s\n", humanDurationMS(out.Timing.TotalMS))
 	}
 	if out.Truncated {
-		fmt.Fprintln(os.Stderr, "output truncated")
+		fmt.Fprintln(&diagnostic, "output truncated")
 	}
 	if out.Error != "" {
-		fmt.Fprintf(os.Stderr, "%s\n", out.Error)
+		fmt.Fprintf(&diagnostic, "%s\n", out.Error)
 	}
+	if _, err := fmt.Fprint(stderr, diagnostic.String()); err != nil {
+		return fmt.Errorf("write command stderr: %w", err)
+	}
+	return nil
 }
 
 // parseKV turns ["KEY=VALUE", ...] into a map.
