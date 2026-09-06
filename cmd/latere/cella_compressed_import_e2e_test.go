@@ -5,6 +5,8 @@ package main
 
 import (
 	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"io"
 	"net/http"
@@ -30,12 +32,8 @@ func TestCellaCompressedTarImportE2E(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, format := range []string{"tar", "tar.gz", "tar.bz2", "tar.xz"} {
-		for _, stdin := range []bool{false, true} {
-			name := format + "/file"
-			if stdin {
-				name = format + "/stdin"
-			}
-			t.Run(name, func(t *testing.T) {
+		for _, mode := range []string{"file", "stdin", "without extension"} {
+			t.Run(format+"/"+mode, func(t *testing.T) {
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					if err := r.ParseMultipartForm(1 << 20); err != nil {
 						http.Error(w, err.Error(), 400)
@@ -68,14 +66,24 @@ func TestCellaCompressedTarImportE2E(t *testing.T) {
 				}))
 				defer server.Close()
 				input := filepath.Join("..", "..", "internal", "commands", "testdata", "import", "payload."+format)
+				if mode == "without extension" {
+					data, err := os.ReadFile(input)
+					if err != nil {
+						t.Fatal(err)
+					}
+					input = filepath.Join(t.TempDir(), "archive")
+					if err := os.WriteFile(input, data, 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
 				args := []string{"cella", "import", "dev", "--api-url", server.URL, "--timeout", "5s"}
-				if !stdin {
+				if mode != "stdin" {
 					args = append(args, "--input", input)
 				}
 				ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 				defer cancel()
 				command := exec.CommandContext(ctx, binary, args...)
-				if stdin {
+				if mode == "stdin" {
 					file, err := os.Open(input)
 					if err != nil {
 						t.Fatal(err)
@@ -90,4 +98,19 @@ func TestCellaCompressedTarImportE2E(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestCellaImportCompressedRegularFileE2E(t *testing.T) {
+	if testing.Short() {
+		t.Skip("binary e2e skipped with -short")
+	}
+	var raw bytes.Buffer
+	writer := gzip.NewWriter(&raw)
+	if _, err := writer.Write([]byte("ordinary data")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	runCellaImportE2E(t, "compressed.bin", []archiveEntry{{Name: "compressed.bin", Body: raw.String()}})
 }

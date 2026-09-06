@@ -1038,7 +1038,7 @@ func hasZipExtension(name string) bool {
 
 func sniffImportInput(f *os.File) (importInputKind, error) {
 	var block [512]byte
-	n, err := io.ReadFull(f, block[:])
+	n, err := io.ReadFull(f, block[:4])
 	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
 		return importInputTar, err
 	}
@@ -1051,10 +1051,17 @@ func sniffImportInput(f *os.File) (importInputKind, error) {
 			return importInputZip, nil
 		}
 	}
-	if n < len(block) {
-		return importInputRegularFile, nil
+	// Probe one decoded tar header. Compressed non-archives remain regular
+	// files; upload reads the complete archive again to verify its checksum.
+	decoded, decodeErr := newImportTarReader(f)
+	if decodeErr == nil {
+		n, decodeErr = io.ReadFull(decoded, block[:])
+		_ = decoded.Close()
 	}
-	if string(block[257:262]) == "ustar" {
+	if _, seekErr := f.Seek(0, io.SeekStart); seekErr != nil {
+		return importInputTar, seekErr
+	}
+	if decodeErr == nil && n == len(block) && string(block[257:262]) == "ustar" {
 		return importInputTar, nil
 	}
 	return importInputRegularFile, nil
@@ -1064,31 +1071,35 @@ func sniffImportInput(f *os.File) (importInputKind, error) {
 // stream so named archives and stdin behave identically. Copy through EOF to
 // surface decompression and checksum errors before completing the multipart body.
 func copyImportTar(dst io.Writer, src io.Reader) error {
+	decoded, err := newImportTarReader(src)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = decoded.Close() }()
+	_, err = io.Copy(dst, decoded)
+	return err
+}
+
+func newImportTarReader(src io.Reader) (io.ReadCloser, error) {
 	buffered := bufio.NewReader(src)
 	header, err := buffered.Peek(6)
 	if err != nil && !errors.Is(err, io.EOF) {
-		return err
+		return nil, err
 	}
-	var decoded io.Reader = buffered
 	switch {
 	case bytes.HasPrefix(header, []byte{0x1f, 0x8b}):
-		reader, err := gzip.NewReader(buffered)
-		if err != nil {
-			return err
-		}
-		defer func() { _ = reader.Close() }() // Read through EOF below to verify the checksum.
-		decoded = reader
+		return gzip.NewReader(buffered)
 	case bytes.HasPrefix(header, []byte("BZh")):
-		decoded = bzip2.NewReader(buffered)
+		return io.NopCloser(bzip2.NewReader(buffered)), nil
 	case bytes.HasPrefix(header, []byte{0xfd, '7', 'z', 'X', 'Z', 0}):
 		reader, err := xz.NewReader(buffered)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		decoded = reader
+		return io.NopCloser(reader), nil
+	default:
+		return io.NopCloser(buffered), nil
 	}
-	_, err = io.Copy(dst, decoded)
-	return err
 }
 
 func writeSingleFileTar(dst io.Writer, name string, f *os.File) error {

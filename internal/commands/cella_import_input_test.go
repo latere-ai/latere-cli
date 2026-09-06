@@ -5,6 +5,8 @@ package commands
 
 import (
 	"archive/zip"
+	"bytes"
+	"compress/gzip"
 	"fmt"
 	"io"
 	"os"
@@ -90,6 +92,9 @@ func TestClassifyImportInputFormats(t *testing.T) {
 		{"archive.zip", zipPath, importInputZip},
 		{"without-extension", zipPath, importInputZip},
 		{"tar-without-extension", filepath.Join("testdata", "import", "payload.tar"), importInputTar},
+		{"gzip-without-extension", filepath.Join("testdata", "import", "payload.tar.gz"), importInputTar},
+		{"bzip2-without-extension", filepath.Join("testdata", "import", "payload.tar.bz2"), importInputTar},
+		{"xz-without-extension", filepath.Join("testdata", "import", "payload.tar.xz"), importInputTar},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f, err := os.Open(tc.path)
@@ -100,6 +105,9 @@ func TestClassifyImportInputFormats(t *testing.T) {
 			got, err := classifyImportInput(tc.name, f)
 			if err != nil || got != tc.want {
 				t.Errorf("classification = %v, %v; want %v", got, err, tc.want)
+			}
+			if pos, err := f.Seek(0, io.SeekCurrent); err != nil || pos != 0 {
+				t.Errorf("input position = %d, %v; want 0", pos, err)
 			}
 		})
 	}
@@ -120,5 +128,33 @@ func TestClassifyImportInputFormats(t *testing.T) {
 	defer writeOnly.Close()
 	if _, err := classifyImportInput("input", writeOnly); err == nil {
 		t.Fatal("unreadable input accepted")
+	}
+}
+
+func TestClassifyCompressedRegularFile(t *testing.T) {
+	var raw bytes.Buffer
+	writer := gzip.NewWriter(&raw)
+	if _, err := writer.Write([]byte("ordinary data")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, data := range [][]byte{raw.Bytes(), {0x1f, 0x8b, 0, 0}, []byte("BZh-invalid"), {0xfd, '7', 'z', 'X', 'Z', 0}} {
+		path := filepath.Join(t.TempDir(), "input")
+		if err := os.WriteFile(path, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		if kind, err := classifyImportInput(path, f); err != nil || kind != importInputRegularFile {
+			t.Errorf("compressed non-tar file = %v, %v", kind, err)
+		}
+		if remaining, err := io.ReadAll(f); err != nil || !bytes.Equal(remaining, data) {
+			t.Errorf("format detection consumed file data: %q, %v", remaining, err)
+		}
 	}
 }
