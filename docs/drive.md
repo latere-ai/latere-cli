@@ -33,6 +33,8 @@ Downloads reject partial or unexpected success responses before writing file byt
 
 Files up to 16 MiB stream in a single request; larger files go through Drive's multipart plane automatically (16 MiB parts, four in flight, up to 16 GiB). Uploading from stdin is single-request and capped at 100 MB.
 
+Uploads verify that the server acknowledges the requested path and byte count, including zero for empty files. Missing or mismatched acknowledgments return an error with the upload outcome unknown; the CLI does not retry the upload.
+
 Concurrent-write safety rides standard HTTP conditions: `--create-only` fails if the file already exists, and `--if-match <checksum>` overwrites only if the file hasn't changed since you read it (get the current checksum from `latere drive ls --long`). Writes under `memory/` require one of the two.
 
 ## Sharing

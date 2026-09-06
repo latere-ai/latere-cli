@@ -114,6 +114,20 @@ type FileWriteResult struct {
 	URL      string `json:"url,omitempty"`
 }
 
+// Keep an absent byte count distinct from a legitimate empty-file receipt.
+type fileWriteReceipt struct {
+	FileWriteResult
+	Size *int64 `json:"size"`
+}
+
+func (r fileWriteReceipt) result(path string, size int64) (*FileWriteResult, error) {
+	if r.Path == "" || r.Path != path || r.Size == nil || *r.Size != size {
+		return nil, errors.New("drive: upload receipt does not match the requested path and size; upload outcome is unknown")
+	}
+	r.FileWriteResult.Size = *r.Size
+	return &r.FileWriteResult, nil
+}
+
 type MoveFileResult struct {
 	Path      string `json:"path"`
 	MovedFrom string `json:"moved_from,omitempty"`
@@ -417,11 +431,11 @@ func (c *Client) Put(ctx context.Context, owner, path string, r io.Reader, size 
 		req.GetBody = nil
 	}
 	opts.apply(req.Header)
-	var out FileWriteResult
+	var out fileWriteReceipt
 	if err := c.do(req, &out); err != nil {
 		return nil, err
 	}
-	return &out, nil
+	return out.result(strings.TrimPrefix(path, "/"), size)
 }
 
 func (c *Client) Move(ctx context.Context, owner, path, dest string) (*MoveFileResult, error) {
@@ -652,14 +666,19 @@ func (c *Client) MultipartUpload(ctx context.Context, owner, path string, r io.R
 	}
 	req.Header.Set("Content-Type", "application/json")
 	opts.applyCAS(req.Header) // CAS rides the complete call, not the parts
-	var out FileWriteResult
+	var out fileWriteReceipt
 	if err := c.do(req, &out); err != nil {
 		// 412/413 already discard the session server-side; abort is a
 		// harmless no-op (404) then.
 		c.abortUpload(ctx, sess.UploadID)
 		return nil, err
 	}
-	return &out, nil
+	result, err := out.result(path, size)
+	if err != nil {
+		c.abortUpload(ctx, sess.UploadID)
+		return nil, err
+	}
+	return result, nil
 }
 
 // putPart PUTs one part's bytes to a presigned object-store URL (no
