@@ -216,6 +216,9 @@ Authentication uses the static admin token (EVAL_ADMIN_TOKEN or
 
 // ---- apply ----
 
+// Matches evald's apply request body limit, including resolved prompts.
+const evalMaxManifestBytes = 256 << 10
+
 // newEvalApplyCmd registers `latere eval apply -f suite.yaml`. The
 // manifest is POSTed as YAML after client-side prompt resolution:
 // file:// prompt refs are inlined as prompt_text (relative to the
@@ -247,7 +250,7 @@ Use --dry-run to see the full reconciliation diff without writing.`,
 			if strings.TrimSpace(file) == "" {
 				return fmt.Errorf("-f is required (path to a suite manifest, or - for stdin)")
 			}
-			body, err := readManifestBody(file)
+			body, err := readManifestBodyWithLimit(file, evalMaxManifestBytes)
 			if err != nil {
 				return err
 			}
@@ -299,6 +302,7 @@ func resolvePromptRefs(manifest []byte, baseDir string) ([]byte, error) {
 		return manifest, nil
 	}
 	resolved := false
+	remaining := evalMaxManifestBytes
 	for i, t := range tasks {
 		task, ok := t.(map[string]any)
 		if !ok {
@@ -316,11 +320,12 @@ func resolvePromptRefs(manifest []byte, baseDir string) ([]byte, error) {
 		if !filepath.IsAbs(p) {
 			p = filepath.Join(baseDir, p)
 		}
-		text, err := os.ReadFile(p)
+		text, err := readEvalPromptFile(p, remaining)
 		if err != nil {
 			return nil, fmt.Errorf("tasks[%d]: resolve prompt %q: %w", i, prompt, err)
 		}
 		task["prompt_text"] = string(text)
+		remaining -= len(text)
 		resolved = true
 	}
 	if !resolved {
@@ -330,7 +335,26 @@ func resolvePromptRefs(manifest []byte, baseDir string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("re-marshal manifest: %w", err)
 	}
+	if len(out) > evalMaxManifestBytes {
+		return nil, fmt.Errorf("resolved manifest exceeds %d byte limit", evalMaxManifestBytes)
+	}
 	return out, nil
+}
+
+func readEvalPromptFile(path string, remaining int) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	text, err := io.ReadAll(io.LimitReader(f, int64(remaining)+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(text) > remaining {
+		return nil, fmt.Errorf("resolved prompts exceed the %d byte manifest limit", evalMaxManifestBytes)
+	}
+	return text, nil
 }
 
 // printEvalApplyResult renders the apply diff: suite, per-task lines,

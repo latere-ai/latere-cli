@@ -255,7 +255,10 @@ Full field reference: https://cella.latere.ai/docs/cella/manifest`,
 // readManifestBody reads the manifest from path or, if path is "-",
 // from stdin. Capped at 64 KiB to match the server's body limit.
 func readManifestBody(path string) ([]byte, error) {
-	const maxBytes = 64 << 10
+	return readManifestBodyWithLimit(path, 64<<10)
+}
+
+func readManifestBodyWithLimit(path string, maxBytes int) ([]byte, error) {
 	var r io.Reader
 	if path == "-" {
 		r = os.Stdin
@@ -267,7 +270,7 @@ func readManifestBody(path string) ([]byte, error) {
 		defer func() { _ = f.Close() }()
 		r = f
 	}
-	body, err := io.ReadAll(io.LimitReader(r, maxBytes+1))
+	body, err := io.ReadAll(io.LimitReader(r, int64(maxBytes)+1))
 	if err != nil {
 		return nil, fmt.Errorf("read manifest: %w", err)
 	}
