@@ -772,9 +772,11 @@ the lifetime returned by auth.`,
 				return err
 			}
 			if raw {
-				fprintln(cmd.OutOrStdout(), bearer)
-				fprintf(cmd.ErrOrStderr(), "# %s\n", provenance)
-				return nil
+				if _, err := fmt.Fprintln(cmd.OutOrStdout(), bearer); err != nil {
+					return err
+				}
+				_, err := fmt.Fprintf(cmd.ErrOrStderr(), "# %s\n", provenance)
+				return err
 			}
 			base := strings.TrimRight(resolveLuxURL(*luxURL), "/")
 			baseValue, err := quoteShellValue(base + spec.envBaseURL)
@@ -785,10 +787,14 @@ the lifetime returned by auth.`,
 			if err != nil {
 				return err
 			}
-			fprintf(cmd.OutOrStdout(), "export %s=%s\n", spec.envBaseVar, baseValue)
-			fprintf(cmd.OutOrStdout(), "export %s=%s\n", spec.envKeyVar, keyValue)
-			fprintf(cmd.ErrOrStderr(), "# %s\n", provenance)
-			return nil
+			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "export %s=%s\n", spec.envBaseVar, baseValue); err != nil {
+				return err
+			}
+			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "export %s=%s\n", spec.envKeyVar, keyValue); err != nil {
+				return err
+			}
+			_, err = fmt.Fprintf(cmd.ErrOrStderr(), "# %s\n", provenance)
+			return err
 		},
 	}
 	cmd.Flags().StringVar(&provider, "provider", "", "deprecated alias for the [route] argument")
@@ -817,8 +823,8 @@ func newLuxTokenCmd(luxURL, authURL, token *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Println(bearer)
-			return nil
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), bearer)
+			return err
 		},
 	}
 }

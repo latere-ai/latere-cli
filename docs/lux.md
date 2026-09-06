@@ -45,6 +45,10 @@ Run `latere lux providers` for the current list. The two cannot be combined: env
 
 Export values are shell-quoted when needed so spaces and shell metacharacters stay literal. `--raw` prints the token without shell quoting.
 
+`lux env` exits non-zero if it cannot write the exports, raw token, or credential
+details. Check the command's exit status before using redirected output; a failed
+write can leave a partial file.
+
 The command reports on stderr which credential it embedded and when it expires: by default your login identity token, which lasts the sign-in session. Missing or empty saved credentials cause an error before any exports are printed; run `latere login` to restore them.
 
 ```sh
