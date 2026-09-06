@@ -489,10 +489,6 @@ Reads /lux/v1/models and /lux/v1/rates with your identity.`,
 			if jsonF {
 				return printJSON(cmd.OutOrStdout(), models.Items)
 			}
-			if len(models.Items) == 0 {
-				fmt.Println("No models.")
-				return nil
-			}
 			// Human output: fold the three numbers into one rate line.
 			for _, m := range models.Items {
 				if line := rateLine(m); line != "" {
@@ -502,8 +498,7 @@ Reads /lux/v1/models and /lux/v1/rates with your identity.`,
 					delete(m, "input_cached_usd_per_m")
 				}
 			}
-			printLuxItems(models.Items)
-			return nil
+			return printLuxItems(cmd.OutOrStdout(), models.Items, "models")
 		},
 	}
 	cmd.Flags().BoolVar(&jsonF, "json", false, "JSON output")
@@ -572,32 +567,39 @@ func newLuxCatalogCmd(name, path, what string, luxURL, authURL, token *string) *
 			if jsonF {
 				return printJSON(cmd.OutOrStdout(), resp.Items)
 			}
-			if len(resp.Items) == 0 {
-				fmt.Printf("No %s.\n", what)
-				return nil
-			}
-			printLuxItems(resp.Items)
-			return nil
+			return printLuxItems(cmd.OutOrStdout(), resp.Items, what)
 		},
 	}
 	cmd.Flags().BoolVar(&jsonF, "json", false, "JSON output")
 	return cmd
 }
 
-// printLuxItems renders catalog rows compactly: id/model headline plus a
-// few well-known fields, falling back to whatever keys are present.
-func printLuxItems(items []map[string]any) {
+// printLuxItems renders the known catalog fields in a stable order.
+func printLuxItems(out io.Writer, items []map[string]any, what string) error {
+	if len(items) == 0 {
+		if _, err := fmt.Fprintf(out, "No %s.\n", what); err != nil {
+			return fmt.Errorf("write Lux %s list: %w", what, err)
+		}
+		return nil
+	}
 	for i, it := range items {
 		if i > 0 {
-			fprintln(os.Stdout)
+			if _, err := fmt.Fprintln(out); err != nil {
+				return fmt.Errorf("write Lux catalog separator: %w", err)
+			}
 		}
+		var record strings.Builder
 		for _, k := range []string{"id", "model", "provider", "name", "status", "default_route_prefix",
 			"rate", "input_usd_per_m", "output_usd_per_m"} {
 			if v, ok := it[k]; ok && v != nil {
-				printWrappedField(k, fmt.Sprintf("%v", v))
+				record.WriteString(formatWrappedField(k, fmt.Sprintf("%v", v)))
 			}
 		}
+		if _, err := fmt.Fprint(out, record.String()); err != nil {
+			return fmt.Errorf("write Lux catalog row %d: %w", i+1, err)
+		}
 	}
+	return nil
 }
 
 // ---- SDK enablement: env / token ----
