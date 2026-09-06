@@ -10,6 +10,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -239,7 +240,7 @@ func extractBinaryWithLimit(archive []byte, maxBinaryBytes int64) ([]byte, error
 	tr := tar.NewReader(gz)
 	for {
 		hdr, err := tr.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
@@ -260,6 +261,16 @@ func extractBinaryWithLimit(archive []byte, maxBinaryBytes int64) ([]byte, error
 		buf := &bytes.Buffer{}
 		if _, err := io.Copy(buf, io.LimitReader(tr, maxBinaryBytes)); err != nil { //nolint:gosec // bounded by LimitReader
 			return nil, fmt.Errorf("extract binary: %w", err)
+		}
+		// Closing a gzip reader does not validate its checksum or size.
+		// Reach EOF before accepting the binary, bounding the remaining
+		// expanded data so an archive cannot force an unbounded drain.
+		n, err := io.Copy(io.Discard, io.LimitReader(gz, maxArchiveBytes+1))
+		if err != nil {
+			return nil, fmt.Errorf("verify archive: %w", err)
+		}
+		if n > maxArchiveBytes {
+			return nil, fmt.Errorf("remaining expanded archive exceeds %d bytes", maxArchiveBytes)
 		}
 		return buf.Bytes(), nil
 	}
