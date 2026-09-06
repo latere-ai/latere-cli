@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-func TestCellaExtendHoursE2E(t *testing.T) {
+func TestCellaExtendLifetimeE2E(t *testing.T) {
 	if testing.Short() {
 		t.Skip("binary e2e skipped with -short")
 	}
@@ -38,12 +38,18 @@ func TestCellaExtendHoursE2E(t *testing.T) {
 			flags    []string
 			hours    int
 			deadline string
-			invalid  bool
+			wantErr  string
 		}{
 			{name: "default", hours: 24},
 			{name: "positive", flags: []string{"--hours", "72"}, hours: 72},
-			{name: "zero", flags: []string{"--hours", "0"}, invalid: true},
-			{name: "negative", flags: []string{"--hours", "-1"}, invalid: true},
+			{name: "zero", flags: []string{"--hours", "0"}, wantErr: "--hours must be greater than zero"},
+			{name: "negative", flags: []string{"--hours", "-1"}, wantErr: "--hours must be greater than zero"},
+			{name: "empty deadline", flags: []string{"--deadline", ""}, wantErr: "--deadline must be RFC3339"},
+			{name: "malformed deadline", flags: []string{"--deadline", "not-a-date"}, wantErr: "--deadline must be RFC3339"},
+			{name: "zero deadline", flags: []string{"--deadline", "0001-01-01T00:00:00Z"}, wantErr: "--deadline must be in the future"},
+			{name: "past deadline", flags: []string{"--deadline", "2000-01-01T00:00:00Z"}, wantErr: "--deadline must be in the future"},
+			{name: "future deadline", flags: []string{"--deadline", deadline}, deadline: deadline},
+			{name: "offset deadline", flags: []string{"--deadline", "2099-01-02T05:04:05+02:00"}, deadline: "2099-01-02T05:04:05+02:00"},
 			{name: "deadline overrides hours", flags: []string{"--hours", "-1", "--deadline", deadline}, deadline: deadline},
 		} {
 			t.Run(prefix+"/"+tc.name, func(t *testing.T) {
@@ -60,7 +66,7 @@ func TestCellaExtendHoursE2E(t *testing.T) {
 					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 						t.Error(err)
 					}
-					if !tc.invalid && (body.Hours != tc.hours || body.Deadline != tc.deadline) {
+					if tc.wantErr == "" && (body.Hours != tc.hours || body.Deadline != tc.deadline) {
 						t.Errorf("extend body = %+v; want hours %d, deadline %q", body, tc.hours, tc.deadline)
 					}
 					_, _ = w.Write([]byte(`{"id":"dev","state":"running"}`))
@@ -72,12 +78,12 @@ func TestCellaExtendHoursE2E(t *testing.T) {
 				command := exec.CommandContext(ctx, binary, args...)
 				command.Env = append(os.Environ(), "LATERE_TOKEN_FILE="+tokenPath, "LATERE_AUTH_TOKEN_FILE="+filepath.Join(root, "absent-auth.json"), "XDG_CONFIG_HOME="+root, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
 				out, err := command.CombinedOutput()
-				if tc.invalid {
-					if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 || !strings.Contains(string(out), "--hours must be greater than zero") {
-						t.Errorf("invalid hours returned %v: %s", err, out)
+				if tc.wantErr != "" {
+					if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 || !strings.Contains(string(out), tc.wantErr) {
+						t.Errorf("invalid lifetime returned %v: %s", err, out)
 					}
 					if requests.Load() != 0 {
-						t.Errorf("invalid hours made %d requests", requests.Load())
+						t.Errorf("invalid lifetime made %d requests", requests.Load())
 					}
 				} else if err != nil || requests.Load() != 1 {
 					t.Errorf("valid extend returned %v, requests %d: %s", err, requests.Load(), out)

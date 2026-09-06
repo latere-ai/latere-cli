@@ -70,7 +70,8 @@ latere cella convert <name|id> --to ephemeral --hours 12
 ```
 
 `extend` defaults to 24 hours. An explicit `--hours` value must be positive;
-`--deadline` overrides it when supplied.
+`--deadline` overrides it when supplied and must be a nonempty RFC3339 timestamp
+in the future. Invalid lifetime values are rejected before sending a request.
 
 `latere sandbox ...` remains as an alias for older scripts, but new usage should prefer `latere cella ...`.
 
