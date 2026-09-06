@@ -270,8 +270,7 @@ Use --dry-run to see the full reconciliation diff without writing.`,
 			if err := c.doYAML(cmd.Context(), http.MethodPost, path, body, &res); err != nil {
 				return err
 			}
-			printEvalApplyResult(cmd.OutOrStdout(), res)
-			return nil
+			return printEvalApplyResult(cmd.OutOrStdout(), res)
 		},
 	}
 	f := cmd.Flags()
@@ -331,7 +330,9 @@ func resolvePromptRefs(manifest []byte, baseDir string) ([]byte, error) {
 
 // printEvalApplyResult renders the apply diff: suite, per-task lines,
 // cell counts, per-comparison lines, then warnings.
-func printEvalApplyResult(w io.Writer, res evalApplyResultDTO) {
+func printEvalApplyResult(dst io.Writer, res evalApplyResultDTO) error {
+	var output strings.Builder
+	w := &output
 	if res.DryRun {
 		fprintln(w, "dry run — no changes written")
 	}
@@ -360,6 +361,10 @@ func printEvalApplyResult(w io.Writer, res evalApplyResultDTO) {
 	for _, warn := range res.Warnings {
 		fprintf(w, "warning: %s\n", warn)
 	}
+	if _, err := fmt.Fprint(dst, output.String()); err != nil {
+		return fmt.Errorf("write Eval apply result: %w", err)
+	}
+	return nil
 }
 
 // ---- suites / cells ----
@@ -384,7 +389,9 @@ func newEvalSuitesCmd() *cobra.Command {
 				return err
 			}
 			if len(suites) == 0 {
-				fprintln(cmd.OutOrStdout(), "No suites.")
+				if _, err := fmt.Fprintln(cmd.OutOrStdout(), "No suites."); err != nil {
+					return fmt.Errorf("write Eval suites: %w", err)
+				}
 				return nil
 			}
 			tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
@@ -424,7 +431,9 @@ func newEvalCellsCmd() *cobra.Command {
 				return err
 			}
 			if len(cells) == 0 {
-				fprintln(cmd.OutOrStdout(), "No cells in this suite.")
+				if _, err := fmt.Fprintln(cmd.OutOrStdout(), "No cells in this suite."); err != nil {
+					return fmt.Errorf("write Eval cells: %w", err)
+				}
 				return nil
 			}
 			tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)

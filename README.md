@@ -131,6 +131,8 @@ latere review
 
 Use `latere eval apply -f suite.yaml --dry-run` to preview changes. Apply rejects redirects that change the request method or dry-run mode.
 
+Eval commands exit with an error if their results cannot be written to stdout. An output failure after apply does not undo the completed API request.
+
 ## Development
 
 ```sh
