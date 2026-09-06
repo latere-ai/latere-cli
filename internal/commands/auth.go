@@ -699,7 +699,7 @@ Cella, then prints the identity claims embedded in the saved JWT.`,
 			// A successful status with no subject (including null or 204) does
 			// not identify a principal. Use the verified fallback in that case.
 			if err := req.GetJSON(cmd.Context(), "/tokeninfo", &info); err == nil && info.Sub != "" {
-				printPrincipal(principalInfo{
+				return printPrincipal(cmd.OutOrStdout(), principalInfo{
 					Sub:           info.Sub,
 					Email:         deref(info.Email),
 					PrincipalType: info.PrincipalType,
@@ -707,7 +707,6 @@ Cella, then prints the identity claims embedded in the saved JWT.`,
 					Scopes:        info.Scopes,
 					ClientID:      info.ClientID,
 				})
-				return nil
 			}
 			// /tokeninfo is best-effort: it 401s on cella- and sandbox-issued
 			// tokens, and is unreachable when the inferred auth host does not
@@ -726,8 +725,7 @@ Cella, then prints the identity claims embedded in the saved JWT.`,
 			if err != nil {
 				return err
 			}
-			printPrincipal(local)
-			return nil
+			return printPrincipal(cmd.OutOrStdout(), local)
 		},
 	}
 	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
@@ -743,24 +741,29 @@ type principalInfo struct {
 	ClientID      string
 }
 
-func printPrincipal(info principalInfo) {
-	fmt.Printf("sub:           %s\n", info.Sub)
+func printPrincipal(dst io.Writer, info principalInfo) error {
+	var out strings.Builder
+	fmt.Fprintf(&out, "sub:           %s\n", info.Sub)
 	if info.Email != "" {
-		fmt.Printf("email:         %s\n", info.Email)
+		fmt.Fprintf(&out, "email:         %s\n", info.Email)
 	}
-	fmt.Printf("principal:     %s\n", info.PrincipalType)
+	fmt.Fprintf(&out, "principal:     %s\n", info.PrincipalType)
 	if info.OrgID != "" {
-		fmt.Printf("context:       org\n")
-		fmt.Printf("org_id:        %s\n", info.OrgID)
+		out.WriteString("context:       org\n")
+		fmt.Fprintf(&out, "org_id:        %s\n", info.OrgID)
 	} else {
-		fmt.Printf("context:       personal\n")
+		out.WriteString("context:       personal\n")
 	}
 	if info.ClientID != "" {
-		fmt.Printf("client_id:     %s\n", info.ClientID)
+		fmt.Fprintf(&out, "client_id:     %s\n", info.ClientID)
 	}
 	if len(info.Scopes) > 0 {
-		fmt.Printf("scopes:        %s\n", strings.Join(info.Scopes, " "))
+		fmt.Fprintf(&out, "scopes:        %s\n", strings.Join(info.Scopes, " "))
 	}
+	if _, err := fmt.Fprint(dst, out.String()); err != nil {
+		return fmt.Errorf("write principal: %w", err)
+	}
+	return nil
 }
 
 func deref(s *string) string {
