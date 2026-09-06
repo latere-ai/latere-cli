@@ -78,8 +78,9 @@ func TestFrameStreamGivesUpAfterMaxTries(t *testing.T) {
 	maxReconnectTries = 2
 	defer func() { reconnectBackoff, maxReconnectTries = oldB, oldT }()
 
+	dialErr := errors.New("refused")
 	dial := func(ctx context.Context, since int64) (*attachConn, error) {
-		return nil, errors.New("refused")
+		return nil, dialErr
 	}
 	fs := newFrameStream(context.Background(), dial)
 	defer fs.Close()
@@ -88,6 +89,26 @@ func TestFrameStreamGivesUpAfterMaxTries(t *testing.T) {
 	got := drainUntil(t, fs, func(m streamMsg) bool { return m.note == "closed" })
 	if got.note != "closed" {
 		t.Fatalf("note = %q, want closed", got.note)
+	}
+	if !errors.Is(fs.Err(), dialErr) {
+		t.Fatalf("terminal error = %v, want original dial error", fs.Err())
+	}
+}
+
+func TestFrameStreamCloseDoesNotReportDialCancellation(t *testing.T) {
+	started := make(chan struct{})
+	fs := newFrameStream(t.Context(), func(ctx context.Context, since int64) (*attachConn, error) {
+		close(started)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+	defer fs.Close()
+	<-started
+	fs.Close()
+	for range fs.Events() {
+	}
+	if err := fs.Err(); err != nil {
+		t.Fatalf("user detach reported a failure: %v", err)
 	}
 }
 

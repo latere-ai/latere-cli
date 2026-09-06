@@ -9,6 +9,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 
@@ -167,15 +168,16 @@ func newToposSessionLsCmd() *cobra.Command {
 
 // runInteractiveSession opens the bubbletea TUI over an auto-reconnecting attach
 // stream.
-func runInteractiveSession(ctx context.Context, c *api.Client, sessionID string, readonly bool) error {
+func runInteractiveSession(ctx context.Context, c *api.Client, sessionID string, readonly bool, options ...tea.ProgramOption) error {
 	dial := func(ctx context.Context, since int64) (*attachConn, error) {
 		return dialAttach(ctx, c.BaseURL, c.Token, sessionID, since, readonly)
 	}
 	fs := newFrameStream(ctx, dial)
 	defer fs.Close()
-	p := tea.NewProgram(newTUIModel(sessionID, fs.Events(), fs, readonly), tea.WithContext(ctx), tea.WithAltScreen())
+	options = append([]tea.ProgramOption{tea.WithContext(ctx), tea.WithAltScreen()}, options...)
+	p := tea.NewProgram(newTUIModel(sessionID, fs.Events(), fs, readonly), options...)
 	_, err := p.Run()
-	return err
+	return errors.Join(err, fs.Err())
 }
 
 // runPrintSession streams a session non-interactively to stdout/stderr. When

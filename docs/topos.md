@@ -66,6 +66,8 @@ If your connection drops, the client reconnects on its own and resumes from wher
 you were. If sending a message, approval, or interrupt fails, the UI shows the
 error and preserves your typed message or pending approval. Once reconnected,
 press Enter, `y`/`n`, or Esc again to retry the action.
+If connection retries are exhausted, the UI exits with an error that includes
+the final connection failure.
 
 ## Print mode (scripts and pipelines)
 

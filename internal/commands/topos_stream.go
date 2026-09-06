@@ -10,6 +10,7 @@ package commands
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -44,6 +45,7 @@ type frameStream struct {
 
 	mu   sync.Mutex
 	conn *attachConn
+	err  error
 }
 
 // newFrameStream starts a stream that dials via dial(ctx, since). The first dial
@@ -62,6 +64,14 @@ func newFrameStream(ctx context.Context, dial func(ctx context.Context, since in
 
 // Events returns the channel of stream messages; it closes when the stream ends.
 func (fs *frameStream) Events() <-chan streamMsg { return fs.events }
+
+// Err reports the terminal connection failure, if retry attempts were exhausted.
+// Transient dial errors and caller-initiated closure are not failures.
+func (fs *frameStream) Err() error {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	return fs.err
+}
 
 // Send writes a control message to the current connection.
 func (fs *frameStream) Send(ctrl attachControl) error {
@@ -86,6 +96,11 @@ func (fs *frameStream) run() {
 		if err != nil {
 			tries++
 			if fs.ctx.Err() != nil || tries > maxReconnectTries {
+				if fs.ctx.Err() == nil {
+					fs.mu.Lock()
+					fs.err = fmt.Errorf("session connection failed after retries: %w", err)
+					fs.mu.Unlock()
+				}
 				fs.emit(streamMsg{note: "closed"})
 				return
 			}
