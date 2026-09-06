@@ -31,13 +31,8 @@ archives:
 checksum:
   name_template: "checksums.txt"
 
-changelog:
-  sort: asc
-  filters:
-    exclude:
-      - "^docs:"
-      - "^chore:"
-      - "^ci:"
+# No changelog block: the release body is the tag's CHANGELOG.md section,
+# passed by the pipeline as --release-notes.
 
 release:
   github:

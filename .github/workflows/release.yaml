@@ -1,23 +1,21 @@
 name: release
+
+# A tag is a release, and a release has notes. The shared CLI pipeline reads
+# the CHANGELOG.md section for the tag, refuses the tag when there is none,
+# and otherwise has goreleaser publish the binaries with that section as the
+# release body. Lint and tests are lateregate's on every push, so the
+# pipeline's own lint job is off; its vet + race test still gates the build.
+
 on:
   push:
     tags: ['v*']
+
 permissions:
   contents: write
+
 jobs:
   release:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-      - uses: goreleaser/goreleaser-action@v7
-        with:
-          version: '~> v2'
-          args: release --clean
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    uses: latere-ai/ci/.github/workflows/cli-release.yml@v1
+    with:
+      run_lint: false
+    secrets: inherit
