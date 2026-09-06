@@ -25,6 +25,8 @@ latere drive unshare <share-id>       #   revoke
 
 Every command takes `--json` for machine-readable output on stdout.
 
+File, trash, history, and share listings fetch every page before printing results. If Drive repeats a pagination cursor, the command stops with an error and leaves stdout empty.
+
 ## Uploads
 
 Files up to 16 MiB stream in a single request; larger files go through Drive's multipart plane automatically (16 MiB parts, four in flight, up to 16 GiB). Uploading from stdin is single-request and capped at 100 MB.

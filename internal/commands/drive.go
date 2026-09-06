@@ -110,6 +110,14 @@ func printDriveJSON(w io.Writer, v any) error {
 	return enc.Encode(v)
 }
 
+func trackDriveCursor(seen map[string]bool, cursor string) error {
+	if seen[cursor] {
+		return errors.New("drive pagination returned a repeated cursor")
+	}
+	seen[cursor] = true
+	return nil
+}
+
 // ---- ls ----
 
 func newDriveLsCmd(o *driveOpts) *cobra.Command {
@@ -134,6 +142,7 @@ func newDriveLsCmd(o *driveOpts) *cobra.Command {
 				return runLsTrashed(cmd, c, o)
 			}
 			var entries []drive.FileEntry
+			seen := make(map[string]bool)
 			for cursor := ""; ; {
 				page, err := c.List(cmd.Context(), *o.owner, prefix, cursor, 1000)
 				if err != nil {
@@ -142,6 +151,9 @@ func newDriveLsCmd(o *driveOpts) *cobra.Command {
 				entries = append(entries, page.Entries...)
 				if page.NextCursor == "" {
 					break
+				}
+				if err := trackDriveCursor(seen, page.NextCursor); err != nil {
+					return err
 				}
 				cursor = page.NextCursor
 			}
@@ -166,6 +178,7 @@ func newDriveLsCmd(o *driveOpts) *cobra.Command {
 
 func runLsTrashed(cmd *cobra.Command, c *drive.Client, o *driveOpts) error {
 	var entries []drive.TrashEntry
+	seen := make(map[string]bool)
 	for cursor := ""; ; {
 		page, err := c.TrashList(cmd.Context(), *o.owner, cursor, 1000)
 		if err != nil {
@@ -174,6 +187,9 @@ func runLsTrashed(cmd *cobra.Command, c *drive.Client, o *driveOpts) error {
 		entries = append(entries, page.Entries...)
 		if page.NextCursor == "" {
 			break
+		}
+		if err := trackDriveCursor(seen, page.NextCursor); err != nil {
+			return err
 		}
 		cursor = page.NextCursor
 	}
@@ -478,6 +494,7 @@ func newDriveHistoryCmd(o *driveOpts) *cobra.Command {
 				return err
 			}
 			var entries []drive.FileVersionEntry
+			seen := make(map[string]bool)
 			for cursor := ""; ; {
 				page, err := c.Versions(cmd.Context(), *o.owner, args[0], cursor, 1000)
 				if err != nil {
@@ -486,6 +503,9 @@ func newDriveHistoryCmd(o *driveOpts) *cobra.Command {
 				entries = append(entries, page.Entries...)
 				if page.NextCursor == "" {
 					break
+				}
+				if err := trackDriveCursor(seen, page.NextCursor); err != nil {
+					return err
 				}
 				cursor = page.NextCursor
 			}
@@ -590,6 +610,7 @@ func newDriveSharesCmd(o *driveOpts) *cobra.Command {
 				return err
 			}
 			var entries []drive.Share
+			seen := make(map[string]bool)
 			for cursor := ""; ; {
 				page, err := c.Shares(cmd.Context(), inbox, cursor, 1000)
 				if err != nil {
@@ -598,6 +619,9 @@ func newDriveSharesCmd(o *driveOpts) *cobra.Command {
 				entries = append(entries, page.Entries...)
 				if page.NextCursor == "" {
 					break
+				}
+				if err := trackDriveCursor(seen, page.NextCursor); err != nil {
+					return err
 				}
 				cursor = page.NextCursor
 			}
