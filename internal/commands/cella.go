@@ -591,8 +591,7 @@ to start that one-shot run and return immediately with a run id.`,
 					if printJSONOut {
 						return printJSON(out)
 					}
-					printStartedDetachedOneShotRun(out)
-					return nil
+					return printStartedDetachedOneShotRun(cmd.OutOrStdout(), out)
 				}
 				out, err := oneShotRun(cmd.Context(), c, args, env, cwd, image, diskGB, cpu, memory, timeout, credentialFlag)
 				if err != nil {
@@ -614,7 +613,9 @@ to start that one-shot run and return immediately with a run id.`,
 			if err != nil {
 				return err
 			}
-			fmt.Println(cd.CommandID)
+			if _, err := fmt.Fprintln(cmd.OutOrStdout(), cd.CommandID); err != nil {
+				return fmt.Errorf("command %q started, but writing its ID failed: %w", cd.CommandID, err)
+			}
 			return nil
 		},
 	}
@@ -1891,9 +1892,12 @@ func printDetachedOneShotRun(out oneShotRunDTO) {
 	}
 }
 
-func printStartedDetachedOneShotRun(out oneShotRunDTO) {
-	fmt.Println(out.RunID)
+func printStartedDetachedOneShotRun(stdout io.Writer, out oneShotRunDTO) error {
+	if _, err := fmt.Fprintln(stdout, out.RunID); err != nil {
+		return fmt.Errorf("run %q started, but writing its ID failed: %w", out.RunID, err)
+	}
 	printDetachedOneShotRun(out)
+	return nil
 }
 
 func printOneShotRun(stdout, stderr io.Writer, out oneShotRunDTO) error {

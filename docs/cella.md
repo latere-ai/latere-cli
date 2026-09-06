@@ -95,6 +95,9 @@ Background execution prints a command id:
 latere cella run <name|id> -- sh -lc 'sleep 30 && echo done'
 ```
 
+If printing a background command or detached run ID as text fails, the CLI
+returns an error that includes the ID and states that the job has already started.
+
 `run --follow` starts the command, streams logs, and exits with the command's status:
 
 ```sh
