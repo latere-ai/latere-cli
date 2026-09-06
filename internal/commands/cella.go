@@ -1892,13 +1892,20 @@ func oneShotRunBody(argv []string, env map[string]string, cwd, image string, dis
 }
 
 func oneShotRun(ctx context.Context, c *api.Client, argv []string, env map[string]string, cwd, image string, diskGB int, cpu, memory string, timeout int, credentialCatalog []string) (oneShotRunDTO, error) {
+	effective := timeout
+	if effective <= 0 {
+		effective = 600
+	}
+	// The server permits timeout+10m for creation, then timeout for execution
+	// and 2m for cleanup. Leave another 30s for the final HTTP response.
+	const overhead = 12*time.Minute + 30*time.Second
+	const maxTimeoutSeconds = int64((math.MaxInt64 - overhead) / (2 * time.Second))
+	if int64(effective) > maxTimeoutSeconds {
+		return oneShotRunDTO{}, fmt.Errorf("--timeout exceeds the maximum supported one-shot duration of %d seconds", maxTimeoutSeconds)
+	}
 	body := oneShotRunBody(argv, env, cwd, image, diskGB, cpu, memory, timeout, credentialCatalog)
 	if c.HTTP != nil {
-		effective := timeout
-		if effective <= 0 {
-			effective = 600
-		}
-		c.HTTP.Timeout = time.Duration(effective+180) * time.Second
+		c.HTTP.Timeout = 2*time.Duration(effective)*time.Second + overhead
 	}
 	var raw json.RawMessage
 	status, err := c.PostJSONWithStatus(ctx, "/v1/one-shot-runs", body, &raw, http.StatusInternalServerError)

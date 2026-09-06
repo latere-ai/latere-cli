@@ -122,6 +122,9 @@ stderr cannot be written locally. If workspace cleanup fails, command output
 and the JSON result remain available. The CLI returns the command's nonzero
 exit code, or 1 if the command succeeded but cleanup failed.
 
+The one-shot `--timeout` limits command execution. The CLI separately allows
+time for workspace creation and cleanup before its HTTP request times out.
+
 Detached one-shot execution returns immediately with a run id. The
 backend keeps the result and log tail for later inspection:
 
