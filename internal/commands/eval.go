@@ -232,10 +232,11 @@ func newEvalApplyCmd() *cobra.Command {
 		Short: "Apply a suite manifest (creates or reconciles the suite).",
 		Long: `Apply a declarative suite manifest to the Eval platform.
 
-Prompts referenced as file:// are read relative to the manifest's
-directory (the current directory for stdin) and inlined as
-prompt_text before upload; the original prompt ref is kept for
-provenance. Apply never deletes: cells missing from a re-applied
+Nonempty prompt_text takes precedence over prompt. Otherwise,
+file:// prompts are read relative to the manifest's directory (the
+current directory for stdin) and inlined as prompt_text before
+upload; the original prompt ref is kept for provenance.
+Apply never deletes: cells missing from a re-applied
 manifest are reported unmanaged.
 
 Use --dry-run to see the full reconciliation diff without writing.`,
@@ -283,8 +284,9 @@ Use --dry-run to see the full reconciliation diff without writing.`,
 }
 
 // resolvePromptRefs inlines file:// prompt refs client-side: for each
-// tasks[] entry whose prompt starts with file://, the referenced file
-// is read relative to baseDir and set as prompt_text. The prompt ref
+// tasks[] entry with no nonempty prompt_text whose prompt starts with
+// file://, the referenced file is read relative to baseDir and set as
+// prompt_text. Existing text takes precedence, matching evald. The prompt ref
 // itself is kept for provenance. The server is the authoritative
 // validator, so everything else passes through untouched.
 func resolvePromptRefs(manifest []byte, baseDir string) ([]byte, error) {
@@ -300,6 +302,9 @@ func resolvePromptRefs(manifest []byte, baseDir string) ([]byte, error) {
 	for i, t := range tasks {
 		task, ok := t.(map[string]any)
 		if !ok {
+			continue
+		}
+		if text, _ := task["prompt_text"].(string); text != "" {
 			continue
 		}
 		prompt, _ := task["prompt"].(string)

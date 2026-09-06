@@ -131,6 +131,8 @@ latere review
 
 Use `latere eval apply -f suite.yaml --dry-run` to preview changes. Apply rejects redirects that change the request method or dry-run mode.
 
+Nonempty `prompt_text` takes precedence over `prompt`, so resolved manifests can be reapplied without their original prompt files. Otherwise, `file://` prompts are loaded relative to the manifest directory (the current directory for stdin).
+
 Eval commands exit with an error if their results cannot be written to stdout. An output failure after apply does not undo the completed API request.
 
 ## Development
