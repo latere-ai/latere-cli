@@ -942,21 +942,15 @@ destination directory.`,
 					return err
 				}
 			}
-			pr, pw := io.Pipe()
-			// Request construction can fail before the transport owns the body.
-			defer func() { _ = pr.Close() }()
-			mw := multipart.NewWriter(pw)
-			go func() {
+			upload, contentType := newMultipartUpload(func(mw *multipart.Writer) error {
 				if dest != "" {
 					if err := mw.WriteField("dest", dest); err != nil {
-						_ = pw.CloseWithError(err)
-						return
+						return err
 					}
 				}
 				fw, err := mw.CreateFormFile("tarball", formFilename)
 				if err != nil {
-					_ = pw.CloseWithError(err)
-					return
+					return err
 				}
 				switch inputKind {
 				case importInputRegularFile:
@@ -966,24 +960,21 @@ destination directory.`,
 				default:
 					err = copyImportTar(fw, src)
 				}
-				if err != nil {
-					_ = pw.CloseWithError(err)
-					return
-				}
-				if err := mw.Close(); err != nil {
-					_ = pw.CloseWithError(err)
-					return
-				}
-				_ = pw.Close()
-			}()
+				return err
+			})
+			// Request construction can fail before the transport owns the body.
+			defer func() { _ = upload.Close() }()
 			path := sbPath(args[0]) + "/files/import"
 			var resp struct {
 				Imported string `json:"imported"`
 				Bytes    int64  `json:"bytes"`
 				Dest     string `json:"dest"`
 			}
-			if err := c.Do(cmd.Context(), http.MethodPost, path, pr,
-				mw.FormDataContentType(), &resp); err != nil {
+			if err := c.Do(cmd.Context(), http.MethodPost, path, upload,
+				contentType, &resp); err != nil {
+				return err
+			}
+			if err := upload.finish(); err != nil {
 				return err
 			}
 			return printJSON(resp)
@@ -1524,46 +1515,42 @@ func newCeUploadCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			pr, pw := io.Pipe()
-			// Request construction can fail before the transport owns the body.
-			defer func() { _ = pr.Close() }()
-			mw := multipart.NewWriter(pw)
-			contentType := mw.FormDataContentType()
-			go func() {
+			upload, contentType := newMultipartUpload(func(mw *multipart.Writer) error {
 				if dest != "" {
 					if err := mw.WriteField("dest", dest); err != nil {
-						_ = pw.CloseWithError(err)
-						return
+						return err
 					}
 				}
 				for _, uf := range files {
 					f, err := os.Open(uf.local)
 					if err != nil {
-						_ = pw.CloseWithError(err)
-						return
+						return err
 					}
 					part, err := mw.CreateFormFile(uf.rel, filepath.Base(uf.local))
 					if err != nil {
 						_ = f.Close()
-						_ = pw.CloseWithError(err)
-						return
+						return err
 					}
 					if _, err := io.Copy(part, f); err != nil {
 						_ = f.Close()
-						_ = pw.CloseWithError(err)
-						return
+						return err
 					}
 					_ = f.Close()
 				}
-				_ = pw.CloseWithError(mw.Close())
-			}()
+				return nil
+			})
+			// Request construction can fail before the transport owns the body.
+			defer func() { _ = upload.Close() }()
 			var resp struct {
 				Dest  string `json:"dest"`
 				Files int    `json:"files"`
 				Bytes int64  `json:"bytes"`
 			}
 			if err := c.Do(cmd.Context(), http.MethodPost, sbPath(args[0])+"/files/upload",
-				pr, contentType, &resp); err != nil {
+				upload, contentType, &resp); err != nil {
+				return err
+			}
+			if err := upload.finish(); err != nil {
 				return err
 			}
 			fmt.Printf("uploaded %d files (%d bytes) to %s\n", resp.Files, resp.Bytes, resp.Dest)
