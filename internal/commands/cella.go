@@ -1428,9 +1428,15 @@ func newCeWriteCmd() *cobra.Command {
 				defer func() { _ = f.Close() }()
 				src = f
 			}
-			content, err := io.ReadAll(src)
+			// The JSON write API accepts at most 10 MiB of decoded content.
+			// Read one extra byte to reject oversize streams without waiting for EOF.
+			const maxContentBytes = 10 << 20
+			content, err := io.ReadAll(io.LimitReader(src, maxContentBytes+1))
 			if err != nil {
 				return err
+			}
+			if len(content) > maxContentBytes {
+				return fmt.Errorf("content exceeds the 10 MiB write limit; use upload for larger files")
 			}
 			c, err := authedClient(apiURL)
 			if err != nil {
