@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"strings"
@@ -188,9 +189,10 @@ they are never sent by the client. Requires the write:agents scope.`,
 			if jsonF {
 				return printJSON(cmd.OutOrStdout(), created)
 			}
-			fmt.Fprintf(os.Stdout, "Created agent %s\n\n", created.ID) //nolint:errcheck
-			printAgent(created)
-			return nil
+			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Created agent %s\n\n", created.ID); err != nil {
+				return fmt.Errorf("write agent %q creation confirmation: %w", created.ID, err)
+			}
+			return printAgent(cmd.OutOrStdout(), created)
 		},
 	}
 	cmd.Flags().StringVar(&apiURL, "api-url", "", "override the Topos API base URL")
@@ -305,12 +307,7 @@ func newToposAgentsListCmd() *cobra.Command {
 			if jsonF {
 				return printJSON(cmd.OutOrStdout(), resp.Agents)
 			}
-			if len(resp.Agents) == 0 {
-				fprintln(os.Stdout, "No agents are visible to this token.")
-				return nil
-			}
-			printAgentList(resp.Agents)
-			return nil
+			return printAgentList(cmd.OutOrStdout(), resp.Agents)
 		},
 	}
 	cmd.Flags().StringVar(&apiURL, "api-url", "", "override the Topos API base URL")
@@ -428,25 +425,44 @@ func agentPath(id string) string {
 	return "/v1/agents/" + url.PathEscape(id)
 }
 
-func printAgentList(agents []agentDTO) {
+func printAgentList(out io.Writer, agents []agentDTO) error {
+	if len(agents) == 0 {
+		if _, err := fmt.Fprintln(out, "No agents are visible to this token."); err != nil {
+			return fmt.Errorf("write agent list: %w", err)
+		}
+		return nil
+	}
 	for i, a := range agents {
 		if i > 0 {
-			fprintln(os.Stdout)
+			if _, err := fmt.Fprintln(out); err != nil {
+				return fmt.Errorf("write agent list separator: %w", err)
+			}
 		}
-		printAgent(a)
+		if err := printAgent(out, a); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
-func printAgent(a agentDTO) {
-	printWrappedField("id", a.ID)
-	printWrappedField("display_name", defaultStr(a.DisplayName, "-"))
-	printWrappedField("kind", defaultStr(a.Kind, "-"))
-	printWrappedField("org_id", defaultStr(a.OrgID, "-"))
-	printWrappedField("owner", defaultStr(a.OwnerSub, "-"))
+func printAgent(out io.Writer, a agentDTO) error {
+	var record strings.Builder
+	field := func(label, value string) {
+		record.WriteString(formatWrappedField(label, value))
+	}
+	field("id", a.ID)
+	field("display_name", defaultStr(a.DisplayName, "-"))
+	field("kind", defaultStr(a.Kind, "-"))
+	field("org_id", defaultStr(a.OrgID, "-"))
+	field("owner", defaultStr(a.OwnerSub, "-"))
 	if a.WorkspaceRef != "" {
-		printWrappedField("workspace", a.WorkspaceRef)
+		field("workspace", a.WorkspaceRef)
 	}
 	if !a.CreatedAt.IsZero() {
-		printWrappedField("created", humanAge(a.CreatedAt)+" ago")
+		field("created", humanAge(a.CreatedAt)+" ago")
 	}
+	if _, err := fmt.Fprint(out, record.String()); err != nil {
+		return fmt.Errorf("write agent %q details: %w", a.ID, err)
+	}
+	return nil
 }
