@@ -154,7 +154,11 @@ func (a *attachConn) readLoop(ctx context.Context) {
 		}
 		var fr attachFrame
 		if err := json.Unmarshal(data, &fr); err != nil {
-			continue // skip a malformed frame rather than tearing down
+			// Report lost frames through the same error path as protocol
+			// failures, rather than allowing a later Stop to hide them.
+			fr = attachFrame{Type: "error", Message: fmt.Sprintf("decode session frame: %v", err)}
+		} else if fr.Type == "" {
+			fr = attachFrame{Type: "error", Message: "decode session frame: missing type"}
 		}
 		select {
 		case a.frames <- fr:

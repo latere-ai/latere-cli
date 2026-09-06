@@ -86,9 +86,9 @@ If a tool needs your approval, print mode exits with an error. Attach to the
 session without `--print` to review the pending request and approve or deny it.
 
 Print mode exits non-zero if the agent reports an error, the server rejects the
-request, the connection ends before completion is confirmed, or streamed output
-cannot be written. Any text already streamed stays on stdout; check the exit
-status before using it in later CI steps.
+request, a stream frame cannot be decoded, the connection ends before completion
+is confirmed, or streamed output cannot be written. Any text already streamed
+stays on stdout; check the exit status before using it in later CI steps.
 
 ## Autonomous runs
 

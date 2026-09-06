@@ -29,7 +29,7 @@ func TestToposPrintReportsFailedStreamsE2E(t *testing.T) {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 	for _, operation := range []string{"start", "attach"} {
-		for _, state := range []string{"completed", "closed session", "graceful disconnect", "abrupt disconnect", "protocol error", "error then stop", "empty error", "run error", "malformed answer", "malformed tool", "malformed tool failure", "malformed run error", "empty run error", "approval required"} {
+		for _, state := range []string{"completed", "closed session", "graceful disconnect", "abrupt disconnect", "protocol error", "error then stop", "empty error", "run error", "malformed answer", "malformed tool", "malformed tool failure", "malformed run error", "empty run error", "approval required", "invalid frame JSON", "invalid frame type", "invalid frame sequence", "null frame", "missing frame type", "trailing frame JSON", "malformed replay frame"} {
 			t.Run(operation+"/"+state, func(t *testing.T) {
 				root := t.TempDir()
 				wantError, wantOutput := "", ""
@@ -45,6 +45,28 @@ func TestToposPrintReportsFailedStreamsE2E(t *testing.T) {
 				}
 				frames = append(frames, `{"type":"caught_up","seq":5}`)
 				switch state {
+				case "invalid frame JSON", "invalid frame type", "invalid frame sequence", "null frame", "missing frame type", "trailing frame JSON", "malformed replay frame":
+					wantError = "decode session frame"
+					malformed := `{`
+					switch state {
+					case "invalid frame type":
+						malformed = `{"type":42}`
+					case "invalid frame sequence":
+						malformed = `{"type":"event","seq":"bad","event":"AssistantMessage","payload":{"text":"lost answer"}}`
+					case "null frame":
+						malformed = `null`
+					case "missing frame type":
+						malformed = `{"event":"AssistantMessage","payload":{"text":"lost answer"}}`
+					case "trailing frame JSON":
+						malformed = `{"type":"event","event":"Stop"} {}`
+					}
+					if state == "malformed replay frame" {
+						frames = append([]string{malformed}, frames...)
+					} else {
+						wantOutput = "partial answer\n"
+						frames = append(frames, `{"type":"event","event":"AssistantMessage","seq":6,"payload":{"text":"partial answer"}}`, malformed)
+					}
+					frames = append(frames, `{"type":"event","event":"Stop","seq":7,"payload":{}}`)
 				case "completed", "graceful disconnect", "abrupt disconnect":
 					wantOutput = "partial answer\n"
 					frames = append(frames, `{"type":"event","event":"AssistantMessage","seq":6,"payload":{"text":"partial answer"}}`)
