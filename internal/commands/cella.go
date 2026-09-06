@@ -1489,7 +1489,9 @@ func newCeLsCmd() *cobra.Command {
 				if e.IsDir {
 					name += "/"
 				}
-				fmt.Printf("%04o\t%d\t%s\n", e.Mode, e.Size, name)
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%04o\t%d\t%s\n", e.Mode, e.Size, name); err != nil {
+					return fmt.Errorf("write directory listing: %w", err)
+				}
 			}
 			return nil
 		},
