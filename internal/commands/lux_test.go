@@ -994,6 +994,31 @@ func TestLuxEnvIdentityExpiryNote(t *testing.T) {
 	if !strings.Contains(errBuf.String(), want) {
 		t.Errorf("stderr = %q, want substring %q", errBuf.String(), want)
 	}
+	if !strings.Contains(errBuf.String(), "root credential") || !strings.Contains(errBuf.String(), "--ttl") {
+		t.Errorf("stderr = %q, want the note that the export is the root credential and how to bound it", errBuf.String())
+	}
+}
+
+// Without a known expiry the note still says what the exported value is:
+// the root credential is the fact the reader must not miss, whatever the
+// lifetime.
+func TestLuxEnvIdentityNamesRootCredentialWithoutExpiry(t *testing.T) {
+	isolateBearer(t)
+	writeAuthTokenFile(t, fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"openid"}}), "r", time.Time{})
+
+	var errBuf strings.Builder
+	_, err := captureStdout(func() error {
+		root := NewRoot("test")
+		root.SetErr(&errBuf)
+		root.SetArgs([]string{"lux", "env", "openai", "--lux-url", "https://lux.example"})
+		return root.Execute()
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := errBuf.String(); !strings.Contains(s, "identity token") || !strings.Contains(s, "root credential") || strings.Contains(s, "expires") {
+		t.Errorf("stderr = %q, want the identity-token note naming the root credential and no expiry", s)
+	}
 }
 
 func TestLuxTokenHiddenAlias(t *testing.T) {

@@ -49,7 +49,7 @@ Export values are shell-quoted when needed so spaces and shell metacharacters st
 details. Check the command's exit status before using redirected output; a failed
 write can leave a partial file.
 
-The command reports on stderr which credential it embedded and when it expires: by default your login identity token, which lasts the sign-in session. Missing or empty saved credentials cause an error before any exports are printed; run `latere login` to restore them.
+The command reports on stderr which credential it embedded and when it expires: by default your login identity token, which lasts the sign-in session. That token is your account's root credential, not a key scoped to Lux: whatever holds the exported value holds your login. Pass `--ttl` when the value may spread beyond your shell, for a short-lived token bound to Lux. Missing or empty saved credentials cause an error before any exports are printed; run `latere login` to restore them.
 
 ```sh
 eval "$(latere lux env --compat openai --ttl 5m)"  # CI: a short-lived actor token

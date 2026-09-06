@@ -49,8 +49,14 @@ One verb, route as the positional argument, dialect inferred:
   + `ANTHROPIC_AUTH_TOKEN`. Gemini stays unsupported with the same
   actionable error.
 - **Says what it embedded** on stderr (stdout stays eval-clean):
-  `# identity token, expires 2026-07-12T22:10Z — re-run after expiry`
-  or `# passthrough token (--token or $LATERE_LUX_TOKEN)`.
+  `# identity token, expires 2026-07-12T22:10Z — re-run after expiry; this
+  is your account's root credential (the login token itself), not a
+  Lux-scoped key; pass --ttl for a short-lived token bound to Lux`
+  or `# passthrough token (--token or $LATERE_LUX_TOKEN)`. The root
+  credential note is there because Lux has no endpoint that mints a
+  long-lived Lux-scoped identity token; its virtual keys (`/lux/v1/keys`)
+  are a separate credential bound to explicit model routes, not a
+  narrower form of the login.
 - `--ttl <duration>` mints a short-lived `aud=lux.latere.ai` actor token
   instead of the identity token (CI: bound blast radius, no refresh
   file). Reuses `mintActorToken`.

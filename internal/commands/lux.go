@@ -630,13 +630,22 @@ func luxEnvBearer(ctx context.Context, tokenFlag, luxURL, authURLFlag string, tt
 		}
 		return actor, "actor token, expiry not reported by auth", nil
 	}
-	provenance = "identity token"
+	provenance = "identity token; " + rootCredentialNote
 	if tok, lerr := api.LoadAuthToken(); lerr == nil && !tok.ExpiresAt.IsZero() {
-		provenance = fmt.Sprintf("identity token, expires %s — re-run after expiry",
-			tok.ExpiresAt.UTC().Format("2006-01-02T15:04Z"))
+		provenance = fmt.Sprintf("identity token, expires %s — re-run after expiry; %s",
+			tok.ExpiresAt.UTC().Format("2006-01-02T15:04Z"), rootCredentialNote)
 	}
 	return access, provenance, nil
 }
+
+// rootCredentialNote follows the identity-token provenance. The value
+// `lux env` exports without --ttl is the login token itself, the account's
+// root credential, not a credential scoped to Lux: Lux exposes no endpoint
+// that mints a long-lived Lux-scoped identity token (its virtual keys are a
+// separate credential, bound to explicit model routes), so the CLI cannot
+// narrow it. Saying so lets the reader choose --ttl when a bounded token
+// is the better fit.
+const rootCredentialNote = "this is your account's root credential (the login token itself), not a Lux-scoped key; pass --ttl for a short-lived token bound to Lux"
 
 // resolveEnvSurface applies the two axes: a [provider] argument selects
 // that provider's passthrough route, --compat selects a dialect surface
@@ -742,10 +751,12 @@ OpenRouter route.
 
 The embedded credential and its lifetime are reported on stderr (stdout
 stays eval-clean). By default it is your login identity token, which
-lasts the login session. For CI, --ttl mints a short-lived actor token
-instead. Use a positive whole number of seconds, without --token or
-LATERE_LUX_TOKEN. Auth may shorten the requested lifetime; stderr reports
-the lifetime returned by auth.`,
+lasts the login session. That token is your account's root credential,
+not a key scoped to Lux: whatever holds it holds your login. For CI, or
+whenever the exported value may spread, --ttl mints a short-lived actor
+token bound to Lux instead. Use a positive whole number of seconds,
+without --token or LATERE_LUX_TOKEN. Auth may shorten the requested
+lifetime; stderr reports the lifetime returned by auth.`,
 		Example: `  eval "$(latere lux env openai)"
   eval "$(latere lux env --compat anthropic)"
   eval "$(latere lux env --compat lux)"

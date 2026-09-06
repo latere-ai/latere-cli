@@ -110,11 +110,14 @@ one call. The call finishes in seconds, so the short lifetime bounds a
 leaked value at no cost to you.
 
 When you export your identity for a stock SDK, the default is your
-longer-lived identity token so an SDK session survives:
+longer-lived identity token so an SDK session survives. That token is
+your account's root credential, not a key scoped to Lux, and the command
+says so on stderr; prefer `--ttl` when the exported value may spread
+beyond your own shell:
 
 ```sh
-eval "$(latere lux env --compat openai)"          # identity token (lasts the login session)
-eval "$(latere lux env --compat openai --ttl 5m)" # a short-lived actor token instead (CI)
+eval "$(latere lux env --compat openai)"          # root identity token (lasts the login session)
+eval "$(latere lux env --compat openai --ttl 5m)" # a short-lived Lux-bound actor token instead (CI)
 ```
 
 `lux env` needs a surface: either `--compat <dialect>` or a passthrough
