@@ -1054,8 +1054,7 @@ Reads /lux/v1/usage and /lux/v1/usage/series.`,
 					"groups": groups.Items, "series": series.Items,
 				})
 			}
-			renderLuxUsage(cmd.OutOrStdout(), period, from, to, p.labelFmt, groups.Items, series.Items)
-			return nil
+			return renderLuxUsage(cmd.OutOrStdout(), period, from, to, p.labelFmt, groups.Items, series.Items)
 		},
 	}
 	cmd.Flags().BoolVar(&jsonF, "json", false, "JSON output")
@@ -1066,17 +1065,21 @@ Reads /lux/v1/usage and /lux/v1/usage/series.`,
 
 // renderLuxUsage prints the period total, the per-group breakdown sorted
 // by cost, and a cost bar chart bucketed by the period's label format.
-func renderLuxUsage(w io.Writer, period string, from, to time.Time, labelFmt string, groups []luxUsageRow, series []luxSeriesPoint) {
+func renderLuxUsage(w io.Writer, period string, from, to time.Time, labelFmt string, groups []luxUsageRow, series []luxSeriesPoint) error {
 	var totalCost, totalCalls int64
 	for _, g := range groups {
 		totalCost += g.CostUSDMicro
 		totalCalls += g.Calls
 	}
-	fprintf(w, "Usage last %s (%s – %s): %s, %d calls\n\n",
-		period, from.Format("Jan 02"), to.Format("Jan 02"), fmtUSDMicro(totalCost), totalCalls)
+	if _, err := fmt.Fprintf(w, "Usage last %s (%s – %s): %s, %d calls\n\n",
+		period, from.Format("Jan 02"), to.Format("Jan 02"), fmtUSDMicro(totalCost), totalCalls); err != nil {
+		return fmt.Errorf("write Lux usage summary: %w", err)
+	}
 	if totalCalls == 0 {
-		fprintln(w, "No usage in this period.")
-		return
+		if _, err := fmt.Fprintln(w, "No usage in this period."); err != nil {
+			return fmt.Errorf("write Lux usage empty message: %w", err)
+		}
+		return nil
 	}
 
 	sortGroups := make([]luxUsageRow, len(groups))
@@ -1086,10 +1089,14 @@ func renderLuxUsage(w io.Writer, period string, from, to time.Time, labelFmt str
 	})
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
 	for _, g := range sortGroups {
-		fprintf(tw, "  %s\t%s\t%d calls\t%s in / %s out\n",
-			g.Group, fmtUSDMicro(g.CostUSDMicro), g.Calls, fmtTokens(g.TokensIn), fmtTokens(g.TokensOut))
+		if _, err := fmt.Fprintf(tw, "  %s\t%s\t%d calls\t%s in / %s out\n",
+			g.Group, fmtUSDMicro(g.CostUSDMicro), g.Calls, fmtTokens(g.TokensIn), fmtTokens(g.TokensOut)); err != nil {
+			return fmt.Errorf("write Lux usage table: %w", err)
+		}
 	}
-	_ = tw.Flush()
+	if err := tw.Flush(); err != nil {
+		return fmt.Errorf("write Lux usage table: %w", err)
+	}
 
 	// Bucket the series by label (sums across groups); labels keep their
 	// first-seen chronological order.
@@ -1114,17 +1121,22 @@ func renderLuxUsage(w io.Writer, period string, from, to time.Time, labelFmt str
 		maxCost = max(maxCost, b.cost)
 	}
 	if maxCost == 0 {
-		return
+		return nil
 	}
-	fprintln(w)
+	if _, err := fmt.Fprintln(w); err != nil {
+		return fmt.Errorf("write Lux usage chart separator: %w", err)
+	}
 	const width = 28
 	for _, b := range buckets {
 		n := int(b.cost * width / maxCost)
 		if n == 0 && b.cost > 0 {
 			n = 1
 		}
-		fprintf(w, "  %-12s %-*s %s\n", b.label, width, strings.Repeat("▇", n), fmtUSDMicro(b.cost))
+		if _, err := fmt.Fprintf(w, "  %-12s %-*s %s\n", b.label, width, strings.Repeat("▇", n), fmtUSDMicro(b.cost)); err != nil {
+			return fmt.Errorf("write Lux usage chart: %w", err)
+		}
 	}
+	return nil
 }
 
 // fmtUSDMicro renders micro-USD as dollars, keeping sub-cent amounts
