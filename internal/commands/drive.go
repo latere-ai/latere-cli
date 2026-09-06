@@ -234,6 +234,9 @@ func newDriveGetCmd(o *driveOpts) *cobra.Command {
   latere drive get files/notes.md --version 3 -o notes-v3.md`,
 		Args: driveVersionArgs(&version),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if cmd.Flags().Changed("output") && out == "" {
+				return errors.New("--output cannot be empty; use '-' for stdout")
+			}
 			c, err := o.client(cmd.Context())
 			if err != nil {
 				return err
