@@ -912,14 +912,14 @@ model listed as local/<model> can be called either way.`,
 				return wrapLuxErr(err)
 			}
 			if jsonF {
-				_, err := fmt.Fprintln(os.Stdout, strings.TrimSpace(string(raw)))
+				_, err := fmt.Fprintln(cmd.OutOrStdout(), strings.TrimSpace(string(raw)))
 				return err
 			}
 			text, err := extractChatText(raw, spec.anthropicStyle)
 			if err != nil {
 				return err
 			}
-			_, err = fmt.Fprintln(os.Stdout, text)
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), text)
 			return err
 		},
 	}
