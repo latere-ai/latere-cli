@@ -10,10 +10,46 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestRefreshAuthTokenReportsPersistenceFailure(t *testing.T) {
+	for _, mode := range []string{"blocked parent", "directory target"} {
+		t.Run(mode, func(t *testing.T) {
+			root := t.TempDir()
+			path := filepath.Join(root, "auth-token.json")
+			if mode == "blocked parent" {
+				if err := os.WriteFile(path, []byte("keep"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				path = filepath.Join(path, "auth-token.json")
+			} else if err := os.Mkdir(path, 0700); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("LATERE_AUTH_TOKEN_FILE", path)
+			calls := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"access_token":"new-access","refresh_token":"new-refresh","token_type":"Bearer","expires_in":3600}`))
+			}))
+			defer server.Close()
+			got, err := RefreshAuthToken(t.Context(), server.URL, Token{RefreshToken: "old-refresh"})
+			_, pathErr := errors.AsType[*os.PathError](err)
+			_, linkErr := errors.AsType[*os.LinkError](err)
+			if (!pathErr && !linkErr) || !strings.Contains(err.Error(), "save refreshed auth token") {
+				t.Fatalf("save failure lost: %v", err)
+			}
+			if got != (Token{}) || calls != 1 {
+				t.Errorf("unsaved credential returned or refresh retried: token=%+v calls=%d", got, calls)
+			}
+		})
+	}
+}
 
 func TestRefreshAuthTokenPersistsAndPreservesRefreshToken(t *testing.T) {
 	dir := t.TempDir()

@@ -214,6 +214,8 @@ func RefreshAuthToken(ctx context.Context, authBase string, previous Token) (Tok
 	if out.RefreshToken == "" {
 		out.RefreshToken = previous.RefreshToken
 	}
-	_ = SaveAuthToken(out) // best-effort; the in-memory token still works this run
+	if err := SaveAuthToken(out); err != nil {
+		return Token{}, fmt.Errorf("save refreshed auth token: %w", err)
+	}
 	return out, nil
 }

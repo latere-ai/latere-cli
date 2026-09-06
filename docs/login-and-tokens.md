@@ -155,6 +155,9 @@ credential.
   token, requesting the exact same scope set it requested at login (so
   a refresh can never silently drop a scope). The refreshed root and
   its new refresh token are written back to `auth-token.json`.
+  If saving fails, refresh reports an error. Restore access to the credential
+  file and run `latere login` again; auth may already have invalidated the old
+  refresh token.
 - **Cella bearer.** When the bearer in `token.json` is near expiry, or
   a Cella call comes back `401`, the CLI re-runs the mint-and-exchange
   chain from the root token (refreshing the root first if it too is
