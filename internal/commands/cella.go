@@ -890,7 +890,7 @@ to stdout. Pass --output to write the archive to a local file.`,
 			if out != "" && out != "-" {
 				return saveDownload(out, resp.Body)
 			}
-			_, err = io.Copy(os.Stdout, resp.Body)
+			_, err = io.Copy(cmd.OutOrStdout(), resp.Body)
 			return err
 		},
 	}
@@ -1385,7 +1385,7 @@ Only persistent cellas can be resized.`,
 
 // ---- granular file ops ----
 
-// newCeCatCmd streams a single file from the cella to stdout.
+// newCeCatCmd streams a single file to the command's configured output.
 func newCeCatCmd() *cobra.Command {
 	var apiURL string
 	cmd := &cobra.Command{
@@ -1407,7 +1407,7 @@ func newCeCatCmd() *cobra.Command {
 			if resp.StatusCode != http.StatusOK {
 				return fmt.Errorf("cella: expected HTTP 200 for a complete download, got HTTP %d", resp.StatusCode)
 			}
-			_, err = io.Copy(os.Stdout, resp.Body)
+			_, err = io.Copy(cmd.OutOrStdout(), resp.Body)
 			return err
 		},
 	}
