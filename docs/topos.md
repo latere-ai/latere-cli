@@ -69,6 +69,9 @@ Once reconnected, press Enter, `y`/`n`, or Esc again to retry the action.
 If connection retries are exhausted, the UI exits with an error that includes
 the final connection failure.
 
+After a server restart, a restoration notice shows the saved turn and warns
+that interrupted work was rolled back. Any old approval prompt is cleared.
+
 ## Print mode (scripts and pipelines)
 
 For automation, run one prompt non-interactively with `--print`/`-p`. The agent's

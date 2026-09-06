@@ -37,6 +37,7 @@ func TestTUIApprovalLifecycleE2E(t *testing.T) {
 		{"budget stop", ev("BudgetBreach", `{"leg":"usd","actual_usd":2.5,"limit_usd":2}`), false, "ready"},
 		{"token stop", ev("Stop", `{"stop_reason":"max_tokens"}`), false, "ready"},
 		{"unfinished tools", ev("Stop", `{"stop_reason":"tool_use"}`), false, "ready"},
+		{"restored snapshot", ev("SessionResumed", `{"session_id":"sess_test","from_turn":3,"message":"resumed from the last snapshot; any interrupted turn was rolled back"}`), false, "ready"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.frame.Type == "event" {
@@ -106,6 +107,9 @@ func TestTUIApprovalLifecycleE2E(t *testing.T) {
 			}
 			if tc.name == "budget stop" && !strings.Contains(model.View(), "budget limit reached") {
 				t.Errorf("budget stop not explained: %s", model.View())
+			}
+			if tc.name == "restored snapshot" && (!strings.Contains(model.View(), "saved turn 3") || !strings.Contains(model.View(), "rolled back")) {
+				t.Errorf("restored snapshot not explained: %s", model.View())
 			}
 			if (tc.name == "token stop" || tc.name == "unfinished tools") && !strings.Contains(model.View(), "may be incomplete") {
 				t.Errorf("incomplete stop not explained: %s", model.View())

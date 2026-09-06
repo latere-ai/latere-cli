@@ -94,6 +94,23 @@ func (s *sessionState) finishPartialText() {
 
 func (s *sessionState) applyEvent(fr attachFrame) {
 	switch fr.Event {
+	case "SessionResumed":
+		var p struct {
+			FromTurn *int   `json:"from_turn"`
+			Message  string `json:"message"`
+		}
+		if json.Unmarshal(fr.Payload, &p) != nil {
+			break
+		}
+		s.applyStatus("awaiting_input")
+		message := "session resumed"
+		if p.FromTurn != nil && *p.FromTurn >= 0 {
+			message += fmt.Sprintf(" (saved turn %d)", *p.FromTurn)
+		}
+		if p.Message == "" {
+			p.Message = "any interrupted turn was rolled back"
+		}
+		s.lines = append(s.lines, "⚠ "+message+": "+p.Message)
 	case "BudgetBreach":
 		message, err := budgetBreachMessage(fr.Payload)
 		if err != nil {
