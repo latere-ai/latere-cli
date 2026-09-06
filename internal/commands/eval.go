@@ -20,6 +20,8 @@ import (
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
+
+	"github.com/latere-ai/latere-cli/internal/api"
 )
 
 // ---- DTOs (subset of evald's wire contract; keep loose so additive
@@ -112,10 +114,25 @@ func newEvalClient(apiURL, token string) (*evalClient, error) {
 	if token == "" {
 		return nil, fmt.Errorf("no Eval token: set EVAL_ADMIN_TOKEN or pass --token")
 	}
+	httpc := otel.HTTPClient()
+	isDryRun := func(req *http.Request) bool {
+		value := req.URL.Query().Get("dry_run")
+		return value == "1" || value == "true"
+	}
+	httpc.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if err := api.PreserveMethodOnRedirect(req, via); err != nil {
+			return err
+		}
+		// Apply carries dry-run mode in the query, outside its replayed body.
+		if req.Method == http.MethodPost && isDryRun(req) != isDryRun(via[0]) {
+			return fmt.Errorf("redirect changed dry-run mode")
+		}
+		return nil
+	}
 	return &evalClient{
 		baseURL: strings.TrimRight(apiURL, "/"),
 		token:   token,
-		http:    otel.HTTPClient(),
+		http:    httpc,
 	}, nil
 }
 
