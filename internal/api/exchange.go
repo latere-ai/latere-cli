@@ -198,7 +198,13 @@ func RefreshAuthToken(ctx context.Context, authBase string, previous Token) (Tok
 	if httpc == nil {
 		httpc = http.DefaultClient
 	}
-	ctx = context.WithValue(ctx, oauth2.HTTPClient, tokenHTTPClient(httpc))
+	refreshHTTP := tokenHTTPClient(httpc)
+	transport := refreshHTTP.Transport
+	if transport == nil {
+		transport = http.DefaultTransport
+	}
+	refreshHTTP.Transport = authRefreshTransport{base: transport}
+	ctx = context.WithValue(ctx, oauth2.HTTPClient, refreshHTTP)
 	tok, err := client.RefreshTokenContext(ctx, previous.RefreshToken)
 	if err != nil {
 		return Token{}, err
