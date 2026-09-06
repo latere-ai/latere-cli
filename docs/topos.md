@@ -88,8 +88,9 @@ If a tool needs your approval, print mode exits with an error. Attach to the
 session without `--print` to review the pending request and approve or deny it.
 
 When a session reaches its spending limit, the client reports
-`budget limit reached`, including the spend and limit when available. Print mode exits non-zero
-and preserves any output already printed.
+`budget limit reached`, including the spend and limit when available. Print mode
+reads through the turn's end to preserve the final partial answer, then exits
+non-zero.
 
 Print mode also exits non-zero when model output reaches its token limit or the
 run ends while still requesting tools. The diagnostic explains that the result

@@ -29,7 +29,7 @@ func TestToposPrintReportsFailedStreamsE2E(t *testing.T) {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 	for _, operation := range []string{"start", "attach"} {
-		for _, state := range []string{"completed", "closed session", "graceful disconnect", "abrupt disconnect", "protocol error", "error then stop", "empty error", "run error", "malformed answer", "malformed tool", "malformed tool failure", "malformed run error", "empty run error", "approval required", "invalid frame JSON", "invalid frame type", "invalid frame sequence", "null frame", "missing frame type", "trailing frame JSON", "malformed replay frame", "budget reached", "budget then stop", "malformed budget", "budget already exhausted", "token limit", "unfinished tools", "natural stop", "stop sequence"} {
+		for _, state := range []string{"completed", "closed session", "graceful disconnect", "abrupt disconnect", "protocol error", "error then stop", "empty error", "run error", "malformed answer", "malformed tool", "malformed tool failure", "malformed run error", "empty run error", "approval required", "invalid frame JSON", "invalid frame type", "invalid frame sequence", "null frame", "missing frame type", "trailing frame JSON", "malformed replay frame", "budget reached", "budget then stop", "malformed budget", "budget already exhausted", "token limit", "unfinished tools", "natural stop", "stop sequence", "budget before answer", "budget before answer idle"} {
 			t.Run(operation+"/"+state, func(t *testing.T) {
 				root := t.TempDir()
 				wantError, wantOutput := "", ""
@@ -45,6 +45,17 @@ func TestToposPrintReportsFailedStreamsE2E(t *testing.T) {
 				}
 				frames = append(frames, `{"type":"caught_up","seq":5}`)
 				switch state {
+				case "budget before answer", "budget before answer idle":
+					wantError, wantOutput = "budget limit reached: $2.5 spent (limit $2)", "final partial answer\n"
+					frames = append(frames,
+						`{"type":"event","event":"BudgetBreach","seq":6,"payload":{"leg":"usd","actual_usd":2.5,"limit_usd":2}}`,
+						`{"type":"event","event":"Usage","seq":7,"payload":{"total":{"input_tokens":10,"output_tokens":10}}}`,
+						`{"type":"event","event":"AssistantMessage","seq":8,"payload":{"text":"final partial answer"}}`)
+					if state == "budget before answer idle" {
+						frames = append(frames, `{"type":"event","event":"SessionStatus","seq":9,"payload":{"status":"awaiting_input"}}`)
+					} else {
+						frames = append(frames, `{"type":"event","event":"Stop","seq":9,"payload":{"stop_reason":"budget_exceeded"}}`)
+					}
 				case "token limit", "unfinished tools", "natural stop", "stop sequence":
 					reason := "end_turn"
 					switch state {
@@ -165,7 +176,7 @@ func TestToposPrintReportsFailedStreamsE2E(t *testing.T) {
 							return // A fatal frame can make the CLI disconnect immediately.
 						}
 					}
-					if state == "budget reached" {
+					if state == "budget reached" || state == "budget before answer idle" {
 						_, _, _ = conn.Read(r.Context()) // Session remains attached after a cap stop.
 						return
 					}

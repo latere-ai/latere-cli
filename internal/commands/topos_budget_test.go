@@ -5,6 +5,9 @@ package commands
 
 import (
 	"bytes"
+	"context"
+	"errors"
+	"io"
 	"strings"
 	"testing"
 )
@@ -26,8 +29,8 @@ func TestBudgetBreachStopsPrintAndUI(t *testing.T) {
 			if err := streamPrint(t.Context(), conn, &out, &diagnostic, ""); err == nil || err.Error() != tc.want {
 				t.Errorf("budget stop not reported: %v", err)
 			}
-			if len(conn.frames) != 1 || out.Len() != 0 || diagnostic.Len() != 0 {
-				t.Error("budget stop consumed completion or wrote duplicate output")
+			if len(conn.frames) != 0 || out.Len() != 0 || diagnostic.Len() != 0 {
+				t.Error("budget stop did not finish the turn or wrote duplicate output")
 			}
 			model, _ := newTestModel(false)
 			model.state.apply(ev("TextDelta", `{"text":"unfinished"}`))
@@ -42,6 +45,81 @@ func TestBudgetBreachStopsPrintAndUI(t *testing.T) {
 				t.Error("Stop duplicated the breach notice")
 			}
 		})
+	}
+}
+
+func TestBudgetBreachPreservesFollowingOutput(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		end  attachFrame
+	}{
+		{"budget stop", ev("Stop", `{"stop_reason":"budget_exceeded"}`)},
+		{"plain stop", ev("Stop", `{}`)},
+		{"idle event", ev("SessionStatus", `{"status":"awaiting_input"}`)},
+		{"idle frame", attachFrame{Type: "status", State: "awaiting_input"}},
+		{"closed frame", attachFrame{Type: "status", State: "closed"}},
+		{"disconnect", attachFrame{}},
+		{"malformed idle", ev("SessionStatus", `{"status":false}`)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			conn := &fakePrintConn{frames: make(chan attachFrame, 4)}
+			conn.frames <- ev("BudgetBreach", `{"leg":"usd","actual_usd":2.5,"limit_usd":2}`)
+			conn.frames <- ev("Usage", `{"total":{"input_tokens":10,"output_tokens":10}}`)
+			conn.frames <- ev("AssistantMessage", `{"text":"final partial answer"}`)
+			if tc.end.Type != "" {
+				conn.frames <- tc.end
+			}
+			close(conn.frames)
+			var out, diagnostic bytes.Buffer
+			err := streamPrint(t.Context(), conn, &out, &diagnostic, "")
+			if err == nil || !strings.Contains(err.Error(), "budget limit reached: $2.5 spent (limit $2)") || out.String() != "final partial answer\n" || diagnostic.Len() != 0 {
+				t.Errorf("lost final answer or budget outcome: err=%v stdout=%q stderr=%q", err, out.String(), diagnostic.String())
+			}
+			if tc.name == "disconnect" && !errors.Is(err, io.ErrUnexpectedEOF) {
+				t.Errorf("disconnect was hidden: %v", err)
+			}
+			if tc.name == "malformed idle" && (err == nil || !strings.Contains(err.Error(), "decode SessionStatus payload")) {
+				t.Errorf("malformed status was hidden: %v", err)
+			}
+		})
+	}
+}
+
+type cancelAfterPrint struct {
+	bytes.Buffer
+	cancel context.CancelFunc
+}
+
+func (w *cancelAfterPrint) Write(data []byte) (int, error) {
+	n, err := w.Buffer.Write(data)
+	w.cancel()
+	return n, err
+}
+
+func TestBudgetBreachPreservesCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	conn := &fakePrintConn{frames: make(chan attachFrame, 2)}
+	conn.frames <- ev("BudgetBreach", `{}`)
+	conn.frames <- ev("AssistantMessage", `{"text":"partial answer"}`)
+	out := &cancelAfterPrint{cancel: cancel}
+	var diagnostic bytes.Buffer
+	err := streamPrint(ctx, conn, out, &diagnostic, "")
+	if !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "budget limit reached") || out.String() != "partial answer\n" {
+		t.Errorf("cancellation lost budget context or output: err=%v out=%q", err, out.String())
+	}
+}
+
+func TestBudgetBreachPreservesLaterWriteError(t *testing.T) {
+	conn := &fakePrintConn{frames: make(chan attachFrame, 3)}
+	conn.frames <- ev("BudgetBreach", `{}`)
+	conn.frames <- ev("AssistantMessage", `{"text":"final partial answer"}`)
+	conn.frames <- ev("Stop", `{}`)
+	writeErr := errors.New("output full")
+	var diagnostic bytes.Buffer
+	err := streamPrint(t.Context(), conn, failingPrintWriter{err: writeErr}, &diagnostic, "")
+	if !errors.Is(err, writeErr) || !strings.Contains(err.Error(), "budget limit reached") || len(conn.frames) != 1 {
+		t.Errorf("write error or budget outcome lost: %v", err)
 	}
 }
 

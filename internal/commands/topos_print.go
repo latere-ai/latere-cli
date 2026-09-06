@@ -10,6 +10,7 @@ package commands
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 )
@@ -134,6 +135,7 @@ type printConn interface {
 // reported an error, output could not be written, or the connection ended
 // before completion was confirmed.
 func streamPrint(ctx context.Context, conn printConn, out, errOut io.Writer, turn string) error {
+	var budgetErr error
 	replaying := turn != ""
 	if replaying {
 		if err := conn.Send(ctx, attachControl{Type: "user_turn", Text: turn}); err != nil {
@@ -143,13 +145,13 @@ func streamPrint(ctx context.Context, conn printConn, out, errOut io.Writer, tur
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return errors.Join(budgetErr, ctx.Err())
 		case fr, ok := <-conn.Frames():
 			if !ok {
 				if err := ctx.Err(); err != nil {
-					return err
+					return errors.Join(budgetErr, err)
 				}
-				return fmt.Errorf("session disconnected before turn completed: %w", io.ErrUnexpectedEOF)
+				return errors.Join(budgetErr, fmt.Errorf("session disconnected before turn completed: %w", io.ErrUnexpectedEOF))
 			}
 			// The server replays history before reading new input. A follow-up
 			// prompt must not render or finish on an earlier turn's events.
@@ -163,12 +165,43 @@ func streamPrint(ctx context.Context, conn printConn, out, errOut io.Writer, tur
 					continue
 				}
 			}
+			if fr.Type == "event" && fr.Event == "BudgetBreach" {
+				// The server emits the breach before Usage/AssistantMessage/Stop.
+				// Retain the failure while consuming the final partial answer.
+				message, err := budgetBreachMessage(fr.Payload)
+				if err != nil {
+					return errors.Join(budgetErr, err)
+				}
+				if budgetErr == nil {
+					budgetErr = &printErr{msg: message}
+				}
+				continue
+			}
+			if budgetErr != nil {
+				status := ""
+				if fr.Type == "status" {
+					status = fr.State
+				} else if fr.Type == "event" && fr.Event == "SessionStatus" {
+					var p sessionStatusPayload
+					if err := json.Unmarshal(fr.Payload, &p); err != nil {
+						return errors.Join(budgetErr, fmt.Errorf("decode SessionStatus payload: %w", err))
+					}
+					status = p.Status
+				}
+				switch status {
+				case "awaiting_input", "completed", "failed", "closed":
+					return budgetErr
+				}
+			}
 			done, err := handlePrintFrame(fr, out, errOut)
+			if budgetErr != nil && done && fr.Type == "event" && fr.Event == "Stop" {
+				return budgetErr // Keep the breach's spending details, without duplicating the Stop error.
+			}
 			if err != nil {
-				return err
+				return errors.Join(budgetErr, err)
 			}
 			if done {
-				return nil
+				return budgetErr
 			}
 		}
 	}
