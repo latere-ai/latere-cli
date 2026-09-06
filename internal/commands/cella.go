@@ -1182,6 +1182,9 @@ only applies to ephemeral cellas.`,
   latere cella extend dev --deadline 2026-05-05T18:00:00Z`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if deadline == "" && hours <= 0 {
+				return fmt.Errorf("--hours must be greater than zero")
+			}
 			c, err := authedClient(apiURL)
 			if err != nil {
 				return err
@@ -1194,9 +1197,6 @@ only applies to ephemeral cellas.`,
 				}
 				body["deadline"] = t
 			} else {
-				if hours <= 0 {
-					hours = 24
-				}
 				body["auto_delete_hours"] = hours
 			}
 			b, err := json.Marshal(body)
@@ -1215,7 +1215,7 @@ only applies to ephemeral cellas.`,
 	}
 	f := cmd.Flags()
 	f.StringVar(&apiURL, "api-url", "", "override Cella API base URL")
-	f.IntVar(&hours, "hours", 24, "push deadline to now + N hours")
+	f.IntVar(&hours, "hours", 24, "push deadline to now + N hours (N must be positive)")
 	f.StringVar(&deadline, "deadline", "", "absolute RFC3339 deadline (overrides --hours)")
 	return cmd
 }

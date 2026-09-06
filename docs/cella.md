@@ -69,6 +69,9 @@ latere cella convert <name|id> --to persistent
 latere cella convert <name|id> --to ephemeral --hours 12
 ```
 
+`extend` defaults to 24 hours. An explicit `--hours` value must be positive;
+`--deadline` overrides it when supplied.
+
 `latere sandbox ...` remains as an alias for older scripts, but new usage should prefer `latere cella ...`.
 
 ## Commands and logs
