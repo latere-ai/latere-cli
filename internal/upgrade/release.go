@@ -81,9 +81,15 @@ func ResolveLatest(ctx context.Context, client *http.Client) (string, error) {
 	if loc == "" {
 		return "", fmt.Errorf("no redirect from %s (status %d)", url, resp.StatusCode)
 	}
-	// .../releases/tag/v0.2.30 -> v0.2.30
-	tag := loc[strings.LastIndex(loc, "/")+1:]
-	if tag == "" || !strings.Contains(loc, "/releases/tag/") {
+	target, err := req.URL.Parse(loc)
+	if err != nil {
+		return "", fmt.Errorf("unexpected latest-release redirect %q: %w", loc, err)
+	}
+	// Resolve relative references and read the tag from the release path,
+	// excluding tracking queries and fragments from the version itself.
+	tag, releasePath := strings.CutPrefix(target.Path, "/"+repoSlug+"/releases/tag/")
+	if target.Scheme != req.URL.Scheme || !strings.EqualFold(target.Host, req.URL.Host) || target.User != nil ||
+		!releasePath || strings.ContainsAny(tag, "/\\?#") || !isRelease(tag) {
 		return "", fmt.Errorf("unexpected latest-release redirect: %s", loc)
 	}
 	return tag, nil
