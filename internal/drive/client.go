@@ -348,7 +348,9 @@ func (c *Client) Stat(ctx context.Context, owner, path string) (*FileInfo, error
 }
 
 // Download returns the file bytes (following Drive's presigned 302) and
-// the content length when known (-1 otherwise). version 0 = current.
+// the content length when known (-1 otherwise). The final response must
+// be HTTP 200 because this request does not ask for a byte range.
+// version 0 = current.
 func (c *Client) Download(ctx context.Context, owner, path string, version int) (io.ReadCloser, int64, error) {
 	q := url.Values{}
 	if version > 0 {
@@ -362,8 +364,11 @@ func (c *Client) Download(ctx context.Context, owner, path string, version int) 
 	if err != nil {
 		return nil, 0, err
 	}
-	if resp.StatusCode/100 != 2 {
+	if resp.StatusCode != http.StatusOK {
 		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode/100 == 2 {
+			return nil, 0, fmt.Errorf("drive: expected HTTP 200 for a complete download, got HTTP %d", resp.StatusCode)
+		}
 		return nil, 0, decodeErr(resp)
 	}
 	return resp.Body, resp.ContentLength, nil
