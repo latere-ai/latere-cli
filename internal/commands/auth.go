@@ -332,7 +332,8 @@ token in the URL. Pass --no-git to leave your git config untouched;
 'latere git-credential setup --remove' undoes the wiring later.
 
 For unattended setups (CI, scripts), pass --token to skip the device
-flow and store an access token directly.`,
+flow and store an access token directly. A pasted token keeps its existing
+context; --personal and --org-id apply only to browser login.`,
 		Example: `  latere login
   latere login --personal
   latere login --org-id org_123
@@ -348,9 +349,15 @@ flow and store an access token directly.`,
 			// Token-paste fast path: --token wins, or stdin pipe falls
 			// back to it. The device flow only kicks in for an
 			// interactive terminal with no --token.
+			pasteLogin := func(t string) error {
+				if personal || strings.TrimSpace(orgID) != "" {
+					return errors.New("--personal and --org-id cannot change a pasted token's context; omit these flags or sign in through the browser")
+				}
+				return loginWithPastedToken(ctx, apiURL, t)
+			}
 			login := func() error {
 				if t := strings.TrimSpace(token); t != "" {
-					return loginWithPastedToken(ctx, apiURL, t)
+					return pasteLogin(t)
 				}
 				if stat, _ := os.Stdin.Stat(); (stat.Mode() & os.ModeCharDevice) == 0 {
 					b, err := readAll(os.Stdin)
@@ -358,7 +365,7 @@ flow and store an access token directly.`,
 						return err
 					}
 					if t := strings.TrimSpace(b); t != "" {
-						return loginWithPastedToken(ctx, apiURL, t)
+						return pasteLogin(t)
 					}
 				}
 				return runDeviceFlow(ctx, deviceFlowOpts{

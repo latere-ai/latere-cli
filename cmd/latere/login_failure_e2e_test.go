@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -31,11 +32,17 @@ func TestPastedLoginPreservesSessionUntilVerifiedE2E(t *testing.T) {
 			name           string
 			status         int
 			blockAuthClear bool
+			contextArgs    []string
+			rejectContext  bool
 		}{
-			{"rejected", http.StatusUnauthorized, false},
-			{"unavailable", http.StatusServiceUnavailable, false},
-			{"success", http.StatusOK, false},
-			{"auth_cleanup_failed", http.StatusOK, true},
+			{name: "rejected", status: http.StatusUnauthorized},
+			{name: "unavailable", status: http.StatusServiceUnavailable},
+			{name: "success", status: http.StatusOK},
+			{name: "auth_cleanup_failed", status: http.StatusOK, blockAuthClear: true},
+			{name: "personal context", status: http.StatusOK, contextArgs: []string{"--personal"}, rejectContext: true},
+			{name: "organization context", status: http.StatusOK, contextArgs: []string{"--org-id", "new-org"}, rejectContext: true},
+			{name: "false personal flag", status: http.StatusOK, contextArgs: []string{"--personal=false"}},
+			{name: "empty organization", status: http.StatusOK, contextArgs: []string{"--org-id", ""}},
 		} {
 			t.Run(input+"/"+tc.name, func(t *testing.T) {
 				status := tc.status
@@ -62,7 +69,9 @@ func TestPastedLoginPreservesSessionUntilVerifiedE2E(t *testing.T) {
 						}
 					}
 				}
+				var requests atomic.Int32
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					requests.Add(1)
 					if r.Method != http.MethodGet || r.URL.Path != "/v1/sandboxes" || r.Header.Get("Authorization") != "Bearer candidate-token" {
 						t.Error("verification did not use the submitted token")
 						w.WriteHeader(http.StatusBadRequest)
@@ -84,12 +93,23 @@ func TestPastedLoginPreservesSessionUntilVerifiedE2E(t *testing.T) {
 				if input == "flag" {
 					args = append(args, "--token", "candidate-token")
 				}
+				args = append(args, tc.contextArgs...)
 				command := exec.CommandContext(ctx, binary, args...)
 				if input == "stdin" {
 					command.Stdin = strings.NewReader("candidate-token\n")
 				}
 				command.Env = append(os.Environ(), "LATERE_TOKEN_FILE="+cellaPath, "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_URL="+server.URL, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
 				out, err := command.CombinedOutput()
+				if tc.rejectContext {
+					if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 || !strings.Contains(string(out), "pasted token") {
+						t.Errorf("incompatible token context returned %v: %s", err, out)
+					}
+					if requests.Load() != 0 {
+						t.Errorf("incompatible token context made %d requests", requests.Load())
+					}
+					assertUnchanged()
+					return
+				}
 				if tc.blockAuthClear {
 					if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 {
 						t.Errorf("auth cleanup failure exit = %v: %s", err, out)

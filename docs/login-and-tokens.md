@@ -40,8 +40,11 @@ Cella bearer; the new auth root token is retained. Retry the switch or log in
 again before using Cella.
 
 For a pre-issued Cella token, use `latere login --token <token>` or pipe the
-token to `latere login`. The CLI verifies that token before replacing the
-saved Cella credential. A rejected token, verification failure, or cancelled
+token to `latere login`. A pasted token keeps its existing context: omit
+`--personal` and `--org-id`, which apply only to browser login. The CLI rejects
+these combinations without changing saved credentials.
+The CLI verifies the token before replacing the saved Cella credential.
+A rejected token, verification failure, or cancelled
 attempt leaves your saved credentials intact. After a successful pasted-token
 login, the CLI removes the previous auth root token to avoid using a different
 identity for other products. If that removal fails, login reports an error and
