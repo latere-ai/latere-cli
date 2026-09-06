@@ -104,7 +104,7 @@ func TestPolicyListEmptyExplainsNextStep(t *testing.T) {
 
 func TestSandboxListPrintsReadableRecords(t *testing.T) {
 	out := capturePolicyStdout(t, func() {
-		printSandboxList([]sandboxDTO{
+		if err := printSandboxList(os.Stdout, []sandboxDTO{
 			{
 				ID:       "sb-019dc976-2b28-7c55-8778-bf7d5ae6c58d",
 				Name:     "workspace-1",
@@ -121,7 +121,9 @@ func TestSandboxListPrintsReadableRecords(t *testing.T) {
 				Tier:   "ephemeral",
 				DiskGB: 5,
 			},
-		})
+		}); err != nil {
+			t.Fatal(err)
+		}
 	})
 
 	for _, want := range []string{

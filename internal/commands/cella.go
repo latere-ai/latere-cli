@@ -241,8 +241,7 @@ Full field reference: https://cella.latere.ai/docs/cella/manifest`,
 				bytes.NewReader(body), "application/yaml", headers, &sb); err != nil {
 				return err
 			}
-			printSandbox(sb)
-			return nil
+			return printSandbox(cmd.OutOrStdout(), sb)
 		},
 	}
 	cmd.Flags().StringVarP(&file, "file", "f", "", "path to a Sandbox Manifest YAML file, or - for stdin")
@@ -309,12 +308,7 @@ cellas returned by the backend, including warm-pool cellas.`,
 			if jsonF {
 				return printJSON(cmd.OutOrStdout(), sbs)
 			}
-			if len(sbs) == 0 {
-				fprintln(os.Stdout, "No cellas are visible to this token.")
-				return nil
-			}
-			printSandboxList(sbs)
-			return nil
+			return printSandboxList(cmd.OutOrStdout(), sbs)
 		},
 	}
 	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
@@ -457,8 +451,7 @@ func newCeRenameCmd() *cobra.Command {
 				body, "application/json", &sb); err != nil {
 				return err
 			}
-			printSandbox(sb)
-			return nil
+			return printSandbox(cmd.OutOrStdout(), sb)
 		},
 	}
 	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
@@ -487,8 +480,7 @@ func simpleAction(verb, short string) *cobra.Command {
 			if err := c.Do(cmd.Context(), http.MethodPost, path, nil, "", &sb); err != nil {
 				return err
 			}
-			printSandbox(sb)
-			return nil
+			return printSandbox(cmd.OutOrStdout(), sb)
 		},
 	}
 	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
@@ -1269,8 +1261,7 @@ only applies to ephemeral cellas.`,
 				bytes.NewReader(b), "application/json", &sb); err != nil {
 				return err
 			}
-			printSandbox(sb)
-			return nil
+			return printSandbox(cmd.OutOrStdout(), sb)
 		},
 	}
 	f := cmd.Flags()
@@ -1325,8 +1316,7 @@ explicit.`,
 				bytes.NewReader(b), "application/json", &sb); err != nil {
 				return err
 			}
-			printSandbox(sb)
-			return nil
+			return printSandbox(cmd.OutOrStdout(), sb)
 		},
 	}
 	f := cmd.Flags()
@@ -1372,8 +1362,7 @@ Only persistent cellas can be resized.`,
 				bytes.NewReader(b), "application/json", &sb); err != nil {
 				return err
 			}
-			printSandbox(sb)
-			return nil
+			return printSandbox(cmd.OutOrStdout(), sb)
 		},
 	}
 	f := cmd.Flags()
@@ -2082,35 +2071,54 @@ func printJSON(out io.Writer, v any) error {
 	return enc.Encode(v)
 }
 
-func printSandboxList(sbs []sandboxDTO) {
+func printSandboxList(out io.Writer, sbs []sandboxDTO) error {
+	if len(sbs) == 0 {
+		if _, err := fmt.Fprintln(out, "No cellas are visible to this token."); err != nil {
+			return fmt.Errorf("write cella list: %w", err)
+		}
+		return nil
+	}
 	for i, s := range sbs {
 		if i > 0 {
-			fprintln(os.Stdout)
+			if _, err := fmt.Fprintln(out); err != nil {
+				return fmt.Errorf("write cella list separator: %w", err)
+			}
 		}
-		printSandbox(s)
+		if err := printSandbox(out, s); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
-func printSandbox(s sandboxDTO) {
-	printWrappedField("cella", nameOrDash(s.Name))
-	printWrappedField("id", s.ID)
-	printWrappedField("state", s.State)
-	printWrappedField("tier", defaultStr(s.Tier, "-"))
+func printSandbox(out io.Writer, s sandboxDTO) error {
+	var record strings.Builder
+	field := func(label, value string) {
+		record.WriteString(formatWrappedField(label, value))
+	}
+	field("cella", nameOrDash(s.Name))
+	field("id", s.ID)
+	field("state", s.State)
+	field("tier", defaultStr(s.Tier, "-"))
 	if s.DiskGB > 0 {
-		printWrappedField("disk", fmt.Sprintf("%dGi", s.DiskGB))
+		field("disk", fmt.Sprintf("%dGi", s.DiskGB))
 	}
 	if size := sandboxResourceSummary(s); size != "" {
-		printWrappedField("resources", size)
+		field("resources", size)
 	}
 	if !s.CreatedAt.IsZero() {
-		printWrappedField("created", humanAge(s.CreatedAt)+" ago")
+		field("created", humanAge(s.CreatedAt)+" ago")
 	}
 	if !s.Deadline.IsZero() {
-		printWrappedField("deadline", s.Deadline.Format(time.RFC3339))
+		field("deadline", s.Deadline.Format(time.RFC3339))
 	}
 	if s.Workdir != "" {
-		printWrappedField("workdir", s.Workdir)
+		field("workdir", s.Workdir)
 	}
+	if _, err := fmt.Fprint(out, record.String()); err != nil {
+		return fmt.Errorf("write cella details for %q: %w", s.ID, err)
+	}
+	return nil
 }
 
 // sandboxResourceSummary renders the cpu_milli / memory_mb fields
@@ -2151,9 +2159,13 @@ func yesNo(v bool) string {
 }
 
 func printWrappedField(label, value string) {
+	fprintf(os.Stdout, "%s", formatWrappedField(label, value))
+}
+
+func formatWrappedField(label, value string) string {
 	value = oneLine(value)
 	if value == "" {
-		return
+		return ""
 	}
 	const (
 		labelWidth = 12
@@ -2162,14 +2174,10 @@ func printWrappedField(label, value string) {
 	prefix := fmt.Sprintf("%-*s", labelWidth, label+":")
 	lines := wrapText(value, maxWidth-labelWidth)
 	if len(lines) == 0 {
-		fprintln(os.Stdout, prefix)
-		return
+		return prefix + "\n"
 	}
-	fprintln(os.Stdout, prefix+lines[0])
 	indent := strings.Repeat(" ", labelWidth)
-	for _, line := range lines[1:] {
-		fprintln(os.Stdout, indent+line)
-	}
+	return prefix + strings.Join(lines, "\n"+indent) + "\n"
 }
 
 func wrapText(s string, width int) []string {
