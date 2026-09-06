@@ -134,6 +134,9 @@ func (m tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.state.resolvePending()
 			return m, nil
 		}
+		// The input box is hidden by the approval prompt. Preserve its draft
+		// until the decision rather than accepting invisible edits.
+		return m, nil
 	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
@@ -141,7 +144,7 @@ func (m tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m tuiModel) handleEnter() (tea.Model, tea.Cmd) {
-	if m.readonly {
+	if m.readonly || m.state.pending != nil {
 		return m, nil
 	}
 	text := strings.TrimSpace(m.input.Value())

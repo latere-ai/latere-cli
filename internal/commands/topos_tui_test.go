@@ -80,6 +80,36 @@ func newTestModel(readonly bool) (tuiModel, *recSender) {
 
 func keyRunes(s string) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)} }
 
+func TestTUIApprovalPreservesHiddenDraft(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		key  tea.KeyMsg
+	}{
+		{"enter", tea.KeyMsg{Type: tea.KeyEnter}},
+		{"typing", keyRunes("more text")},
+		{"backspace", tea.KeyMsg{Type: tea.KeyBackspace}},
+		{"clear line", tea.KeyMsg{Type: tea.KeyCtrlU}},
+		{"pasted approval", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y"), Paste: true}},
+		{"pasted denial", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n"), Paste: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, sender := newTestModel(false)
+			m.input.SetValue("my unfinished draft")
+			m.state.apply(ev("ApprovalRequest", `{"decision_id":"d1","tool_id":"bash"}`))
+			updated, _ := m.Update(tc.key)
+			m = updated.(tuiModel)
+			if len(sender.sent) != 0 || m.input.Value() != "my unfinished draft" || m.state.pending == nil {
+				t.Fatalf("approval prompt changed or sent hidden draft: sent=%+v input=%q pending=%v", sender.sent, m.input.Value(), m.state.pending)
+			}
+			updated, _ = m.Update(keyRunes("n"))
+			m = updated.(tuiModel)
+			if len(sender.sent) != 1 || sender.sent[0].Type != "approval_reply" || sender.sent[0].Approve || m.state.pending != nil || !strings.Contains(m.View(), "my unfinished draft") {
+				t.Fatalf("decision did not restore draft: sent=%+v view=%s", sender.sent, m.View())
+			}
+		})
+	}
+}
+
 func TestTUIEnterSendsUserTurn(t *testing.T) {
 	m, snd := newTestModel(false)
 	m.input.SetValue("hello agent")
