@@ -933,7 +933,7 @@ destination directory.`,
 				c.HTTP.Timeout = timeout
 			}
 			var (
-				src          io.Reader = os.Stdin
+				src          = cmd.InOrStdin()
 				srcFile      *os.File
 				formFilename = "import.tar"
 				inputKind    = importInputTar
@@ -1415,7 +1415,7 @@ func newCeCatCmd() *cobra.Command {
 	return cmd
 }
 
-// newCeWriteCmd writes a single file into the cella from --input or stdin.
+// newCeWriteCmd writes a single file from --input or the configured input stream.
 func newCeWriteCmd() *cobra.Command {
 	var (
 		apiURL string
@@ -1428,7 +1428,7 @@ func newCeWriteCmd() *cobra.Command {
   latere cella write dev /workspace/app.tar -f app.tar`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			var src io.Reader = os.Stdin
+			src := cmd.InOrStdin()
 			if input != "" && input != "-" {
 				f, err := os.Open(input)
 				if err != nil {
