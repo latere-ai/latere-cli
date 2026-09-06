@@ -113,8 +113,8 @@ func handlePrintEvent(fr attachFrame, out, errOut io.Writer) (bool, error) {
 				return false, fmt.Errorf("decode Stop payload: %w", err)
 			}
 		}
-		if p.StopReason == "budget_exceeded" {
-			return true, &printErr{msg: "budget limit reached"}
+		if message := stopFailureMessage(p.StopReason); message != "" {
+			return true, &printErr{msg: message}
 		}
 		return true, nil
 	}

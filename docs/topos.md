@@ -91,6 +91,10 @@ When a session reaches its spending limit, the client reports
 `budget limit reached`, including the spend and limit when available. Print mode exits non-zero
 and preserves any output already printed.
 
+Print mode also exits non-zero when model output reaches its token limit or the
+run ends while still requesting tools. The diagnostic explains that the result
+may be incomplete; partial output remains available on stdout.
+
 Print mode exits non-zero if the agent reports an error, the server rejects the
 request, a stream frame cannot be decoded, the connection ends before completion
 is confirmed, or streamed output cannot be written. Any text already streamed

@@ -35,6 +35,8 @@ func TestTUIApprovalLifecycleE2E(t *testing.T) {
 		{"live idle", ev("SessionStatus", `{"session_id":"sess_test","status":"awaiting_input"}`), false, "ready"},
 		{"live waiting", ev("SessionStatus", `{"session_id":"sess_test","status":"awaiting_approval"}`), true, "awaiting approval"},
 		{"budget stop", ev("BudgetBreach", `{"leg":"usd","actual_usd":2.5,"limit_usd":2}`), false, "ready"},
+		{"token stop", ev("Stop", `{"stop_reason":"max_tokens"}`), false, "ready"},
+		{"unfinished tools", ev("Stop", `{"stop_reason":"tool_use"}`), false, "ready"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.frame.Type == "event" {
@@ -104,6 +106,9 @@ func TestTUIApprovalLifecycleE2E(t *testing.T) {
 			}
 			if tc.name == "budget stop" && !strings.Contains(model.View(), "budget limit reached") {
 				t.Errorf("budget stop not explained: %s", model.View())
+			}
+			if (tc.name == "token stop" || tc.name == "unfinished tools") && !strings.Contains(model.View(), "may be incomplete") {
+				t.Errorf("incomplete stop not explained: %s", model.View())
 			}
 			updated, _ := model.Update(keyRunes("y"))
 			model = updated.(tuiModel)

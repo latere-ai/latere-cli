@@ -29,7 +29,7 @@ func TestToposPrintReportsFailedStreamsE2E(t *testing.T) {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 	for _, operation := range []string{"start", "attach"} {
-		for _, state := range []string{"completed", "closed session", "graceful disconnect", "abrupt disconnect", "protocol error", "error then stop", "empty error", "run error", "malformed answer", "malformed tool", "malformed tool failure", "malformed run error", "empty run error", "approval required", "invalid frame JSON", "invalid frame type", "invalid frame sequence", "null frame", "missing frame type", "trailing frame JSON", "malformed replay frame", "budget reached", "budget then stop", "malformed budget", "budget already exhausted"} {
+		for _, state := range []string{"completed", "closed session", "graceful disconnect", "abrupt disconnect", "protocol error", "error then stop", "empty error", "run error", "malformed answer", "malformed tool", "malformed tool failure", "malformed run error", "empty run error", "approval required", "invalid frame JSON", "invalid frame type", "invalid frame sequence", "null frame", "missing frame type", "trailing frame JSON", "malformed replay frame", "budget reached", "budget then stop", "malformed budget", "budget already exhausted", "token limit", "unfinished tools", "natural stop", "stop sequence"} {
 			t.Run(operation+"/"+state, func(t *testing.T) {
 				root := t.TempDir()
 				wantError, wantOutput := "", ""
@@ -45,6 +45,19 @@ func TestToposPrintReportsFailedStreamsE2E(t *testing.T) {
 				}
 				frames = append(frames, `{"type":"caught_up","seq":5}`)
 				switch state {
+				case "token limit", "unfinished tools", "natural stop", "stop sequence":
+					reason := "end_turn"
+					switch state {
+					case "token limit":
+						reason, wantError = "max_tokens", "model output reached its token limit; response may be incomplete"
+					case "unfinished tools":
+						reason, wantError = "tool_use", "agent stopped while requesting tools; work may be incomplete"
+					case "stop sequence":
+						reason = "stop_sequence"
+					}
+					wantOutput = "partial answer\n"
+					frames = append(frames, `{"type":"event","event":"AssistantMessage","seq":6,"payload":{"text":"partial answer"}}`,
+						`{"type":"event","event":"Stop","seq":7,"payload":{"stop_reason":"`+reason+`"}}`)
 				case "budget already exhausted":
 					wantError = "budget limit reached"
 					frames = append(frames, `{"type":"event","event":"Stop","seq":6,"payload":{"stop_reason":"budget_exceeded"}}`)

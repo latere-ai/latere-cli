@@ -158,9 +158,14 @@ func (s *sessionState) applyEvent(fr attachFrame) {
 		s.pending = nil
 	case "Stop":
 		var p stopPayload
-		if json.Unmarshal(fr.Payload, &p) == nil && p.StopReason == "budget_exceeded" && !s.budgetStopped {
-			s.lines = append(s.lines, "⚠ budget limit reached")
-			s.budgetStopped = true
+		if json.Unmarshal(fr.Payload, &p) == nil {
+			message := stopFailureMessage(p.StopReason)
+			if message != "" && (p.StopReason != "budget_exceeded" || !s.budgetStopped) {
+				s.lines = append(s.lines, "⚠ "+message)
+			}
+			if p.StopReason == "budget_exceeded" {
+				s.budgetStopped = true
+			}
 		}
 		// The turn completed; the in-flight buffer (if any) is now redundant.
 		s.turn.Reset()
