@@ -288,6 +288,9 @@ the current checksum to overwrite, or --create-only for new files.`,
 			dest := ""
 			if len(args) == 2 {
 				dest = args[1]
+				if strings.TrimSpace(dest) == "" {
+					return errors.New("destination path cannot be empty")
+				}
 			}
 			c, err := o.client(cmd.Context())
 			if err != nil {
