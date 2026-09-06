@@ -71,6 +71,12 @@ func ResolveLatest(ctx context.Context, client *http.Client) (string, error) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	switch resp.StatusCode {
+	case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther,
+		http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
+	default:
+		return "", fmt.Errorf("latest-release lookup from %s returned status %d; expected a redirect", url, resp.StatusCode)
+	}
 	loc := resp.Header.Get("Location")
 	if loc == "" {
 		return "", fmt.Errorf("no redirect from %s (status %d)", url, resp.StatusCode)
