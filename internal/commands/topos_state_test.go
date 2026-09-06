@@ -80,10 +80,10 @@ func TestSessionStateClearsFinishedApprovals(t *testing.T) {
 		frame        attachFrame
 		pending      bool
 	}{
-		{"running", "running", attachFrame{Type: "status", State: "running"}, false},
-		{"idle", "awaiting_input", attachFrame{Type: "status", State: "awaiting_input"}, false},
+		{"running", "working", attachFrame{Type: "status", State: "running"}, false},
+		{"idle", "ready", attachFrame{Type: "status", State: "awaiting_input"}, false},
 		{"closed", "closed", attachFrame{Type: "status", State: "closed"}, false},
-		{"still waiting", "awaiting_approval", attachFrame{Type: "status", State: "awaiting_approval"}, true},
+		{"still waiting", "awaiting approval", attachFrame{Type: "status", State: "awaiting_approval"}, true},
 		{"empty status", "awaiting approval", attachFrame{Type: "status"}, true},
 		{"completed", "ready", ev("Stop", `{}`), false},
 		{"failed", "ready", ev("RunError", `{"error":"interrupted"}`), false},
@@ -110,12 +110,12 @@ func TestSessionStateErrorsAndStatus(t *testing.T) {
 		t.Fatal("want a protocol error line")
 	}
 	s.apply(attachFrame{Type: "status", State: "running"})
-	if s.status != "running" {
-		t.Fatalf("status = %q, want running", s.status)
+	if s.status != "working" {
+		t.Fatalf("status = %q, want working", s.status)
 	}
 	// An empty-state status frame leaves the status unchanged.
 	s.apply(attachFrame{Type: "status", State: ""})
-	if s.status != "running" {
+	if s.status != "working" {
 		t.Fatalf("empty status changed state to %q", s.status)
 	}
 	// An unrecognised frame type is a harmless no-op.
@@ -123,6 +123,28 @@ func TestSessionStateErrorsAndStatus(t *testing.T) {
 	s.apply(attachFrame{Type: "status", State: "closed"})
 	if s.status != "closed" {
 		t.Fatalf("status = %q, want closed", s.status)
+	}
+}
+
+func TestSessionStateTransitionsAfterServerStatus(t *testing.T) {
+	for _, state := range []string{"running", "awaiting_approval"} {
+		t.Run(state, func(t *testing.T) {
+			s := newSessionState()
+			if state == "awaiting_approval" {
+				s.apply(ev("ApprovalRequest", `{"decision_id":"d1","tool_id":"bash"}`))
+			}
+			s.apply(attachFrame{Type: "status", State: state})
+			if state == "awaiting_approval" {
+				s.resolvePending()
+				if s.status != "working" {
+					t.Errorf("decided approval still waiting: %q", s.status)
+				}
+			}
+			s.apply(ev("Stop", `{}`))
+			if s.status != "ready" {
+				t.Errorf("completed turn still active: %q", s.status)
+			}
+		})
 	}
 }
 

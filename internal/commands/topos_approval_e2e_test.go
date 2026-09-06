@@ -23,13 +23,14 @@ func TestTUIApprovalLifecycleE2E(t *testing.T) {
 		name    string
 		frame   attachFrame
 		pending bool
+		status  string
 	}{
-		{"resumed", attachFrame{Type: "status", State: "running"}, false},
-		{"idle", attachFrame{Type: "status", State: "awaiting_input"}, false},
-		{"completed", ev("Stop", `{}`), false},
-		{"failed", ev("RunError", `{"error":"interrupted"}`), false},
-		{"still waiting", attachFrame{Type: "status", State: "awaiting_approval"}, true},
-		{"empty status", attachFrame{Type: "status"}, true},
+		{"resumed", attachFrame{Type: "status", State: "running"}, false, "working"},
+		{"idle", attachFrame{Type: "status", State: "awaiting_input"}, false, "ready"},
+		{"completed", ev("Stop", `{}`), false, "ready"},
+		{"failed", ev("RunError", `{"error":"interrupted"}`), false, "ready"},
+		{"still waiting", attachFrame{Type: "status", State: "awaiting_approval"}, true, "awaiting approval"},
+		{"empty status", attachFrame{Type: "status"}, true, "awaiting approval"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
@@ -60,6 +61,10 @@ func TestTUIApprovalLifecycleE2E(t *testing.T) {
 					return
 				}
 				received <- control
+				if err := conn.Write(ctx, websocket.MessageText, []byte(`{"type":"event","event":"Stop","payload":{}}`)); err != nil {
+					t.Error(err)
+					return
+				}
 				_, _, _ = conn.Read(ctx) // Keep the connection live until test cleanup.
 			}))
 			defer server.Close()
@@ -87,13 +92,20 @@ func TestTUIApprovalLifecycleE2E(t *testing.T) {
 			if strings.Contains(model.View(), "approve tool") != tc.pending {
 				t.Errorf("stale approval prompt in view: %s", model.View())
 			}
+			if !strings.Contains(model.View(), "["+tc.status+"]") {
+				t.Errorf("wrong status after replay: %s", model.View())
+			}
 			updated, _ := model.Update(keyRunes("y"))
 			model = updated.(tuiModel)
+			if tc.pending && !strings.Contains(model.View(), "[working]") {
+				t.Errorf("decided approval still waiting: %s", model.View())
+			}
 			if !tc.pending {
 				if model.input.Value() != "y" {
 					t.Error("typing y was consumed as a stale approval")
 				}
-				_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+				updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+				model = updated.(tuiModel)
 			}
 			select {
 			case control := <-received:
@@ -106,6 +118,14 @@ func TestTUIApprovalLifecycleE2E(t *testing.T) {
 				}
 			case <-ctx.Done():
 				t.Fatal("timed out receiving UI control")
+			}
+			drainUntil(t, stream, func(message streamMsg) bool {
+				updated, _ := model.Update(streamEventMsg{ok: true, m: message})
+				model = updated.(tuiModel)
+				return message.frame != nil && message.frame.Event == "Stop"
+			})
+			if !strings.Contains(model.View(), "[ready]") {
+				t.Errorf("completed turn still active: %s", model.View())
 			}
 		})
 	}

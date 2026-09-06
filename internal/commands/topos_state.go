@@ -50,6 +50,16 @@ func (s *sessionState) apply(fr attachFrame) {
 	case "status":
 		if fr.State != "" {
 			s.status = fr.State
+			// Status frames and event-driven transitions share UI labels.
+			// Otherwise replay leaves states that Stop/resolvePending miss.
+			switch fr.State {
+			case "running":
+				s.status = "working"
+			case "awaiting_input":
+				s.status = "ready"
+			case "awaiting_approval":
+				s.status = "awaiting approval"
+			}
 			// Replayed requests can outlive their approval; current server
 			// status determines whether a decision is still outstanding.
 			if fr.State != "awaiting_approval" {
