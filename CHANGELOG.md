@@ -9,3 +9,5 @@ A section says what changed for whoever uses the release, not what was
 committed: the commit log already holds that.
 
 ## Unreleased
+
+- Cella `wait` and `logs` now detect status-output failures and honor configured stderr streams. Remote exit codes remain intact.
