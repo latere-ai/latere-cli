@@ -866,6 +866,9 @@ to stdout. Pass --output to write the archive to a local file.`,
   latere cella export dev --src-dir /workspace/results logs -o results.tar`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if out == "" {
+				return errors.New("--output cannot be empty; use '-' for stdout")
+			}
 			c, err := authedClient(apiURL)
 			if err != nil {
 				return err
@@ -891,7 +894,7 @@ to stdout. Pass --output to write the archive to a local file.`,
 			if resp.StatusCode != http.StatusOK {
 				return fmt.Errorf("cella: expected HTTP 200 for a complete download, got HTTP %d", resp.StatusCode)
 			}
-			if out != "" && out != "-" {
+			if out != "-" {
 				return saveDownload(out, resp.Body)
 			}
 			_, err = io.Copy(cmd.OutOrStdout(), resp.Body)
