@@ -24,8 +24,12 @@ func TestTUIApprovalDraftE2E(t *testing.T) {
 		{"typing", keyRunes("unseen edit")},
 		{"paste", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y"), Paste: true}},
 		{"backspace", tea.KeyMsg{Type: tea.KeyBackspace}},
+		{"delayed clipboard", tea.KeyMsg{Type: tea.KeyCtrlV}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.name == "delayed clipboard" {
+				fakeClipboard(t)
+			}
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
 			received := make(chan attachControl, 3)
@@ -64,11 +68,24 @@ func TestTUIApprovalDraftE2E(t *testing.T) {
 			defer stream.Close()
 			m := newTUIModel("sess_test", stream.Events(), stream, false)
 			m.input.SetValue("my unfinished draft")
+			var delayedPaste tea.Cmd
+			if tc.name == "delayed clipboard" {
+				updated, cmd := m.Update(tc.key)
+				m = updated.(tuiModel)
+				delayedPaste = cmd
+				if delayedPaste == nil {
+					t.Fatal("paste command was not started")
+				}
+			}
 			drainUntil(t, stream, func(message streamMsg) bool {
 				updated, _ := m.Update(streamEventMsg{ok: true, m: message})
 				m = updated.(tuiModel)
 				return m.state.pending != nil
 			})
+			if delayedPaste != nil {
+				updated, _ := m.Update(delayedPaste())
+				m = updated.(tuiModel)
+			}
 			// Keys pressed while the draft is hidden must not change or send it.
 			for _, key := range []tea.KeyMsg{tc.key, keyRunes("y"), {Type: tea.KeyEnter}} {
 				updated, _ := m.Update(key)

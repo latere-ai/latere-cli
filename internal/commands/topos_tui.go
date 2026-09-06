@@ -103,6 +103,12 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	var cmd tea.Cmd
+	if m.state.pending != nil {
+		// Clipboard results can arrive after the approval hides the input.
+		// Keep cursor animation alive without applying edits to the draft.
+		m.input.Cursor, cmd = m.input.Cursor.Update(msg)
+		return m, cmd
+	}
 	m.input, cmd = m.input.Update(msg)
 	return m, cmd
 }

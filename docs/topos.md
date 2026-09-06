@@ -32,7 +32,8 @@ Inside the session:
 - When the agent wants to run a tool that policy flags for review, you get an
   inline **`approve tool …? [y/n]`** prompt — press `y` to allow it or `n` to deny.
   Your draft is preserved while this prompt is visible; Enter and editing keys
-  do nothing until you approve or deny.
+  do nothing until you approve or deny. If a paste arrives while the prompt is
+  visible, it is ignored; paste again after making your decision.
 - **Ctrl+C** detaches. The session keeps running on the server; the screen shows
   you the command to reattach.
 
