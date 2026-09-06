@@ -1344,7 +1344,9 @@ func authIdentityToken(ctx context.Context, luxURL, authURLFlag string) (access,
 		if errors.Is(err, api.ErrNoToken) {
 			return "", "", fmt.Errorf("cannot authenticate to Lux: %w", err)
 		}
-		return "", "", err
+		// A saved login that exists but cannot be read is only repaired by
+		// signing in again, so carry the hint every other failure here has.
+		return "", "", fmt.Errorf("read saved login: %w; run `latere login`", err)
 	}
 	authBase = resolveAuthURL(resolveLuxURL(luxURL), authURLFlag)
 

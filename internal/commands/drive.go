@@ -16,6 +16,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/latere-ai/latere-cli/internal/api"
 	"github.com/latere-ai/latere-cli/internal/drive"
 )
 
@@ -88,8 +89,10 @@ func (o *driveOpts) client(ctx context.Context) (*drive.Client, error) {
 }
 
 // driveBearer resolves the bearer presented to Drive: an explicit --token,
-// then $LATERE_DRIVE_TOKEN, then the saved login via the same refreshed
-// auth-identity path the git credential helper uses.
+// then $LATERE_DRIVE_TOKEN, then a Drive-audience actor token minted from
+// the saved login, the same path the git credential helper uses. A missing
+// login reads as "not signed in"; a refresh or mint failure is reported as
+// itself, since re-login is not always the fix.
 func driveBearer(ctx context.Context, tokenFlag, authURL string) (string, error) {
 	if t := strings.TrimSpace(tokenFlag); t != "" {
 		return t, nil
@@ -97,10 +100,11 @@ func driveBearer(ctx context.Context, tokenFlag, authURL string) (string, error)
 	if t := strings.TrimSpace(os.Getenv("LATERE_DRIVE_TOKEN")); t != "" {
 		return t, nil
 	}
-	if tok, ok := driveCredentialToken(ctx, authURL); ok {
-		return tok, nil
+	tok, err := driveCredentialToken(ctx, authURL)
+	if errors.Is(err, api.ErrNoToken) {
+		return "", errors.New("not signed in; run `latere login`")
 	}
-	return "", errors.New("not signed in; run `latere login`")
+	return tok, err
 }
 
 // printDriveJSON emits one machine-readable value to stdout.

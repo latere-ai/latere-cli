@@ -126,14 +126,16 @@ provider argument. See the "Models (Lux)" page for the full surface.
 host (`drive.latere.ai`) in your global git config, so
 `git clone https://drive.latere.ai/git/me/<repo>.git` authenticates
 with no token in the URL. When git asks the helper for a credential on
-that host, it answers with your auth root identity token (refreshed if
-expired), which Drive validates as an auth-issued JWT. The `latere
-drive` file commands present the same identity token.
+that host, the CLI refreshes your login if it has expired, mints an actor
+token at auth with audience `drive.latere.ai` and a 5-minute TTL, and
+hands git that token. Drive accepts only tokens carrying its audience, so
+your root identity token never reaches git. A git exchange completes in
+seconds, so the short lifetime bounds a leaked value at no cost to you.
 
-If that auth credential cannot be read or refreshed, the git helper returns no
-credential so git can prompt, and Drive file commands report an authentication
-error. The CLI uses a pasted token only when the auth token file is absent; an
-existing auth failure never causes it to substitute the saved Cella token.
+If the login cannot be read or refreshed, or auth cannot mint the token, the
+git helper returns no credential so git can prompt. The CLI uses a pasted
+token only when the auth token file is absent; an existing auth failure never
+causes it to substitute the saved Cella token.
 
 ```sh
 latere git-credential setup             # wire the helper manually

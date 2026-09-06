@@ -49,25 +49,38 @@ func TestGitCredentialRejectsProtocolControlBytesE2E(t *testing.T) {
 				if err := os.WriteFile(cellaPath, cellaBefore, 0600); err != nil {
 					t.Fatal(err)
 				}
+				// The value git receives is the minted Drive token; the root
+				// token (saved or refreshed) is only the bearer of the mint.
 				var authBefore []byte
+				wantBearer := "Bearer saved-root"
 				if source != "pasted" {
-					value := map[string]any{"access_token": tc.token}
+					value := map[string]any{"access_token": "saved-root"}
 					if source == "refreshed" {
 						value = map[string]any{"access_token": "old-root", "refresh_token": "test-refresh", "expires_at": time.Now().Add(-time.Hour)}
+						wantBearer = "Bearer new-root"
 					}
 					authBefore, _ = json.Marshal(value)
 					if err := os.WriteFile(authPath, authBefore, 0600); err != nil {
 						t.Fatal(err)
 					}
 				}
-				var refreshes atomic.Int32
+				var refreshes, mints atomic.Int32
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					refreshes.Add(1)
-					if r.URL.Path != "/token" || r.Method != http.MethodPost {
-						t.Errorf("unexpected auth request: %s %s", r.Method, r.URL.Path)
-					}
 					w.Header().Set("Content-Type", "application/json")
-					_ = json.NewEncoder(w).Encode(map[string]any{"access_token": tc.token, "refresh_token": "new-refresh", "token_type": "Bearer", "expires_in": 3600})
+					switch {
+					case r.Method == http.MethodPost && r.URL.Path == "/token":
+						refreshes.Add(1)
+						_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "new-root", "refresh_token": "new-refresh", "token_type": "Bearer", "expires_in": 3600})
+					case r.Method == http.MethodPost && r.URL.Path == "/actor-tokens":
+						mints.Add(1)
+						if got := r.Header.Get("Authorization"); got != wantBearer {
+							t.Errorf("mint bearer = %q, want %q", got, wantBearer)
+						}
+						_ = json.NewEncoder(w).Encode(map[string]any{"actor_token": tc.token, "expires_in": 300})
+					default:
+						t.Errorf("unexpected auth request: %s %s", r.Method, r.URL.Path)
+						http.NotFound(w, r)
+					}
 				}))
 				defer server.Close()
 				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
@@ -85,12 +98,15 @@ func TestGitCredentialRejectsProtocolControlBytesE2E(t *testing.T) {
 				if err != nil || stdout.String() != want || stderr.Len() != 0 {
 					t.Errorf("helper=%v, stdout=%q stderr=%q, want stdout=%q", err, stdout.String(), stderr.String(), want)
 				}
-				var wantRefreshes int32
+				var wantRefreshes, wantMints int32 = 0, 1
 				if source == "refreshed" {
 					wantRefreshes = 1
 				}
-				if refreshes.Load() != wantRefreshes {
-					t.Errorf("refresh requests=%d, want %d", refreshes.Load(), wantRefreshes)
+				if source == "pasted" {
+					wantMints = 0 // no root token to mint from; the paste is presented verbatim
+				}
+				if refreshes.Load() != wantRefreshes || mints.Load() != wantMints {
+					t.Errorf("refresh requests=%d mint requests=%d, want %d and %d", refreshes.Load(), mints.Load(), wantRefreshes, wantMints)
 				}
 				if data, err := os.ReadFile(cellaPath); err != nil || !bytes.Equal(data, cellaBefore) {
 					t.Errorf("helper changed saved Cella token: %v", err)

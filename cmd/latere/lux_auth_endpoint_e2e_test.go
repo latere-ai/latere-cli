@@ -6,6 +6,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -70,7 +71,20 @@ func TestLuxAndDriveUseConfiguredAuthEndpointE2E(t *testing.T) {
 						if r.Header.Get("Authorization") != want {
 							t.Error("actor mint used the wrong root credential")
 						}
-						_, _ = w.Write([]byte(`{"actor_token":"lux-actor"}`))
+						// Each product mints for its own audience; the git helper
+						// is Drive-bound and receives a Drive token.
+						var body struct {
+							Audience string `json:"audience"`
+						}
+						_ = json.NewDecoder(r.Body).Decode(&body)
+						wantAudience, actor := "lux.latere.ai", "lux-actor"
+						if flow == "git credential" {
+							wantAudience, actor = "drive.latere.ai", "drive-actor"
+						}
+						if body.Audience != wantAudience {
+							t.Errorf("actor mint audience = %q, want %q", body.Audience, wantAudience)
+						}
+						_, _ = w.Write([]byte(`{"actor_token":"` + actor + `"}`))
 					default:
 						t.Errorf("unexpected auth endpoint: %s", r.URL.Path)
 						w.WriteHeader(http.StatusNotFound)
@@ -103,7 +117,8 @@ func TestLuxAndDriveUseConfiguredAuthEndpointE2E(t *testing.T) {
 					}
 				case "git credential":
 					args = []string{"git-credential", "get"}
-					wantOut = "username=token\npassword=new-root\n\n"
+					wantOut = "username=token\npassword=drive-actor\n\n"
+					wantMints = 1 // the refreshed root is only the bearer of the Drive mint
 				}
 				if explicit {
 					args = append(args, "--auth-url", authServer.URL+"/")

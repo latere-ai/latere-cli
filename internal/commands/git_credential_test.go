@@ -15,9 +15,94 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
+
+// driveAuthStub is a fake auth service for the git helper: /token refreshes
+// the root token and /actor-tokens mints the Drive credential. It records the
+// mint request so a test can pin the bearer, audience and TTL the helper
+// sends. mintStatus, when nonzero, makes every mint fail with that status.
+type driveAuthStub struct {
+	srv        *httptest.Server
+	mintStatus int
+
+	mu           sync.Mutex
+	refreshes    int
+	mints        int
+	mintBearer   string
+	mintAudience string
+	mintTTL      float64
+}
+
+func newDriveAuthStub(t *testing.T) *driveAuthStub {
+	t.Helper()
+	s := &driveAuthStub{}
+	s.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		switch r.URL.Path {
+		case "/token":
+			s.refreshes++
+			_ = r.ParseForm()
+			if r.FormValue("grant_type") != "refresh_token" || r.FormValue("refresh_token") != "refresh-old" {
+				http.Error(w, "bad grant", http.StatusBadRequest)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"access_token": "access-new", "token_type": "Bearer",
+				"refresh_token": "refresh-new", "expires_in": 3600,
+			})
+		case "/actor-tokens":
+			s.mints++
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			s.mintBearer = r.Header.Get("Authorization")
+			s.mintAudience, _ = body["audience"].(string)
+			s.mintTTL, _ = body["ttl_seconds"].(float64)
+			if s.mintStatus != 0 {
+				http.Error(w, "mint failed", s.mintStatus)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"actor_token": "drive-actor", "expires_in": 300})
+		default:
+			http.Error(w, "unexpected "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(s.srv.Close)
+	return s
+}
+
+// assertDriveMint checks the single mint the helper is expected to make:
+// presenting bearer, for the Drive audience, with the fixed 300s TTL.
+func (s *driveAuthStub) assertDriveMint(t *testing.T, bearer string) {
+	t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.mints != 1 {
+		t.Errorf("mints = %d, want 1", s.mints)
+	}
+	if s.mintBearer != "Bearer "+bearer {
+		t.Errorf("mint bearer = %q, want %q", s.mintBearer, "Bearer "+bearer)
+	}
+	if s.mintAudience != "drive.latere.ai" {
+		t.Errorf("mint audience = %q, want drive.latere.ai", s.mintAudience)
+	}
+	if s.mintTTL != 300 {
+		t.Errorf("mint ttl_seconds = %v, want 300", s.mintTTL)
+	}
+}
+
+func (s *driveAuthStub) counts() (refreshes, mints int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.refreshes, s.mints
+}
+
+const driveActorOutput = "username=token\npassword=drive-actor\n\n"
 
 // isolateDriveTokens points both token files at absent paths so a
 // developer's real ~/.config/latere login never leaks into a test, and
@@ -45,35 +130,82 @@ func runGitCredential(t *testing.T, in string, args ...string) (string, error) {
 
 const driveGetInput = "protocol=https\nhost=drive.latere.ai\npath=git/me/notes.git\n\n"
 
-func TestGitCredentialGetEmitsSavedToken(t *testing.T) {
+// The helper never hands git the root token: it mints an actor token bound
+// to Drive's audience with the root token as bearer, and emits that.
+func TestGitCredentialGetMintsDriveActorToken(t *testing.T) {
 	isolateDriveTokens(t)
 	writeAuthTokenFile(t, "access-root", "refresh-root", time.Now().Add(time.Hour))
+	auth := newDriveAuthStub(t)
 
-	out, err := runGitCredential(t, driveGetInput, "get")
+	out, err := runGitCredential(t, driveGetInput, "get", "--auth-url", auth.srv.URL)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	want := "username=token\npassword=access-root\n\n"
-	if out != want {
-		t.Errorf("get output = %q, want %q", out, want)
+	if out != driveActorOutput {
+		t.Errorf("get output = %q, want the minted Drive token %q", out, driveActorOutput)
 	}
+	if strings.Contains(out, "access-root") {
+		t.Errorf("get output = %q leaks the root token to git", out)
+	}
+	auth.assertDriveMint(t, "access-root")
+	if refreshes, _ := auth.counts(); refreshes != 0 {
+		t.Errorf("refreshes = %d, want 0 for a fresh root token", refreshes)
+	}
+}
+
+// A mint that fails, whether auth rejects it or is unreachable, is the
+// same outcome as a failed refresh: nothing printed, exit 0, git prompts.
+func TestGitCredentialGetSilentWhenMintFails(t *testing.T) {
+	t.Run("auth rejects", func(t *testing.T) {
+		isolateDriveTokens(t)
+		writeAuthTokenFile(t, "access-root", "refresh-root", time.Now().Add(time.Hour))
+		auth := newDriveAuthStub(t)
+		auth.mintStatus = http.StatusInternalServerError
+
+		out, err := runGitCredential(t, driveGetInput, "get", "--auth-url", auth.srv.URL)
+		if err != nil {
+			t.Fatalf("get must exit 0 when the mint fails, got %v", err)
+		}
+		if out != "" {
+			t.Errorf("get output = %q, want empty when the mint fails", out)
+		}
+	})
+	t.Run("auth unreachable", func(t *testing.T) {
+		isolateDriveTokens(t)
+		writeAuthTokenFile(t, "access-root", "refresh-root", time.Now().Add(time.Hour))
+		auth := newDriveAuthStub(t)
+		url := auth.srv.URL
+		auth.srv.Close()
+
+		out, err := runGitCredential(t, driveGetInput, "get", "--auth-url", url)
+		if err != nil {
+			t.Fatalf("get must exit 0 when auth is unreachable, got %v", err)
+		}
+		if out != "" {
+			t.Errorf("get output = %q, want empty when auth is unreachable", out)
+		}
+	})
 }
 
 func TestGitCredentialGetIgnoresOtherHosts(t *testing.T) {
 	isolateDriveTokens(t)
 	writeAuthTokenFile(t, "access-root", "refresh-root", time.Now().Add(time.Hour))
+	auth := newDriveAuthStub(t)
 
 	for _, in := range []string{
 		"protocol=https\nhost=github.com\n\n",
 		"protocol=http\nhost=drive.latere.ai\n\n", // Drive is https-only in prod
 	} {
-		out, err := runGitCredential(t, in, "get")
+		out, err := runGitCredential(t, in, "get", "--auth-url", auth.srv.URL)
 		if err != nil {
 			t.Fatalf("get(%q): %v", in, err)
 		}
 		if out != "" {
 			t.Errorf("get(%q) output = %q, want empty (not our host)", in, out)
 		}
+	}
+	if refreshes, mints := auth.counts(); refreshes != 0 || mints != 0 {
+		t.Errorf("auth calls = %d refreshes, %d mints; want none for a foreign host", refreshes, mints)
 	}
 }
 
@@ -93,18 +225,21 @@ func TestGitCredentialGetHonorsDriveHostOverride(t *testing.T) {
 	isolateDriveTokens(t)
 	writeAuthTokenFile(t, "access-root", "refresh-root", time.Now().Add(time.Hour))
 	t.Setenv("DRIVE_HOST", "localhost:8080")
+	auth := newDriveAuthStub(t)
 
-	// The dev override may be plain http.
-	out, err := runGitCredential(t, "protocol=http\nhost=localhost:8080\n\n", "get")
+	// The dev override may be plain http. The audience stays the production
+	// one: DRIVE_HOST picks the git host, not the aud claim.
+	out, err := runGitCredential(t, "protocol=http\nhost=localhost:8080\n\n", "get", "--auth-url", auth.srv.URL)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if !strings.Contains(out, "password=access-root") {
-		t.Errorf("get output = %q, want the saved token for the DRIVE_HOST override", out)
+	if out != driveActorOutput {
+		t.Errorf("get output = %q, want the minted token for the DRIVE_HOST override", out)
 	}
+	auth.assertDriveMint(t, "access-root")
 
 	// The override replaces the production host, it does not add to it.
-	out, err = runGitCredential(t, driveGetInput, "get")
+	out, err = runGitCredential(t, driveGetInput, "get", "--auth-url", auth.srv.URL)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -113,39 +248,31 @@ func TestGitCredentialGetHonorsDriveHostOverride(t *testing.T) {
 	}
 }
 
+// An expired root token is refreshed first; the refreshed value is the
+// bearer for the mint, and git still only sees the minted token.
 func TestGitCredentialGetRefreshesExpiredToken(t *testing.T) {
 	isolateDriveTokens(t)
-	authSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/token" {
-			http.Error(w, "unexpected "+r.URL.Path, http.StatusNotFound)
-			return
-		}
-		_ = r.ParseForm()
-		if r.FormValue("grant_type") != "refresh_token" || r.FormValue("refresh_token") != "refresh-old" {
-			http.Error(w, "bad grant", http.StatusBadRequest)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"access_token": "access-new", "token_type": "Bearer",
-			"refresh_token": "refresh-new", "expires_in": 3600,
-		})
-	}))
-	defer authSrv.Close()
+	auth := newDriveAuthStub(t)
 	writeAuthTokenFile(t, "access-old", "refresh-old", time.Now().Add(-time.Hour))
 
-	out, err := runGitCredential(t, driveGetInput, "get", "--auth-url", authSrv.URL)
+	out, err := runGitCredential(t, driveGetInput, "get", "--auth-url", auth.srv.URL)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	want := "username=token\npassword=access-new\n\n"
-	if out != want {
-		t.Errorf("get output = %q, want the refreshed token %q", out, want)
+	if out != driveActorOutput {
+		t.Errorf("get output = %q, want the minted token %q", out, driveActorOutput)
 	}
+	if refreshes, _ := auth.counts(); refreshes != 1 {
+		t.Errorf("refreshes = %d, want 1", refreshes)
+	}
+	auth.assertDriveMint(t, "access-new")
 }
 
+// A --token paste login has no auth file, so there is no root token to
+// mint from; the pasted bearer is presented verbatim and auth is not called.
 func TestGitCredentialGetFallsBackToCellaToken(t *testing.T) {
 	isolateDriveTokens(t)
+	auth := newDriveAuthStub(t)
 	// No auth-token.json (a --token paste login clears it); token.json holds
 	// the pasted bearer.
 	p := filepath.Join(t.TempDir(), "token.json")
@@ -155,7 +282,7 @@ func TestGitCredentialGetFallsBackToCellaToken(t *testing.T) {
 	}
 	t.Setenv("LATERE_TOKEN_FILE", p)
 
-	out, err := runGitCredential(t, driveGetInput, "get")
+	out, err := runGitCredential(t, driveGetInput, "get", "--auth-url", auth.srv.URL)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -163,11 +290,15 @@ func TestGitCredentialGetFallsBackToCellaToken(t *testing.T) {
 	if out != want {
 		t.Errorf("get output = %q, want %q", out, want)
 	}
+	if refreshes, mints := auth.counts(); refreshes != 0 || mints != 0 {
+		t.Errorf("auth calls = %d refreshes, %d mints; want none for a pasted token", refreshes, mints)
+	}
 }
 
 func TestGitCredentialStoreEraseAreNoops(t *testing.T) {
 	isolateDriveTokens(t)
 	writeAuthTokenFile(t, "access-root", "refresh-root", time.Now().Add(time.Hour))
+	auth := newDriveAuthStub(t)
 
 	for _, op := range []string{"store", "erase"} {
 		out, err := runGitCredential(t, "protocol=https\nhost=drive.latere.ai\nusername=token\npassword=whatever\n\n", op)
@@ -178,10 +309,12 @@ func TestGitCredentialStoreEraseAreNoops(t *testing.T) {
 			t.Errorf("%s output = %q, want empty (no-op)", op, out)
 		}
 	}
-	// The auth token file must be untouched by erase.
-	if tok, ok := driveCredentialToken(t.Context(), ""); !ok || tok != "access-root" {
-		t.Errorf("token after erase = (%q, %v), want the saved login intact", tok, ok)
+	// The auth token file must be untouched by erase: the saved login still
+	// mints.
+	if tok, err := driveCredentialToken(t.Context(), auth.srv.URL); err != nil || tok != "drive-actor" {
+		t.Errorf("token after erase = (%q, %v), want a mint from the intact login", tok, err)
 	}
+	auth.assertDriveMint(t, "access-root")
 }
 
 func TestParseCredentialAttrs(t *testing.T) {

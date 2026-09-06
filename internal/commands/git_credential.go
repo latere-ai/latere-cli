@@ -9,11 +9,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
+	"latere.ai/x/pkg/otel"
 
 	"github.com/latere-ai/latere-cli/internal/api"
 )
@@ -43,10 +46,11 @@ by 'latere login'.
 
 git invokes this helper as 'latere git-credential get|store|erase',
 writing an attribute block (protocol, host, ...) to stdin. 'get' answers
-only for the Drive host and emits the saved login as username/password
-lines, refreshing the token first when it has expired. 'store' and
-'erase' are no-ops: the token lives in ~/.config/latere, managed by
-'latere login' and 'latere logout', never in git's own store.
+only for the Drive host: it refreshes the saved login when expired, mints
+a 5-minute token bound to Drive's audience from it, and emits that token
+as username/password lines. The login token itself never reaches git.
+'store' and 'erase' are no-ops: the login lives in ~/.config/latere,
+managed by 'latere login' and 'latere logout', never in git's own store.
 
 Run 'latere git-credential setup' once to wire the helper into your
 global git config, scoped to drive.latere.ai only.`,
@@ -106,7 +110,7 @@ override configures HTTP as well as HTTPS for that development host.`,
 				fprintf(errw, "  %s=                          (resets inherited helpers)\n", key)
 				fprintf(errw, "  %s=!latere git-credential\n\n", key)
 			}
-			fprintf(errw, "Git now authenticates to %s with the token from `latere login`.\n", driveHost())
+			fprintf(errw, "Git now authenticates to %s with short-lived tokens minted from `latere login`.\n", driveHost())
 			return nil
 		},
 	}
@@ -213,10 +217,10 @@ func newGitCredentialGetCmd() *cobra.Command {
 			if !isDriveCredentialRequest(cmd.InOrStdin()) {
 				return nil
 			}
-			access, ok := driveCredentialToken(cmd.Context(), authURL)
+			access, err := driveCredentialToken(cmd.Context(), authURL)
 			// Git values must fit one NUL-free line. Decline malformed tokens
 			// rather than letting their bytes become credential attributes.
-			if !ok || strings.ContainsAny(access, "\r\n\x00") {
+			if err != nil || strings.ContainsAny(access, "\r\n\x00") {
 				return nil
 			}
 			// Drive's git endpoint reads the Basic password as the bearer
@@ -262,23 +266,52 @@ func driveCredentialRequest(attrs map[string]string) bool {
 	}
 }
 
-// driveCredentialToken resolves the bearer git presents to Drive: the
-// retained auth root token, refreshed when expired via the same
-// authIdentityToken path `latere lux` uses (Drive validates auth-issued
-// JWTs). Falls back to token.json only when the auth file is absent, as it is
-// after --token paste login. Existing auth failures must not change identity.
-func driveCredentialToken(ctx context.Context, authURL string) (string, bool) {
-	access, _, err := authIdentityToken(ctx, "", authURL)
+// driveAudience is the aud claim Drive enforces on the bearer git presents.
+// It is the production audience regardless of DRIVE_HOST: the override
+// selects which git host the helper answers for, not which audience auth
+// stamps.
+const driveAudience = "drive.latere.ai"
+
+// driveActorTTL bounds the token git receives, in seconds. A git exchange
+// completes in seconds, so five minutes covers it and limits the window of
+// a value that leaks through git's own credential store or a trace.
+const driveActorTTL = 300
+
+// driveCredentialToken resolves the bearer presented to Drive, by the git
+// helper and the `latere drive` file commands alike: a short-lived actor
+// token bound to driveAudience, minted at auth with the retained root token
+// (refreshed when expired via the same authIdentityToken path `latere lux`
+// uses). The root token itself is never presented: its audience is auth,
+// sandboxd and toposd, and Drive rejects it. Falls back to token.json only
+// when the auth file is absent, as it is after --token paste login; that
+// case returns api.ErrNoToken when token.json is empty too. Existing auth
+// failures must not change identity, so they are returned, not masked by
+// the fallback.
+func driveCredentialToken(ctx context.Context, authURL string) (string, error) {
+	access, authBase, err := authIdentityToken(ctx, "", authURL)
 	if err == nil {
-		return access, access != ""
+		return mintDriveActorToken(ctx, authBase, access)
 	}
 	if !errors.Is(err, api.ErrNoToken) {
-		return "", false
+		return "", err
 	}
-	if tok, err := api.LoadToken(""); err == nil && tok.AccessToken != "" {
-		return tok.AccessToken, true
+	if tok, lerr := api.LoadToken(""); lerr == nil && tok.AccessToken != "" {
+		return tok.AccessToken, nil
 	}
-	return "", false
+	return "", err
+}
+
+// mintDriveActorToken exchanges the root token for a driveAudience actor
+// token. Any failure, auth unreachable included, is an error the caller
+// decides how to surface: the git helper stays silent so git prompts, the
+// file commands report it.
+func mintDriveActorToken(ctx context.Context, authBase, access string) (string, error) {
+	httpc := &http.Client{Timeout: 15 * time.Second, Transport: otel.Transport(nil)}
+	actor, err := api.MintActorToken(ctx, httpc, authBase, access, driveAudience, driveActorTTL)
+	if err != nil {
+		return "", fmt.Errorf("mint Drive token: %w; if this persists run `latere login`", err)
+	}
+	return actor, nil
 }
 
 // parseCredentialAttrs reads git's credential-helper attribute block: one

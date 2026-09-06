@@ -62,9 +62,12 @@ everywhere.
   Mirrors `internal/api/client.go` conventions (Bearer header,
   `User-Agent: latere-cli`, 60s timeout, non-2xx → typed error) but decodes
   Drive's error envelope.
-- **Bearer**: auth identity token via `authIdentityToken` (auto-refresh),
-  same path as git-credential and Lux. `--token` / `LATERE_DRIVE_TOKEN`
-  passthrough for CI.
+- **Bearer**: a Drive-audience actor token (`aud=drive.latere.ai`, 300s)
+  minted at auth from the refreshed identity token, via
+  `driveCredentialToken` in git_credential.go, the same path as
+  git-credential. Drive enforces the audience, so the root identity token
+  is never presented to it. `--token` / `LATERE_DRIVE_TOKEN` passthrough
+  for CI.
 - **Base URL**: `resolveDriveURL(flag)` — flag `--drive-url` > env
   `DRIVE_API_URL` > default `https://drive.latere.ai`; copies
   `resolveLuxURL` (lux.go:596). `DRIVE_HOST` (git credential host matching)

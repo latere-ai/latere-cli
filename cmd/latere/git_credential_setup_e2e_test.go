@@ -6,6 +6,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -45,7 +47,22 @@ func TestGitCredentialSetupMatchesSupportedSchemesE2E(t *testing.T) {
 			if err := os.WriteFile(config, []byte("[user]\n\tname = Unrelated Setting\n"), 0600); err != nil {
 				t.Fatal(err)
 			}
-			env := append(os.Environ(), "PATH="+filepath.Dir(binary)+string(os.PathListSeparator)+os.Getenv("PATH"), "DRIVE_HOST="+tc.override, "LATERE_TOKEN_FILE="+filepath.Join(root, "token.json"), "LATERE_AUTH_TOKEN_FILE="+authPath, "GIT_CONFIG_GLOBAL="+config, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_COUNT=0", "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=", "SSH_ASKPASS=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
+			// git runs the helper with this environment, so AUTH_URL routes
+			// the Drive-audience mint to the stub.
+			auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost || r.URL.Path != "/actor-tokens" {
+					t.Errorf("unexpected auth request: %s %s", r.Method, r.URL.Path)
+					http.NotFound(w, r)
+					return
+				}
+				if got := r.Header.Get("Authorization"); got != "Bearer saved-root" {
+					t.Errorf("mint bearer = %q, want the saved root token", got)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"actor_token":"drive-actor","expires_in":300}`))
+			}))
+			defer auth.Close()
+			env := append(os.Environ(), "PATH="+filepath.Dir(binary)+string(os.PathListSeparator)+os.Getenv("PATH"), "DRIVE_HOST="+tc.override, "AUTH_URL="+auth.URL, "LATERE_TOKEN_FILE="+filepath.Join(root, "token.json"), "LATERE_AUTH_TOKEN_FILE="+authPath, "GIT_CONFIG_GLOBAL="+config, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_COUNT=0", "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=", "SSH_ASKPASS=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
 			run := func(program, input string, args ...string) (string, error) {
 				t.Helper()
 				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
@@ -78,8 +95,8 @@ func TestGitCredentialSetupMatchesSupportedSchemesE2E(t *testing.T) {
 					input := "protocol=" + scheme + "\nhost=" + tc.host + "\n\n"
 					out, err := run(git, input, "credential", "fill")
 					if allowed {
-						if err != nil || !strings.Contains(out, "password=saved-root\n") {
-							t.Errorf("Git did not obtain %s credential: %v, %q", scheme, err, out)
+						if err != nil || !strings.Contains(out, "password=drive-actor\n") || strings.Contains(out, "saved-root") {
+							t.Errorf("Git did not obtain the minted %s credential: %v, %q", scheme, err, out)
 						}
 					} else if err == nil || out != "" {
 						t.Errorf("Git unexpectedly obtained HTTP credential: %v, %q", err, out)

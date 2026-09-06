@@ -44,14 +44,30 @@ func TestGitCredentialValidatesProtocolBeforeRefreshE2E(t *testing.T) {
 				if err := os.WriteFile(authPath, before, 0600); err != nil {
 					t.Fatal(err)
 				}
-				var calls atomic.Int32
+				// auth serves the refresh and then the Drive-audience mint; the
+				// mint must present the refreshed root token as bearer.
+				var refreshes, mints atomic.Int32
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					calls.Add(1)
-					if r.Method != http.MethodPost || r.URL.Path != "/token" {
-						t.Errorf("unexpected auth request: %s %s", r.Method, r.URL.Path)
-					}
 					w.Header().Set("Content-Type", "application/json")
-					_, _ = w.Write([]byte(`{"access_token":"new-root","refresh_token":"new-refresh","token_type":"Bearer","expires_in":3600}`))
+					switch {
+					case r.Method == http.MethodPost && r.URL.Path == "/token":
+						refreshes.Add(1)
+						_, _ = w.Write([]byte(`{"access_token":"new-root","refresh_token":"new-refresh","token_type":"Bearer","expires_in":3600}`))
+					case r.Method == http.MethodPost && r.URL.Path == "/actor-tokens":
+						mints.Add(1)
+						var body map[string]any
+						_ = json.NewDecoder(r.Body).Decode(&body)
+						if got := r.Header.Get("Authorization"); got != "Bearer new-root" {
+							t.Errorf("mint bearer = %q, want the refreshed root token", got)
+						}
+						if body["audience"] != "drive.latere.ai" || body["ttl_seconds"] != float64(300) {
+							t.Errorf("mint request = %v, want audience drive.latere.ai and ttl_seconds 300", body)
+						}
+						_, _ = w.Write([]byte(`{"actor_token":"drive-actor","expires_in":300}`))
+					default:
+						t.Errorf("unexpected auth request: %s %s", r.Method, r.URL.Path)
+						http.NotFound(w, r)
+					}
 				}))
 				defer server.Close()
 				input := "host=" + deployment.host + "\n\n"
@@ -70,14 +86,14 @@ func TestGitCredentialValidatesProtocolBeforeRefreshE2E(t *testing.T) {
 				want := ""
 				var wantCalls int32
 				if allowed {
-					want = "username=token\npassword=new-root\n\n"
+					want = "username=token\npassword=drive-actor\n\n"
 					wantCalls = 1
 				}
 				if err != nil || stdout.String() != want || stderr.Len() != 0 {
 					t.Errorf("credential result=%v, stdout=%q stderr=%q; want %q", err, stdout.String(), stderr.String(), want)
 				}
-				if calls.Load() != wantCalls {
-					t.Errorf("refresh calls=%d, want %d", calls.Load(), wantCalls)
+				if refreshes.Load() != wantCalls || mints.Load() != wantCalls {
+					t.Errorf("refresh calls=%d, mint calls=%d, want %d each", refreshes.Load(), mints.Load(), wantCalls)
 				}
 				if !allowed {
 					if data, err := os.ReadFile(authPath); err != nil || !bytes.Equal(data, before) {

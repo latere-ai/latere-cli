@@ -68,7 +68,21 @@ func TestProductsRejectExpiredAuthWithoutRefreshE2E(t *testing.T) {
 						_, _ = w.Write([]byte(`{"code":"expired_cella"}`))
 						return
 					}
-					if r.Method != http.MethodGet || r.Header.Get("Authorization") != "Bearer saved-auth" {
+					// Drive-bound products first mint an aud=drive.latere.ai
+					// actor token from the usable root, then present that.
+					if r.Method == http.MethodPost && r.URL.Path == "/actor-tokens" {
+						if (product != "git helper" && product != "drive") || r.Header.Get("Authorization") != "Bearer saved-auth" {
+							t.Error("unexpected Drive mint or credential")
+						}
+						w.Header().Set("Content-Type", "application/json")
+						_, _ = w.Write([]byte(`{"actor_token":"drive-actor","expires_in":300}`))
+						return
+					}
+					wantBearer := "Bearer saved-auth"
+					if product == "drive" {
+						wantBearer = "Bearer drive-actor"
+					}
+					if r.Method != http.MethodGet || r.Header.Get("Authorization") != wantBearer {
 						t.Error("unexpected product request or credential")
 					}
 					w.Header().Set("Content-Type", "application/json")
@@ -116,11 +130,19 @@ func TestProductsRejectExpiredAuthWithoutRefreshE2E(t *testing.T) {
 						t.Errorf("usable credential rejected: %v; stderr: %s", err, stderr.String())
 					}
 					wantRequests := int32(1)
-					if product == "lux export" || product == "git helper" {
+					switch product {
+					case "lux export":
 						wantRequests = 0
 						if !strings.Contains(stdout.String(), "saved-auth") {
 							t.Errorf("missing usable credential: %q", stdout.String())
 						}
+					case "git helper":
+						wantRequests = 1 // the Drive mint; git sees only its result
+						if !strings.Contains(stdout.String(), "drive-actor") || strings.Contains(stdout.String(), "saved-auth") {
+							t.Errorf("git helper credential = %q, want the minted Drive token", stdout.String())
+						}
+					case "drive":
+						wantRequests = 2 // the Drive mint, then the Drive call
 					}
 					if requests.Load() != wantRequests {
 						t.Errorf("product requests = %d, want %d", requests.Load(), wantRequests)

@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/latere-ai/latere-cli/internal/drive"
 )
@@ -82,10 +83,53 @@ func TestDriveBearerPrecedence(t *testing.T) {
 	t.Run("not signed in", func(t *testing.T) {
 		t.Setenv("LATERE_DRIVE_TOKEN", "")
 		_, err := driveBearer(t.Context(), "", "")
-		if err == nil || !strings.Contains(err.Error(), "latere login") {
+		if err == nil || !strings.Contains(err.Error(), "not signed in") || !strings.Contains(err.Error(), "latere login") {
 			t.Errorf("want login hint, got %v", err)
 		}
 	})
+}
+
+// The file commands present the same Drive-audience actor token as the git
+// helper, never the root token, and name a mint failure for what it is
+// rather than as a missing login.
+func TestDriveBearerMintsDriveActorToken(t *testing.T) {
+	isolateDriveTokens(t)
+	t.Setenv("LATERE_DRIVE_TOKEN", "")
+	writeAuthTokenFile(t, "access-root", "refresh-root", time.Now().Add(time.Hour))
+
+	t.Run("mints", func(t *testing.T) {
+		auth := newDriveAuthStub(t)
+		got, err := driveBearer(t.Context(), "", auth.srv.URL)
+		if err != nil || got != "drive-actor" {
+			t.Fatalf("driveBearer = (%q, %v), want the minted Drive token", got, err)
+		}
+		auth.assertDriveMint(t, "access-root")
+	})
+	t.Run("mint failure is reported", func(t *testing.T) {
+		auth := newDriveAuthStub(t)
+		auth.mintStatus = http.StatusServiceUnavailable
+		_, err := driveBearer(t.Context(), "", auth.srv.URL)
+		if err == nil || !strings.Contains(err.Error(), "mint Drive token") || strings.Contains(err.Error(), "not signed in") {
+			t.Errorf("driveBearer error = %v, want the mint failure, not a missing login", err)
+		}
+	})
+}
+
+// A saved login that cannot be parsed is not "not signed in", but the only
+// repair is a new login, so the error must still point there.
+func TestDriveBearerUnreadableLoginHintsRelogin(t *testing.T) {
+	isolateDriveTokens(t)
+	t.Setenv("LATERE_DRIVE_TOKEN", "")
+	p := filepath.Join(t.TempDir(), "auth-token.json")
+	if err := os.WriteFile(p, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LATERE_AUTH_TOKEN_FILE", p)
+
+	_, err := driveBearer(t.Context(), "", "")
+	if err == nil || !strings.Contains(err.Error(), "parse token file") || !strings.Contains(err.Error(), "latere login") {
+		t.Errorf("driveBearer error = %v, want the parse failure with a re-login hint", err)
+	}
 }
 
 // execDrive runs a drive subcommand against srv with a passthrough token,

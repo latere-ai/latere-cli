@@ -29,17 +29,20 @@ func TestDriveDoesNotSubstituteCellaAfterAuthFailureE2E(t *testing.T) {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 	for _, kind := range []string{"git helper", "file command"} {
+		// wantRoot is the root token auth must see on the Drive mint; wantBearer
+		// is what Drive must then receive. A usable root always yields the
+		// minted token; only a pasted login reaches Drive verbatim.
 		for _, tc := range []struct {
-			name, wantBearer string
-			refreshStatus    int
+			name, wantRoot, wantBearer string
+			refreshStatus              int
 		}{
 			{name: "rejected refresh", refreshStatus: 400},
 			{name: "unavailable refresh", refreshStatus: 503},
 			{name: "malformed auth"},
 			{name: "empty auth"},
 			{name: "unreadable auth"},
-			{name: "healthy auth", wantBearer: "root-access"},
-			{name: "refreshed auth", wantBearer: "new-root", refreshStatus: 200},
+			{name: "healthy auth", wantRoot: "root-access", wantBearer: "drive-actor"},
+			{name: "refreshed auth", wantRoot: "new-root", wantBearer: "drive-actor", refreshStatus: 200},
 			{name: "pasted token", wantBearer: "saved-cella"},
 		} {
 			t.Run(kind+"/"+tc.name, func(t *testing.T) {
@@ -71,9 +74,17 @@ func TestDriveDoesNotSubstituteCellaAfterAuthFailureE2E(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				var refreshes, driveCalls atomic.Int32
+				var refreshes, mints, driveCalls atomic.Int32
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					w.Header().Set("Content-Type", "application/json")
+					if r.URL.Path == "/actor-tokens" {
+						mints.Add(1)
+						if tc.wantRoot == "" || r.Header.Get("Authorization") != "Bearer "+tc.wantRoot {
+							t.Error("the Drive mint presented a substituted credential after auth failed")
+						}
+						_, _ = w.Write([]byte(`{"actor_token":"drive-actor","expires_in":300}`))
+						return
+					}
 					if r.URL.Path == "/token" {
 						refreshes.Add(1)
 						if tc.refreshStatus == 0 {
@@ -122,15 +133,18 @@ func TestDriveDoesNotSubstituteCellaAfterAuthFailureE2E(t *testing.T) {
 				if stdout.String() != wantOut {
 					t.Errorf("stdout = %q, want %q", stdout.String(), wantOut)
 				}
-				var wantDrive, wantRefresh int32
+				var wantDrive, wantRefresh, wantMint int32
 				if kind == "file command" && tc.wantBearer != "" {
 					wantDrive = 1
 				}
 				if tc.refreshStatus != 0 {
 					wantRefresh = 1
 				}
-				if driveCalls.Load() != wantDrive || refreshes.Load() != wantRefresh {
-					t.Errorf("requests: Drive=%d refresh=%d, want %d/%d", driveCalls.Load(), refreshes.Load(), wantDrive, wantRefresh)
+				if tc.wantRoot != "" {
+					wantMint = 1
+				}
+				if driveCalls.Load() != wantDrive || refreshes.Load() != wantRefresh || mints.Load() != wantMint {
+					t.Errorf("requests: Drive=%d refresh=%d mint=%d, want %d/%d/%d", driveCalls.Load(), refreshes.Load(), mints.Load(), wantDrive, wantRefresh, wantMint)
 				}
 				if got, err := api.LoadToken(cellaPath); err != nil || got.AccessToken != "saved-cella" {
 					t.Errorf("Drive changed Cella credentials: %v", err)
