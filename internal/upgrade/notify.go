@@ -163,12 +163,16 @@ func Run(ctx context.Context, current, target string, checkOnly bool, out io.Wri
 	// the whole point of a rollback).
 	atLatest := target == "" && isRelease(current) && !Newer(current, tag)
 	if atLatest {
-		fprintf(out, "latere %s is already the latest release.\n", display(current))
+		if _, err := fmt.Fprintf(out, "latere %s is already the latest release.\n", display(current)); err != nil {
+			return fmt.Errorf("write upgrade check result: %w", err)
+		}
 		return nil
 	}
 	if checkOnly {
-		fprintf(out, "A new release of latere is available: %s -> %s\nRun `latere upgrade` to update.\n",
-			display(current), display(tag))
+		if _, err := fmt.Fprintf(out, "A new release of latere is available: %s -> %s\nRun `latere upgrade` to update.\n",
+			display(current), display(tag)); err != nil {
+			return fmt.Errorf("write upgrade check result: %w", err)
+		}
 		return nil
 	}
 	if !replaceSupported() {
