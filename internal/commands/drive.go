@@ -420,7 +420,11 @@ func newDriveRmCmd(o *driveOpts) *cobra.Command {
 			// files route; purge it from the trash instead.
 			var derr *drive.Error
 			if permanent && version == 0 && errors.As(err, &derr) && derr.Status == 404 {
-				if n, perr := c.TrashPurge(cmd.Context(), *o.owner, args[0]); perr == nil && n > 0 {
+				n, perr := c.TrashPurge(cmd.Context(), *o.owner, args[0])
+				if perr != nil {
+					return fmt.Errorf("purge trashed file %q: %w", args[0], perr)
+				}
+				if n > 0 {
 					err = nil
 				}
 			}

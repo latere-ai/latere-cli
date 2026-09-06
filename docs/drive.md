@@ -31,6 +31,8 @@ Downloads reject partial or unexpected success responses before writing file byt
 
 Moves verify the source and destination in the server's response. Version restores verify the file path and requested version. Incomplete or mismatched receipts return an error with the outcome unknown; the CLI does not retry the operation.
 
+`rm --permanent` also purges a file that is already in the trash. If that purge fails, the command reports the purge error so you can distinguish a missing file from a permission or service failure.
+
 ## Uploads
 
 Files up to 16 MiB stream in a single request; larger files go through Drive's multipart plane automatically (16 MiB parts, four in flight, up to 16 GiB). Uploading from stdin is single-request and capped at 100 MB.
