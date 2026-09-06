@@ -12,7 +12,10 @@ import (
 )
 
 func TestCollectCellaUploadFiles(t *testing.T) {
-	root := t.TempDir()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	dir := filepath.Join(root, "dist")
 	if err := os.MkdirAll(filepath.Join(dir, "nested"), 0700); err != nil {
 		t.Fatal(err)
@@ -46,7 +49,10 @@ func TestCollectCellaUploadFiles(t *testing.T) {
 func TestCollectCellaUploadSymlinks(t *testing.T) {
 	for _, target := range []string{"file", "directory", "missing"} {
 		t.Run(target, func(t *testing.T) {
-			root := t.TempDir()
+			root, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
 			dir := filepath.Join(root, "dist")
 			if err := os.Mkdir(dir, 0700); err != nil {
 				t.Fatal(err)
@@ -75,6 +81,56 @@ func TestCollectCellaUploadSymlinks(t *testing.T) {
 				} else if err == nil {
 					t.Error("invalid symlink source accepted")
 				}
+			}
+		})
+	}
+}
+
+func TestCollectCellaUploadParentPaths(t *testing.T) {
+	root := t.TempDir()
+	parent := filepath.Join(root, "actual")
+	child := filepath.Join(parent, "child")
+	if err := os.MkdirAll(child, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "child"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	for path, data := range map[string]string{
+		filepath.Join(parent, "file"): "wanted",
+		filepath.Join(root, "file"):   "wrong file",
+	} {
+		if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	link := filepath.Join(root, "link")
+	if err := os.Symlink(child, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	for _, tc := range []struct{ name, cwd, source, remote string }{
+		{"parent", child, "..", "actual/file"},
+		{"current", parent, ".", "file"},
+		{"current trailing slash", parent, "./", "file"},
+		{"current repeated dot", parent, "./.", "file"},
+		{"relative symlink parent", root, "link/..", "actual/file"},
+		{"absolute symlink parent", root, link + "/..", "actual/file"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Chdir(tc.cwd)
+			files, err := collectCellaUploadFiles([]string{tc.source})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(files) != 1 {
+				t.Fatalf("files = %v, want one file", files)
+			}
+			if files[0].rel != tc.remote {
+				t.Errorf("remote path = %q, want %q", files[0].rel, tc.remote)
+			}
+			data, err := os.ReadFile(files[0].local)
+			if err != nil || string(data) != "wanted" {
+				t.Errorf("local content = %q, %v; want wanted", data, err)
 			}
 		})
 	}

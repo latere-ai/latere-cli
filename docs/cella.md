@@ -182,6 +182,10 @@ Upload checks every source before sending data. Regular files, empty files,
 and symlinks to regular files are supported. Devices, named pipes, and
 directory symlinks are rejected, including inside directory trees.
 
+Uploading `.` puts the current directory's contents directly in the destination.
+Uploading `..` preserves the parent directory's name. Paths containing symlinks
+follow the local filesystem's meaning of `..` when selecting files.
+
 Upload and import report success only after all file data has been sent.
 If the server responds early, the command reports an error instead
 of confirming a transfer that did not finish.

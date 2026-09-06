@@ -138,3 +138,94 @@ func TestCellaUploadValidatesSourcesE2E(t *testing.T) {
 		})
 	}
 }
+
+func TestCellaUploadParentPathsE2E(t *testing.T) {
+	if testing.Short() {
+		t.Skip("binary e2e skipped with -short")
+	}
+	root := t.TempDir()
+	binary := filepath.Join(root, "latere")
+	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build: %v\n%s", err, out)
+	}
+	parent := filepath.Join(root, "actual")
+	child := filepath.Join(parent, "child")
+	if err := os.MkdirAll(child, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "child"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	tokenPath := filepath.Join(root, "token.json")
+	for path, data := range map[string]string{
+		tokenPath:                     `{"access_token":"test-token"}`,
+		filepath.Join(parent, "file"): "wanted",
+		filepath.Join(root, "file"):   "wrong file",
+	} {
+		if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	link := filepath.Join(root, "link")
+	if err := os.Symlink(child, link); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ name, cwd, source, remote string }{
+		{"parent", child, "..", "actual/file"},
+		{"current", parent, ".", "file"},
+		{"current trailing slash", parent, "./", "file"},
+		{"current repeated dot", parent, "./.", "file"},
+		{"relative symlink parent", root, "link/..", "actual/file"},
+		{"absolute symlink parent", root, link + "/..", "actual/file"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var requests atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				parts, err := r.MultipartReader()
+				if err != nil {
+					t.Error(err)
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				got := map[string]string{}
+				for {
+					part, err := parts.NextPart()
+					if errors.Is(err, io.EOF) {
+						break
+					}
+					if err != nil {
+						t.Error(err)
+						w.WriteHeader(http.StatusBadRequest)
+						return
+					}
+					data, err := io.ReadAll(part)
+					if err != nil {
+						t.Error(err)
+					}
+					got[part.FormName()] = string(data)
+				}
+				want := map[string]string{"dest": "/workspace", tc.remote: "wanted"}
+				if !reflect.DeepEqual(got, want) {
+					t.Errorf("uploaded contents = %v, want %v", got, want)
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				_, _ = w.Write([]byte(`{"dest":"/workspace","files":1,"bytes":6}`))
+			}))
+			defer server.Close()
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			command := exec.CommandContext(ctx, binary, "cella", "upload", "dev", tc.source, "--dest", "/workspace", "--api-url", server.URL)
+			command.Dir = tc.cwd
+			command.Env = append(os.Environ(), "LATERE_TOKEN_FILE="+tokenPath, "LATERE_AUTH_TOKEN_FILE="+filepath.Join(root, "absent-auth.json"), "XDG_CONFIG_HOME="+root, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
+			out, err := command.CombinedOutput()
+			if err != nil || !strings.Contains(string(out), "uploaded 1 files (6 bytes)") {
+				t.Errorf("upload = %v; output: %s", err, out)
+			}
+			if requests.Load() != 1 {
+				t.Errorf("upload requests = %d, want 1", requests.Load())
+			}
+		})
+	}
+}

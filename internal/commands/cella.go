@@ -1460,19 +1460,40 @@ func collectCellaUploadFiles(sources []string) ([]cellaUploadFile, error) {
 			return nil, err
 		}
 		if info.IsDir() {
-			parent := filepath.Dir(filepath.Clean(src))
-			if err := filepath.WalkDir(src, func(p string, d os.DirEntry, err error) error {
+			entry, err := os.Lstat(src)
+			if err != nil {
+				return nil, err
+			}
+			if entry.Mode()&os.ModeSymlink != 0 {
+				return nil, fmt.Errorf("upload source %q is not a regular file", src)
+			}
+			// Resolve symlinks before cleaning ..: WalkDir joins child paths
+			// lexically, which can otherwise select a different local directory.
+			root, err := filepath.EvalSymlinks(src)
+			if err != nil {
+				return nil, err
+			}
+			contentsOnly := root == "."
+			root, err = filepath.Abs(root)
+			if err != nil {
+				return nil, err
+			}
+			prefix := filepath.Base(root)
+			if contentsOnly || filepath.Dir(root) == root {
+				prefix = ""
+			}
+			if err := filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
 				if err != nil {
 					return err
 				}
 				if d.IsDir() {
 					return nil
 				}
-				rel, err := filepath.Rel(parent, p)
+				rel, err := filepath.Rel(root, p)
 				if err != nil {
 					return err
 				}
-				return addFile(p, rel)
+				return addFile(p, filepath.Join(prefix, rel))
 			}); err != nil {
 				return nil, err
 			}
