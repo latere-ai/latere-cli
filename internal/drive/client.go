@@ -537,12 +537,15 @@ func (c *Client) TrashPurge(ctx context.Context, owner, path string) (int, error
 		return 0, err
 	}
 	var out struct {
-		Purged int `json:"purged"`
+		Purged *int `json:"purged"`
 	}
 	if err := c.do(req, &out); err != nil {
 		return 0, err
 	}
-	return out.Purged, nil
+	if out.Purged == nil || *out.Purged < 0 {
+		return 0, errors.New("drive: trash purge receipt does not contain a nonnegative purged count; purge outcome is unknown")
+	}
+	return *out.Purged, nil
 }
 
 // ---- quota ----

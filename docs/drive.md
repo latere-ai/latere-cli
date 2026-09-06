@@ -31,7 +31,7 @@ Downloads reject partial or unexpected success responses before writing file byt
 
 Moves verify the source and destination in the server's response. Version restores verify the file path and requested version. Trash restores verify the file path and completed restore status. Incomplete or mismatched receipts return an error with the outcome unknown; the CLI does not retry the operation.
 
-`rm --permanent` also purges a file that is already in the trash. If that purge fails, the command reports the purge error so you can distinguish a missing file from a permission or service failure.
+`rm --permanent` also purges a file that is already in the trash. If that purge fails, the command reports the purge error so you can distinguish a missing file from a permission or service failure. A missing, null, or negative purge count leaves the deletion outcome unknown; the CLI reports an error without retrying.
 
 ## Uploads
 

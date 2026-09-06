@@ -34,6 +34,10 @@ func TestDriveRmPurgeErrorE2E(t *testing.T) {
 		body, want string
 	}{
 		{"success", 200, `{"purged":1}`, ""},
+		{"null receipt", 200, `null`, "purge outcome is unknown"},
+		{"missing count", 200, `{}`, "purge outcome is unknown"},
+		{"null count", 200, `{"purged":null}`, "purge outcome is unknown"},
+		{"negative count", 200, `{"purged":-1}`, "purge outcome is unknown"},
 		{"forbidden", 403, `{"error":"purge forbidden"}`, "purge forbidden"},
 		{"server failure", 500, `{"error":"purge failed"}`, "purge failed"},
 		{"invalid response", 200, `{"purged":`, "unexpected EOF"},
