@@ -1943,13 +1943,29 @@ func oneShotRunDetached(ctx context.Context, c *api.Client, argv []string, env m
 func oneShotRunStatus(ctx context.Context, c *api.Client, runID string) (oneShotRunDTO, error) {
 	var out oneShotRunDTO
 	err := c.GetJSON(ctx, runPath(runID), &out)
+	if err == nil {
+		err = validateOneShotRunResponse(out, runID)
+	}
 	return out, err
 }
 
 func oneShotRunCancel(ctx context.Context, c *api.Client, runID string) (oneShotRunDTO, error) {
 	var out oneShotRunDTO
 	err := c.Do(ctx, http.MethodDelete, runPath(runID), nil, "", &out)
+	if err == nil {
+		err = validateOneShotRunResponse(out, runID)
+	}
 	return out, err
+}
+
+func validateOneShotRunResponse(out oneShotRunDTO, runID string) error {
+	if out.RunID == "" || out.RunID != runID {
+		return fmt.Errorf("run response identifies %q; requested %q", out.RunID, runID)
+	}
+	if strings.TrimSpace(out.State) == "" {
+		return fmt.Errorf("run response for %q is missing state", runID)
+	}
+	return nil
 }
 
 func fetchOneShotRunLogs(ctx context.Context, c *api.Client, runID string, cursor int64) (logsCursorDTO, error) {

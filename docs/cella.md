@@ -135,6 +135,9 @@ latere cella run logs "$RUN" --follow
 latere cella run cancel "$RUN"
 ```
 
+Status and cancellation results must identify the requested run and include
+its state. Missing or mismatched responses are reported as errors.
+
 Inspect output and status:
 
 ```sh
