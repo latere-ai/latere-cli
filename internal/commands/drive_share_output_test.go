@@ -25,10 +25,12 @@ func TestDriveShareURLOutput(t *testing.T) {
 						t.Errorf("unexpected request: %s %s", r.Method, r.URL)
 					}
 					url := ""
+					granteeType := "principal"
 					if hasURL {
 						url = "/s/synthetic-link"
+						granteeType = "link"
 					}
-					_ = json.NewEncoder(w).Encode(map[string]any{"id": "share-1", "status": "active", "permission": "read", "existing": existing, "url": url})
+					_ = json.NewEncoder(w).Encode(map[string]any{"id": "share-1", "status": "active", "permission": "read", "grantee_type": granteeType, "path_prefix": "files/item", "owner": "u-test", "existing": existing, "url": url})
 				}))
 				out := &failingEnvWriter{}
 				sentinel := errors.New("stdout unavailable")

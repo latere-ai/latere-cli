@@ -355,7 +355,7 @@ func TestCreateShareRoundtrip(t *testing.T) {
 			t.Errorf("req = %+v", req)
 		}
 		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(ShareCreated{ID: "s1", Status: "active", URL: "/s/tok123"})
+		_ = json.NewEncoder(w).Encode(ShareCreated{ID: "s1", Status: "active", Permission: req.Permission, GranteeType: req.GranteeType, PathPrefix: req.PathPrefix, Owner: "u-test", URL: "/s/tok123"})
 	}))
 	defer srv.Close()
 

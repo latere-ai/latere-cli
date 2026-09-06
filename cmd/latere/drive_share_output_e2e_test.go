@@ -39,7 +39,7 @@ func TestDriveShareOutputFailureE2E(t *testing.T) {
 						if r.Method != http.MethodPost || r.URL.Path != "/api/v1/shares" || r.Header.Get("Authorization") != "Bearer synthetic-token" {
 							t.Errorf("unexpected request: %s %s", r.Method, r.URL)
 						}
-						_ = json.NewEncoder(w).Encode(map[string]any{"id": "share-1", "status": "active", "permission": "read", "existing": existing, "url": "/s/synthetic-link"})
+						_ = json.NewEncoder(w).Encode(map[string]any{"id": "share-1", "status": "active", "permission": "read", "grantee_type": "link", "path_prefix": "files/item", "owner": "u-test", "existing": existing, "url": "/s/synthetic-link"})
 					}))
 					defer server.Close()
 					output := filepath.Join(t.TempDir(), "output")

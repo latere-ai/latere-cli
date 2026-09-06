@@ -369,7 +369,7 @@ func TestDriveShareGranteeInference(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				_ = json.NewDecoder(r.Body).Decode(&got)
 				w.WriteHeader(http.StatusCreated)
-				_ = json.NewEncoder(w).Encode(drive.ShareCreated{ID: "s1", Status: "active", URL: "/s/tok"})
+				_ = json.NewEncoder(w).Encode(drive.ShareCreated{ID: "s1", Status: "active", Permission: got.Permission, GranteeType: got.GranteeType, PathPrefix: got.PathPrefix, Owner: "u-test", URL: "/s/tok"})
 			}))
 			defer srv.Close()
 

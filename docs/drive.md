@@ -49,6 +49,8 @@ Concurrent-write safety rides standard HTTP conditions: `--create-only` fails if
 
 If the link cannot be written to stdout, the command exits with an error that includes the share ID. The share still exists; the CLI does not retry its creation.
 
+Share creation verifies the returned ID, status, permissions, recipient type, path prefix, and explicit owner. Newly created active link, public, and email shares must also include a viewer URL. Invalid receipts report an unknown creation outcome without retrying or printing an unverified link. Pending shares remain valid while awaiting approval, as do existing email and public grants without viewer tokens.
+
 ## Settings
 
 | Setting | Purpose |

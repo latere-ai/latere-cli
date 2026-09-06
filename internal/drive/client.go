@@ -565,7 +565,45 @@ func (c *Client) CreateShare(ctx context.Context, in CreateShareRequest) (*Share
 	if err := c.postJSON(ctx, "/api/v1/shares", in, &out); err != nil {
 		return nil, err
 	}
+	if err := validateShareReceipt(in, out); err != nil {
+		return nil, fmt.Errorf("drive: invalid share creation receipt (share %q): %w; creation outcome is unknown", out.ID, err)
+	}
 	return &out, nil
+}
+
+func validateShareReceipt(in CreateShareRequest, out ShareCreated) error {
+	switch {
+	case strings.TrimSpace(out.ID) == "":
+		return errors.New("missing share ID")
+	case out.Status != "active" && out.Status != "pending":
+		return errors.New("expected an active or pending share")
+	case out.Permission == "" || out.Permission != in.Permission:
+		return errors.New("permission does not match the request")
+	case out.GranteeType == "" || out.GranteeType != in.GranteeType:
+		return errors.New("recipient type does not match the request")
+	case out.PathPrefix == "" || out.PathPrefix != in.PathPrefix:
+		return errors.New("path prefix does not match the request")
+	case strings.TrimSpace(out.Owner) == "":
+		return errors.New("missing owner")
+	}
+
+	// The server resolves aliases; explicit owner IDs must match exactly.
+	if in.Owner != "me" && in.Owner != "org" && out.Owner != in.Owner {
+		return errors.New("owner does not match the request")
+	}
+
+	if out.Status == "active" && strings.TrimSpace(out.URL) == "" {
+		switch in.GranteeType {
+		case "link":
+			return errors.New("active link is missing its viewer URL")
+		case "public", "email":
+			// Existing grants can be returned without viewer tokens.
+			if !out.Existing {
+				return errors.New("new active grant is missing its viewer URL")
+			}
+		}
+	}
+	return nil
 }
 
 func (c *Client) Shares(ctx context.Context, inbox bool, cursor string, limit int) (*ShareListPage, error) {
