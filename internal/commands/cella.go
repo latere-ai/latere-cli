@@ -1699,6 +1699,9 @@ func startCommand(ctx context.Context, c *api.Client, sandbox string, argv []str
 	}
 	var cd commandDTO
 	err := c.PostJSON(ctx, sbPath(sandbox)+"/commands", body, &cd)
+	if err == nil && cd.CommandID == "" {
+		err = fmt.Errorf("start response is missing command_id; the command may have started")
+	}
 	return cd, err
 }
 
@@ -1851,6 +1854,9 @@ func oneShotRunDetached(ctx context.Context, c *api.Client, argv []string, env m
 	body := oneShotRunBody(argv, env, cwd, image, diskGB, cpu, memory, timeout, credentialCatalog)
 	var out oneShotRunDTO
 	err := c.PostJSON(ctx, "/v1/one-shot-runs?detach=true", body, &out)
+	if err == nil && out.RunID == "" {
+		err = fmt.Errorf("start response is missing run_id; the run may have started")
+	}
 	return out, err
 }
 
