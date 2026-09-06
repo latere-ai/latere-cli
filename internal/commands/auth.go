@@ -696,7 +696,9 @@ Cella, then prints the identity claims embedded in the saved JWT.`,
 				Scopes        []string `json:"scopes"`
 				ClientID      string   `json:"client_id,omitempty"`
 			}
-			if err := req.GetJSON(cmd.Context(), "/tokeninfo", &info); err == nil {
+			// A successful status with no subject (including null or 204) does
+			// not identify a principal. Use the verified fallback in that case.
+			if err := req.GetJSON(cmd.Context(), "/tokeninfo", &info); err == nil && info.Sub != "" {
 				printPrincipal(principalInfo{
 					Sub:           info.Sub,
 					Email:         deref(info.Email),
