@@ -73,7 +73,7 @@ func TestEvalResolvedPromptTextE2E(t *testing.T) {
 							t.Errorf("second task=%+v", got.Tasks[1])
 						}
 					}
-					_, _ = io.WriteString(w, `{"suite":{"name":"test","status":"exists"}}`)
+					_, _ = io.WriteString(w, `{"dry_run":false,"suite":{"id":"st-1","name":"test","status":"exists"}}`)
 				}))
 				defer server.Close()
 				input := manifest

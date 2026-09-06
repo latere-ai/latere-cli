@@ -47,7 +47,7 @@ func TestEvalOutputFailures(t *testing.T) {
 		want     string
 	}{
 		{"apply", []string{"apply", "-f", manifest}, evalApplyResponse, "suite frontier-suite (created)\n  task abcdef012345 created\n  task fedcba987654 exists (lineage ln-7)\ncells: 4 created, 2 exists, 1 unmanaged\n  comparison model-vs-model: created, single-variable, 4 members\n  comparison sloppy: updated, confounded(harness, effort_configured), 6 members\nwarning: matrix.exclude[0] matched no cells\n"},
-		{"dry-run", []string{"apply", "-f", manifest, "--dry-run"}, `{"dry_run":true,"suite":{"name":"test","status":"created"}}`, "dry run — no changes written\nsuite test (created)\ncells: 0 created, 0 exists, 0 unmanaged\n"},
+		{"dry-run", []string{"apply", "-f", manifest, "--dry-run"}, `{"dry_run":true,"suite":{"id":"st-1","name":"test","status":"created"}}`, "dry run — no changes written\nsuite test (created)\ncells: 0 created, 0 exists, 0 unmanaged\n"},
 		{"empty suites", []string{"suites"}, `[]`, "No suites.\n"},
 		{"empty cells", []string{"cells", "--suite", "st-1"}, `[]`, "No cells in this suite.\n"},
 	} {

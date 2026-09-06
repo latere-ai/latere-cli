@@ -28,7 +28,7 @@ import (
 //      backend changes don't break the CLI). ----
 
 type evalApplyResultDTO struct {
-	DryRun      bool                `json:"dry_run"`
+	DryRun      *bool               `json:"dry_run"`
 	Suite       evalApplyNounDTO    `json:"suite"`
 	Tasks       []evalApplyTaskDTO  `json:"tasks"`
 	Cells       evalApplyCellsDTO   `json:"cells"`
@@ -274,6 +274,15 @@ Use --dry-run to see the full reconciliation diff without writing.`,
 			if err := c.doYAML(cmd.Context(), http.MethodPost, path, body, &res); err != nil {
 				return err
 			}
+			if strings.TrimSpace(res.Suite.ID) == "" || strings.TrimSpace(res.Suite.Name) == "" || strings.TrimSpace(res.Suite.Status) == "" {
+				return fmt.Errorf("invalid Eval apply response: missing suite identity or status; apply outcome is unknown")
+			}
+			if res.DryRun == nil {
+				return fmt.Errorf("invalid Eval apply response: missing dry-run mode; apply outcome is unknown")
+			}
+			if *res.DryRun != dryRun {
+				return fmt.Errorf("invalid Eval apply response: dry_run=%t, requested %t; apply outcome is unknown", *res.DryRun, dryRun)
+			}
 			return printEvalApplyResult(cmd.OutOrStdout(), res)
 		},
 	}
@@ -362,7 +371,7 @@ func readEvalPromptFile(path string, remaining int) ([]byte, error) {
 func printEvalApplyResult(dst io.Writer, res evalApplyResultDTO) error {
 	var output strings.Builder
 	w := &output
-	if res.DryRun {
+	if res.DryRun != nil && *res.DryRun {
 		fprintln(w, "dry run — no changes written")
 	}
 	fprintf(w, "suite %s (%s)\n", res.Suite.Name, res.Suite.Status)

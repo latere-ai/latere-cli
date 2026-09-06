@@ -137,6 +137,8 @@ Eval manifests may be up to 256 KiB, including the YAML produced after inlining 
 
 Eval commands exit with an error if their results cannot be written to stdout. An output failure after apply does not undo the completed API request.
 
+Apply also rejects responses missing the suite identity, status, or dry-run mode, and responses whose dry-run mode differs from the request. These errors leave the apply outcome unknown; the CLI does not retry automatically.
+
 ## Development
 
 ```sh

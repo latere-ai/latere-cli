@@ -99,7 +99,7 @@ func TestEvalManifestLimitE2E(t *testing.T) {
 							}
 						}
 					}
-					_, _ = io.WriteString(w, `{"suite":{"name":"test","status":"created"}}`)
+					_, _ = io.WriteString(w, `{"dry_run":false,"suite":{"id":"st-1","name":"test","status":"created"}}`)
 				}))
 				defer server.Close()
 				input := manifest

@@ -37,8 +37,8 @@ func TestEvalOutputFailureE2E(t *testing.T) {
 		args           []string
 		response, want string
 	}{
-		{"apply", []string{"apply", "-f", manifest}, `{"suite":{"name":"test","status":"created"}}`, "suite test (created)"},
-		{"dry-run", []string{"apply", "-f", manifest, "--dry-run"}, `{"dry_run":true,"suite":{"name":"test","status":"created"}}`, "dry run — no changes written"},
+		{"apply", []string{"apply", "-f", manifest}, `{"dry_run":false,"suite":{"id":"st-1","name":"test","status":"created"}}`, "suite test (created)"},
+		{"dry-run", []string{"apply", "-f", manifest, "--dry-run"}, `{"dry_run":true,"suite":{"id":"st-1","name":"test","status":"created"}}`, "dry run — no changes written"},
 		{"empty suites", []string{"suites"}, `[]`, "No suites."},
 		{"empty cells", []string{"cells", "--suite", "st-1"}, `[]`, "No cells in this suite."},
 		{"suites", []string{"suites"}, `[{"id":"st-1","name":"test"}]`, "st-1"},
