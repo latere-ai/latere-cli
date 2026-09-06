@@ -796,7 +796,9 @@ the command exits.`,
 			if _, err := fmt.Fprint(cmd.OutOrStdout(), out.Bytes); err != nil {
 				return fmt.Errorf("write logs: %w", err)
 			}
-			fmt.Fprintf(os.Stderr, "[cursor=%d phase=%s]\n", out.NextCursor, out.Phase)
+			if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "[cursor=%d phase=%s]\n", out.NextCursor, out.Phase); err != nil {
+				return fmt.Errorf("write command status: %w", err)
+			}
 			return nil
 		},
 	}
@@ -833,12 +835,15 @@ func newCeWaitCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(os.Stderr, "phase=%s", cd.Phase)
+			status := fmt.Sprintf("phase=%s", cd.Phase)
 			if cd.ExitCode != nil {
-				fmt.Fprintf(os.Stderr, " exit_code=%d", *cd.ExitCode)
+				status += fmt.Sprintf(" exit_code=%d", *cd.ExitCode)
 			}
-			fmt.Fprintln(os.Stderr)
-			return commandExitError(cd.Phase, cd.ExitCode)
+			exitErr := commandExitError(cd.Phase, cd.ExitCode)
+			if _, err := fmt.Fprintln(cmd.ErrOrStderr(), status); err != nil {
+				return errors.Join(exitErr, fmt.Errorf("write command status: %w", err))
+			}
+			return exitErr
 		},
 	}
 	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
