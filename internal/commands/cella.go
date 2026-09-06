@@ -1061,8 +1061,13 @@ func sniffImportInput(f *os.File) (importInputKind, error) {
 	if _, seekErr := f.Seek(0, io.SeekStart); seekErr != nil {
 		return importInputTar, seekErr
 	}
-	if decodeErr == nil && n == len(block) && string(block[257:262]) == "ustar" {
-		return importInputTar, nil
+	if decodeErr == nil && n == len(block) && block != ([512]byte{}) {
+		header, headerErr := tar.NewReader(bytes.NewReader(block[:])).Next()
+		// A complete nonzero block must pass header parsing before Next
+		// can request following PAX/GNU metadata and hit our probe's EOF.
+		if header != nil || errors.Is(headerErr, io.EOF) || errors.Is(headerErr, io.ErrUnexpectedEOF) {
+			return importInputTar, nil
+		}
 	}
 	return importInputRegularFile, nil
 }

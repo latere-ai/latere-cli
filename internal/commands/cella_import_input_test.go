@@ -4,6 +4,7 @@
 package commands
 
 import (
+	"archive/tar"
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
@@ -95,6 +96,8 @@ func TestClassifyImportInputFormats(t *testing.T) {
 		{"gzip-without-extension", filepath.Join("testdata", "import", "payload.tar.gz"), importInputTar},
 		{"bzip2-without-extension", filepath.Join("testdata", "import", "payload.tar.bz2"), importInputTar},
 		{"xz-without-extension", filepath.Join("testdata", "import", "payload.tar.xz"), importInputTar},
+		{"v7-without-extension", filepath.Join("testdata", "import", "payload.v7.tar"), importInputTar},
+		{"gzip-v7-without-extension", filepath.Join("testdata", "import", "payload.v7.tar.gz"), importInputTar},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f, err := os.Open(tc.path)
@@ -128,6 +131,45 @@ func TestClassifyImportInputFormats(t *testing.T) {
 	defer writeOnly.Close()
 	if _, err := classifyImportInput("input", writeOnly); err == nil {
 		t.Fatal("unreadable input accepted")
+	}
+}
+
+func TestClassifyImportTarHeaders(t *testing.T) {
+	for _, kind := range []string{"false magic", "zeros", "PAX", "GNU"} {
+		t.Run(kind, func(t *testing.T) {
+			data := make([]byte, 512)
+			want := importInputRegularFile
+			switch kind {
+			case "false magic":
+				copy(data[257:], "ustar")
+			case "PAX", "GNU":
+				var archive bytes.Buffer
+				writer := tar.NewWriter(&archive)
+				format := tar.FormatPAX
+				if kind == "GNU" {
+					format = tar.FormatGNU
+				}
+				if err := writer.WriteHeader(&tar.Header{Name: strings.Repeat("x", 110), Size: 0, Mode: 0600, Format: format}); err != nil {
+					t.Fatal(err)
+				}
+				if err := writer.Close(); err != nil {
+					t.Fatal(err)
+				}
+				data, want = archive.Bytes(), importInputTar
+			}
+			path := filepath.Join(t.TempDir(), "input")
+			if err := os.WriteFile(path, data, 0600); err != nil {
+				t.Fatal(err)
+			}
+			file, err := os.Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer file.Close()
+			if got, err := classifyImportInput(path, file); err != nil || got != want {
+				t.Errorf("classification = %v, %v; want %v", got, err, want)
+			}
+		})
 	}
 }
 

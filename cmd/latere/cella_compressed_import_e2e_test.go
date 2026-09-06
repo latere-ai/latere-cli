@@ -31,7 +31,7 @@ func TestCellaCompressedTarImportE2E(t *testing.T) {
 	if err := os.WriteFile(tokenPath, []byte(`{"access_token":"test-token"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	for _, format := range []string{"tar", "tar.gz", "tar.bz2", "tar.xz"} {
+	for _, format := range []string{"tar", "tar.gz", "tar.bz2", "tar.xz", "v7.tar", "v7.tar.gz"} {
 		for _, mode := range []string{"file", "stdin", "without extension"} {
 			t.Run(format+"/"+mode, func(t *testing.T) {
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -98,6 +98,15 @@ func TestCellaCompressedTarImportE2E(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestCellaImportRegularFileWithTarMagicE2E(t *testing.T) {
+	if testing.Short() {
+		t.Skip("binary e2e skipped with -short")
+	}
+	data := make([]byte, 512)
+	copy(data[257:], "ustar")
+	runCellaImportE2E(t, "ordinary.bin", []archiveEntry{{Name: "ordinary.bin", Body: string(data)}})
 }
 
 func TestCellaImportCompressedRegularFileE2E(t *testing.T) {

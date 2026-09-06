@@ -159,6 +159,7 @@ latere cella run demo --credential llm-primary -- sh -lc 'curl http://127.0.0.1:
 Import recognizes compressed tar archives by their contents even without a
 filename extension. Named compressed files that are not tar archives are copied
 unchanged.
+Legacy V7 tar archives are also detected without an extension.
 
 Cella file transfer uses tar streams:
 
