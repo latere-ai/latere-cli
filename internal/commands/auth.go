@@ -274,6 +274,7 @@ func replaceCellaOrgToken(ctx context.Context, authBase, rootToken string) error
 func newAuthPrintTokenCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "print-token",
+		Args:  cobra.NoArgs,
 		Short: "Print the saved access token to stdout (for use in scripts).",
 		Long: `Print the OAuth access token from ~/.config/latere/token.json.
 
@@ -311,6 +312,7 @@ func newAuthLoginCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "login",
+		Args:  cobra.NoArgs,
 		Short: "Sign in via OAuth2 device-code (or paste a token with --token).",
 		Long: `Sign in to Latere.
 
@@ -665,6 +667,7 @@ func newAuthWhoamiCmd() *cobra.Command {
 	var apiURL string
 	cmd := &cobra.Command{
 		Use:   "whoami",
+		Args:  cobra.NoArgs,
 		Short: "Print the current principal.",
 		Long: `Print the principal and token context currently used by the CLI.
 
@@ -828,6 +831,7 @@ func newAuthLogoutCmd() *cobra.Command {
 	var apiURL, authURL string
 	cmd := &cobra.Command{
 		Use:   "logout",
+		Args:  cobra.NoArgs,
 		Short: "Sign out: revoke the session server-side and clear local tokens.",
 		Long: `Sign out of Latere.
 
