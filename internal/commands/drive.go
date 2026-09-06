@@ -163,9 +163,13 @@ func newDriveLsCmd(o *driveOpts) *cobra.Command {
 			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
 			for _, e := range entries {
 				if long {
-					fprintf(w, "%d\t%s\t%s\t%s\n", e.Size, e.Modified, e.Checksum, e.Path)
+					if _, err := fmt.Fprintf(w, "%d\t%s\t%s\t%s\n", e.Size, e.Modified, e.Checksum, e.Path); err != nil {
+						return fmt.Errorf("write Drive file list: %w", err)
+					}
 				} else {
-					fprintln(w, e.Path)
+					if _, err := fmt.Fprintln(w, e.Path); err != nil {
+						return fmt.Errorf("write Drive file list: %w", err)
+					}
 				}
 			}
 			return w.Flush()
