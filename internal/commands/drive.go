@@ -583,7 +583,9 @@ applies to person grants; links are always read-only.`,
 			}
 			fprintf(cmd.ErrOrStderr(), "Share %s (%s, %s, id %s)\n", state, res.Status, res.Permission, res.ID)
 			if res.URL != "" {
-				fprintln(cmd.OutOrStdout(), drive.ResolveURL(*o.driveURL)+res.URL)
+				if _, err := fmt.Fprintln(cmd.OutOrStdout(), drive.ResolveURL(*o.driveURL)+res.URL); err != nil {
+					return fmt.Errorf("write share URL for share %s: %w", res.ID, err)
+				}
 			}
 			return nil
 		},

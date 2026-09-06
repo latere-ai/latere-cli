@@ -37,6 +37,8 @@ Concurrent-write safety rides standard HTTP conditions: `--create-only` fails if
 
 `share` grants access to everything under a path prefix. `--link` mints a read-only viewer URL (printed on stdout); `--to` grants a person by email or principal id (`--permission read|write|manage`); `--public` makes the prefix world-readable. In org spaces, shares may enter a `pending` state until an org admin approves them in the web app.
 
+If the link cannot be written to stdout, the command exits with an error that includes the share ID. The share still exists; the CLI does not retry its creation.
+
 ## Settings
 
 | Setting | Purpose |
