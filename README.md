@@ -44,7 +44,7 @@ latere upgrade --auto off # turn auto-upgrade off
 latere upgrade --auto on  # turn it back on
 ```
 
-If an auto-upgraded release turns out to be broken, roll back with `latere upgrade <previous-version>` and optionally `latere upgrade --auto off` to stay put. Every install verifies the release archive's checksum before replacing the binary.
+If an auto-upgraded release turns out to be broken, roll back with `latere upgrade <previous-version>` and optionally `latere upgrade --auto off` to stay put. Every install verifies the release archive's checksum before replacing the binary. Empty binaries and binaries larger than 200 MiB are rejected, leaving your installed executable intact.
 
 Auto-upgrade and the daily notice are skipped for `go install`/dev builds, in CI, when output is not a terminal, and when `latere` lives somewhere you cannot write (for example a system-wide `PREFIX=/usr/local` install) — there `latere upgrade` tells you to re-run the installer instead. Set `LATERE_NO_UPDATE_CHECK=1` to silence the check entirely.
 

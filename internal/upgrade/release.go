@@ -215,6 +215,10 @@ func checksumFor(sums, asset string) string {
 // It matches on the entry's base name and writes to a caller-controlled
 // buffer, never honouring the archive's own path (no tar-slip).
 func extractBinary(archive []byte) ([]byte, error) {
+	return extractBinaryWithLimit(archive, maxArchiveBytes)
+}
+
+func extractBinaryWithLimit(archive []byte, maxBinaryBytes int64) ([]byte, error) {
 	gz, err := gzip.NewReader(bytes.NewReader(archive))
 	if err != nil {
 		return nil, fmt.Errorf("open archive: %w", err)
@@ -235,8 +239,14 @@ func extractBinary(archive []byte) ([]byte, error) {
 		if path.Base(hdr.Name) != "latere" {
 			continue
 		}
+		if hdr.Size == 0 {
+			return nil, fmt.Errorf("empty latere binary in archive")
+		}
+		if hdr.Size > maxBinaryBytes {
+			return nil, fmt.Errorf("latere binary is too large (%d bytes; maximum %d bytes)", hdr.Size, maxBinaryBytes)
+		}
 		buf := &bytes.Buffer{}
-		if _, err := io.Copy(buf, io.LimitReader(tr, maxArchiveBytes)); err != nil { //nolint:gosec // bounded by LimitReader
+		if _, err := io.Copy(buf, io.LimitReader(tr, maxBinaryBytes)); err != nil { //nolint:gosec // bounded by LimitReader
 			return nil, fmt.Errorf("extract binary: %w", err)
 		}
 		return buf.Bytes(), nil
