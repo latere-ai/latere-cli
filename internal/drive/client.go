@@ -456,6 +456,9 @@ func (c *Client) RestoreVersion(ctx context.Context, owner, path string, version
 	if err != nil {
 		return nil, err
 	}
+	if out.Path == "" || out.Path != strings.TrimPrefix(path, "/") || out.RestoredVersion <= 0 || out.RestoredVersion != version {
+		return nil, errors.New("drive: restore receipt does not match the requested path and version; restore outcome is unknown")
+	}
 	return &out, nil
 }
 

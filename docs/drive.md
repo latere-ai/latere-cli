@@ -29,7 +29,7 @@ File, trash, history, and share listings fetch every page before printing result
 
 Downloads reject partial or unexpected success responses before writing file bytes, preserving existing destination files. Valid empty files are supported.
 
-Moves verify the source and destination in the server's response. An incomplete or mismatched receipt leaves the move outcome unknown and returns an error; the CLI does not retry it.
+Moves verify the source and destination in the server's response. Version restores verify the file path and requested version. Incomplete or mismatched receipts return an error with the outcome unknown; the CLI does not retry the operation.
 
 ## Uploads
 
