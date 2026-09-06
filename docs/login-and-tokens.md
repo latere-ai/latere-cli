@@ -33,6 +33,8 @@ latere login --no-browser       # print the URL instead of opening a browser
 Use `latere org <org-uuid>` or `latere org --personal` to switch context
 without another browser approval. Switching updates the auth root token and
 replaces the Cella bearer so subsequent Cella commands use the selected context.
+Choose either an organization ID or `--personal`; combining them is rejected
+without changing credentials, including through `latere auth org switch`.
 If the Cella exchange fails, the command reports an error and removes the old
 Cella bearer; the new auth root token is retained. Retry the switch or log in
 again before using Cella.

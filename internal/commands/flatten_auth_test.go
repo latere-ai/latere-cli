@@ -210,13 +210,18 @@ func TestOrgSwitch(t *testing.T) {
 }
 
 func TestOrgPersonalAndArgMutuallyExclusive(t *testing.T) {
-	cmd := newOrgCmd()
-	cmd.SetOut(new(bytes.Buffer))
-	cmd.SetErr(new(bytes.Buffer))
-	cmd.SetArgs([]string{"org-123", "--personal"})
-	err := cmd.Execute()
-	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
-		t.Fatalf("want mutually-exclusive error, got %v", err)
+	t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(t.TempDir(), "missing-auth.json"))
+	for name, factory := range map[string]func() *cobra.Command{"org": newOrgCmd, "auth org switch": newAuthOrgSwitchCmd} {
+		t.Run(name, func(t *testing.T) {
+			cmd := factory()
+			cmd.SetOut(new(bytes.Buffer))
+			cmd.SetErr(new(bytes.Buffer))
+			cmd.SetArgs([]string{"org-123", "--personal"})
+			err := cmd.Execute()
+			if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+				t.Fatalf("want mutually-exclusive error before loading credentials, got %v", err)
+			}
+		})
 	}
 }
 

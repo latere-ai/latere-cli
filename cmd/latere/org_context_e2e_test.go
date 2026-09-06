@@ -30,13 +30,19 @@ func TestOrgSwitchUpdatesCellaIdentityE2E(t *testing.T) {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 	for _, tc := range []struct {
-		name, org, authSuffix     string
-		expiryState               string
-		failExchange, failRefresh bool
-		authFromEnv               bool
+		name, org, authSuffix      string
+		expiryState                string
+		failExchange, failRefresh  bool
+		authFromEnv                bool
+		alias, conflict, falseFlag bool
 	}{
 		{name: "organization", org: "new-org"},
 		{name: "personal"},
+		{name: "alias organization", org: "new-org", alias: true},
+		{name: "alias personal", alias: true},
+		{name: "alias false personal flag", org: "new-org", alias: true, falseFlag: true},
+		{name: "conflicting context", org: "new-org", conflict: true},
+		{name: "alias conflicting context", org: "new-org", alias: true, conflict: true},
 		{name: "organization without expiry", org: "new-org", expiryState: "missing"},
 		{name: "organization zero expiry", org: "new-org", expiryState: "zero"},
 		{name: "personal without expiry", expiryState: "missing"},
@@ -122,6 +128,9 @@ func TestOrgSwitchUpdatesCellaIdentityE2E(t *testing.T) {
 				return command.CombinedOutput()
 			}
 			args := []string{"org"}
+			if tc.alias {
+				args = []string{"auth", "org", "switch"}
+			}
 			if !tc.authFromEnv {
 				args = append(args, "--auth-url", server.URL+tc.authSuffix)
 			}
@@ -130,7 +139,27 @@ func TestOrgSwitchUpdatesCellaIdentityE2E(t *testing.T) {
 			} else {
 				args = append(args, tc.org)
 			}
+			if tc.conflict {
+				args = append(args, "--personal")
+			} else if tc.falseFlag {
+				args = append(args, "--personal=false")
+			}
 			out, err := run(args...)
+			if tc.conflict {
+				if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 || !strings.Contains(string(out), "mutually exclusive") {
+					t.Errorf("conflicting context returned %v: %s", err, out)
+				}
+				if refreshes.Load() != 0 {
+					t.Errorf("conflicting context sent %d refresh requests", refreshes.Load())
+				}
+				if got, err := api.LoadToken(authPath); err != nil || got != oldAuth {
+					t.Errorf("conflicting context changed auth credentials: %v", err)
+				}
+				if got, err := api.LoadToken(tokenPath); err != nil || got.AccessToken != "old-cella" {
+					t.Errorf("conflicting context changed Cella credentials: %v", err)
+				}
+				return
+			}
 			if tc.failExchange || tc.failRefresh {
 				if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 {
 					t.Errorf("switch error = %v; output: %s", err, out)

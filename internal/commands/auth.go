@@ -109,6 +109,9 @@ func newAuthOrgSwitchCmd() *cobra.Command {
 		Short: "Switch the active org context using the saved refresh token.",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if personal && len(args) == 1 {
+				return errors.New("--personal and an org id are mutually exclusive")
+			}
 			orgID := ""
 			if len(args) == 1 {
 				orgID = args[0]
