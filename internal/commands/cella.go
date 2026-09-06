@@ -177,7 +177,7 @@ the remote command's exit code when the command finishes.`,
 			}
 			sandbox := args[0]
 			argv := args[1:]
-			return runAndStream(cmd.Context(), c, sandbox, argv, nil, "", nil)
+			return runAndStream(cmd.Context(), c, sandbox, argv, nil, "", nil, cmd.OutOrStdout())
 		},
 	}
 	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
@@ -608,7 +608,7 @@ to start that one-shot run and return immediately with a run id.`,
 				return commandExitError(out.State, out.ExitCode)
 			}
 			if follow {
-				return runAndStream(cmd.Context(), c, args[0], args[1:], env, cwd, credentialFlag)
+				return runAndStream(cmd.Context(), c, args[0], args[1:], env, cwd, credentialFlag, cmd.OutOrStdout())
 			}
 			cd, err := startCommand(cmd.Context(), c, args[0], args[1:], env, cwd, credentialFlag)
 			if err != nil {
@@ -700,13 +700,15 @@ call. Use --follow to keep streaming until the run exits.`,
 				return err
 			}
 			if follow {
-				return streamOneShotRunLogs(cmd.Context(), c, args[0], cursor)
+				return streamOneShotRunLogs(cmd.Context(), c, args[0], cursor, cmd.OutOrStdout())
 			}
 			out, err := fetchOneShotRunLogs(cmd.Context(), c, args[0], cursor)
 			if err != nil {
 				return err
 			}
-			fmt.Print(out.Bytes)
+			if _, err := fmt.Fprint(cmd.OutOrStdout(), out.Bytes); err != nil {
+				return fmt.Errorf("write logs: %w", err)
+			}
 			fmt.Fprintf(os.Stderr, "[cursor=%d state=%s]\n", out.NextCursor, out.Phase)
 			return nil
 		},
@@ -776,13 +778,15 @@ the command exits.`,
 				return err
 			}
 			if follow {
-				return streamLogs(cmd.Context(), c, args[0], args[1], cursor)
+				return streamLogs(cmd.Context(), c, args[0], args[1], cursor, cmd.OutOrStdout())
 			}
 			out, err := fetchLogsCursor(cmd.Context(), c, args[0], args[1], cursor)
 			if err != nil {
 				return err
 			}
-			fmt.Print(out.Bytes)
+			if _, err := fmt.Fprint(cmd.OutOrStdout(), out.Bytes); err != nil {
+				return fmt.Errorf("write logs: %w", err)
+			}
 			fmt.Fprintf(os.Stderr, "[cursor=%d phase=%s]\n", out.NextCursor, out.Phase)
 			return nil
 		},
@@ -1742,14 +1746,16 @@ func fetchLogsCursor(ctx context.Context, c *api.Client, sandbox, cmdID string, 
 // streamLogs polls cursor-based logs until the command terminates.
 // SSE follow mode is the alternative; cursor polling works against
 // a simpler sandboxd build and survives reconnects naturally.
-func streamLogs(ctx context.Context, c *api.Client, sandbox, cmdID string, cursor int64) error {
+func streamLogs(ctx context.Context, c *api.Client, sandbox, cmdID string, cursor int64, dst io.Writer) error {
 	for {
 		out, err := fetchLogsCursor(ctx, c, sandbox, cmdID, cursor)
 		if err != nil {
 			return err
 		}
 		if out.Bytes != "" {
-			fmt.Print(out.Bytes)
+			if _, err := fmt.Fprint(dst, out.Bytes); err != nil {
+				return fmt.Errorf("write logs: %w", err)
+			}
 		}
 		cursor = out.NextCursor
 		if out.Phase != "running" {
@@ -1763,14 +1769,16 @@ func streamLogs(ctx context.Context, c *api.Client, sandbox, cmdID string, curso
 	}
 }
 
-func streamOneShotRunLogs(ctx context.Context, c *api.Client, runID string, cursor int64) error {
+func streamOneShotRunLogs(ctx context.Context, c *api.Client, runID string, cursor int64, dst io.Writer) error {
 	for {
 		out, err := fetchOneShotRunLogs(ctx, c, runID, cursor)
 		if err != nil {
 			return err
 		}
 		if out.Bytes != "" {
-			fmt.Print(out.Bytes)
+			if _, err := fmt.Fprint(dst, out.Bytes); err != nil {
+				return fmt.Errorf("write logs: %w", err)
+			}
 		}
 		cursor = out.NextCursor
 		if out.Phase != "creating" && out.Phase != "running" {
@@ -1787,12 +1795,12 @@ func streamOneShotRunLogs(ctx context.Context, c *api.Client, runID string, curs
 // runAndStream is the foreground equivalent: start a detached command
 // then tail its logs until exit. Used by `latere exec` and
 // `latere sandbox run --follow`.
-func runAndStream(ctx context.Context, c *api.Client, sandbox string, argv []string, env map[string]string, cwd string, credentialCatalog []string) error {
+func runAndStream(ctx context.Context, c *api.Client, sandbox string, argv []string, env map[string]string, cwd string, credentialCatalog []string, dst io.Writer) error {
 	cd, err := startCommand(ctx, c, sandbox, argv, env, cwd, credentialCatalog)
 	if err != nil {
 		return err
 	}
-	return streamLogs(ctx, c, sandbox, cd.CommandID, 0)
+	return streamLogs(ctx, c, sandbox, cd.CommandID, 0, dst)
 }
 
 func oneShotRunBody(argv []string, env map[string]string, cwd, image string, diskGB int, cpu, memory string, timeout int, credentialCatalog []string) map[string]any {

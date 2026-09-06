@@ -101,6 +101,9 @@ latere cella run <name|id> -- sh -lc 'sleep 30 && echo done'
 latere cella run <name|id> --follow -- sh -lc 'go test ./...'
 ```
 
+Log reads and streaming commands fail if logs cannot be written to stdout.
+Following stops immediately on an output error.
+
 One-shot execution uses the backend's atomic disposable-run API:
 
 ```sh
