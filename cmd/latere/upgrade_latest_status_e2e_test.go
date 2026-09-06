@@ -88,7 +88,11 @@ func TestUpgradeLatestStatusHelperProcess(t *testing.T) {
 	}
 	http.DefaultTransport = upgradeFixtureTransport{target: target, base: &http.Transport{Proxy: nil}}
 	root := commands.NewRoot("v1.0.0")
-	root.SetArgs([]string{"upgrade", "--check"})
+	args := []string{"upgrade", "--check"}
+	if target, present := os.LookupEnv("LATERE_TEST_LATEST_TARGET"); present {
+		args = append(args, target)
+	}
+	root.SetArgs(args)
 	if err := root.Execute(); err != nil {
 		os.Exit(commands.HandleExitError(os.Stderr, err))
 	}

@@ -54,6 +54,9 @@ Set LATERE_NO_UPDATE_CHECK=1 to silence the passive update check.`,
 			target := ""
 			if len(args) == 1 {
 				target = args[0]
+				if strings.TrimSpace(target) == "" {
+					return fmt.Errorf("invalid version %q; expected a release like v0.2.29", target)
+				}
 			}
 			return upgrade.Run(cmd.Context(), version, target, checkOnly, cmd.OutOrStdout())
 		},
