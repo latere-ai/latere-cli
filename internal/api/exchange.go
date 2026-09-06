@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"golang.org/x/oauth2"
-	"latere.ai/x/pkg/oidc"
+	"latere.ai/x/pkg/authkit/oidc"
 )
 
 // LoginScopes is the single scope set the CLI requests from auth, at

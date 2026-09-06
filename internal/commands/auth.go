@@ -22,8 +22,8 @@ import (
 
 	"github.com/spf13/cobra"
 	"golang.org/x/oauth2"
-	"latere.ai/x/pkg/authkit"
-	"latere.ai/x/pkg/oidc"
+	"latere.ai/x/pkg/authkit/cli"
+	"latere.ai/x/pkg/authkit/oidc"
 
 	"github.com/latere-ai/latere-cli/internal/api"
 )
@@ -485,7 +485,7 @@ func resolveAuthURL(apiBase, authBase string) string {
 // verification, and token storage succeed. A rejected login must not replace
 // the auth identity used by other commands while retaining the old Cella token.
 type captureStore struct {
-	disk     *authkit.FileTokenStore
+	disk     *cli.FileTokenStore
 	last     *oauth2.Token
 	clientID string
 }
@@ -495,7 +495,7 @@ func newAuthTokenStore(clientID string) (*captureStore, error) {
 	if p == "" {
 		return nil, errors.New("cannot determine auth token path")
 	}
-	disk, err := authkit.NewFileTokenStore(p)
+	disk, err := cli.NewFileTokenStore(p)
 	if err != nil {
 		return nil, err
 	}
@@ -534,7 +534,7 @@ func (s *captureStore) Load() (*oauth2.Token, error) { return s.disk.Load() }
 func (s *captureStore) Clear() error                 { return s.disk.Clear() }
 
 // runDeviceFlow drives the RFC 8628 device-code flow against
-// auth.latere.ai via pkg/authkit.DeviceCodeClient, then trades the
+// auth.latere.ai via pkg/cli.DeviceCodeClient, then trades the
 // resulting auth-issued token for a Cella-scoped one.
 func runDeviceFlow(ctx context.Context, opts deviceFlowOpts) error {
 	opts.AuthURL, opts.APIURL = opts.endpoints()
@@ -561,7 +561,7 @@ func runDeviceFlow(ctx context.Context, opts deviceFlowOpts) error {
 		extra["org_id"] = []string{opts.OrgID}
 	}
 
-	dcc := authkit.NewDeviceCodeClient(client, store)
+	dcc := cli.NewDeviceCodeClient(client, store)
 	dcc.Output = os.Stderr
 	dcc.ExtraParams = extra
 	if opts.NoBrowser {
