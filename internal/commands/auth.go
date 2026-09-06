@@ -359,7 +359,11 @@ context; --personal and --org-id apply only to browser login.`,
 				if t := strings.TrimSpace(token); t != "" {
 					return pasteLogin(t)
 				}
-				if stat, _ := os.Stdin.Stat(); (stat.Mode() & os.ModeCharDevice) == 0 {
+				stat, err := os.Stdin.Stat()
+				if err != nil {
+					return fmt.Errorf("inspect stdin: %w", err)
+				}
+				if (stat.Mode() & os.ModeCharDevice) == 0 {
 					b, err := readAll(os.Stdin)
 					if err != nil {
 						return err
