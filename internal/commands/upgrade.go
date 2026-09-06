@@ -82,11 +82,12 @@ func setAutoUpgrade(cmd *cobra.Command, val string) error {
 	if err := upgrade.SaveConfig(cfg); err != nil {
 		return err
 	}
-	out := cmd.OutOrStdout()
+	message := "Auto-upgrade disabled."
 	if enabled {
-		fprintln(out, "Auto-upgrade enabled. latere will update itself on the next run when a new release is available.")
-	} else {
-		fprintln(out, "Auto-upgrade disabled.")
+		message = "Auto-upgrade enabled. latere will update itself on the next run when a new release is available."
+	}
+	if _, err := fmt.Fprintln(cmd.OutOrStdout(), message); err != nil {
+		return fmt.Errorf("write auto-upgrade confirmation (preference was saved): %w", err)
 	}
 	return nil
 }
