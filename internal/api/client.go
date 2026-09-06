@@ -304,6 +304,14 @@ func (c *Client) Do(ctx context.Context, method, path string, body io.Reader, co
 // retrying the request once with the fresh bearer (only when the body
 // is nil or rewindable, so a consumed stream is never resent corrupt).
 func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body io.Reader, contentType string, headers map[string]string, out any) error {
+	return c.doWithHeaders(ctx, method, path, body, contentType, headers, func(resp *http.Response) error {
+		return decodeResponse(resp, out, 0)
+	})
+}
+
+// doWithHeaders owns response closure and shares authentication/retry behavior
+// between ordinary requests and endpoints with structured error results.
+func (c *Client) doWithHeaders(ctx context.Context, method, path string, body io.Reader, contentType string, headers map[string]string, decode func(*http.Response) error) error {
 	if c.Refresh != nil && !c.refreshed && !c.expiresAt.IsZero() &&
 		time.Now().After(c.expiresAt.Add(-60*time.Second)) {
 		c.refreshed = true
@@ -359,7 +367,11 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body io
 		}
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode/100 != 2 {
+	return decode(resp)
+}
+
+func decodeResponse(resp *http.Response, out any, extraStatus int) error {
+	if resp.StatusCode/100 != 2 && (extraStatus == 0 || resp.StatusCode != extraStatus) {
 		return parseAPIError(resp)
 	}
 	if out == nil || resp.StatusCode == http.StatusNoContent {
@@ -396,6 +408,22 @@ func (c *Client) PostJSON(ctx context.Context, path string, body, out any) error
 		return err
 	}
 	return c.Do(ctx, http.MethodPost, path, bytes.NewReader(b), "application/json", out)
+}
+
+// PostJSONWithStatus also decodes extraStatus as a complete JSON response.
+// It returns the actual HTTP status. Callers must validate the extra-status
+// payload and report its failure; ordinary non-2xx statuses remain APIError.
+func (c *Client) PostJSONWithStatus(ctx context.Context, path string, body, out any, extraStatus int) (int, error) {
+	b, err := json.Marshal(body)
+	if err != nil {
+		return 0, err
+	}
+	var status int
+	err = c.doWithHeaders(ctx, http.MethodPost, path, bytes.NewReader(b), "application/json", nil, func(resp *http.Response) error {
+		status = resp.StatusCode
+		return decodeResponse(resp, out, extraStatus)
+	})
+	return status, err
 }
 
 // GetJSON is the GET variant.

@@ -1900,8 +1900,26 @@ func oneShotRun(ctx context.Context, c *api.Client, argv []string, env map[strin
 		}
 		c.HTTP.Timeout = time.Duration(effective+180) * time.Second
 	}
+	var raw json.RawMessage
+	status, err := c.PostJSONWithStatus(ctx, "/v1/one-shot-runs", body, &raw, http.StatusInternalServerError)
+	if err != nil {
+		return oneShotRunDTO{}, err
+	}
 	var out oneShotRunDTO
-	err := c.PostJSON(ctx, "/v1/one-shot-runs", body, &out)
+	if len(raw) > 0 {
+		err = json.Unmarshal(raw, &out)
+	}
+	if status == http.StatusInternalServerError {
+		// Cleanup failures carry a completed run, including output and exit status.
+		// Other 500 responses must keep their normal API-error behavior.
+		if err == nil && out.RunID != "" && out.State == "cleanup_failed" && out.CleanupError != "" {
+			return out, nil
+		}
+		raw = raw[:min(len(raw), 1<<14)]
+		failure := &api.APIError{Status: status, Message: strings.TrimSpace(string(raw))}
+		_ = json.Unmarshal(raw, failure)
+		return oneShotRunDTO{}, failure
+	}
 	return out, err
 }
 
