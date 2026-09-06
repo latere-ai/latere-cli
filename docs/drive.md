@@ -29,6 +29,8 @@ File, trash, history, and share listings fetch every page before printing result
 
 Downloads reject partial or unexpected success responses before writing file bytes, preserving existing destination files. Valid empty files are supported.
 
+Moves verify the source and destination in the server's response. An incomplete or mismatched receipt leaves the move outcome unknown and returns an error; the CLI does not retry it.
+
 ## Uploads
 
 Files up to 16 MiB stream in a single request; larger files go through Drive's multipart plane automatically (16 MiB parts, four in flight, up to 16 GiB). Uploading from stdin is single-request and capped at 100 MB.

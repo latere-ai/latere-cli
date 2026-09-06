@@ -444,6 +444,9 @@ func (c *Client) Move(ctx context.Context, owner, path, dest string) (*MoveFileR
 	if err != nil {
 		return nil, err
 	}
+	if out.Path == "" || out.Path != dest || out.MovedFrom == "" || out.MovedFrom != strings.TrimPrefix(path, "/") {
+		return nil, errors.New("drive: move receipt does not match the requested source and destination; move outcome is unknown")
+	}
 	return &out, nil
 }
 
