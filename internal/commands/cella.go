@@ -950,6 +950,7 @@ destination directory.`,
 					return err
 				}
 			}
+			var payload importPayloadWriter
 			upload, contentType := newMultipartUpload(func(mw *multipart.Writer) error {
 				if dest != "" {
 					if err := mw.WriteField("dest", dest); err != nil {
@@ -960,13 +961,14 @@ destination directory.`,
 				if err != nil {
 					return err
 				}
+				payload.Writer = fw
 				switch inputKind {
 				case importInputRegularFile:
-					err = writeSingleFileTar(fw, input, srcFile)
+					err = writeSingleFileTar(&payload, input, srcFile)
 				case importInputZip:
-					err = writeZipAsTar(fw, input, srcFile)
+					err = writeZipAsTar(&payload, input, srcFile)
 				default:
-					err = copyImportTar(fw, src)
+					err = copyImportTar(&payload, src)
 				}
 				return err
 			})
@@ -975,7 +977,7 @@ destination directory.`,
 			path := sbPath(args[0]) + "/files/import"
 			var resp struct {
 				Imported string `json:"imported"`
-				Bytes    int64  `json:"bytes"`
+				Bytes    *int64 `json:"bytes"`
 				Dest     string `json:"dest"`
 			}
 			if err := c.Do(cmd.Context(), http.MethodPost, path, upload,
@@ -984,6 +986,13 @@ destination directory.`,
 			}
 			if err := upload.finish(); err != nil {
 				return err
+			}
+			if resp.Bytes == nil {
+				return fmt.Errorf("import receipt is missing the byte count")
+			}
+			// JSON replaces invalid UTF-8 filename bytes with replacement runes.
+			if resp.Imported != string([]rune(formFilename)) || *resp.Bytes != payload.bytes {
+				return fmt.Errorf("import receipt reports %q (%d bytes); sent %q (%d bytes)", resp.Imported, *resp.Bytes, formFilename, payload.bytes)
 			}
 			return printJSON(resp)
 		},
@@ -994,6 +1003,19 @@ destination directory.`,
 	f.StringVarP(&input, "input", "i", "-", "input path; tar archives are extracted, regular files are copied")
 	f.DurationVar(&timeout, "timeout", 30*time.Minute, "HTTP timeout covering upload and extraction (0 disables)")
 	return cmd
+}
+
+// importPayloadWriter counts the tar bytes after conversion or decompression,
+// excluding multipart framing. Read bytes only after upload.finish succeeds.
+type importPayloadWriter struct {
+	io.Writer
+	bytes int64
+}
+
+func (w *importPayloadWriter) Write(p []byte) (int, error) {
+	n, err := w.Writer.Write(p)
+	w.bytes += int64(n)
+	return n, err
 }
 
 type importInputKind int

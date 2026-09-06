@@ -4,6 +4,7 @@
 package commands
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -51,7 +52,11 @@ func TestCellaTransferTimeout(t *testing.T) {
 						return nil, err
 					}
 					_ = r.Body.Close()
-					return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"files":1,"bytes":7,"dest":"/workspace","imported":"file"}`)), Request: r}, nil
+					payloadBytes := 7
+					if verb == "import" {
+						payloadBytes = 2048
+					}
+					return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(fmt.Sprintf(`{"files":1,"bytes":%d,"dest":"/workspace","imported":"file"}`, payloadBytes))), Request: r}, nil
 				})
 				cmd := newCeUploadCmd()
 				args := []string{"dev", source}

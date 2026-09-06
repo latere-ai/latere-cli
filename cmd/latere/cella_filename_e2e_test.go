@@ -9,6 +9,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -46,10 +48,13 @@ func TestCellaMultipartFilenamesE2E(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, action := range []string{"upload", "import"} {
-		for _, name := range []string{"line\nbreak.tar", "carriage\rreturn.tar", "quote\"back\\slash.tar", "雪 + %0A.tar"} {
+		for _, name := range []string{"line\nbreak.tar", "carriage\rreturn.tar", "quote\"back\\slash.tar", "雪 + %0A.tar", "invalid-\xff\xfe.tar"} {
 			t.Run(action+"/"+name, func(t *testing.T) {
 				source := filepath.Join(t.TempDir(), name)
 				if err := os.WriteFile(source, archive.Bytes(), 0600); err != nil {
+					if errors.Is(err, syscall.EILSEQ) {
+						t.Skip("filesystem rejects invalid UTF-8 filenames")
+					}
 					t.Fatal(err)
 				}
 				var requests atomic.Int32
@@ -91,7 +96,7 @@ func TestCellaMultipartFilenamesE2E(t *testing.T) {
 					if files != 1 {
 						t.Errorf("file parts = %d, want 1", files)
 					}
-					_, _ = w.Write([]byte(`{"dest":"/workspace","files":1,"bytes":2048,"imported":"archive"}`))
+					_ = json.NewEncoder(w).Encode(map[string]any{"dest": "/workspace", "files": 1, "bytes": archive.Len(), "imported": name})
 				}))
 				defer server.Close()
 				ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)

@@ -212,6 +212,8 @@ and line breaks.
 
 Upload and import report success only after all file data has been sent.
 Upload also checks that the server's file and byte counts match the transfer.
+Import checks the archive name and tar byte count, including after decompression
+or ZIP conversion. A missing or mismatched receipt is reported as an error.
 If the server responds early, the command reports an error instead
 of confirming a transfer that did not finish.
 

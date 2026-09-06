@@ -6,6 +6,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -90,7 +91,7 @@ func TestCellaMultipartRequiresCompleteUploadE2E(t *testing.T) {
 					if total < 16<<20 {
 						t.Errorf("incomplete payload: %d bytes", total)
 					}
-					_, _ = io.WriteString(w, reply)
+					_ = json.NewEncoder(w).Encode(map[string]any{"files": 1, "bytes": total, "dest": "/workspace", "imported": filepath.Base(source)})
 				}))
 				defer server.Close()
 				args := []string{"cella", verb, "dev"}

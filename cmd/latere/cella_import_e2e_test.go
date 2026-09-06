@@ -102,7 +102,7 @@ func runCellaImportE2E(t *testing.T, inputName string, wantEntries []archiveEntr
 		if got, want := r.FormValue("dest"), "/workspace"; got != want {
 			t.Fatalf("dest = %q, want %q", got, want)
 		}
-		file, _, err := r.FormFile("tarball")
+		file, receipt, err := r.FormFile("tarball")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -136,7 +136,7 @@ func runCellaImportE2E(t *testing.T, inputName string, wantEntries []archiveEntr
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"imported": filepath.Base(inputPath),
-			"bytes":    len(wantEntries[0].Body),
+			"bytes":    receipt.Size,
 			"dest":     "/workspace",
 		})
 	}))

@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -40,7 +41,7 @@ func TestCellaCompressedTarImportE2E(t *testing.T) {
 						return
 					}
 					defer r.MultipartForm.RemoveAll()
-					file, _, err := r.FormFile("tarball")
+					file, receipt, err := r.FormFile("tarball")
 					if err != nil {
 						http.Error(w, err.Error(), 400)
 						return
@@ -62,7 +63,7 @@ func TestCellaCompressedTarImportE2E(t *testing.T) {
 						t.Errorf("unexpected additional tar entry: %v", err)
 					}
 					w.Header().Set("Content-Type", "application/json")
-					_, _ = w.Write([]byte(`{"dest":"/workspace","bytes":17}`))
+					_ = json.NewEncoder(w).Encode(map[string]any{"dest": "/workspace", "bytes": receipt.Size, "imported": receipt.Filename})
 				}))
 				defer server.Close()
 				input := filepath.Join("..", "..", "internal", "commands", "testdata", "import", "payload."+format)
