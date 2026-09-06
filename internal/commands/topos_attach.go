@@ -44,6 +44,10 @@ type attachControl struct {
 
 // --- payloads for the events the client renders ---
 
+type sessionStatusPayload struct {
+	Status string `json:"status"`
+}
+
 type assistantMessagePayload struct {
 	Text string `json:"text"`
 	Turn int    `json:"turn"`

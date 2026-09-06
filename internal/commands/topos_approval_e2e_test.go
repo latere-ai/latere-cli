@@ -31,8 +31,14 @@ func TestTUIApprovalLifecycleE2E(t *testing.T) {
 		{"failed", ev("RunError", `{"error":"interrupted"}`), false, "ready"},
 		{"still waiting", attachFrame{Type: "status", State: "awaiting_approval"}, true, "awaiting approval"},
 		{"empty status", attachFrame{Type: "status"}, true, "awaiting approval"},
+		{"live resumed", ev("SessionStatus", `{"session_id":"sess_test","status":"running"}`), false, "working"},
+		{"live idle", ev("SessionStatus", `{"session_id":"sess_test","status":"awaiting_input"}`), false, "ready"},
+		{"live waiting", ev("SessionStatus", `{"session_id":"sess_test","status":"awaiting_approval"}`), true, "awaiting approval"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.frame.Type == "event" {
+				tc.frame.Seq = 2
+			}
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
 			received := make(chan attachControl, 1)
@@ -61,7 +67,7 @@ func TestTUIApprovalLifecycleE2E(t *testing.T) {
 					return
 				}
 				received <- control
-				if err := conn.Write(ctx, websocket.MessageText, []byte(`{"type":"event","event":"Stop","payload":{}}`)); err != nil {
+				if err := conn.Write(ctx, websocket.MessageText, []byte(`{"type":"event","event":"Stop","seq":3,"payload":{}}`)); err != nil {
 					t.Error(err)
 					return
 				}

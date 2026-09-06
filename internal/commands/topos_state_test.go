@@ -148,6 +148,32 @@ func TestSessionStateTransitionsAfterServerStatus(t *testing.T) {
 	}
 }
 
+func TestSessionStateSessionStatusEvents(t *testing.T) {
+	for _, tc := range []struct {
+		name, payload, status string
+		pending               bool
+	}{
+		{"running", `{"session_id":"sess_test","status":"running"}`, "working", false},
+		{"idle", `{"status":"awaiting_input"}`, "ready", false},
+		{"waiting", `{"status":"awaiting_approval"}`, "awaiting approval", true},
+		{"completed", `{"status":"completed"}`, "completed", false},
+		{"failed", `{"status":"failed"}`, "failed", false},
+		{"empty", `{}`, "awaiting approval", true},
+		{"invalid", `{"status":123}`, "awaiting approval", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newSessionState()
+			s.apply(ev("ApprovalRequest", `{"decision_id":"d1","tool_id":"bash"}`))
+			frame := ev("SessionStatus", tc.payload)
+			frame.Seq = 8
+			s.apply(frame)
+			if s.status != tc.status || (s.pending != nil) != tc.pending || s.lastSeq != 8 {
+				t.Fatalf("status=%q pending=%v cursor=%d; want status=%q pending=%t cursor=8", s.status, s.pending, s.lastSeq, tc.status, tc.pending)
+			}
+		})
+	}
+}
+
 func TestSessionStateLastSeqTracksDurableOnly(t *testing.T) {
 	s := newSessionState()
 	s.apply(attachFrame{Type: "event", Event: "AssistantMessage", Payload: []byte(`{"text":"a"}`), Seq: 5})

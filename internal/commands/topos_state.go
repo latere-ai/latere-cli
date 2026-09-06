@@ -48,24 +48,7 @@ func (s *sessionState) apply(fr attachFrame) {
 	}
 	switch fr.Type {
 	case "status":
-		if fr.State != "" {
-			s.status = fr.State
-			// Status frames and event-driven transitions share UI labels.
-			// Otherwise replay leaves states that Stop/resolvePending miss.
-			switch fr.State {
-			case "running":
-				s.status = "working"
-			case "awaiting_input":
-				s.status = "ready"
-			case "awaiting_approval":
-				s.status = "awaiting approval"
-			}
-			// Replayed requests can outlive their approval; current server
-			// status determines whether a decision is still outstanding.
-			if fr.State != "awaiting_approval" {
-				s.pending = nil
-			}
-		}
+		s.applyStatus(fr.State)
 	case "error":
 		s.lines = append(s.lines, "⚠ "+fr.Message)
 	case "event":
@@ -73,8 +56,34 @@ func (s *sessionState) apply(fr attachFrame) {
 	}
 }
 
+// applyStatus handles both the attach status frame and durable SessionStatus
+// events, using the same labels as event-driven UI transitions.
+func (s *sessionState) applyStatus(status string) {
+	if status == "" {
+		return
+	}
+	s.status = status
+	switch status {
+	case "running":
+		s.status = "working"
+	case "awaiting_input":
+		s.status = "ready"
+	case "awaiting_approval":
+		s.status = "awaiting approval"
+	}
+	// Current server status supersedes any outstanding or replayed approval.
+	if status != "awaiting_approval" {
+		s.pending = nil
+	}
+}
+
 func (s *sessionState) applyEvent(fr attachFrame) {
 	switch fr.Event {
+	case "SessionStatus":
+		var p sessionStatusPayload
+		if json.Unmarshal(fr.Payload, &p) == nil {
+			s.applyStatus(p.Status)
+		}
 	case "TextDelta":
 		var p textDeltaPayload
 		if json.Unmarshal(fr.Payload, &p) == nil {
