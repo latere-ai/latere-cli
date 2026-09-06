@@ -27,6 +27,9 @@ import (
 // against a hostile or corrupt download exhausting memory.
 const maxArchiveBytes = 200 << 20 // 200 MiB
 
+// Allow room for the binary, archive metadata, and accompanying files.
+const maxExpandedArchiveBytes = 2 * maxArchiveBytes // 400 MiB
+
 // githubBase is the host serving releases. It is a var so tests can point it
 // at a local server; production always uses github.com.
 var githubBase = "https://github.com"
@@ -228,16 +231,40 @@ func checksumFor(sums, asset string) string {
 // It matches on the entry's base name and writes to a caller-controlled
 // buffer, never honouring the archive's own path (no tar-slip).
 func extractBinary(archive []byte) ([]byte, error) {
-	return extractBinaryWithLimit(archive, maxArchiveBytes)
+	return extractBinaryWithLimits(archive, maxArchiveBytes, maxExpandedArchiveBytes)
 }
 
-func extractBinaryWithLimit(archive []byte, maxBinaryBytes int64) ([]byte, error) {
+func extractBinaryWithLimits(archive []byte, maxBinaryBytes, maxExpandedBytes int64) ([]byte, error) {
 	gz, err := gzip.NewReader(bytes.NewReader(archive))
 	if err != nil {
 		return nil, fmt.Errorf("open archive: %w", err)
 	}
 	defer func() { _ = gz.Close() }()
-	tr := tar.NewReader(gz)
+	expanded := &io.LimitedReader{R: gz, N: maxExpandedBytes + 1}
+	binary, err := readArchiveBinary(expanded, maxBinaryBytes)
+	if expanded.N == 0 {
+		return nil, fmt.Errorf("expanded archive exceeds %d bytes", maxExpandedBytes)
+	}
+	if err != nil {
+		return nil, err
+	}
+	// Reach gzip EOF to verify its checksum and size, retaining the separate
+	// bound on trailing data. All reads also count toward the whole-archive cap.
+	n, err := io.Copy(io.Discard, io.LimitReader(expanded, maxArchiveBytes+1))
+	if expanded.N == 0 {
+		return nil, fmt.Errorf("expanded archive exceeds %d bytes", maxExpandedBytes)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("verify archive: %w", err)
+	}
+	if n > maxArchiveBytes {
+		return nil, fmt.Errorf("remaining expanded archive exceeds %d bytes", maxArchiveBytes)
+	}
+	return binary, nil
+}
+
+func readArchiveBinary(src io.Reader, maxBinaryBytes int64) ([]byte, error) {
+	tr := tar.NewReader(src)
 	for {
 		hdr, err := tr.Next()
 		if errors.Is(err, io.EOF) {
@@ -261,16 +288,6 @@ func extractBinaryWithLimit(archive []byte, maxBinaryBytes int64) ([]byte, error
 		buf := &bytes.Buffer{}
 		if _, err := io.Copy(buf, io.LimitReader(tr, maxBinaryBytes)); err != nil { //nolint:gosec // bounded by LimitReader
 			return nil, fmt.Errorf("extract binary: %w", err)
-		}
-		// Closing a gzip reader does not validate its checksum or size.
-		// Reach EOF before accepting the binary, bounding the remaining
-		// expanded data so an archive cannot force an unbounded drain.
-		n, err := io.Copy(io.Discard, io.LimitReader(gz, maxArchiveBytes+1))
-		if err != nil {
-			return nil, fmt.Errorf("verify archive: %w", err)
-		}
-		if n > maxArchiveBytes {
-			return nil, fmt.Errorf("remaining expanded archive exceeds %d bytes", maxArchiveBytes)
 		}
 		return buf.Bytes(), nil
 	}

@@ -22,7 +22,7 @@ func TestExtractBinarySize(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			payload := strings.Repeat("x", tc.size)
 			archive := makeTarGz(t, map[string]string{"release/latere": payload})
-			got, err := extractBinaryWithLimit(archive, 16)
+			got, err := extractBinaryWithLimits(archive, 16, maxExpandedArchiveBytes)
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) || got != nil {
 					t.Errorf("binary=%q error=%v, want %q", got, err, tc.wantErr)
