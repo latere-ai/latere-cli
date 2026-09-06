@@ -70,7 +70,7 @@ func TestDriveUploadReceiptE2E(t *testing.T) {
 							aborts.Add(1)
 							w.WriteHeader(http.StatusNoContent)
 						case r.URL.Path == "/api/v1/uploads":
-							_ = json.NewEncoder(w).Encode(map[string]any{"upload_id": "upload", "part_size": 16 << 20, "part_count": 2, "part_urls": []string{"http://" + r.Host + "/part", "http://" + r.Host + "/part"}})
+							_ = json.NewEncoder(w).Encode(map[string]any{"upload_id": "upload", "path": "files/item", "part_size": 16 << 20, "part_count": 2, "part_urls": []string{"http://" + r.Host + "/part", "http://" + r.Host + "/part"}})
 						case r.URL.Path == "/part":
 							parts.Add(1)
 							n, err := io.Copy(io.Discard, r.Body)

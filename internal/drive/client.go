@@ -627,6 +627,10 @@ func (c *Client) MultipartUpload(ctx context.Context, owner, path string, r io.R
 		return nil, fmt.Errorf("drive: malformed upload session (part_size=%d, part_count=%d, urls=%d)",
 			sess.PartSize, sess.PartCount, len(sess.PartURLs))
 	}
+	if sess.Path == "" || sess.Path != path {
+		c.abortUpload(ctx, sess.UploadID)
+		return nil, errors.New("drive: upload session destination does not match the requested path")
+	}
 
 	etags := make([]string, sess.PartCount)
 	// The group keeps the first part failure and cancels the rest; SetLimit

@@ -317,7 +317,7 @@ func TestMultipartUploadAbortsOnPartFailure(t *testing.T) {
 	mux.HandleFunc("/api/v1/uploads", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(uploadSession{
-			UploadID: "u2", PartSize: 4, PartCount: 2,
+			UploadID: "u2", Path: "files/b.bin", PartSize: 4, PartCount: 2,
 			PartURLs: []string{srv.URL + "/part/1", srv.URL + "/part/2"},
 		})
 	})
