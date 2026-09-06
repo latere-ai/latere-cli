@@ -5,11 +5,44 @@ package commands
 
 import (
 	"archive/zip"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestSniffImportZipSignatures(t *testing.T) {
+	for _, third := range []byte{0x03, 0x05, 0x07} {
+		for _, fourth := range []byte{0x04, 0x06, 0x08} {
+			t.Run(fmt.Sprintf("PK%02x%02x", third, fourth), func(t *testing.T) {
+				data := []byte{'P', 'K', third, fourth, 'd', 'a', 't', 'a'}
+				path := filepath.Join(t.TempDir(), "input")
+				if err := os.WriteFile(path, data, 0600); err != nil {
+					t.Fatal(err)
+				}
+				f, err := os.Open(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer f.Close()
+				want := importInputRegularFile
+				if fourth == third+1 {
+					want = importInputZip
+				}
+				got, err := classifyImportInput("input", f)
+				if err != nil || got != want {
+					t.Errorf("classification = %v, %v; want %v", got, err, want)
+				}
+				pos, err := f.Seek(0, io.SeekCurrent)
+				if err != nil || pos != 0 {
+					t.Errorf("input position = %d, %v; want 0", pos, err)
+				}
+			})
+		}
+	}
+}
 
 func TestClassifyImportInputRequiresRegularFile(t *testing.T) {
 	file, err := os.Open(os.DevNull)

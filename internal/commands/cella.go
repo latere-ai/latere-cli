@@ -1040,10 +1040,11 @@ func sniffImportInput(f *os.File) (importInputKind, error) {
 	if _, seekErr := f.Seek(0, io.SeekStart); seekErr != nil {
 		return importInputTar, seekErr
 	}
-	if n >= 4 && string(block[:2]) == "PK" &&
-		(block[2] == 0x03 || block[2] == 0x05 || block[2] == 0x07) &&
-		(block[3] == 0x04 || block[3] == 0x06 || block[3] == 0x08) {
-		return importInputZip, nil
+	if n >= 4 {
+		switch string(block[:4]) {
+		case "PK\x03\x04", "PK\x05\x06", "PK\x07\x08":
+			return importInputZip, nil
+		}
 	}
 	if n < len(block) {
 		return importInputRegularFile, nil

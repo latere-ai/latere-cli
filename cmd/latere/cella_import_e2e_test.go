@@ -8,6 +8,7 @@ import (
 	"archive/zip"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -25,6 +26,24 @@ func TestCellaImportRegularFileE2E(t *testing.T) {
 	runCellaImportE2E(t, "64ceff9a-01f2-4b3c-9b94-9d4c59435c15.jsonl", []archiveEntry{
 		{Name: "64ceff9a-01f2-4b3c-9b94-9d4c59435c15.jsonl", Body: "{\"ok\":true}\n"},
 	})
+}
+
+func TestCellaImportRegularFileWithZipLikePrefixE2E(t *testing.T) {
+	if testing.Short() {
+		t.Skip("binary e2e skipped with -short")
+	}
+	for _, third := range []byte{0x03, 0x05, 0x07} {
+		for _, fourth := range []byte{0x04, 0x06, 0x08} {
+			if fourth == third+1 {
+				continue
+			}
+			t.Run(fmt.Sprintf("PK%02x%02x", third, fourth), func(t *testing.T) {
+				runCellaImportE2E(t, "ordinary.bin", []archiveEntry{
+					{Name: "ordinary.bin", Body: string([]byte{'P', 'K', third, fourth}) + "ordinary file contents"},
+				})
+			})
+		}
+	}
 }
 
 func TestCellaImportZipE2E(t *testing.T) {
