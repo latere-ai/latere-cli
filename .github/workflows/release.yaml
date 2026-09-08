@@ -4,7 +4,9 @@ name: release
 # the CHANGELOG.md section for the tag, refuses the tag when there is none,
 # and otherwise has goreleaser publish the binaries with that section as the
 # release body. Lint and tests are lateregate's on every push, so the
-# pipeline's own lint job is off; its vet + race test still gates the build.
+# pipeline's own lint job is off; its vet + race test still gates the build,
+# and runs on macOS as well because the tag ships a darwin binary. Every
+# push tests on Linux only: a macOS minute costs ten Linux minutes.
 
 on:
   push:
@@ -18,4 +20,5 @@ jobs:
     uses: latere-ai/ci/.github/workflows/cli-release.yml@v1
     with:
       run_lint: false
+      test_os: '["ubuntu-latest", "macos-latest"]'
     secrets: inherit
