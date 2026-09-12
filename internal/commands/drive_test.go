@@ -148,7 +148,7 @@ func execDrive(t *testing.T, srv *httptest.Server, args ...string) (string, stri
 func TestDriveLsListsAndPaginates(t *testing.T) {
 	calls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/files/me/files" {
+		if r.URL.Path != "/v1/files/me/files" {
 			t.Errorf("path = %q", r.URL.Path)
 		}
 		calls++
@@ -257,7 +257,7 @@ func TestDrivePutSmallFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gotPath != "/api/v1/files/me/files/src.txt" {
+	if gotPath != "/v1/files/me/files/src.txt" {
 		t.Errorf("path = %q (default destination should be files/<basename>)", gotPath)
 	}
 	if gotBody != "small" || !strings.Contains(stderr, "Uploaded") {
@@ -320,12 +320,12 @@ func TestDriveRmVariants(t *testing.T) {
 // is already gone.
 func TestDriveRmPermanentPurgesTrashedFile(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/api/v1/files/") {
+		if strings.HasPrefix(r.URL.Path, "/v1/files/") {
 			w.WriteHeader(http.StatusNotFound)
 			fmt.Fprint(w, `{"error":"not found"}`)
 			return
 		}
-		if r.URL.Path == "/api/v1/trash" && r.Method == http.MethodDelete {
+		if r.URL.Path == "/v1/trash" && r.Method == http.MethodDelete {
 			_ = json.NewEncoder(w).Encode(map[string]int{"purged": 1})
 			return
 		}
@@ -345,14 +345,14 @@ func TestDriveRmPermanentPurgesTrashedFile(t *testing.T) {
 func TestDriveRestoreVariants(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/v1/trash/restore":
+		case "/v1/trash/restore":
 			var req map[string]string
 			_ = json.NewDecoder(r.Body).Decode(&req)
 			if req["owner"] != "me" || req["path"] != "files/a.txt" {
 				t.Errorf("restore req = %v", req)
 			}
 			_ = json.NewEncoder(w).Encode(map[string]string{"path": "files/a.txt", "status": "restored"})
-		case "/api/v1/files/me/files/a.txt":
+		case "/v1/files/me/files/a.txt":
 			var req map[string]int
 			_ = json.NewDecoder(r.Body).Decode(&req)
 			if req["restore_version"] != 3 {
@@ -448,20 +448,20 @@ func TestDriveSharesInbox(t *testing.T) {
 	defer srv.Close()
 
 	out, _, err := execDrive(t, srv, "shares")
-	if err != nil || gotPath != "/api/v1/shares" {
+	if err != nil || gotPath != "/v1/shares" {
 		t.Errorf("shares: %v path=%q", err, gotPath)
 	}
 	if !strings.Contains(out, "a@b.c") {
 		t.Errorf("out = %q", out)
 	}
-	if _, _, err := execDrive(t, srv, "shares", "--inbox"); err != nil || gotPath != "/api/v1/shared-with-me" {
+	if _, _, err := execDrive(t, srv, "shares", "--inbox"); err != nil || gotPath != "/v1/shared-with-me" {
 		t.Errorf("shares --inbox: %v path=%q", err, gotPath)
 	}
 }
 
 func TestDriveUnshare(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodDelete || r.URL.Path != "/api/v1/shares/s1" {
+		if r.Method != http.MethodDelete || r.URL.Path != "/v1/shares/s1" {
 			t.Errorf("%s %s", r.Method, r.URL.Path)
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -485,7 +485,7 @@ func TestDriveOwnerFlagRoutesToSpace(t *testing.T) {
 	if _, _, err := execDrive(t, srv, "ls", "--owner", "org"); err != nil {
 		t.Fatal(err)
 	}
-	if gotPath != "/api/v1/files/org/files" {
+	if gotPath != "/v1/files/org/files" {
 		t.Errorf("path = %q", gotPath)
 	}
 }
@@ -519,7 +519,7 @@ func TestDriveRejectsNonPositiveVersion(t *testing.T) {
 func TestDriveRmVersionNeverPurgesWholeFile(t *testing.T) {
 	var purges atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/trash" {
+		if r.URL.Path == "/v1/trash" {
 			purges.Add(1)
 			fmt.Fprint(w, `{"purged":1}`)
 			return
@@ -559,7 +559,7 @@ func TestDrivePutEmptyFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPut || r.URL.Path != "/api/v1/files/me/files/empty.txt" {
+		if r.Method != http.MethodPut || r.URL.Path != "/v1/files/me/files/empty.txt" {
 			t.Errorf("unexpected empty upload request: %s %s", r.Method, r.URL.Path)
 		}
 		if r.ContentLength < 0 {
