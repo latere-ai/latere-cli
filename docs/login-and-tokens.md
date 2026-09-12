@@ -67,7 +67,7 @@ use `AUTH_CLIENT_ID`, falling back to `latere-cli`.
 
 | File | What it is | Used for |
 |------|------------|----------|
-| `~/.config/latere/auth-token.json` | The **auth root token**: an `auth.latere.ai`-issued access token plus its refresh token. | The source every per-product credential is derived from. Never presented to a product directly except by the Drive git helper (below). |
+| `~/.config/latere/auth-token.json` | The **auth root token**: an `auth.latere.ai`-issued access token plus its refresh token. | The source every per-product credential is derived from. Never presented to a product directly except by the git credential helper (below). |
 | `~/.config/latere/token.json` | The **Cella bearer**: a Cella-issued catalog token, labeled `CLI on <hostname>`. | `latere cella ...` and `latere whoami`. |
 
 The split is deliberate. The two tokens have different issuers
@@ -123,17 +123,21 @@ eval "$(latere lux env --compat openai --ttl 5m)" # a short-lived Lux-bound acto
 `lux env` needs a surface: either `--compat <dialect>` or a passthrough
 provider argument. See the "Models (Lux)" page for the full surface.
 
-### Drive
+### Git: Drive and Latere Code
 
-`latere login` also wires a git credential helper scoped to the Drive
-host (`drive.latere.ai`) in your global git config, so
-`git clone https://drive.latere.ai/git/me/<repo>.git` authenticates
-with no token in the URL. When git asks the helper for a credential on
-that host, the CLI refreshes your login if it has expired, mints an actor
-token at auth with audience `drive.latere.ai` and a 5-minute TTL, and
-hands git that token. Drive accepts only tokens carrying its audience, so
-your root identity token never reaches git. A git exchange completes in
-seconds, so the short lifetime bounds a leaked value at no cost to you.
+`latere login` also wires a git credential helper scoped to the two Latere
+git hosts, Drive (`drive.latere.ai`) and Latere Code (`code.latere.ai`),
+in your global git config, so
+`git clone https://drive.latere.ai/git/me/<repo>.git` and
+`git clone https://code.latere.ai/<owner>/<repo>.git` authenticate with
+no token in the URL. When git asks the helper for a credential on one of
+those hosts, the CLI refreshes your login if it has expired, mints an actor
+token at auth for that host's audience (`drive.latere.ai` for Drive,
+`origo` for Latere Code) with a 5-minute TTL, and hands git that token.
+Each host accepts only tokens carrying its audience, so your root identity
+token never reaches git and a token for one host is useless at the other.
+A git exchange completes in seconds, so the short lifetime bounds a leaked
+value at no cost to you.
 
 If the login cannot be read or refreshed, or auth cannot mint the token, the
 git helper returns no credential so git can prompt. The CLI uses a pasted
@@ -145,10 +149,11 @@ latere git-credential setup             # wire the helper manually
 latere login --no-git                   # sign in without touching git config
 ```
 
-The helper answers only for the Drive host over HTTPS. A nonblank
-`DRIVE_HOST` override also permits HTTP for development. Setup registers both
-HTTPS and HTTP for that override; `setup --remove` removes both. Missing or
-other protocols receive no credential and do not trigger token refresh.
+The helper answers only for those two hosts over HTTPS. A nonblank
+`DRIVE_HOST` or `CODE_HOST` override also permits HTTP for development.
+Setup registers both HTTPS and HTTP for an overridden host; `setup --remove`
+removes both. Missing or other protocols receive no credential and do not
+trigger token refresh.
 `store` and `erase` are
 no-ops: your tokens live in `~/.config/latere`, managed by `latere
 login` and `latere logout`, never in git's own credential store.
@@ -242,12 +247,13 @@ latere login --token <token>      # save a pasted access token (no refresh)
 | `--auth-url` / `AUTH_URL` | Override the auth base URL (default `https://auth.latere.ai`). |
 | `--api-url` / `SANDBOX_API_URL` | Override the Cella API base URL, from which the auth URL is derived. |
 | `DRIVE_HOST` | Override the Drive host the git credential helper answers for. |
+| `CODE_HOST` | Override the Latere Code host the git credential helper answers for. |
 
 Explicit URL flags take precedence over environment variables. Login uses
 the resolved Cella URL for both token exchange and verification. If neither
 `--auth-url` nor `AUTH_URL` is set, the auth URL is derived from that Cella URL.
 `whoami` also uses `AUTH_URL` when probing an auth-issued token. Lux commands
-and the Drive git credential helper use the same auth override precedence
+and the git credential helper use the same auth override precedence
 for refreshing the root token and minting product credentials.
 
 ## Related reading
@@ -258,6 +264,6 @@ for refreshing the root token and minting product credentials.
 - Cella: **"Sandbox identity, egress, and agent grants"** covers how
   the Cella bearer arrives through token exchange and what it grants
   inside a sandbox.
-- This repo: `latere lux` details in "Models (Lux)", and Drive git
-  access in the [main README](../README.md#git-with-drive). Start any
+- This repo: `latere lux` details in "Models (Lux)", and git access
+  in the [main README](../README.md#git-with-drive-and-latere-code). Start any
   of these with `latere login` (see [Sign in](../README.md#sign-in)).

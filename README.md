@@ -83,18 +83,19 @@ Switching uses the auth service's refresh-token grant: no device-code re-prompt,
 | `LATERE_TOKEN_FILE` | Cella bearer file path, default `~/.config/latere/token.json`. |
 | `LATERE_AUTH_TOKEN_FILE` | Auth root token file path, default `~/.config/latere/auth-token.json`. |
 
-## Git with Drive
+## Git with Drive and Latere Code
 
-Drive (`drive.latere.ai`) serves repo workspaces over git smart-HTTP. Signing in is all it takes — `latere login` also wires git's credential helper for `drive.latere.ai`, so plain `git clone` authenticates with your saved login, no token in the URL:
+Drive (`drive.latere.ai`) serves repo workspaces over git smart-HTTP, and Latere Code (`code.latere.ai`) hosts repositories. Signing in is all it takes — `latere login` also wires git's credential helper for both hosts, so plain `git clone` authenticates with your saved login, no token in the URL:
 
 ```sh
 latere login
 
-git clone https://drive.latere.ai/git/me/<repo>.git          # your personal repos
-git clone https://drive.latere.ai/git/<org-slug>/<repo>.git  # org repos
+git clone https://drive.latere.ai/git/me/<repo>.git          # your personal Drive repos
+git clone https://drive.latere.ai/git/<org-slug>/<repo>.git  # Drive org repos
+git clone https://code.latere.ai/<owner>/<repo>.git          # Latere Code repos
 ```
 
-The helper is scoped to `drive.latere.ai` only; credentials for every other host keep flowing through your existing helpers. Fetch and clone need read access to the repo workspace, push needs write access.
+The helper is scoped to those two hosts only; credentials for every other host keep flowing through your existing helpers. Fetch and clone need read access, push needs write access. A public Latere Code repository clones with no credential at all.
 
 If you'd rather manage the git config yourself, these are the escape hatches:
 
