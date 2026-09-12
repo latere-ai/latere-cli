@@ -39,17 +39,17 @@ func TestDriveCommandsRequireCompleteResponsesE2E(t *testing.T) {
 				if err := os.WriteFile(src, []byte("test upload"), 0600); err != nil {
 					t.Fatal(err)
 				}
-				payload, method, path := `{"entries":[{"path":"files/test"}]}`, http.MethodGet, "/api/v1/files/me/files"
+				payload, method, path := `{"entries":[{"path":"files/test"}]}`, http.MethodGet, "/v1/files/me/files"
 				args := []string{"drive", operation}
 				switch operation {
 				case "ls":
 					args = append(args, "--json")
 				case "put":
 					args = append(args, src, "files/test")
-					payload, method, path = `{"path":"files/test","size":11}`, http.MethodPut, "/api/v1/files/me/files/test"
+					payload, method, path = `{"path":"files/test","size":11}`, http.MethodPut, "/v1/files/me/files/test"
 				case "rm":
 					args = append(args, "files/test")
-					payload, method, path = `{}`, http.MethodDelete, "/api/v1/files/me/files/test"
+					payload, method, path = `{}`, http.MethodDelete, "/v1/files/me/files/test"
 				}
 				wantError := ""
 				switch state {

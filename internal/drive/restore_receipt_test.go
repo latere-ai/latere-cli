@@ -40,7 +40,7 @@ func TestRestoreReceipt(t *testing.T) {
 				if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Version != 3 {
 					t.Errorf("request body=%+v error=%v", body, err)
 				}
-				if r.Method != http.MethodPost || r.URL.Path != "/api/v1/files/me/files/item" {
+				if r.Method != http.MethodPost || r.URL.Path != "/v1/files/me/files/item" {
 					t.Errorf("request=%s %s", r.Method, r.URL)
 				}
 				_, _ = io.WriteString(w, tc.body)

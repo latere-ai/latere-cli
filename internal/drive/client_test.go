@@ -39,7 +39,7 @@ func TestResolveURL(t *testing.T) {
 
 func TestFilesPathEscaping(t *testing.T) {
 	got := filesPath("me", "files/a dir/b#c.txt")
-	want := "/api/v1/files/me/files/a%20dir/b%23c.txt"
+	want := "/v1/files/me/files/a%20dir/b%23c.txt"
 	if got != want {
 		t.Errorf("filesPath = %q, want %q", got, want)
 	}
@@ -71,7 +71,7 @@ func asDriveErr(err error, out **Error) bool {
 func TestListPaginatesWithCursor(t *testing.T) {
 	var gotCursor, gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/files/me/files" {
+		if r.URL.Path != "/v1/files/me/files" {
 			t.Errorf("path = %q", r.URL.Path)
 		}
 		if _, ok := r.URL.Query()["list"]; !ok {
@@ -124,7 +124,7 @@ func TestDownloadFollowsRedirect(t *testing.T) {
 	mux := http.NewServeMux()
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
-	mux.HandleFunc("/api/v1/files/me/files/a.txt", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/v1/files/me/files/a.txt", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, srv.URL+"/presigned/a.txt", http.StatusFound)
 	})
 	mux.HandleFunc("/presigned/a.txt", func(w http.ResponseWriter, r *http.Request) {
@@ -213,7 +213,7 @@ func TestDeleteQueryModifiers(t *testing.T) {
 
 func TestTrashPurgeReturnsCount(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodDelete || r.URL.Path != "/api/v1/trash" {
+		if r.Method != http.MethodDelete || r.URL.Path != "/v1/trash" {
 			t.Errorf("%s %s", r.Method, r.URL.Path)
 		}
 		if r.URL.Query().Get("owner") != "me" || r.URL.Query().Get("path") != "files/a.txt" {
@@ -243,7 +243,7 @@ func TestMultipartUpload(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	mux.HandleFunc("/api/v1/uploads", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/v1/uploads", func(w http.ResponseWriter, r *http.Request) {
 		var req map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&req)
 		if req["owner"] != "me" || req["path"] != "files/big.bin" || req["size"] != float64(len(data)) {
@@ -271,7 +271,7 @@ func TestMultipartUpload(t *testing.T) {
 		}
 		w.Header().Set("ETag", `"etag-`+n+`"`)
 	})
-	mux.HandleFunc("/api/v1/uploads/u1/complete", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/v1/uploads/u1/complete", func(w http.ResponseWriter, r *http.Request) {
 		completeBody, _ = io.ReadAll(r.Body)
 		if r.Header.Get("If-None-Match") != "*" {
 			t.Error("CAS header missing on complete")
@@ -314,7 +314,7 @@ func TestMultipartUploadAbortsOnPartFailure(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	mux.HandleFunc("/api/v1/uploads", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/v1/uploads", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(uploadSession{
 			UploadID: "u2", Path: "files/b.bin", PartSize: 4, PartCount: 2,
@@ -327,7 +327,7 @@ func TestMultipartUploadAbortsOnPartFailure(t *testing.T) {
 	mux.HandleFunc("/part/2", func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "boom", http.StatusBadGateway)
 	})
-	mux.HandleFunc("/api/v1/uploads/u2", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/v1/uploads/u2", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodDelete {
 			aborted <- struct{}{}
 			w.WriteHeader(http.StatusNoContent)
@@ -378,7 +378,7 @@ func TestSimpleEndpointRoundtrips(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got = probe{r.Method, r.URL.Path}
 		switch {
-		case r.URL.Path == "/api/v1/files/me/files/a.txt" && r.Method == http.MethodPost:
+		case r.URL.Path == "/v1/files/me/files/a.txt" && r.Method == http.MethodPost:
 			var body map[string]any
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			if _, ok := body["move_to"]; ok {
@@ -386,19 +386,19 @@ func TestSimpleEndpointRoundtrips(t *testing.T) {
 			} else {
 				_ = json.NewEncoder(w).Encode(VersionRestoreResult{Path: "files/a.txt", RestoredVersion: 2, Size: 1, Checksum: "c"})
 			}
-		case r.URL.Path == "/api/v1/files/me/files/a.txt": // ?versions
+		case r.URL.Path == "/v1/files/me/files/a.txt": // ?versions
 			_ = json.NewEncoder(w).Encode(FileVersionListPage{Entries: []FileVersionEntry{{VersionNo: 2, Size: 1, Checksum: "c"}}})
-		case r.URL.Path == "/api/v1/trash" && r.Method == http.MethodGet:
+		case r.URL.Path == "/v1/trash" && r.Method == http.MethodGet:
 			_ = json.NewEncoder(w).Encode(TrashListPage{Entries: []TrashEntry{{Path: "files/t.txt", DeletedAt: "2026-07-12T00:00:00Z"}}})
-		case r.URL.Path == "/api/v1/trash/restore":
+		case r.URL.Path == "/v1/trash/restore":
 			_ = json.NewEncoder(w).Encode(map[string]string{"path": "files/t.txt", "status": "restored"})
-		case r.URL.Path == "/api/v1/quotas/me":
+		case r.URL.Path == "/v1/quotas/me":
 			_ = json.NewEncoder(w).Encode(QuotaView{Owner: "me", UsedBytes: 10, LimitBytes: 100})
-		case r.URL.Path == "/api/v1/shares" && r.Method == http.MethodGet:
+		case r.URL.Path == "/v1/shares" && r.Method == http.MethodGet:
 			_ = json.NewEncoder(w).Encode(ShareListPage{Entries: []Share{{ID: "s1", Status: "active"}}})
-		case r.URL.Path == "/api/v1/shared-with-me":
+		case r.URL.Path == "/v1/shared-with-me":
 			_ = json.NewEncoder(w).Encode(ShareListPage{Entries: []Share{{ID: "s2"}}})
-		case r.URL.Path == "/api/v1/shares/s1" && r.Method == http.MethodDelete:
+		case r.URL.Path == "/v1/shares/s1" && r.Method == http.MethodDelete:
 			w.WriteHeader(http.StatusNoContent)
 		default:
 			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)

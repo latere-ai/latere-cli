@@ -56,7 +56,7 @@ func TestDriveGetOutputArgumentsE2E(t *testing.T) {
 			var requests atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				requests.Add(1)
-				if r.Method != http.MethodGet || r.URL.Path != "/api/v1/files/me/files/report.txt" || r.Header.Get("Authorization") != "Bearer synthetic-token" {
+				if r.Method != http.MethodGet || r.URL.Path != "/v1/files/me/files/report.txt" || r.Header.Get("Authorization") != "Bearer synthetic-token" {
 					t.Errorf("request=%s %s", r.Method, r.URL)
 				}
 				_, _ = io.WriteString(w, "downloaded contents")

@@ -21,7 +21,7 @@ func TestDriveShareURLOutput(t *testing.T) {
 				var requests atomic.Int32
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					requests.Add(1)
-					if r.Method != http.MethodPost || r.URL.Path != "/api/v1/shares" {
+					if r.Method != http.MethodPost || r.URL.Path != "/v1/shares" {
 						t.Errorf("unexpected request: %s %s", r.Method, r.URL)
 					}
 					url := ""

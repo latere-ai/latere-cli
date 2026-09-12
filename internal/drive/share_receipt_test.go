@@ -54,7 +54,7 @@ func TestCreateShareReceipt(t *testing.T) {
 				if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.Owner != "o-example" || in.PathPrefix != "files/item" || in.GranteeType != "link" || in.Permission != "read" {
 					t.Errorf("request=%+v error=%v", in, err)
 				}
-				if r.Method != http.MethodPost || r.URL.Path != "/api/v1/shares" || r.Header.Get("Authorization") != "Bearer synthetic-token" {
+				if r.Method != http.MethodPost || r.URL.Path != "/v1/shares" || r.Header.Get("Authorization") != "Bearer synthetic-token" {
 					t.Errorf("request=%s %s", r.Method, r.URL)
 				}
 				w.WriteHeader(http.StatusCreated)

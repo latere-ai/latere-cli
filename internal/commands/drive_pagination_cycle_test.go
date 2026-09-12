@@ -18,11 +18,11 @@ func TestDrivePaginationCycles(t *testing.T) {
 		name, path string
 		args       []string
 	}{
-		{"files", "/api/v1/files/me/files", []string{"ls"}},
-		{"trash", "/api/v1/trash", []string{"ls", "--trashed"}},
-		{"history", "/api/v1/files/me/files/item", []string{"history", "files/item"}},
-		{"shares", "/api/v1/shares", []string{"shares"}},
-		{"inbox", "/api/v1/shared-with-me", []string{"shares", "--inbox"}},
+		{"files", "/v1/files/me/files", []string{"ls"}},
+		{"trash", "/v1/trash", []string{"ls", "--trashed"}},
+		{"history", "/v1/files/me/files/item", []string{"history", "files/item"}},
+		{"shares", "/v1/shares", []string{"shares"}},
+		{"inbox", "/v1/shared-with-me", []string{"shares", "--inbox"}},
 	} {
 		for _, tc := range []struct {
 			name  string

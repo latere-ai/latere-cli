@@ -127,17 +127,17 @@ func (f *fakeDrive) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(f.files[strings.TrimPrefix(p, "/blob/")])
 	case strings.HasPrefix(p, "/part/"):
 		f.handlePart(w, r)
-	case p == "/api/v1/uploads":
+	case p == "/v1/uploads":
 		f.handleCreateUpload(w, r)
-	case strings.HasPrefix(p, "/api/v1/uploads/") && strings.HasSuffix(p, "/complete"):
+	case strings.HasPrefix(p, "/v1/uploads/") && strings.HasSuffix(p, "/complete"):
 		f.handleCompleteUpload(w, r)
-	case p == "/api/v1/trash" && r.Method == http.MethodGet:
+	case p == "/v1/trash" && r.Method == http.MethodGet:
 		var entries []map[string]any
 		for path, b := range f.trash {
 			entries = append(entries, map[string]any{"path": path, "size": len(b), "created_by": "u", "deleted_at": "2026-07-12T00:00:00Z"})
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"entries": entries})
-	case p == "/api/v1/trash/restore":
+	case p == "/v1/trash/restore":
 		var req struct {
 			Path string `json:"path"`
 		}
@@ -149,8 +149,8 @@ func (f *fakeDrive) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		f.err(w, 404, "not in trash")
-	case strings.HasPrefix(p, "/api/v1/files/me/"):
-		f.handleFile(w, r, strings.TrimPrefix(p, "/api/v1/files/me/"))
+	case strings.HasPrefix(p, "/v1/files/me/"):
+		f.handleFile(w, r, strings.TrimPrefix(p, "/v1/files/me/"))
 	default:
 		f.err(w, 404, "unexpected route "+r.Method+" "+p)
 	}
@@ -243,7 +243,7 @@ func (f *fakeDrive) handlePart(w http.ResponseWriter, r *http.Request) {
 }
 
 func (f *fakeDrive) handleCompleteUpload(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/v1/uploads/"), "/complete")
+	id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v1/uploads/"), "/complete")
 	var req struct {
 		Parts []struct {
 			N    int    `json:"n"`

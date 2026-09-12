@@ -52,7 +52,7 @@ func TestDriveMoveReceiptE2E(t *testing.T) {
 					if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Destination != "files/to" {
 						t.Errorf("request body=%+v error=%v", body, err)
 					}
-					if r.Method != http.MethodPost || r.URL.Path != "/api/v1/files/me/files/from" || r.Header.Get("Authorization") != "Bearer synthetic-token" {
+					if r.Method != http.MethodPost || r.URL.Path != "/v1/files/me/files/from" || r.Header.Get("Authorization") != "Bearer synthetic-token" {
 						t.Errorf("request=%s %s", r.Method, r.URL)
 					}
 					_, _ = io.WriteString(w, tc.body)

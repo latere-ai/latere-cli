@@ -33,10 +33,10 @@ func TestDriveDeleteRequiresCompletionE2E(t *testing.T) {
 		name, path, query, want string
 		args                    []string
 	}{
-		{"trash", "/api/v1/files/me/files/item", "", "Trashed files/item (restore with `latere drive restore files/item`)\n", []string{"rm", "files/item"}},
-		{"permanent", "/api/v1/files/me/files/item", "permanent=true", "Permanently deleted files/item\n", []string{"rm", "files/item", "--permanent"}},
-		{"version", "/api/v1/files/me/files/item", "version=2", "Pruned version 2 of files/item\n", []string{"rm", "files/item", "--version", "2"}},
-		{"revoke", "/api/v1/shares/share-1", "", "Revoked share share-1\n", []string{"unshare", "share-1"}},
+		{"trash", "/v1/files/me/files/item", "", "Trashed files/item (restore with `latere drive restore files/item`)\n", []string{"rm", "files/item"}},
+		{"permanent", "/v1/files/me/files/item", "permanent=true", "Permanently deleted files/item\n", []string{"rm", "files/item", "--permanent"}},
+		{"version", "/v1/files/me/files/item", "version=2", "Pruned version 2 of files/item\n", []string{"rm", "files/item", "--version", "2"}},
+		{"revoke", "/v1/shares/share-1", "", "Revoked share share-1\n", []string{"unshare", "share-1"}},
 	} {
 		for _, status := range []int{200, 202, 204, 403} {
 			t.Run(fmt.Sprintf("%s/%d", operation.name, status), func(t *testing.T) {

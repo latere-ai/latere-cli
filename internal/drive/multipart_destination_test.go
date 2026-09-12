@@ -29,7 +29,7 @@ func TestMultipartDestination(t *testing.T) {
 			var created, parts, completed, aborted atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
-				case "/api/v1/uploads":
+				case "/v1/uploads":
 					created.Add(1)
 					var req struct{ Path string }
 					if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Path != tc.want {
@@ -40,10 +40,10 @@ func TestMultipartDestination(t *testing.T) {
 					parts.Add(1)
 					_, _ = io.Copy(io.Discard, r.Body)
 					w.Header().Set("ETag", "part")
-				case "/api/v1/uploads/upload/complete":
+				case "/v1/uploads/upload/complete":
 					completed.Add(1)
 					_ = json.NewEncoder(w).Encode(FileWriteResult{Path: tc.returned, Size: 7})
-				case "/api/v1/uploads/upload":
+				case "/v1/uploads/upload":
 					if r.Method != http.MethodDelete {
 						t.Errorf("cleanup method=%s", r.Method)
 					}

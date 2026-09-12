@@ -43,7 +43,7 @@ func TestUploadReceipt(t *testing.T) {
 					case r.Method == http.MethodDelete:
 						aborts.Add(1)
 						w.WriteHeader(http.StatusNoContent)
-					case r.URL.Path == "/api/v1/uploads":
+					case r.URL.Path == "/v1/uploads":
 						_ = json.NewEncoder(w).Encode(uploadSession{UploadID: "upload", Path: "files/item", PartSize: 4, PartCount: 2, PartURLs: []string{"http://" + r.Host + "/part", "http://" + r.Host + "/part"}})
 					case r.URL.Path == "/part":
 						parts.Add(1)

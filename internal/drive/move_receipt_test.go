@@ -41,7 +41,7 @@ func TestMoveReceipt(t *testing.T) {
 				if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Destination != "files/to" {
 					t.Errorf("request body=%+v error=%v", body, err)
 				}
-				if r.Method != http.MethodPost || r.URL.Path != "/api/v1/files/me/files/from" {
+				if r.Method != http.MethodPost || r.URL.Path != "/v1/files/me/files/from" {
 					t.Errorf("request=%s %s", r.Method, r.URL)
 				}
 				w.WriteHeader(tc.status)

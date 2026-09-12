@@ -38,7 +38,7 @@ func TestMultipartUploadRejectsMalformedSession(t *testing.T) {
 				switch {
 				case r.Method == http.MethodDelete:
 					aborts.Add(1)
-					if r.URL.Path != "/api/v1/uploads/"+tc.id || tc.id == "" {
+					if r.URL.Path != "/v1/uploads/"+tc.id || tc.id == "" {
 						t.Errorf("unexpected abort: %s", r.URL.Path)
 					}
 					w.WriteHeader(http.StatusNoContent)
@@ -109,7 +109,7 @@ func TestMultipartUploadRejectsIncompleteResponses(t *testing.T) {
 					switch {
 					case r.Method == http.MethodDelete:
 						aborts.Add(1)
-						if r.URL.Path != "/api/v1/uploads/test-upload" {
+						if r.URL.Path != "/v1/uploads/test-upload" {
 							t.Errorf("unexpected abort: %s", r.URL.Path)
 						}
 						w.WriteHeader(http.StatusNoContent)
@@ -162,7 +162,7 @@ func TestMultipartUploadAbortsOnMethodChangingRedirect(t *testing.T) {
 			var redirected, completes, aborts atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
-				case "/api/v1/uploads":
+				case "/v1/uploads":
 					_ = json.NewEncoder(w).Encode(uploadSession{UploadID: "test-upload", Path: "files/test", PartSize: 4, PartCount: 1, PartURLs: []string{"http://" + r.Host + "/part"}})
 				case "/part":
 					_, _ = io.Copy(io.Discard, r.Body)
@@ -171,10 +171,10 @@ func TestMultipartUploadAbortsOnMethodChangingRedirect(t *testing.T) {
 				case "/redirected":
 					redirected.Add(1)
 					w.Header().Set("ETag", `"not-an-upload"`)
-				case "/api/v1/uploads/test-upload/complete":
+				case "/v1/uploads/test-upload/complete":
 					completes.Add(1)
 					_ = json.NewEncoder(w).Encode(FileWriteResult{Path: "files/test", Size: 4})
-				case "/api/v1/uploads/test-upload":
+				case "/v1/uploads/test-upload":
 					if r.Method != http.MethodDelete {
 						t.Errorf("unexpected cleanup method: %s", r.Method)
 					}

@@ -50,7 +50,7 @@ func TestDriveMultipartRequiresCompletePartResponseE2E(t *testing.T) {
 					t.Error("Drive control request lost authentication")
 				}
 				switch r.URL.Path {
-				case "/api/v1/uploads":
+				case "/v1/uploads":
 					_ = json.NewEncoder(w).Encode(map[string]any{"upload_id": "test-upload", "path": "files/test", "part_size": size, "part_count": 1, "part_urls": []string{"http://" + r.Host + "/part"}})
 				case "/part":
 					puts.Add(1)
@@ -76,7 +76,7 @@ func TestDriveMultipartRequiresCompletePartResponseE2E(t *testing.T) {
 						w.(http.Flusher).Flush()
 						panic(http.ErrAbortHandler)
 					}
-				case "/api/v1/uploads/test-upload/complete":
+				case "/v1/uploads/test-upload/complete":
 					completes.Add(1)
 					var body struct {
 						Parts []struct {
@@ -88,7 +88,7 @@ func TestDriveMultipartRequiresCompletePartResponseE2E(t *testing.T) {
 						t.Error("completion lost the uploaded part's ETag")
 					}
 					_ = json.NewEncoder(w).Encode(map[string]any{"path": "files/test", "size": size})
-				case "/api/v1/uploads/test-upload":
+				case "/v1/uploads/test-upload":
 					aborts.Add(1)
 					if r.Method != http.MethodDelete {
 						t.Errorf("unexpected cleanup method: %s", r.Method)

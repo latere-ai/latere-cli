@@ -62,7 +62,7 @@ func TestDriveRejectsMethodChangingRedirectsE2E(t *testing.T) {
 						return
 					}
 					initial.Add(1)
-					if r.Method != method || r.URL.Path != "/api/v1/files/me/files/test" || r.Header.Get("Authorization") != "Bearer test-drive" {
+					if r.Method != method || r.URL.Path != "/v1/files/me/files/test" || r.Header.Get("Authorization") != "Bearer test-drive" {
 						t.Errorf("unexpected initial request: %s %s", r.Method, r.URL.Path)
 					}
 					_, _ = io.Copy(io.Discard, r.Body)

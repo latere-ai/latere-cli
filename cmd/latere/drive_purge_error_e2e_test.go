@@ -50,14 +50,14 @@ func TestDriveRmPurgeErrorE2E(t *testing.T) {
 					t.Errorf("request=%s %s", r.Method, r.URL)
 				}
 				switch r.URL.Path {
-				case "/api/v1/files/org/files/item":
+				case "/v1/files/org/files/item":
 					live.Add(1)
 					if r.URL.Query().Get("permanent") != "true" {
 						t.Error("missing permanent flag")
 					}
 					w.WriteHeader(http.StatusNotFound)
 					_, _ = io.WriteString(w, `{"error":"live lookup missed"}`)
-				case "/api/v1/trash":
+				case "/v1/trash":
 					trash.Add(1)
 					if r.URL.Query().Get("owner") != "org" || r.URL.Query().Get("path") != "files/item" {
 						t.Errorf("purge query=%s", r.URL.RawQuery)

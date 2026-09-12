@@ -30,7 +30,7 @@ func TestTrashPurgeReceipt(t *testing.T) {
 				var requests atomic.Int32
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					requests.Add(1)
-					if r.Method != http.MethodDelete || r.URL.Path != "/api/v1/trash" || r.URL.Query().Get("owner") != "org:example" || r.URL.Query().Get("path") != path || r.Header.Get("Authorization") != "Bearer synthetic-token" {
+					if r.Method != http.MethodDelete || r.URL.Path != "/v1/trash" || r.URL.Query().Get("owner") != "org:example" || r.URL.Query().Get("path") != path || r.Header.Get("Authorization") != "Bearer synthetic-token" {
 						t.Errorf("request=%s %s", r.Method, r.URL)
 					}
 					_, _ = io.WriteString(w, tc.body)

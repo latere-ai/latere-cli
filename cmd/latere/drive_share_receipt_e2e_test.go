@@ -61,7 +61,7 @@ func TestDriveShareReceiptE2E(t *testing.T) {
 						t.Error(err)
 						return
 					}
-					if r.Method != http.MethodPost || r.URL.Path != "/api/v1/shares" || r.Header.Get("Authorization") != "Bearer synthetic-token" || fields["owner"] != "o-example" || fields["path_prefix"] != "files/item" || fields["grantee_type"] != "link" || fields["permission"] != "read" {
+					if r.Method != http.MethodPost || r.URL.Path != "/v1/shares" || r.Header.Get("Authorization") != "Bearer synthetic-token" || fields["owner"] != "o-example" || fields["path_prefix"] != "files/item" || fields["grantee_type"] != "link" || fields["permission"] != "read" {
 						t.Errorf("request=%s %s body=%+v", r.Method, r.URL, fields)
 					}
 					w.WriteHeader(http.StatusCreated)

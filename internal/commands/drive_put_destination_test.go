@@ -37,7 +37,7 @@ func TestDrivePutDestinationArguments(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				requests.Add(1)
 				body, err := io.ReadAll(r.Body)
-				if err != nil || string(body) != "report" || r.Method != http.MethodPut || r.URL.Path != "/api/v1/files/me/"+tc.path {
+				if err != nil || string(body) != "report" || r.Method != http.MethodPut || r.URL.Path != "/v1/files/me/"+tc.path {
 					t.Errorf("request=%s %s body=%q error=%v", r.Method, r.URL, body, err)
 				}
 				_ = json.NewEncoder(w).Encode(map[string]any{"path": tc.path, "size": len(body)})

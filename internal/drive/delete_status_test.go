@@ -19,10 +19,10 @@ func TestDeleteRequiresCompletion(t *testing.T) {
 		name, path, query string
 		run               func(*Client) error
 	}{
-		{"trash", "/api/v1/files/me/files/item", "", func(c *Client) error { return c.Delete(t.Context(), "me", "files/item", false, 0) }},
-		{"permanent", "/api/v1/files/me/files/item", "permanent=true", func(c *Client) error { return c.Delete(t.Context(), "me", "files/item", true, 0) }},
-		{"version", "/api/v1/files/me/files/item", "version=2", func(c *Client) error { return c.Delete(t.Context(), "me", "files/item", false, 2) }},
-		{"revoke", "/api/v1/shares/share-1", "", func(c *Client) error { return c.RevokeShare(t.Context(), "share-1") }},
+		{"trash", "/v1/files/me/files/item", "", func(c *Client) error { return c.Delete(t.Context(), "me", "files/item", false, 0) }},
+		{"permanent", "/v1/files/me/files/item", "permanent=true", func(c *Client) error { return c.Delete(t.Context(), "me", "files/item", true, 0) }},
+		{"version", "/v1/files/me/files/item", "version=2", func(c *Client) error { return c.Delete(t.Context(), "me", "files/item", false, 2) }},
+		{"revoke", "/v1/shares/share-1", "", func(c *Client) error { return c.RevokeShare(t.Context(), "share-1") }},
 	} {
 		for _, status := range []int{200, 202, 204, 403} {
 			t.Run(fmt.Sprintf("%s/%d", operation.name, status), func(t *testing.T) {

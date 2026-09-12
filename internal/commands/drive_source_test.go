@@ -49,7 +49,7 @@ func TestDrivePutAllowsSymlinkToRegularFile(t *testing.T) {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/files/me/files/alias" {
+		if r.URL.Path != "/v1/files/me/files/alias" {
 			t.Errorf("upload path = %q", r.URL.Path)
 		}
 		body, err := io.ReadAll(r.Body)
