@@ -63,7 +63,7 @@ Omit `--ttl` to export your existing credential.
 
 ## Verify access with a raw call
 
-`invoke` sends one raw prompt through the gateway: no tools, no session. Use it to check that a model responds through your identity after binding a provider key; for actual assistant work, use `latere topos -p "<prompt>"`.
+`invoke` sends one raw prompt through the gateway: no tools, no session. Use it to check that a model responds through your identity after binding a provider key; for actual assistant work, run an agent instead: `latere topos --local -p "<prompt>"` on this machine, or `latere topos session start <agent-id> -p "<prompt>"` on the hosted platform.
 
 ```sh
 latere lux invoke --model openai/gpt-4o-mini "Say hi"
