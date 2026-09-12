@@ -165,11 +165,11 @@ If the login cannot be read or refreshed, or auth cannot mint the token, the
 git helper returns no credential so git can prompt. An existing auth failure
 never causes it to substitute the saved Cella token.
 
-One fallback remains on every actor-token path (Drive and git alike):
-when `auth-token.json` is absent entirely, as it is after a
-`--token` paste login, the CLI sends the saved Cella bearer instead.
-Drive and Origo both refuse it, since it names neither of them. The
-fallback is removed by leaf id-01 of `specs/infrastructure/identity`.
+After a `--token` paste login there is no `auth-token.json`, so there
+is no root token to mint from. Drive and the git helper then refuse
+with `not signed in; run `latere login``, and nothing is sent: the
+saved Cella bearer names Cella and is never presented to another
+product. Run `latere login` to get a root token back.
 
 ```sh
 latere git-credential setup             # wire the helper manually

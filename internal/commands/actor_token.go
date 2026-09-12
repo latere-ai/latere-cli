@@ -18,31 +18,32 @@ import (
 // actorTokenTTL bounds the token a product receives, in seconds. A git
 // exchange or a file command completes in seconds, so five minutes covers
 // it and limits the window of a value that leaks through git's own
-// credential store or a trace.
+// credential store or a trace. It is also auth's cap on /actor-tokens, so
+// a larger request would be silently shortened to this.
 const actorTokenTTL = 300
+
+// errNotSignedIn is the one error every product path reports when no auth
+// root token is on file, as after a `--token` paste login. token.json holds
+// a Cella-issued bearer that names Cella and nothing else, so there is no
+// credential to fall back to: presenting it would carry one product's token
+// to another, and the receiver refuses it anyway.
+var errNotSignedIn = errors.New("not signed in; run `latere login`")
 
 // actorCredentialToken resolves the bearer presented to a product that
 // enforces its own audience: a short-lived actor token bound to audience,
 // minted at auth with the retained root token (refreshed when expired via
 // the same authIdentityToken path `latere lux` uses). The root token itself
 // is never presented: its audience is auth, sandboxd and toposd, and the
-// product rejects it. Falls back to token.json only when the auth file is
-// absent, as it is after --token paste login; that case returns
-// api.ErrNoToken when token.json is empty too. Existing auth failures must
-// not change identity, so they are returned, not masked by the fallback.
-// name is what an error calls the product.
+// product rejects it. name is what an error calls the product.
 func actorCredentialToken(ctx context.Context, authURL, audience, name string) (string, error) {
 	access, authBase, err := authIdentityToken(ctx, "", authURL)
-	if err == nil {
-		return mintActorToken(ctx, authBase, access, audience, name)
-	}
-	if !errors.Is(err, api.ErrNoToken) {
+	if err != nil {
+		if errors.Is(err, api.ErrNoToken) {
+			return "", errNotSignedIn
+		}
 		return "", err
 	}
-	if tok, lerr := api.LoadToken(""); lerr == nil && tok.AccessToken != "" {
-		return tok.AccessToken, nil
-	}
-	return "", err
+	return mintActorToken(ctx, authBase, access, audience, name)
 }
 
 // mintActorToken exchanges the root token for an actor token bound to

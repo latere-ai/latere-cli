@@ -43,7 +43,9 @@ func TestDriveDoesNotSubstituteCellaAfterAuthFailureE2E(t *testing.T) {
 			{name: "unreadable auth"},
 			{name: "healthy auth", wantRoot: "root-access", wantBearer: "drive-actor"},
 			{name: "refreshed auth", wantRoot: "new-root", wantBearer: "drive-actor", refreshStatus: 200},
-			{name: "pasted token", wantBearer: "saved-cella"},
+			// A paste login leaves only the Cella bearer, which names Cella
+			// alone. Nothing is substituted for it and nothing is sent.
+			{name: "pasted token"},
 		} {
 			t.Run(kind+"/"+tc.name, func(t *testing.T) {
 				root := t.TempDir()
@@ -120,7 +122,11 @@ func TestDriveDoesNotSubstituteCellaAfterAuthFailureE2E(t *testing.T) {
 				command.Stdout, command.Stderr = &stdout, &stderr
 				err := command.Run()
 				if kind == "file command" && tc.wantBearer == "" {
-					if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 || !strings.Contains(stderr.String(), "latere login") {
+					want := "latere login"
+					if tc.name == "pasted token" {
+						want = "not signed in; run `latere login`"
+					}
+					if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 || !strings.Contains(stderr.String(), want) {
 						t.Errorf("failed Drive auth = %v; stderr: %s", err, stderr.String())
 					}
 				} else if err != nil {

@@ -280,13 +280,15 @@ func TestGitCredentialGetRefreshesExpiredToken(t *testing.T) {
 	auth.assertMint(t, "access-new", "origo")
 }
 
-// A --token paste login has no auth file, so there is no root token to
-// mint from; the pasted bearer is presented verbatim and auth is not called.
-func TestGitCredentialGetFallsBackToCellaToken(t *testing.T) {
+// A --token paste login leaves no auth file, and token.json holds a
+// Cella-issued bearer that names Cella alone. There is nothing to mint from
+// and nothing to substitute: the helper refuses with one sentence, emits no
+// credential, and no request reaches auth or Origo.
+func TestGitCredentialGetRefusesWithoutAuthToken(t *testing.T) {
 	isolateTokens(t)
 	auth := newAuthStub(t)
 	// No auth-token.json (a --token paste login clears it); token.json holds
-	// the pasted bearer.
+	// the pasted Cella bearer.
 	p := filepath.Join(t.TempDir(), "token.json")
 	b, _ := json.Marshal(map[string]any{"access_token": "pasted-token", "token_type": "Bearer"})
 	if err := os.WriteFile(p, b, 0o600); err != nil {
@@ -294,16 +296,23 @@ func TestGitCredentialGetFallsBackToCellaToken(t *testing.T) {
 	}
 	t.Setenv("LATERE_TOKEN_FILE", p)
 
+	if _, err := gitCredentialToken(t.Context(), auth.srv.URL, gitTargets()[0]); err == nil ||
+		err.Error() != "not signed in; run `latere login`" {
+		t.Errorf("token without a login = %v, want the not-signed-in sentence", err)
+	}
+	// git must still be able to prompt, so the helper exits 0 and says nothing.
 	out, err := runGitCredential(t, codeGetInput, "get", "--auth-url", auth.srv.URL)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	want := "username=x-access-token\npassword=pasted-token\n\n"
-	if out != want {
-		t.Errorf("get output = %q, want %q", out, want)
+	if out != "" {
+		t.Errorf("get output = %q, want empty: the Cella bearer is not a git credential", out)
+	}
+	if strings.Contains(out, "pasted-token") {
+		t.Errorf("get output = %q hands git the Cella bearer", out)
 	}
 	if refreshes, mints := auth.counts(); refreshes != 0 || mints != 0 {
-		t.Errorf("auth calls = %d refreshes, %d mints; want none for a pasted token", refreshes, mints)
+		t.Errorf("auth calls = %d refreshes, %d mints; want none without a login", refreshes, mints)
 	}
 }
 

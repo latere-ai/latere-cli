@@ -115,6 +115,32 @@ func TestDriveBearerMintsDriveActorToken(t *testing.T) {
 	})
 }
 
+// A --token paste login leaves only token.json, a Cella-issued bearer that
+// names Cella alone. Drive must refuse with one sentence and send nothing:
+// a bearer minted for one product is never presented to another.
+func TestDriveBearerRefusesCellaTokenWithoutAuthToken(t *testing.T) {
+	isolateTokens(t)
+	t.Setenv("LATERE_DRIVE_TOKEN", "")
+	p := filepath.Join(t.TempDir(), "token.json")
+	b, _ := json.Marshal(map[string]any{"access_token": "pasted-cella", "token_type": "Bearer"})
+	if err := os.WriteFile(p, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LATERE_TOKEN_FILE", p)
+	auth := newAuthStub(t)
+
+	got, err := driveBearer(t.Context(), "", auth.srv.URL)
+	if err == nil || err.Error() != "not signed in; run `latere login`" {
+		t.Errorf("driveBearer = (%q, %v), want the not-signed-in sentence", got, err)
+	}
+	if got == "pasted-cella" {
+		t.Error("driveBearer handed Drive the Cella bearer")
+	}
+	if refreshes, mints := auth.counts(); refreshes != 0 || mints != 0 {
+		t.Errorf("auth calls = %d refreshes, %d mints; want none without a login", refreshes, mints)
+	}
+}
+
 // A saved login that cannot be parsed is not "not signed in", but the only
 // repair is a new login, so the error must still point there.
 func TestDriveBearerUnreadableLoginHintsRelogin(t *testing.T) {

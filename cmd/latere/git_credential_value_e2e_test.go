@@ -41,6 +41,8 @@ func TestGitCredentialRejectsProtocolControlBytesE2E(t *testing.T) {
 			t.Run(source+"/"+tc.name, func(t *testing.T) {
 				root := t.TempDir()
 				cellaPath, authPath := filepath.Join(root, "token.json"), filepath.Join(root, "auth-token.json")
+				// The pasted source puts the candidate value in token.json, the
+				// Cella bearer, to prove none of it reaches git.
 				cellaToken := "unrelated-cella"
 				if source == "pasted" {
 					cellaToken = tc.token
@@ -95,6 +97,11 @@ func TestGitCredentialRejectsProtocolControlBytesE2E(t *testing.T) {
 				if tc.invalid {
 					want = ""
 				}
+				// A paste login leaves no root token, so there is no mint and
+				// nothing to emit whatever the saved Cella value looks like.
+				if source == "pasted" {
+					want = ""
+				}
 				if err != nil || stdout.String() != want || stderr.Len() != 0 {
 					t.Errorf("helper=%v, stdout=%q stderr=%q, want stdout=%q", err, stdout.String(), stderr.String(), want)
 				}
@@ -103,7 +110,7 @@ func TestGitCredentialRejectsProtocolControlBytesE2E(t *testing.T) {
 					wantRefreshes = 1
 				}
 				if source == "pasted" {
-					wantMints = 0 // no root token to mint from; the paste is presented verbatim
+					wantMints = 0 // no root token to mint from, and the Cella bearer is never substituted
 				}
 				if refreshes.Load() != wantRefreshes || mints.Load() != wantMints {
 					t.Errorf("refresh requests=%d mint requests=%d, want %d and %d", refreshes.Load(), mints.Load(), wantRefreshes, wantMints)

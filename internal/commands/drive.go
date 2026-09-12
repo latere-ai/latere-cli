@@ -16,7 +16,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/latere-ai/latere-cli/internal/api"
 	"github.com/latere-ai/latere-cli/internal/drive"
 )
 
@@ -111,11 +110,7 @@ func driveBearer(ctx context.Context, tokenFlag, authURL string) (string, error)
 	if t := strings.TrimSpace(os.Getenv("LATERE_DRIVE_TOKEN")); t != "" {
 		return t, nil
 	}
-	tok, err := driveCredentialToken(ctx, authURL)
-	if errors.Is(err, api.ErrNoToken) {
-		return "", errors.New("not signed in; run `latere login`")
-	}
-	return tok, err
+	return driveCredentialToken(ctx, authURL)
 }
 
 // printDriveJSON emits one machine-readable value to stdout.
