@@ -61,10 +61,13 @@ func InferAuthURL(apiURL string) string {
 
 // MintActorToken POSTs {authBase}/actor-tokens with the given audience
 // and TTL, presenting bearer, and returns the minted actor_token. The
-// actor token inherits the bearer's scopes and is issued by auth, so it
-// is accepted by any service that trusts the auth issuer (sandboxd for
-// audience "sandboxd", Lux for "lux.latere.ai" — Lux does not check the
-// audience but the short TTL bounds a leaked export).
+// actor token inherits the bearer's scopes and carries exactly the one
+// requested audience, so it authenticates at that service and nowhere
+// else: sandboxd for "sandboxd", Lux for "lux.latere.ai", Drive for
+// "drive.latere.ai", Origo for "origo". Each of them enforces the
+// audience, Lux whenever AUTH_AUDIENCES is set, which the hosted
+// deployment does. The audience is the credential's blast radius and
+// the short TTL bounds how long a leaked one lives.
 func MintActorToken(ctx context.Context, httpc *http.Client, authBase, bearer, audience string, ttlSeconds int) (string, error) {
 	token, _, err := MintActorTokenWithLifetime(ctx, httpc, authBase, bearer, audience, ttlSeconds)
 	return token, err
