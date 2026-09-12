@@ -68,11 +68,12 @@ func TestProductsRejectExpiredAuthWithoutRefreshE2E(t *testing.T) {
 						_, _ = w.Write([]byte(`{"code":"expired_cella"}`))
 						return
 					}
-					// Drive-bound products first mint an aud=drive.latere.ai
-					// actor token from the usable root, then present that.
+					// Audience-bound products (the git helper for Origo, the drive
+					// file commands) first mint an actor token from the usable
+					// root, then present that.
 					if r.Method == http.MethodPost && r.URL.Path == "/actor-tokens" {
 						if (product != "git helper" && product != "drive") || r.Header.Get("Authorization") != "Bearer saved-auth" {
-							t.Error("unexpected Drive mint or credential")
+							t.Error("unexpected actor mint or credential")
 						}
 						w.Header().Set("Content-Type", "application/json")
 						_, _ = w.Write([]byte(`{"actor_token":"drive-actor","expires_in":300}`))
@@ -103,8 +104,8 @@ func TestProductsRejectExpiredAuthWithoutRefreshE2E(t *testing.T) {
 				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 				defer cancel()
 				command := exec.CommandContext(ctx, binary, args...)
-				command.Stdin = strings.NewReader("protocol=https\nhost=drive.latere.ai\n\n")
-				command.Env = append(os.Environ(), "LATERE_TOKEN_FILE="+cellaPath, "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_URL="+server.URL, "DRIVE_API_URL="+server.URL, "TOPOS_API_URL="+server.URL, "LUX_API_URL="+server.URL, "DRIVE_HOST=drive.latere.ai", "LATERE_DRIVE_TOKEN=", "LATERE_LUX_TOKEN=", "TOPOS_TOKEN=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
+				command.Stdin = strings.NewReader("protocol=https\nhost=code.latere.ai\n\n")
+				command.Env = append(os.Environ(), "LATERE_TOKEN_FILE="+cellaPath, "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_URL="+server.URL, "DRIVE_API_URL="+server.URL, "TOPOS_API_URL="+server.URL, "LUX_API_URL="+server.URL, "LATERE_DRIVE_TOKEN=", "LATERE_LUX_TOKEN=", "TOPOS_TOKEN=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
 				var stdout, stderr bytes.Buffer
 				command.Stdout, command.Stderr = &stdout, &stderr
 				err := command.Run()
@@ -137,9 +138,9 @@ func TestProductsRejectExpiredAuthWithoutRefreshE2E(t *testing.T) {
 							t.Errorf("missing usable credential: %q", stdout.String())
 						}
 					case "git helper":
-						wantRequests = 1 // the Drive mint; git sees only its result
+						wantRequests = 1 // the Origo mint; git sees only its result
 						if !strings.Contains(stdout.String(), "drive-actor") || strings.Contains(stdout.String(), "saved-auth") {
-							t.Errorf("git helper credential = %q, want the minted Drive token", stdout.String())
+							t.Errorf("git helper credential = %q, want the minted actor token", stdout.String())
 						}
 					case "drive":
 						wantRequests = 2 // the Drive mint, then the Drive call

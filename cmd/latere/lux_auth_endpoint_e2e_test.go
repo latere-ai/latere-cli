@@ -72,14 +72,14 @@ func TestLuxAndDriveUseConfiguredAuthEndpointE2E(t *testing.T) {
 							t.Error("actor mint used the wrong root credential")
 						}
 						// Each product mints for its own audience; the git helper
-						// is Drive-bound and receives a Drive token.
+						// is Origo-bound and receives an Origo token.
 						var body struct {
 							Audience string `json:"audience"`
 						}
 						_ = json.NewDecoder(r.Body).Decode(&body)
 						wantAudience, actor := "lux.latere.ai", "lux-actor"
 						if flow == "git credential" {
-							wantAudience, actor = "drive.latere.ai", "drive-actor"
+							wantAudience, actor = "origo", "code-actor"
 						}
 						if body.Audience != wantAudience {
 							t.Errorf("actor mint audience = %q, want %q", body.Audience, wantAudience)
@@ -117,8 +117,8 @@ func TestLuxAndDriveUseConfiguredAuthEndpointE2E(t *testing.T) {
 					}
 				case "git credential":
 					args = []string{"git-credential", "get"}
-					wantOut = "username=token\npassword=drive-actor\n\n"
-					wantMints = 1 // the refreshed root is only the bearer of the Drive mint
+					wantOut = "username=x-access-token\npassword=code-actor\n\n"
+					wantMints = 1 // the refreshed root is only the bearer of the Origo mint
 				}
 				if explicit {
 					args = append(args, "--auth-url", authServer.URL+"/")
@@ -126,8 +126,8 @@ func TestLuxAndDriveUseConfiguredAuthEndpointE2E(t *testing.T) {
 				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 				defer cancel()
 				command := exec.CommandContext(ctx, binary, args...)
-				command.Stdin = strings.NewReader("protocol=https\nhost=drive.latere.ai\n\n")
-				command.Env = append(os.Environ(), "LATERE_TOKEN_FILE="+cellaPath, "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_URL="+authEnv, "LUX_API_URL="+productServer.URL, "DRIVE_HOST=drive.latere.ai", "LATERE_LUX_TOKEN=", "AUTH_CLIENT_ID=", "XDG_CONFIG_HOME="+root,
+				command.Stdin = strings.NewReader("protocol=https\nhost=code.latere.ai\n\n")
+				command.Env = append(os.Environ(), "LATERE_TOKEN_FILE="+cellaPath, "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_URL="+authEnv, "LUX_API_URL="+productServer.URL, "LATERE_LUX_TOKEN=", "AUTH_CLIENT_ID=", "XDG_CONFIG_HOME="+root,
 					"HTTP_PROXY="+blocked.URL, "HTTPS_PROXY="+blocked.URL, "ALL_PROXY="+blocked.URL, "NO_PROXY=127.0.0.1,localhost", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
 				var stdout, stderr bytes.Buffer
 				command.Stdout, command.Stderr = &stdout, &stderr

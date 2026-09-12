@@ -49,7 +49,7 @@ func TestGitCredentialRejectsProtocolControlBytesE2E(t *testing.T) {
 				if err := os.WriteFile(cellaPath, cellaBefore, 0600); err != nil {
 					t.Fatal(err)
 				}
-				// The value git receives is the minted Drive token; the root
+				// The value git receives is the minted Origo token; the root
 				// token (saved or refreshed) is only the bearer of the mint.
 				var authBefore []byte
 				wantBearer := "Bearer saved-root"
@@ -86,12 +86,12 @@ func TestGitCredentialRejectsProtocolControlBytesE2E(t *testing.T) {
 				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 				defer cancel()
 				command := exec.CommandContext(ctx, binary, "git-credential", "get", "--auth-url", server.URL)
-				command.Stdin = strings.NewReader("protocol=https\nhost=drive.latere.ai\n\n")
-				command.Env = append(os.Environ(), "DRIVE_HOST=drive.latere.ai", "LATERE_TOKEN_FILE="+cellaPath, "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_CLIENT_ID=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
+				command.Stdin = strings.NewReader("protocol=https\nhost=code.latere.ai\n\n")
+				command.Env = append(os.Environ(), "LATERE_TOKEN_FILE="+cellaPath, "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_CLIENT_ID=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
 				var stdout, stderr bytes.Buffer
 				command.Stdout, command.Stderr = &stdout, &stderr
 				err := command.Run()
-				want := "username=token\npassword=" + tc.token + "\n\n"
+				want := "username=x-access-token\npassword=" + tc.token + "\n\n"
 				if tc.invalid {
 					want = ""
 				}

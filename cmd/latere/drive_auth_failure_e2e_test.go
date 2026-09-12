@@ -114,8 +114,8 @@ func TestDriveDoesNotSubstituteCellaAfterAuthFailureE2E(t *testing.T) {
 				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 				defer cancel()
 				command := exec.CommandContext(ctx, binary, args...)
-				command.Stdin = strings.NewReader("protocol=https\nhost=drive.latere.ai\n\n")
-				command.Env = append(os.Environ(), "LATERE_TOKEN_FILE="+cellaPath, "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_URL="+server.URL, "DRIVE_API_URL="+server.URL, "DRIVE_HOST=drive.latere.ai", "LATERE_DRIVE_TOKEN=", "AUTH_CLIENT_ID=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
+				command.Stdin = strings.NewReader("protocol=https\nhost=code.latere.ai\n\n")
+				command.Env = append(os.Environ(), "LATERE_TOKEN_FILE="+cellaPath, "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_URL="+server.URL, "DRIVE_API_URL="+server.URL, "LATERE_DRIVE_TOKEN=", "AUTH_CLIENT_ID=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
 				var stdout, stderr bytes.Buffer
 				command.Stdout, command.Stderr = &stdout, &stderr
 				err := command.Run()
@@ -128,7 +128,7 @@ func TestDriveDoesNotSubstituteCellaAfterAuthFailureE2E(t *testing.T) {
 				}
 				wantOut := ""
 				if kind == "git helper" && tc.wantBearer != "" {
-					wantOut = "username=token\npassword=" + tc.wantBearer + "\n\n"
+					wantOut = "username=x-access-token\npassword=" + tc.wantBearer + "\n\n"
 				}
 				if stdout.String() != wantOut {
 					t.Errorf("stdout = %q, want %q", stdout.String(), wantOut)

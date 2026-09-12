@@ -30,11 +30,11 @@ func TestGitCredentialValidatesProtocolBeforeRefreshE2E(t *testing.T) {
 		name, override, host string
 		dev                  bool
 	}{
-		{"production", "", "drive.latere.ai", false},
-		{"blank override", " \t ", "drive.latere.ai", false},
-		{"development", "localhost:8080", "localhost:8080", true},
-		{"padded override", " localhost:8080 ", "localhost:8080", true},
-		{"different host", "localhost:8080", "drive.latere.ai", true},
+		{"production", "", "code.latere.ai", false},
+		{"blank override", " \t ", "code.latere.ai", false},
+		{"development", "localhost:8081", "localhost:8081", true},
+		{"padded override", " localhost:8081 ", "localhost:8081", true},
+		{"different host", "localhost:8081", "code.latere.ai", true},
 	} {
 		for _, protocol := range []string{"https", "http", "ftp", "ssh", "file", "", "missing"} {
 			t.Run(deployment.name+"/"+protocol, func(t *testing.T) {
@@ -44,7 +44,7 @@ func TestGitCredentialValidatesProtocolBeforeRefreshE2E(t *testing.T) {
 				if err := os.WriteFile(authPath, before, 0600); err != nil {
 					t.Fatal(err)
 				}
-				// auth serves the refresh and then the Drive-audience mint; the
+				// auth serves the refresh and then the Origo-audience mint; the
 				// mint must present the refreshed root token as bearer.
 				var refreshes, mints atomic.Int32
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -60,10 +60,10 @@ func TestGitCredentialValidatesProtocolBeforeRefreshE2E(t *testing.T) {
 						if got := r.Header.Get("Authorization"); got != "Bearer new-root" {
 							t.Errorf("mint bearer = %q, want the refreshed root token", got)
 						}
-						if body["audience"] != "drive.latere.ai" || body["ttl_seconds"] != float64(300) {
-							t.Errorf("mint request = %v, want audience drive.latere.ai and ttl_seconds 300", body)
+						if body["audience"] != "origo" || body["ttl_seconds"] != float64(300) {
+							t.Errorf("mint request = %v, want audience origo and ttl_seconds 300", body)
 						}
-						_, _ = w.Write([]byte(`{"actor_token":"drive-actor","expires_in":300}`))
+						_, _ = w.Write([]byte(`{"actor_token":"code-actor","expires_in":300}`))
 					default:
 						t.Errorf("unexpected auth request: %s %s", r.Method, r.URL.Path)
 						http.NotFound(w, r)
@@ -78,7 +78,7 @@ func TestGitCredentialValidatesProtocolBeforeRefreshE2E(t *testing.T) {
 				defer cancel()
 				command := exec.CommandContext(ctx, binary, "git-credential", "get", "--auth-url", server.URL)
 				command.Stdin = strings.NewReader(input)
-				command.Env = append(os.Environ(), "DRIVE_HOST="+deployment.override, "LATERE_TOKEN_FILE="+filepath.Join(root, "token.json"), "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_CLIENT_ID=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
+				command.Env = append(os.Environ(), "CODE_HOST="+deployment.override, "LATERE_TOKEN_FILE="+filepath.Join(root, "token.json"), "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_CLIENT_ID=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
 				var stdout, stderr bytes.Buffer
 				command.Stdout, command.Stderr = &stdout, &stderr
 				err := command.Run()
@@ -86,7 +86,7 @@ func TestGitCredentialValidatesProtocolBeforeRefreshE2E(t *testing.T) {
 				want := ""
 				var wantCalls int32
 				if allowed {
-					want = "username=token\npassword=drive-actor\n\n"
+					want = "username=x-access-token\npassword=code-actor\n\n"
 					wantCalls = 1
 				}
 				if err != nil || stdout.String() != want || stderr.Len() != 0 {
