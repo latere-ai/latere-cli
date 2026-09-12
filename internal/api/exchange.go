@@ -17,6 +17,7 @@ import (
 
 	"golang.org/x/oauth2"
 	"latere.ai/x/pkg/authkit/oidc"
+	"latere.ai/x/pkg/otel"
 )
 
 // LoginScopes is the single scope set the CLI requests from auth, at
@@ -196,7 +197,7 @@ func RefreshAuthToken(ctx context.Context, authBase string, previous Token) (Tok
 	// custom transports and timeouts while enforcing the token redirect policy.
 	httpc, _ := ctx.Value(oauth2.HTTPClient).(*http.Client)
 	if httpc == nil {
-		httpc = http.DefaultClient
+		httpc = otel.HTTPClient()
 	}
 	refreshHTTP := tokenHTTPClient(httpc)
 	transport := refreshHTTP.Transport
