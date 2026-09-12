@@ -327,9 +327,8 @@ terminal. Re-run login with a different context to switch which cellas
 the CLI can list and operate.
 
 After a successful login the CLI also wires git's credential helper for
-drive.latere.ai and code.latere.ai (idempotent, scoped to those hosts
-only), so plain 'git clone https://drive.latere.ai/git/me/<repo>.git'
-and 'git clone https://code.latere.ai/<owner>/<repo>.git' work with no
+code.latere.ai (idempotent, scoped to that host only), so plain
+'git clone https://code.latere.ai/<owner>/<repo>.git' works with no
 token in the URL. Pass --no-git to leave your git config untouched;
 'latere git-credential setup --remove' undoes the wiring later.
 
@@ -387,11 +386,11 @@ context; --personal and --org-id apply only to browser login.`,
 			if err := login(); err != nil {
 				return err
 			}
-			// Every login variant ends by wiring git for Drive (best-effort,
-			// never fatal) so `git clone https://drive.latere.ai/...` is a
-			// one-step story after sign-in.
+			// Every login variant ends by wiring git for Latere Code
+			// (best-effort, never fatal) so `git clone https://code.latere.ai/...`
+			// is a one-step story after sign-in.
 			if !noGit {
-				configureDriveGitAfterLogin(ctx, cmd.ErrOrStderr())
+				configureGitAfterLogin(ctx, cmd.ErrOrStderr())
 			}
 			return nil
 		},
@@ -406,7 +405,7 @@ context; --personal and --org-id apply only to browser login.`,
 	f.BoolVar(&personal, "personal", false, "issue the CLI token for personal cellas")
 	f.StringVar(&orgID, "org-id", "", "issue the CLI token for this organization id")
 	f.BoolVar(&noBrowser, "no-browser", false, "print the device URL without opening a browser")
-	f.BoolVar(&noGit, "no-git", false, "do not configure git's credential helper for drive.latere.ai and code.latere.ai")
+	f.BoolVar(&noGit, "no-git", false, "do not configure git's credential helper for code.latere.ai")
 	return cmd
 }
 

@@ -20,11 +20,11 @@ import (
 	"time"
 )
 
-// driveAuthStub is a fake auth service for the git helper: /token refreshes
-// the root token and /actor-tokens mints the Drive credential. It records the
-// mint request so a test can pin the bearer, audience and TTL the helper
-// sends. mintStatus, when nonzero, makes every mint fail with that status.
-type driveAuthStub struct {
+// authStub is a fake auth service: /token refreshes the root token and
+// /actor-tokens mints the product credential. It records the mint request
+// so a test can pin the bearer, audience and TTL the caller sends.
+// mintStatus, when nonzero, makes every mint fail with that status.
+type authStub struct {
 	srv        *httptest.Server
 	mintStatus int
 
@@ -36,9 +36,12 @@ type driveAuthStub struct {
 	mintTTL      float64
 }
 
-func newDriveAuthStub(t *testing.T) *driveAuthStub {
+// mintedActor is the actor token the stub hands out.
+const mintedActor = "minted-actor"
+
+func newAuthStub(t *testing.T) *authStub {
 	t.Helper()
-	s := &driveAuthStub{}
+	s := &authStub{}
 	s.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
@@ -67,7 +70,7 @@ func newDriveAuthStub(t *testing.T) *driveAuthStub {
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{"actor_token": "drive-actor", "expires_in": 300})
+			_ = json.NewEncoder(w).Encode(map[string]any{"actor_token": mintedActor, "expires_in": 300})
 		default:
 			http.Error(w, "unexpected "+r.URL.Path, http.StatusNotFound)
 		}
@@ -76,9 +79,9 @@ func newDriveAuthStub(t *testing.T) *driveAuthStub {
 	return s
 }
 
-// assertDriveMint checks the single mint the helper is expected to make:
-// presenting bearer, for the Drive audience, with the fixed 300s TTL.
-func (s *driveAuthStub) assertDriveMint(t *testing.T, bearer string) {
+// assertMint checks the single mint the caller is expected to make:
+// presenting bearer, for audience, with the fixed 300s TTL.
+func (s *authStub) assertMint(t *testing.T, bearer, audience string) {
 	t.Helper()
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -88,30 +91,32 @@ func (s *driveAuthStub) assertDriveMint(t *testing.T, bearer string) {
 	if s.mintBearer != "Bearer "+bearer {
 		t.Errorf("mint bearer = %q, want %q", s.mintBearer, "Bearer "+bearer)
 	}
-	if s.mintAudience != "drive.latere.ai" {
-		t.Errorf("mint audience = %q, want drive.latere.ai", s.mintAudience)
+	if s.mintAudience != audience {
+		t.Errorf("mint audience = %q, want %q", s.mintAudience, audience)
 	}
 	if s.mintTTL != 300 {
 		t.Errorf("mint ttl_seconds = %v, want 300", s.mintTTL)
 	}
 }
 
-func (s *driveAuthStub) counts() (refreshes, mints int) {
+func (s *authStub) counts() (refreshes, mints int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.refreshes, s.mints
 }
 
-const driveActorOutput = "username=token\npassword=drive-actor\n\n"
+// codeActorOutput is what git receives for a Latere Code request: Origo's
+// username convention and the minted token.
+const codeActorOutput = "username=x-access-token\npassword=" + mintedActor + "\n\n"
 
-// isolateDriveTokens points both token files at absent paths so a
-// developer's real ~/.config/latere login never leaks into a test, and
-// clears any DRIVE_HOST override from the environment.
-func isolateDriveTokens(t *testing.T) {
+// isolateTokens points both token files at absent paths so a developer's
+// real ~/.config/latere login never leaks into a test, and clears any
+// CODE_HOST override from the environment.
+func isolateTokens(t *testing.T) {
 	t.Helper()
 	t.Setenv("LATERE_TOKEN_FILE", filepath.Join(t.TempDir(), "absent-token.json"))
 	t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(t.TempDir(), "absent-auth-token.json"))
-	t.Setenv("DRIVE_HOST", "")
+	t.Setenv("CODE_HOST", "")
 }
 
 // runGitCredential executes `latere git-credential <args>` with in on stdin
@@ -128,26 +133,28 @@ func runGitCredential(t *testing.T, in string, args ...string) (string, error) {
 	return out.String(), err
 }
 
-const driveGetInput = "protocol=https\nhost=drive.latere.ai\npath=git/me/notes.git\n\n"
+const codeGetInput = "protocol=https\nhost=code.latere.ai\npath=changkun/hello-world.git\n\n"
 
 // The helper never hands git the root token: it mints an actor token bound
-// to Drive's audience with the root token as bearer, and emits that.
-func TestGitCredentialGetMintsDriveActorToken(t *testing.T) {
-	isolateDriveTokens(t)
+// to Origo's audience with the root token as bearer, and emits that with
+// the username Origo's docs use. Origo accepts any username; x-access-token
+// is the convention, not a check.
+func TestGitCredentialGetMintsOrigoActorToken(t *testing.T) {
+	isolateTokens(t)
 	writeAuthTokenFile(t, "access-root", "refresh-root", time.Now().Add(time.Hour))
-	auth := newDriveAuthStub(t)
+	auth := newAuthStub(t)
 
-	out, err := runGitCredential(t, driveGetInput, "get", "--auth-url", auth.srv.URL)
+	out, err := runGitCredential(t, codeGetInput, "get", "--auth-url", auth.srv.URL)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if out != driveActorOutput {
-		t.Errorf("get output = %q, want the minted Drive token %q", out, driveActorOutput)
+	if out != codeActorOutput {
+		t.Errorf("get output = %q, want the minted token %q", out, codeActorOutput)
 	}
 	if strings.Contains(out, "access-root") {
 		t.Errorf("get output = %q leaks the root token to git", out)
 	}
-	auth.assertDriveMint(t, "access-root")
+	auth.assertMint(t, "access-root", "origo")
 	if refreshes, _ := auth.counts(); refreshes != 0 {
 		t.Errorf("refreshes = %d, want 0 for a fresh root token", refreshes)
 	}
@@ -157,12 +164,12 @@ func TestGitCredentialGetMintsDriveActorToken(t *testing.T) {
 // same outcome as a failed refresh: nothing printed, exit 0, git prompts.
 func TestGitCredentialGetSilentWhenMintFails(t *testing.T) {
 	t.Run("auth rejects", func(t *testing.T) {
-		isolateDriveTokens(t)
+		isolateTokens(t)
 		writeAuthTokenFile(t, "access-root", "refresh-root", time.Now().Add(time.Hour))
-		auth := newDriveAuthStub(t)
+		auth := newAuthStub(t)
 		auth.mintStatus = http.StatusInternalServerError
 
-		out, err := runGitCredential(t, driveGetInput, "get", "--auth-url", auth.srv.URL)
+		out, err := runGitCredential(t, codeGetInput, "get", "--auth-url", auth.srv.URL)
 		if err != nil {
 			t.Fatalf("get must exit 0 when the mint fails, got %v", err)
 		}
@@ -171,13 +178,13 @@ func TestGitCredentialGetSilentWhenMintFails(t *testing.T) {
 		}
 	})
 	t.Run("auth unreachable", func(t *testing.T) {
-		isolateDriveTokens(t)
+		isolateTokens(t)
 		writeAuthTokenFile(t, "access-root", "refresh-root", time.Now().Add(time.Hour))
-		auth := newDriveAuthStub(t)
+		auth := newAuthStub(t)
 		url := auth.srv.URL
 		auth.srv.Close()
 
-		out, err := runGitCredential(t, driveGetInput, "get", "--auth-url", url)
+		out, err := runGitCredential(t, codeGetInput, "get", "--auth-url", url)
 		if err != nil {
 			t.Fatalf("get must exit 0 when auth is unreachable, got %v", err)
 		}
@@ -187,14 +194,18 @@ func TestGitCredentialGetSilentWhenMintFails(t *testing.T) {
 	})
 }
 
+// The helper answers for no host it has no business answering for, and a
+// miss stays silent so git prompts rather than breaking the fetch.
 func TestGitCredentialGetIgnoresOtherHosts(t *testing.T) {
-	isolateDriveTokens(t)
+	isolateTokens(t)
 	writeAuthTokenFile(t, "access-root", "refresh-root", time.Now().Add(time.Hour))
-	auth := newDriveAuthStub(t)
+	auth := newAuthStub(t)
 
 	for _, in := range []string{
 		"protocol=https\nhost=github.com\n\n",
-		"protocol=http\nhost=drive.latere.ai\n\n", // Drive is https-only in prod
+		"protocol=https\nhost=evil.example\n\n",
+		"protocol=http\nhost=code.latere.ai\n\n", // production is https-only
+		"protocol=ssh\nhost=code.latere.ai\n\n",
 	} {
 		out, err := runGitCredential(t, in, "get", "--auth-url", auth.srv.URL)
 		if err != nil {
@@ -210,9 +221,9 @@ func TestGitCredentialGetIgnoresOtherHosts(t *testing.T) {
 }
 
 func TestGitCredentialGetSilentWhenLoggedOut(t *testing.T) {
-	isolateDriveTokens(t)
+	isolateTokens(t)
 
-	out, err := runGitCredential(t, driveGetInput, "get")
+	out, err := runGitCredential(t, codeGetInput, "get")
 	if err != nil {
 		t.Fatalf("get must exit 0 without a login (git falls back to prompting), got %v", err)
 	}
@@ -221,58 +232,59 @@ func TestGitCredentialGetSilentWhenLoggedOut(t *testing.T) {
 	}
 }
 
-func TestGitCredentialGetHonorsDriveHostOverride(t *testing.T) {
-	isolateDriveTokens(t)
+// A dev deployment on a host override may be plain http, production may
+// not. The audience stays the production one: CODE_HOST picks the git host,
+// not the aud claim.
+func TestGitCredentialGetHonorsCodeHostOverride(t *testing.T) {
+	isolateTokens(t)
 	writeAuthTokenFile(t, "access-root", "refresh-root", time.Now().Add(time.Hour))
-	t.Setenv("DRIVE_HOST", "localhost:8080")
-	auth := newDriveAuthStub(t)
+	t.Setenv("CODE_HOST", "localhost:8081")
+	auth := newAuthStub(t)
 
-	// The dev override may be plain http. The audience stays the production
-	// one: DRIVE_HOST picks the git host, not the aud claim.
-	out, err := runGitCredential(t, "protocol=http\nhost=localhost:8080\n\n", "get", "--auth-url", auth.srv.URL)
+	out, err := runGitCredential(t, "protocol=http\nhost=localhost:8081\n\n", "get", "--auth-url", auth.srv.URL)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if out != driveActorOutput {
-		t.Errorf("get output = %q, want the minted token for the DRIVE_HOST override", out)
+	if out != codeActorOutput {
+		t.Errorf("get output = %q, want the minted token for the CODE_HOST override", out)
 	}
-	auth.assertDriveMint(t, "access-root")
+	auth.assertMint(t, "access-root", "origo")
 
 	// The override replaces the production host, it does not add to it.
-	out, err = runGitCredential(t, driveGetInput, "get", "--auth-url", auth.srv.URL)
+	out, err = runGitCredential(t, codeGetInput, "get", "--auth-url", auth.srv.URL)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
 	if out != "" {
-		t.Errorf("get output = %q, want empty for drive.latere.ai while DRIVE_HOST=localhost:8080", out)
+		t.Errorf("get output = %q, want empty for code.latere.ai while CODE_HOST=localhost:8081", out)
 	}
 }
 
 // An expired root token is refreshed first; the refreshed value is the
 // bearer for the mint, and git still only sees the minted token.
 func TestGitCredentialGetRefreshesExpiredToken(t *testing.T) {
-	isolateDriveTokens(t)
-	auth := newDriveAuthStub(t)
+	isolateTokens(t)
+	auth := newAuthStub(t)
 	writeAuthTokenFile(t, "access-old", "refresh-old", time.Now().Add(-time.Hour))
 
-	out, err := runGitCredential(t, driveGetInput, "get", "--auth-url", auth.srv.URL)
+	out, err := runGitCredential(t, codeGetInput, "get", "--auth-url", auth.srv.URL)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if out != driveActorOutput {
-		t.Errorf("get output = %q, want the minted token %q", out, driveActorOutput)
+	if out != codeActorOutput {
+		t.Errorf("get output = %q, want the minted token %q", out, codeActorOutput)
 	}
 	if refreshes, _ := auth.counts(); refreshes != 1 {
 		t.Errorf("refreshes = %d, want 1", refreshes)
 	}
-	auth.assertDriveMint(t, "access-new")
+	auth.assertMint(t, "access-new", "origo")
 }
 
 // A --token paste login has no auth file, so there is no root token to
 // mint from; the pasted bearer is presented verbatim and auth is not called.
 func TestGitCredentialGetFallsBackToCellaToken(t *testing.T) {
-	isolateDriveTokens(t)
-	auth := newDriveAuthStub(t)
+	isolateTokens(t)
+	auth := newAuthStub(t)
 	// No auth-token.json (a --token paste login clears it); token.json holds
 	// the pasted bearer.
 	p := filepath.Join(t.TempDir(), "token.json")
@@ -282,11 +294,11 @@ func TestGitCredentialGetFallsBackToCellaToken(t *testing.T) {
 	}
 	t.Setenv("LATERE_TOKEN_FILE", p)
 
-	out, err := runGitCredential(t, driveGetInput, "get", "--auth-url", auth.srv.URL)
+	out, err := runGitCredential(t, codeGetInput, "get", "--auth-url", auth.srv.URL)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	want := "username=token\npassword=pasted-token\n\n"
+	want := "username=x-access-token\npassword=pasted-token\n\n"
 	if out != want {
 		t.Errorf("get output = %q, want %q", out, want)
 	}
@@ -296,12 +308,12 @@ func TestGitCredentialGetFallsBackToCellaToken(t *testing.T) {
 }
 
 func TestGitCredentialStoreEraseAreNoops(t *testing.T) {
-	isolateDriveTokens(t)
+	isolateTokens(t)
 	writeAuthTokenFile(t, "access-root", "refresh-root", time.Now().Add(time.Hour))
-	auth := newDriveAuthStub(t)
+	auth := newAuthStub(t)
 
 	for _, op := range []string{"store", "erase"} {
-		out, err := runGitCredential(t, "protocol=https\nhost=drive.latere.ai\nusername=token\npassword=whatever\n\n", op)
+		out, err := runGitCredential(t, "protocol=https\nhost=code.latere.ai\nusername=x-access-token\npassword=whatever\n\n", op)
 		if err != nil {
 			t.Fatalf("%s: %v", op, err)
 		}
@@ -311,22 +323,22 @@ func TestGitCredentialStoreEraseAreNoops(t *testing.T) {
 	}
 	// The auth token file must be untouched by erase: the saved login still
 	// mints.
-	if tok, err := driveCredentialToken(t.Context(), auth.srv.URL); err != nil || tok != "drive-actor" {
+	if tok, err := gitCredentialToken(t.Context(), auth.srv.URL, gitTargets()[0]); err != nil || tok != mintedActor {
 		t.Errorf("token after erase = (%q, %v), want a mint from the intact login", tok, err)
 	}
-	auth.assertDriveMint(t, "access-root")
+	auth.assertMint(t, "access-root", "origo")
 }
 
 func TestParseCredentialAttrs(t *testing.T) {
-	in := "protocol=https\nhost=drive.latere.ai\nurl=https://x@drive.latere.ai/a=b\nmalformed line\n\nignored=after-blank\n"
+	in := "protocol=https\nhost=code.latere.ai\nurl=https://x@code.latere.ai/a=b\nmalformed line\n\nignored=after-blank\n"
 	attrs, err := parseCredentialAttrs(strings.NewReader(in))
 	if err != nil {
 		t.Fatalf("parseCredentialAttrs: %v", err)
 	}
 	want := map[string]string{
 		"protocol": "https",
-		"host":     "drive.latere.ai",
-		"url":      "https://x@drive.latere.ai/a=b", // values may contain '='
+		"host":     "code.latere.ai",
+		"url":      "https://x@code.latere.ai/a=b", // values may contain '='
 	}
 	if len(attrs) != len(want) {
 		t.Errorf("attrs = %v, want %v (stop at blank line, skip malformed)", attrs, want)
@@ -348,7 +360,7 @@ func setupGitConfigFile(t *testing.T) func() []string {
 	}
 	cfg := filepath.Join(t.TempDir(), "gitconfig")
 	t.Setenv("GIT_CONFIG_GLOBAL", cfg)
-	key := "credential.https://drive.latere.ai.helper"
+	key := "credential.https://code.latere.ai.helper"
 	return func() []string {
 		out, err := exec.Command("git", "config", "--global", "--get-all", key).Output()
 		if err != nil {
@@ -364,7 +376,7 @@ func setupGitConfigFile(t *testing.T) func() []string {
 }
 
 func TestGitCredentialSetupWritesScopedHelper(t *testing.T) {
-	isolateDriveTokens(t)
+	isolateTokens(t)
 	getAll := setupGitConfigFile(t)
 
 	if _, err := runGitCredential(t, "", "setup"); err != nil {
@@ -387,7 +399,7 @@ func TestGitCredentialSetupWritesScopedHelper(t *testing.T) {
 }
 
 func TestGitCredentialSetupRemove(t *testing.T) {
-	isolateDriveTokens(t)
+	isolateTokens(t)
 	getAll := setupGitConfigFile(t)
 
 	if _, err := runGitCredential(t, "", "setup"); err != nil {
@@ -429,10 +441,10 @@ func fakeSandboxAPI(t *testing.T, acceptToken bool) *httptest.Server {
 // swapGitWiring replaces the post-login git wiring seam with a counter.
 func swapGitWiring(t *testing.T) *int {
 	t.Helper()
-	orig := configureDriveGitAfterLogin
-	t.Cleanup(func() { configureDriveGitAfterLogin = orig })
+	orig := configureGitAfterLogin
+	t.Cleanup(func() { configureGitAfterLogin = orig })
 	calls := 0
-	configureDriveGitAfterLogin = func(ctx context.Context, errw io.Writer) { calls++ }
+	configureGitAfterLogin = func(ctx context.Context, errw io.Writer) { calls++ }
 	return &calls
 }
 
@@ -447,7 +459,7 @@ func runAuthLogin(t *testing.T, args ...string) error {
 }
 
 func TestAuthLoginWiresGitHelperOnce(t *testing.T) {
-	isolateDriveTokens(t)
+	isolateTokens(t)
 	calls := swapGitWiring(t)
 	srv := fakeSandboxAPI(t, true)
 
@@ -460,7 +472,7 @@ func TestAuthLoginWiresGitHelperOnce(t *testing.T) {
 }
 
 func TestAuthLoginNoGitSkipsWiring(t *testing.T) {
-	isolateDriveTokens(t)
+	isolateTokens(t)
 	calls := swapGitWiring(t)
 	srv := fakeSandboxAPI(t, true)
 
@@ -473,7 +485,7 @@ func TestAuthLoginNoGitSkipsWiring(t *testing.T) {
 }
 
 func TestAuthLoginFailureSkipsWiring(t *testing.T) {
-	isolateDriveTokens(t)
+	isolateTokens(t)
 	calls := swapGitWiring(t)
 	srv := fakeSandboxAPI(t, false)
 
@@ -485,20 +497,20 @@ func TestAuthLoginFailureSkipsWiring(t *testing.T) {
 	}
 }
 
-func TestAutoConfigureDriveGitIdempotent(t *testing.T) {
-	isolateDriveTokens(t)
+func TestAutoConfigureGitIdempotent(t *testing.T) {
+	isolateTokens(t)
 	getAll := setupGitConfigFile(t)
 
 	var errw bytes.Buffer
-	autoConfigureDriveGit(t.Context(), &errw)
-	autoConfigureDriveGit(t.Context(), &errw) // second run: already configured, skip the write
+	autoConfigureGit(t.Context(), &errw)
+	autoConfigureGit(t.Context(), &errw) // second run: already configured, skip the write
 
 	want := []string{"", "!latere git-credential"}
 	got := getAll()
 	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("helper entries = %q, want %q", got, want)
 	}
-	announced := strings.Count(errw.String(), "git is configured for drive.latere.ai")
+	announced := strings.Count(errw.String(), "git is configured for code.latere.ai")
 	if announced != 2 {
 		t.Errorf("announcement printed %d times, want 2 (once per login):\n%s", announced, errw.String())
 	}
@@ -508,7 +520,7 @@ func TestAutoConfigureDriveGitIdempotent(t *testing.T) {
 }
 
 func TestAuthLoginSucceedsWithoutGitBinary(t *testing.T) {
-	isolateDriveTokens(t)
+	isolateTokens(t)
 	srv := fakeSandboxAPI(t, true)
 	// An empty PATH hides git; login must still succeed and the real
 	// wiring hook must skip silently.
@@ -540,144 +552,50 @@ func TestSkipUpdateCheckForGitCredential(t *testing.T) {
 }
 
 func TestAutoGitSetupRepairsMissingDevelopmentHTTPHelper(t *testing.T) {
-	isolateDriveTokens(t)
+	isolateTokens(t)
 	setupGitConfigFile(t)
-	t.Setenv("DRIVE_HOST", "localhost:8080")
-	key := "credential.https://localhost:8080.helper"
+	t.Setenv("CODE_HOST", "localhost:8081")
+	key := "credential.https://localhost:8081.helper"
 	if err := gitConfig(t.Context(), "--replace-all", key, ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := gitConfig(t.Context(), "--add", key, "!latere git-credential"); err != nil {
 		t.Fatal(err)
 	}
-	if driveGitHelperConfigured(t.Context()) {
+	if gitHelperConfigured(t.Context()) {
 		t.Error("HTTPS-only setup incorrectly considered complete for a development host")
 	}
-	autoConfigureDriveGit(t.Context(), io.Discard)
-	out, err := exec.Command("git", "config", "--global", "--get-all", "credential.http://localhost:8080.helper").Output()
+	autoConfigureGit(t.Context(), io.Discard)
+	out, err := exec.Command("git", "config", "--global", "--get-all", "credential.http://localhost:8081.helper").Output()
 	if err != nil || string(out) != "\n!latere git-credential\n" {
 		t.Errorf("automatic setup did not repair HTTP helpers: %q (%v)", out, err)
 	}
-	if !driveGitHelperConfigured(t.Context()) {
+	if !gitHelperConfigured(t.Context()) {
 		t.Error("repaired setup not recognized")
 	}
 }
 
-// Latere Code (code.latere.ai) is the second git host this helper serves.
-//
-// Drive was the only one when the helper was written, and the hostname was
-// hardcoded in three places: which host `get` answers for, which host
-// `setup` configures, and the audience the minted token carries. Code
-// shipped later and inherited none of them, so `git clone https://code...`
-// produced a working clone and a push that prompted for a password every
-// time, with no helper to answer it. These pin the table that replaced the
-// three.
-
-// TestSetupConfiguresEveryGitHost: a login must leave git able to push to
-// every host the helper serves, not just the first one.
+// TestSetupConfiguresEveryGitHost pins the table: setup writes one helper
+// key per row of gitTargets and no other.
 func TestSetupConfiguresEveryGitHost(t *testing.T) {
-	isolateDriveTokens(t)
-	t.Setenv("CODE_HOST", "")
-	got := driveGitHelperKeys()
-	want := map[string]bool{
-		"credential.https://drive.latere.ai.helper": false,
-		"credential.https://code.latere.ai.helper":  false,
-	}
-	for _, k := range got {
-		if _, ok := want[k]; !ok {
-			t.Errorf("unexpected helper key %q", k)
-			continue
-		}
-		want[k] = true
-	}
-	for k, seen := range want {
-		if !seen {
-			t.Errorf("setup does not configure %q; an HTTPS push to that host will prompt", k)
-		}
+	isolateTokens(t)
+	got := gitHelperKeys()
+	want := []string{"credential.https://code.latere.ai.helper"}
+	if len(got) != len(want) || got[0] != want[0] {
+		t.Errorf("helper keys = %q, want %q", got, want)
 	}
 }
 
-// TestCodeHostMintsTheOrigoAudience is the half that would still fail with
-// the helper wired up but the audience left at Drive's: Origo rejects any
-// token whose aud is not the literal "origo" (its auth.AudienceOrigo), so
-// the push would 401 rather than prompt.
+// TestCodeHostMintsTheOrigoAudience: Origo rejects any token whose aud is
+// not the literal "origo" (its auth.AudienceOrigo), so a wrong audience
+// would 401 rather than prompt.
 func TestCodeHostMintsTheOrigoAudience(t *testing.T) {
-	isolateDriveTokens(t)
-	t.Setenv("CODE_HOST", "")
-	for _, c := range []struct {
-		host, want string
-	}{
-		{"drive.latere.ai", "drive.latere.ai"},
-		{"code.latere.ai", "origo"},
-	} {
-		target, ok := targetFor(map[string]string{"protocol": "https", "host": c.host})
-		if !ok {
-			t.Errorf("%s: the helper answers for no target", c.host)
-			continue
-		}
-		if target.audience != c.want {
-			t.Errorf("%s: audience = %q, want %q", c.host, target.audience, c.want)
-		}
+	isolateTokens(t)
+	target, ok := targetFor(map[string]string{"protocol": "https", "host": "code.latere.ai"})
+	if !ok {
+		t.Fatal("the helper answers for no target on code.latere.ai")
 	}
-}
-
-// TestCodeHostGetEmitsOrigoConvention is the whole exchange for the Code
-// host: git asks for code.latere.ai, the helper mints against auth with
-// audience "origo" and answers with the username Origo's docs use. Origo
-// accepts any username; x-access-token is the convention, not a check.
-func TestCodeHostGetEmitsOrigoConvention(t *testing.T) {
-	isolateDriveTokens(t)
-	t.Setenv("CODE_HOST", "")
-	writeAuthTokenFile(t, "access-root", "refresh-root", time.Now().Add(time.Hour))
-	auth := newDriveAuthStub(t)
-
-	in := "protocol=https\nhost=code.latere.ai\npath=changkun/hello-world.git\n\n"
-	out, err := runGitCredential(t, in, "get", "--auth-url", auth.srv.URL)
-	if err != nil {
-		t.Fatalf("get: %v", err)
-	}
-	const want = "username=x-access-token\npassword=drive-actor\n\n"
-	if out != want {
-		t.Errorf("get output = %q, want %q", out, want)
-	}
-	auth.mu.Lock()
-	defer auth.mu.Unlock()
-	if auth.mints != 1 || auth.mintAudience != "origo" || auth.mintTTL != 300 {
-		t.Errorf("mint: count=%d audience=%q ttl=%v, want one 300s mint for audience origo", auth.mints, auth.mintAudience, auth.mintTTL)
-	}
-	if auth.mintBearer != "Bearer access-root" {
-		t.Errorf("mint bearer = %q, want the saved login", auth.mintBearer)
-	}
-}
-
-// TestUnknownGitHostIsStillSilence: the table did not turn the helper into
-// one that answers for hosts it has no business answering for. A miss must
-// stay silent so git prompts rather than breaking the fetch.
-func TestUnknownGitHostIsStillSilence(t *testing.T) {
-	isolateDriveTokens(t)
-	t.Setenv("CODE_HOST", "")
-	for _, attrs := range []map[string]string{
-		{"protocol": "https", "host": "github.com"},
-		{"protocol": "https", "host": "evil.example"},
-		// Plain http against production is not a dev override.
-		{"protocol": "http", "host": "code.latere.ai"},
-		{"protocol": "ssh", "host": "code.latere.ai"},
-	} {
-		if _, ok := targetFor(attrs); ok {
-			t.Errorf("the helper answers for %v", attrs)
-		}
-	}
-}
-
-// TestCodeHostOverrideAllowsHTTP mirrors DRIVE_HOST: a dev deployment on a
-// host override may be plain http, production may not.
-func TestCodeHostOverrideAllowsHTTP(t *testing.T) {
-	isolateDriveTokens(t)
-	t.Setenv("CODE_HOST", "localhost:8081")
-	if _, ok := targetFor(map[string]string{"protocol": "http", "host": "localhost:8081"}); !ok {
-		t.Error("CODE_HOST override does not allow http")
-	}
-	if _, ok := targetFor(map[string]string{"protocol": "https", "host": "code.latere.ai"}); ok {
-		t.Error("the override still answers for the production host")
+	if target.audience != "origo" {
+		t.Errorf("audience = %q, want origo", target.audience)
 	}
 }

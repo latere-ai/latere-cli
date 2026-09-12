@@ -93,20 +93,20 @@ func TestDriveBearerPrecedence(t *testing.T) {
 // helper, never the root token, and name a mint failure for what it is
 // rather than as a missing login.
 func TestDriveBearerMintsDriveActorToken(t *testing.T) {
-	isolateDriveTokens(t)
+	isolateTokens(t)
 	t.Setenv("LATERE_DRIVE_TOKEN", "")
 	writeAuthTokenFile(t, "access-root", "refresh-root", time.Now().Add(time.Hour))
 
 	t.Run("mints", func(t *testing.T) {
-		auth := newDriveAuthStub(t)
+		auth := newAuthStub(t)
 		got, err := driveBearer(t.Context(), "", auth.srv.URL)
-		if err != nil || got != "drive-actor" {
+		if err != nil || got != mintedActor {
 			t.Fatalf("driveBearer = (%q, %v), want the minted Drive token", got, err)
 		}
-		auth.assertDriveMint(t, "access-root")
+		auth.assertMint(t, "access-root", "drive.latere.ai")
 	})
 	t.Run("mint failure is reported", func(t *testing.T) {
-		auth := newDriveAuthStub(t)
+		auth := newAuthStub(t)
 		auth.mintStatus = http.StatusServiceUnavailable
 		_, err := driveBearer(t.Context(), "", auth.srv.URL)
 		if err == nil || !strings.Contains(err.Error(), "mint Drive token") || strings.Contains(err.Error(), "not signed in") {
@@ -118,7 +118,7 @@ func TestDriveBearerMintsDriveActorToken(t *testing.T) {
 // A saved login that cannot be parsed is not "not signed in", but the only
 // repair is a new login, so the error must still point there.
 func TestDriveBearerUnreadableLoginHintsRelogin(t *testing.T) {
-	isolateDriveTokens(t)
+	isolateTokens(t)
 	t.Setenv("LATERE_DRIVE_TOKEN", "")
 	p := filepath.Join(t.TempDir(), "auth-token.json")
 	if err := os.WriteFile(p, []byte("{"), 0o600); err != nil {

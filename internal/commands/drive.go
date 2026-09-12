@@ -42,9 +42,9 @@ repos/…, workspaces/…. Commands operate in your personal space by
 default; --owner org (or an explicit u-<uuid>/o-<uuid>) selects
 another space.
 
-Uses the login saved by 'latere login'. Repo workspaces are served
-over git — plain 'git clone https://drive.latere.ai/git/me/<repo>.git'
-already works after login; see 'latere git-credential'.`,
+Uses the login saved by 'latere login'. Repo workspaces are mountable
+folders for code checkouts; repository history lives on Latere Code
+(https://code.latere.ai), see 'latere git-credential'.`,
 		Example: `  latere drive ls
   latere drive put report.pdf files/reports/q2.pdf
   latere drive get files/reports/q2.pdf -o q2.pdf
@@ -93,6 +93,17 @@ func (o *driveOpts) client(ctx context.Context) (*drive.Client, error) {
 // the saved login, the same path the git credential helper uses. A missing
 // login reads as "not signed in"; a refresh or mint failure is reported as
 // itself, since re-login is not always the fix.
+// driveAudience is the aud claim Drive enforces on the bearer the file
+// commands present. It is the production audience regardless of
+// DRIVE_API_URL: the URL selects the deployment, not what auth stamps.
+const driveAudience = "drive.latere.ai"
+
+// driveCredentialToken is the bearer presented to Drive: an actor token
+// bound to driveAudience, minted from the saved login.
+func driveCredentialToken(ctx context.Context, authURL string) (string, error) {
+	return actorCredentialToken(ctx, authURL, driveAudience, "Drive")
+}
+
 func driveBearer(ctx context.Context, tokenFlag, authURL string) (string, error) {
 	if t := strings.TrimSpace(tokenFlag); t != "" {
 		return t, nil
