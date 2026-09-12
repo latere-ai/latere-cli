@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 // Package drive is a thin typed client for the Latere Drive API
-// (https://drive.latere.ai/api/v1). It mirrors internal/api's conventions
+// (https://drive.latere.ai/v1). It mirrors internal/api's conventions
 // (Bearer auth, latere-cli User-Agent, typed non-2xx errors) but decodes
 // Drive's error envelope, which is a bare {"error": "..."} object.
 package drive
@@ -228,14 +228,14 @@ type FileInfo struct {
 
 // ---- request plumbing ----
 
-// filesPath builds /api/v1/files/{owner}/{path...} with each path segment
+// filesPath builds /v1/files/{owner}/{path...} with each path segment
 // escaped ("/" separators preserved).
 func filesPath(owner, p string) string {
 	segs := strings.Split(strings.TrimPrefix(p, "/"), "/")
 	for i, s := range segs {
 		segs[i] = url.PathEscape(s)
 	}
-	return "/api/v1/files/" + url.PathEscape(owner) + "/" + strings.Join(segs, "/")
+	return "/v1/files/" + url.PathEscape(owner) + "/" + strings.Join(segs, "/")
 }
 
 func (c *Client) req(ctx context.Context, method, path string, query url.Values, body io.Reader) (*http.Request, error) {
@@ -508,7 +508,7 @@ func (c *Client) TrashList(ctx context.Context, owner, cursor string, limit int)
 		q.Set("limit", strconv.Itoa(limit))
 	}
 	var page TrashListPage
-	if err := c.getJSON(ctx, "/api/v1/trash", q, &page); err != nil {
+	if err := c.getJSON(ctx, "/v1/trash", q, &page); err != nil {
 		return nil, err
 	}
 	return &page, nil
@@ -519,7 +519,7 @@ func (c *Client) TrashRestore(ctx context.Context, owner, path string) error {
 		Path   string `json:"path"`
 		Status string `json:"status"`
 	}
-	if err := c.postJSON(ctx, "/api/v1/trash/restore", map[string]string{"owner": owner, "path": path}, &out); err != nil {
+	if err := c.postJSON(ctx, "/v1/trash/restore", map[string]string{"owner": owner, "path": path}, &out); err != nil {
 		return err
 	}
 	if out.Path == "" || out.Path != path || out.Status != "restored" {
@@ -535,7 +535,7 @@ func (c *Client) TrashPurge(ctx context.Context, owner, path string) (int, error
 	if path != "" {
 		q.Set("path", path)
 	}
-	req, err := c.req(ctx, http.MethodDelete, "/api/v1/trash", q, nil)
+	req, err := c.req(ctx, http.MethodDelete, "/v1/trash", q, nil)
 	if err != nil {
 		return 0, err
 	}
@@ -555,7 +555,7 @@ func (c *Client) TrashPurge(ctx context.Context, owner, path string) (int, error
 
 func (c *Client) Quota(ctx context.Context, owner string) (*QuotaView, error) {
 	var out QuotaView
-	if err := c.getJSON(ctx, "/api/v1/quotas/"+url.PathEscape(owner), nil, &out); err != nil {
+	if err := c.getJSON(ctx, "/v1/quotas/"+url.PathEscape(owner), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -565,7 +565,7 @@ func (c *Client) Quota(ctx context.Context, owner string) (*QuotaView, error) {
 
 func (c *Client) CreateShare(ctx context.Context, in CreateShareRequest) (*ShareCreated, error) {
 	var out ShareCreated
-	if err := c.postJSON(ctx, "/api/v1/shares", in, &out); err != nil {
+	if err := c.postJSON(ctx, "/v1/shares", in, &out); err != nil {
 		return nil, err
 	}
 	if err := validateShareReceipt(in, out); err != nil {
@@ -610,9 +610,9 @@ func validateShareReceipt(in CreateShareRequest, out ShareCreated) error {
 }
 
 func (c *Client) Shares(ctx context.Context, inbox bool, cursor string, limit int) (*ShareListPage, error) {
-	path := "/api/v1/shares"
+	path := "/v1/shares"
 	if inbox {
-		path = "/api/v1/shared-with-me"
+		path = "/v1/shared-with-me"
 	}
 	q := url.Values{}
 	if cursor != "" {
@@ -629,7 +629,7 @@ func (c *Client) Shares(ctx context.Context, inbox bool, cursor string, limit in
 }
 
 func (c *Client) RevokeShare(ctx context.Context, id string) error {
-	req, err := c.req(ctx, http.MethodDelete, "/api/v1/shares/"+url.PathEscape(id), nil, nil)
+	req, err := c.req(ctx, http.MethodDelete, "/v1/shares/"+url.PathEscape(id), nil, nil)
 	if err != nil {
 		return err
 	}
@@ -664,7 +664,7 @@ func (c *Client) MultipartUpload(ctx context.Context, owner, path string, r io.R
 		create["content_type"] = opts.ContentType
 	}
 	var sess uploadSession
-	if err := c.postJSON(ctx, "/api/v1/uploads", create, &sess); err != nil {
+	if err := c.postJSON(ctx, "/v1/uploads", create, &sess); err != nil {
 		// A decoded session may precede an incomplete or invalid response
 		// tail. Release it even though its response cannot be accepted.
 		if sess.UploadID != "" {
@@ -719,7 +719,7 @@ func (c *Client) MultipartUpload(ctx context.Context, owner, path string, r io.R
 		c.abortUpload(ctx, sess.UploadID)
 		return nil, err
 	}
-	req, err := c.req(ctx, http.MethodPost, "/api/v1/uploads/"+url.PathEscape(sess.UploadID)+"/complete", nil, bytes.NewReader(b))
+	req, err := c.req(ctx, http.MethodPost, "/v1/uploads/"+url.PathEscape(sess.UploadID)+"/complete", nil, bytes.NewReader(b))
 	if err != nil {
 		c.abortUpload(ctx, sess.UploadID)
 		return nil, err
@@ -779,7 +779,7 @@ func putPart(ctx context.Context, httpc *http.Client, presignedURL string, body 
 func (c *Client) abortUpload(ctx context.Context, id string) {
 	actx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 	defer cancel()
-	req, err := c.req(actx, http.MethodDelete, "/api/v1/uploads/"+url.PathEscape(id), nil, nil)
+	req, err := c.req(actx, http.MethodDelete, "/v1/uploads/"+url.PathEscape(id), nil, nil)
 	if err != nil {
 		return
 	}

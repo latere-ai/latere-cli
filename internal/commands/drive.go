@@ -21,7 +21,7 @@ import (
 )
 
 // newDriveCmd groups the Drive file-plane verbs (specs/003-drive-subcommand.md):
-// eight orthogonal commands over https://drive.latere.ai/api/v1. Paths are
+// eight orthogonal commands over https://drive.latere.ai/v1. Paths are
 // namespace-rooted exactly as in the API (files/…, memory/…, repos/…,
 // workspaces/…); variations are flags, not subcommand groups.
 func newDriveCmd() *cobra.Command {
