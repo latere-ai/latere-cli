@@ -10,5 +10,6 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+- `latere drive` commands now call Drive's API at `/v1` instead of `/api/v1`. They need the Drive release that serves `/v1`; against an older Drive they fail with 404.
 - The git credential helper no longer answers for `drive.latere.ai`: Drive does not host git, and repositories live on Latere Code (`code.latere.ai`). `latere login` still wires the helper, for that host only. The `DRIVE_HOST` override is removed; `latere drive` and `DRIVE_API_URL` are unchanged.
 - Cella `wait` and `logs` now detect status-output failures and honor configured stderr streams. Remote exit codes remain intact.
