@@ -11,7 +11,7 @@ read the [README](../README.md) and [docs/](../docs/).
 specs/
   001-auth-unification-migration.md  (complete    — adopts the shared device-code client and file token store)
   002-review-local-subcommand.md     (implemented — latere review; critics run through Lux and Topos)
-  003-drive-subcommand.md            (implemented — latere drive: eight orthogonal file-plane verbs over Drive /api/v1)
+  003-drive-subcommand.md            (implemented — latere drive: eight orthogonal file-plane verbs over Drive /v1)
   004-flatten-auth-commands.md       (implemented — latere login/logout/whoami/print-token/org as top-level verbs)
   005-lux-env-redesign.md            (implemented — lux env keyed by dialect and provider, with token provenance and TTL)
 ```
@@ -24,7 +24,7 @@ Every spec in the tree has shipped:
   token store are in use.
 - `002-review-local-subcommand.md`: `latere review` ships.
 - `003-drive-subcommand.md`: the `latere drive` file-plane verbs ship over
-  Drive `/api/v1`.
+  Drive `/v1`.
 - `004-flatten-auth-commands.md`: session verbs are top-level
   (`latere login/logout/whoami/print-token/org`).
 - `005-lux-env-redesign.md`: `latere lux env` takes a `--compat` dialect or a

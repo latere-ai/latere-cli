@@ -51,7 +51,7 @@ everywhere.
   auth.latere.ai identity token via `authIdentityToken`. No `drive` command
   existed. (2026-09-12: the helper answers for Latere Code only; the Drive
   row, `DRIVE_HOST` and `driveHost()` are gone.)
-- **In ../drive**: the HTTP API under `/api/v1` is described by
+- **In ../drive**: the HTTP API under `/v1` is described by
   `docs/openapi.yaml` (generated, drift-proof). Drive validates auth-issued
   JWTs directly; authorization is claims-driven, no Drive-specific scopes.
   There is no Go client SDK; the CLI builds its own thin client.
@@ -60,7 +60,7 @@ everywhere.
 
 - `internal/commands/drive.go` — the whole cobra tree, `newDriveCmd()`
   factory, registered via `root.AddCommand(newDriveCmd())` in root.go.
-- `internal/drive/client.go` — thin typed client over Drive's `/api/v1`.
+- `internal/drive/client.go` — thin typed client over Drive's `/v1`.
   Mirrors `internal/api/client.go` conventions (Bearer header,
   `User-Agent: latere-cli`, 60s timeout, non-2xx → typed error) but decodes
   Drive's error envelope.
@@ -189,4 +189,4 @@ needs a second identity. None blocking.
   resolution — web-app flows; add individual verbs later only on demand.
 - Git sugar (`clone`) and LFS — Drive does not serve git; repositories live
   on Latere Code, where plain `git` works through the credential helper.
-- Public share-link download (`/api/v1/s/{token}/…`) — curl-able without auth.
+- Public share-link download (`/v1/s/{token}/…`) — curl-able without auth.
