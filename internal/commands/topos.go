@@ -97,6 +97,12 @@ session or start a new one; it signs you in on first use.`,
 			if local {
 				return runToposLocal(cmd.Context(), dir, model, print, cmd.Root().Version)
 			}
+			// The hosted home has no agent to hand a prompt to; a prompt it
+			// cannot run must fail loudly rather than open the interactive
+			// home with the prompt discarded.
+			if print != "" {
+				return errors.New("--print needs --local here; on the hosted platform run 'latere topos session start <agent-id> -p \"<prompt>\"'")
+			}
 			return runToposHome(cmd.Context(), apiURL)
 		},
 	}

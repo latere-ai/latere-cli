@@ -4,6 +4,7 @@
 package commands
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -75,6 +76,27 @@ func TestToposHelpText(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestToposPrintWithoutLocalRejected pins that a prompt given to the root
+// command without --local is refused. Before this, `latere topos -p "..."`
+// parsed cleanly and opened the hosted home with the prompt discarded, so a
+// user copying that form from the docs got no answer and no error.
+func TestToposPrintWithoutLocalRejected(t *testing.T) {
+	root := NewRoot("test")
+	var errOut bytes.Buffer
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&errOut)
+	root.SetArgs([]string{"topos", "-p", "explain this repo"})
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("topos -p without --local ran without error; the prompt was silently dropped")
+	}
+	for _, want := range []string{"--local", "session start"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not point the user at %q", err, want)
+		}
 	}
 }
 
