@@ -20,6 +20,11 @@ func TestInferAuthURL(t *testing.T) {
 		"http://cella.localhost:80": "http://auth.localhost:80",
 		"://not-a-url":              "https://auth.latere.ai",
 		"https://localhost":         "https://auth.latere.ai",
+		// An IP literal has no DNS labels to swap; splitting it at the
+		// first dot invented hosts like auth.0.0.1:8080 (issue #4).
+		"http://127.0.0.1:8080": "https://auth.latere.ai",
+		"http://10.1.2.3":       "https://auth.latere.ai",
+		"http://[::1]:8080":     "https://auth.latere.ai",
 	}
 	for in, want := range cases {
 		if got := InferAuthURL(in); got != want {

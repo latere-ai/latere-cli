@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -40,12 +41,14 @@ var ErrActorAudienceMismatch = errors.New("actor-tokens: audience mismatch")
 
 // InferAuthURL maps a sandboxd URL like https://cella.latere.ai to the
 // auth base https://auth.latere.ai. Falls back to a sane default for
-// the public deployment if the API URL isn't a known shape.
+// the public deployment if the API URL isn't a known shape: a bare
+// single-label host, or an IP literal, whose dots separate octets rather
+// than DNS labels and so have no leading label to replace.
 func InferAuthURL(apiURL string) string {
 	if apiURL == "" {
 		return "https://auth.latere.ai"
 	}
-	if u, err := url.Parse(apiURL); err == nil && u.Host != "" {
+	if u, err := url.Parse(apiURL); err == nil && u.Host != "" && net.ParseIP(u.Hostname()) == nil {
 		// Replace the leading host label.
 		if _, rest, ok := strings.Cut(u.Host, "."); ok {
 			u.Host = "auth." + rest
