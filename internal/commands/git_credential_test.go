@@ -621,6 +621,35 @@ func TestCodeHostMintsTheOrigoAudience(t *testing.T) {
 	}
 }
 
+// TestCodeHostGetEmitsOrigoConvention is the whole exchange for the Code
+// host: git asks for code.latere.ai, the helper mints against auth with
+// audience "origo" and answers with the username Origo's docs use. Origo
+// accepts any username; x-access-token is the convention, not a check.
+func TestCodeHostGetEmitsOrigoConvention(t *testing.T) {
+	isolateDriveTokens(t)
+	t.Setenv("CODE_HOST", "")
+	writeAuthTokenFile(t, "access-root", "refresh-root", time.Now().Add(time.Hour))
+	auth := newDriveAuthStub(t)
+
+	in := "protocol=https\nhost=code.latere.ai\npath=changkun/hello-world.git\n\n"
+	out, err := runGitCredential(t, in, "get", "--auth-url", auth.srv.URL)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	const want = "username=x-access-token\npassword=drive-actor\n\n"
+	if out != want {
+		t.Errorf("get output = %q, want %q", out, want)
+	}
+	auth.mu.Lock()
+	defer auth.mu.Unlock()
+	if auth.mints != 1 || auth.mintAudience != "origo" || auth.mintTTL != 300 {
+		t.Errorf("mint: count=%d audience=%q ttl=%v, want one 300s mint for audience origo", auth.mints, auth.mintAudience, auth.mintTTL)
+	}
+	if auth.mintBearer != "Bearer access-root" {
+		t.Errorf("mint bearer = %q, want the saved login", auth.mintBearer)
+	}
+}
+
 // TestUnknownGitHostIsStillSilence: the table did not turn the helper into
 // one that answers for hosts it has no business answering for. A miss must
 // stay silent so git prompts rather than breaking the fetch.

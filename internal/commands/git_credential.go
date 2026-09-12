@@ -53,6 +53,10 @@ type gitTarget struct {
 	// overridden reports whether the host came from an environment
 	// override, which is what allows plain http for a dev deployment.
 	overridden bool
+	// username is what the helper puts in git's username line. Both hosts
+	// read only the password as the bearer and ignore the username; each
+	// value is the convention that host's own documentation uses.
+	username string
 	// cloneHint is the example printed after login.
 	cloneHint string
 }
@@ -62,6 +66,7 @@ type gitTarget struct {
 func gitTargets() []gitTarget {
 	drive := gitTarget{
 		name: "Drive", host: defaultDriveHost, audience: driveAudience,
+		username:  "token",
 		cloneHint: "git clone https://%s/git/<handle>/<repo>.git",
 	}
 	if v := strings.TrimSpace(os.Getenv("DRIVE_HOST")); v != "" {
@@ -69,6 +74,7 @@ func gitTargets() []gitTarget {
 	}
 	code := gitTarget{
 		name: "Latere Code", host: defaultCodeHost, audience: codeAudience,
+		username:  "x-access-token",
 		cloneHint: "git clone https://%s/<owner>/<repo>.git",
 	}
 	if v := strings.TrimSpace(os.Getenv("CODE_HOST")); v != "" {
@@ -101,30 +107,32 @@ func driveHost() string {
 	return defaultDriveHost
 }
 
-// newGitCredentialCmd is the git credential helper for Drive. git invokes it
-// as `latere git-credential get|store|erase` with an attribute block on
-// stdin, so `git clone https://drive.latere.ai/git/me/<repo>.git` works with
-// no token in the URL after `latere login`.
+// newGitCredentialCmd is the git credential helper for the Latere git
+// hosts. git invokes it as `latere git-credential get|store|erase` with an
+// attribute block on stdin, so `git clone https://drive.latere.ai/git/me/<repo>.git`
+// and `git clone https://code.latere.ai/<owner>/<repo>.git` work with no
+// token in the URL after `latere login`.
 func newGitCredentialCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "git-credential",
-		Short: "Git credential helper for Drive (drive.latere.ai).",
-		Long: `Authenticate git against Drive (drive.latere.ai) with the token saved
-by 'latere login'.
+		Short: "Git credential helper for Drive (drive.latere.ai) and Latere Code (code.latere.ai).",
+		Long: `Authenticate git against Drive (drive.latere.ai) and Latere Code
+(code.latere.ai) with the login saved by 'latere login'.
 
 git invokes this helper as 'latere git-credential get|store|erase',
 writing an attribute block (protocol, host, ...) to stdin. 'get' answers
-only for the Drive host: it refreshes the saved login when expired, mints
-a 5-minute token bound to Drive's audience from it, and emits that token
-as username/password lines. The login token itself never reaches git.
-'store' and 'erase' are no-ops: the login lives in ~/.config/latere,
+only for those two hosts: it refreshes the saved login when expired, mints
+a 5-minute token bound to that host's audience from it, and emits that
+token as username/password lines. The login token itself never reaches
+git. 'store' and 'erase' are no-ops: the login lives in ~/.config/latere,
 managed by 'latere login' and 'latere logout', never in git's own store.
 
 Run 'latere git-credential setup' once to wire the helper into your
-global git config, scoped to drive.latere.ai only.`,
+global git config, scoped to those two hosts only.`,
 		Example: `  latere login
   latere git-credential setup
-  git clone https://drive.latere.ai/git/me/<repo>.git`,
+  git clone https://drive.latere.ai/git/me/<repo>.git
+  git clone https://code.latere.ai/<owner>/<repo>.git`,
 	}
 	cmd.AddCommand(newGitCredentialGetCmd())
 	cmd.AddCommand(newGitCredentialNoopCmd("store"))
@@ -143,18 +151,19 @@ func newGitCredentialSetupCmd() *cobra.Command {
 	var remove bool
 	cmd := &cobra.Command{
 		Use:   "setup",
-		Short: "Configure git to use this helper for Drive (undo with --remove).",
-		Long: `Write the global git config entries that route Drive credentials
-through this helper:
+		Short: "Configure git to use this helper for Drive and Latere Code (undo with --remove).",
+		Long: `Write the global git config entries that route Drive and Latere Code
+credentials through this helper, one pair per host:
 
-    credential.https://<drive-host>.helper =                        (reset)
-    credential.https://<drive-host>.helper = !latere git-credential
+    credential.https://<host>.helper =                        (reset)
+    credential.https://<host>.helper = !latere git-credential
 
 The empty first entry clears helpers inherited from wider git config
-scopes for the Drive host, so only this helper answers there. Helpers
-for every other host are untouched. Re-running setup is idempotent;
---remove deletes the entries for each scheme. A nonblank DRIVE_HOST
-override configures HTTP as well as HTTPS for that development host.`,
+scopes for that host, so only this helper answers there. Helpers for
+every other host are untouched. Re-running setup is idempotent; --remove
+deletes the entries for each host and scheme. A nonblank DRIVE_HOST or
+CODE_HOST override configures HTTP as well as HTTPS for that development
+host.`,
 		Example: `  latere git-credential setup
   latere git-credential setup --remove`,
 		Args: cobra.NoArgs,
@@ -184,7 +193,7 @@ override configures HTTP as well as HTTPS for that development host.`,
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&remove, "remove", false, "remove the Drive credential-helper entries from the global git config")
+	cmd.Flags().BoolVar(&remove, "remove", false, "remove the Drive and Latere Code credential-helper entries from the global git config")
 	return cmd
 }
 
@@ -288,7 +297,7 @@ func newGitCredentialGetCmd() *cobra.Command {
 	var authURL string
 	cmd := &cobra.Command{
 		Use:   "get",
-		Short: "Emit the saved Latere login for a Drive git request (called by git).",
+		Short: "Emit a token from the saved Latere login for a Drive or Latere Code git request (called by git).",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target, ok := credentialRequestTarget(cmd.InOrStdin())
@@ -304,9 +313,9 @@ func newGitCredentialGetCmd() *cobra.Command {
 			if strings.ContainsAny(access, "\r\n\x00") {
 				return nil
 			}
-			// Drive's git endpoint reads the Basic password as the bearer
-			// token; the username is ignored, `token` by convention.
-			fprintf(cmd.OutOrStdout(), "username=token\npassword=%s\n\n", access)
+			// Both git endpoints read the Basic password as the bearer
+			// token and ignore the username; the row carries its convention.
+			fprintf(cmd.OutOrStdout(), "username=%s\npassword=%s\n\n", target.username, access)
 			return nil
 		},
 	}
