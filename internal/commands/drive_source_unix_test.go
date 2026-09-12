@@ -1,7 +1,7 @@
-//go:build darwin || linux || freebsd || openbsd || netbsd || dragonfly
-
 // SPDX-FileCopyrightText: 2026 Latere AI
 // SPDX-License-Identifier: MIT
+
+//go:build darwin || linux || freebsd || openbsd || netbsd || dragonfly
 
 package commands
 
