@@ -562,3 +562,93 @@ func TestAutoGitSetupRepairsMissingDevelopmentHTTPHelper(t *testing.T) {
 		t.Error("repaired setup not recognized")
 	}
 }
+
+// Latere Code (code.latere.ai) is the second git host this helper serves.
+//
+// Drive was the only one when the helper was written, and the hostname was
+// hardcoded in three places: which host `get` answers for, which host
+// `setup` configures, and the audience the minted token carries. Code
+// shipped later and inherited none of them, so `git clone https://code...`
+// produced a working clone and a push that prompted for a password every
+// time, with no helper to answer it. These pin the table that replaced the
+// three.
+
+// TestSetupConfiguresEveryGitHost: a login must leave git able to push to
+// every host the helper serves, not just the first one.
+func TestSetupConfiguresEveryGitHost(t *testing.T) {
+	isolateDriveTokens(t)
+	t.Setenv("CODE_HOST", "")
+	got := driveGitHelperKeys()
+	want := map[string]bool{
+		"credential.https://drive.latere.ai.helper": false,
+		"credential.https://code.latere.ai.helper":  false,
+	}
+	for _, k := range got {
+		if _, ok := want[k]; !ok {
+			t.Errorf("unexpected helper key %q", k)
+			continue
+		}
+		want[k] = true
+	}
+	for k, seen := range want {
+		if !seen {
+			t.Errorf("setup does not configure %q; an HTTPS push to that host will prompt", k)
+		}
+	}
+}
+
+// TestCodeHostMintsTheOrigoAudience is the half that would still fail with
+// the helper wired up but the audience left at Drive's: Origo rejects any
+// token whose aud is not the literal "origo" (its auth.AudienceOrigo), so
+// the push would 401 rather than prompt.
+func TestCodeHostMintsTheOrigoAudience(t *testing.T) {
+	isolateDriveTokens(t)
+	t.Setenv("CODE_HOST", "")
+	for _, c := range []struct {
+		host, want string
+	}{
+		{"drive.latere.ai", "drive.latere.ai"},
+		{"code.latere.ai", "origo"},
+	} {
+		target, ok := targetFor(map[string]string{"protocol": "https", "host": c.host})
+		if !ok {
+			t.Errorf("%s: the helper answers for no target", c.host)
+			continue
+		}
+		if target.audience != c.want {
+			t.Errorf("%s: audience = %q, want %q", c.host, target.audience, c.want)
+		}
+	}
+}
+
+// TestUnknownGitHostIsStillSilence: the table did not turn the helper into
+// one that answers for hosts it has no business answering for. A miss must
+// stay silent so git prompts rather than breaking the fetch.
+func TestUnknownGitHostIsStillSilence(t *testing.T) {
+	isolateDriveTokens(t)
+	t.Setenv("CODE_HOST", "")
+	for _, attrs := range []map[string]string{
+		{"protocol": "https", "host": "github.com"},
+		{"protocol": "https", "host": "evil.example"},
+		// Plain http against production is not a dev override.
+		{"protocol": "http", "host": "code.latere.ai"},
+		{"protocol": "ssh", "host": "code.latere.ai"},
+	} {
+		if _, ok := targetFor(attrs); ok {
+			t.Errorf("the helper answers for %v", attrs)
+		}
+	}
+}
+
+// TestCodeHostOverrideAllowsHTTP mirrors DRIVE_HOST: a dev deployment on a
+// host override may be plain http, production may not.
+func TestCodeHostOverrideAllowsHTTP(t *testing.T) {
+	isolateDriveTokens(t)
+	t.Setenv("CODE_HOST", "localhost:8081")
+	if _, ok := targetFor(map[string]string{"protocol": "http", "host": "localhost:8081"}); !ok {
+		t.Error("CODE_HOST override does not allow http")
+	}
+	if _, ok := targetFor(map[string]string{"protocol": "https", "host": "code.latere.ai"}); ok {
+		t.Error("the override still answers for the production host")
+	}
+}

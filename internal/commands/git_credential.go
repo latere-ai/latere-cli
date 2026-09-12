@@ -26,6 +26,74 @@ import (
 // verbatim, so it may carry a port (e.g. localhost:8080).
 const defaultDriveHost = "drive.latere.ai"
 
+// defaultCodeHost is the public Latere Code deployment (Origo). CODE_HOST
+// overrides it the same way DRIVE_HOST does.
+const defaultCodeHost = "code.latere.ai"
+
+// gitTarget is one git host this helper answers for, and the audience auth
+// stamps on the token it mints for that host.
+//
+// There is more than one because there is more than one git host. Drive was
+// the first and the helper was written around it; Latere Code shipped later
+// on code.latere.ai and inherited nothing, so an HTTPS clone from Code had
+// no helper to authenticate a push with and git fell back to prompting for
+// a password on every push. The host and the audience are separate fields
+// because they are separate things: Drive enforces its own hostname as the
+// audience, Origo enforces the literal "origo" (its
+// internal/auth.AudienceOrigo), and neither follows from the other.
+type gitTarget struct {
+	// name is what a message calls this deployment.
+	name string
+	// host is the git hostname, after its environment override.
+	host string
+	// audience is the aud claim the service requires on the bearer git
+	// presents. Always the production value: the host override selects
+	// which git host the helper answers for, not what auth stamps.
+	audience string
+	// overridden reports whether the host came from an environment
+	// override, which is what allows plain http for a dev deployment.
+	overridden bool
+	// cloneHint is the example printed after login.
+	cloneHint string
+}
+
+// gitTargets is the table the helper, setup, and the post-login hook all
+// read. Adding a git host is one row here.
+func gitTargets() []gitTarget {
+	drive := gitTarget{
+		name: "Drive", host: defaultDriveHost, audience: driveAudience,
+		cloneHint: "git clone https://%s/git/<handle>/<repo>.git",
+	}
+	if v := strings.TrimSpace(os.Getenv("DRIVE_HOST")); v != "" {
+		drive.host, drive.overridden = v, true
+	}
+	code := gitTarget{
+		name: "Latere Code", host: defaultCodeHost, audience: codeAudience,
+		cloneHint: "git clone https://%s/<owner>/<repo>.git",
+	}
+	if v := strings.TrimSpace(os.Getenv("CODE_HOST")); v != "" {
+		code.host, code.overridden = v, true
+	}
+	return []gitTarget{drive, code}
+}
+
+// targetFor returns the row git's attribute block names, if any. Production
+// requires https; a host override (dev deployments) may be plain http.
+func targetFor(attrs map[string]string) (gitTarget, bool) {
+	for _, t := range gitTargets() {
+		if !strings.EqualFold(attrs["host"], t.host) {
+			continue
+		}
+		switch attrs["protocol"] {
+		case "https":
+			return t, true
+		case "http":
+			return t, t.overridden
+		}
+	}
+	return gitTarget{}, false
+}
+
 func driveHost() string {
 	if v := strings.TrimSpace(os.Getenv("DRIVE_HOST")); v != "" {
 		return v
@@ -110,7 +178,9 @@ override configures HTTP as well as HTTPS for that development host.`,
 				fprintf(errw, "  %s=                          (resets inherited helpers)\n", key)
 				fprintf(errw, "  %s=!latere git-credential\n\n", key)
 			}
-			fprintf(errw, "Git now authenticates to %s with short-lived tokens minted from `latere login`.\n", driveHost())
+			for _, t := range gitTargets() {
+				fprintf(errw, "Git now authenticates to %s with short-lived tokens minted from `latere login`.\n", t.host)
+			}
 			return nil
 		},
 	}
@@ -118,11 +188,16 @@ override configures HTTP as well as HTTPS for that development host.`,
 	return cmd
 }
 
+// driveGitHelperKeys is every git config key setup writes, across every row
+// of gitTargets. The name is historical: Drive was the only host when the
+// helper was written.
 func driveGitHelperKeys() []string {
-	host := driveHost()
-	keys := []string{fmt.Sprintf("credential.https://%s.helper", host)}
-	if strings.TrimSpace(os.Getenv("DRIVE_HOST")) != "" {
-		keys = append(keys, fmt.Sprintf("credential.http://%s.helper", host))
+	var keys []string
+	for _, t := range gitTargets() {
+		keys = append(keys, fmt.Sprintf("credential.https://%s.helper", t.host))
+		if t.overridden {
+			keys = append(keys, fmt.Sprintf("credential.http://%s.helper", t.host))
+		}
 	}
 	return keys
 }
@@ -174,7 +249,9 @@ func autoConfigureDriveGit(ctx context.Context, errw io.Writer) {
 			return
 		}
 	}
-	fprintf(errw, "git is configured for %s (clone with git clone https://%s/git/<handle>/<repo>.git)\n", driveHost(), driveHost())
+	for _, t := range gitTargets() {
+		fprintf(errw, "git is configured for %s (clone with "+t.cloneHint+")\n", t.host, t.host)
+	}
 }
 
 // gitConfig runs `git config --global <args>`. Tests point it at a scratch
@@ -214,10 +291,11 @@ func newGitCredentialGetCmd() *cobra.Command {
 		Short: "Emit the saved Latere login for a Drive git request (called by git).",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if !isDriveCredentialRequest(cmd.InOrStdin()) {
+			target, ok := credentialRequestTarget(cmd.InOrStdin())
+			if !ok {
 				return nil
 			}
-			access, err := driveCredentialToken(cmd.Context(), authURL)
+			access, err := gitCredentialToken(cmd.Context(), authURL, target)
 			if err != nil {
 				return nil //nolint:nilerr // a helper miss is silence by protocol: git then prompts
 			}
@@ -252,28 +330,16 @@ func newGitCredentialNoopCmd(op string) *cobra.Command {
 	}
 }
 
-// driveCredentialRequest reports whether the attribute block names the Drive
-// deployment this CLI serves credentials for. Production requires https;
-// a DRIVE_HOST override (dev deployments) may be plain http.
-func driveCredentialRequest(attrs map[string]string) bool {
-	if !strings.EqualFold(attrs["host"], driveHost()) {
-		return false
-	}
-	switch attrs["protocol"] {
-	case "https":
-		return true
-	case "http":
-		return strings.TrimSpace(os.Getenv("DRIVE_HOST")) != ""
-	default:
-		return false
-	}
-}
-
 // driveAudience is the aud claim Drive enforces on the bearer git presents.
 // It is the production audience regardless of DRIVE_HOST: the override
 // selects which git host the helper answers for, not which audience auth
 // stamps.
 const driveAudience = "drive.latere.ai"
+
+// codeAudience is the aud claim Origo enforces on every token it accepts:
+// the literal "origo", not the hostname. See origo's
+// internal/auth.AudienceOrigo.
+const codeAudience = "origo"
 
 // driveActorTTL bounds the token git receives, in seconds. A git exchange
 // completes in seconds, so five minutes covers it and limits the window of
@@ -291,9 +357,15 @@ const driveActorTTL = 300
 // failures must not change identity, so they are returned, not masked by
 // the fallback.
 func driveCredentialToken(ctx context.Context, authURL string) (string, error) {
+	return gitCredentialToken(ctx, authURL, gitTargets()[0])
+}
+
+// gitCredentialToken is driveCredentialToken for any row of gitTargets: the
+// bearer presented to that host, bound to that host's audience.
+func gitCredentialToken(ctx context.Context, authURL string, target gitTarget) (string, error) {
 	access, authBase, err := authIdentityToken(ctx, "", authURL)
 	if err == nil {
-		return mintDriveActorToken(ctx, authBase, access)
+		return mintGitActorToken(ctx, authBase, access, target)
 	}
 	if !errors.Is(err, api.ErrNoToken) {
 		return "", err
@@ -308,11 +380,15 @@ func driveCredentialToken(ctx context.Context, authURL string) (string, error) {
 // token. Any failure, auth unreachable included, is an error the caller
 // decides how to surface: the git helper stays silent so git prompts, the
 // file commands report it.
-func mintDriveActorToken(ctx context.Context, authBase, access string) (string, error) {
+// mintGitActorToken exchanges the root token for an actor token bound to
+// target's audience. Any failure, auth unreachable included, is an error the
+// caller decides how to surface: the git helper stays silent so git prompts,
+// the file commands report it.
+func mintGitActorToken(ctx context.Context, authBase, access string, target gitTarget) (string, error) {
 	httpc := &http.Client{Timeout: 15 * time.Second, Transport: otel.Transport(nil)}
-	actor, err := api.MintActorToken(ctx, httpc, authBase, access, driveAudience, driveActorTTL)
+	actor, err := api.MintActorToken(ctx, httpc, authBase, access, target.audience, driveActorTTL)
 	if err != nil {
-		return "", fmt.Errorf("mint Drive token: %w; if this persists run `latere login`", err)
+		return "", fmt.Errorf("mint %s token: %w; if this persists run `latere login`", target.name, err)
 	}
 	return actor, nil
 }
@@ -320,16 +396,16 @@ func mintDriveActorToken(ctx context.Context, authBase, access string) (string, 
 // parseCredentialAttrs reads git's credential-helper attribute block: one
 // `key=value` per line, terminated by a blank line or EOF. Values may
 // contain `=`; lines without one are ignored, matching git's tolerance.
-// isDriveCredentialRequest reports whether git is asking for a credential
-// this helper answers. Every miss reads the same -- an unreadable request as
-// much as another host -- because a credential helper must never break
+// credentialRequestTarget reports which git host, if any, git is asking for
+// a credential for. Every miss reads the same -- an unreadable request as
+// much as an unknown host -- because a credential helper must never break
 // `git fetch`: the command then prints nothing, exits 0, and git prompts.
-func isDriveCredentialRequest(r io.Reader) bool {
+func credentialRequestTarget(r io.Reader) (gitTarget, bool) {
 	attrs, err := parseCredentialAttrs(r)
 	if err != nil {
-		return false
+		return gitTarget{}, false
 	}
-	return driveCredentialRequest(attrs)
+	return targetFor(attrs)
 }
 
 func parseCredentialAttrs(r io.Reader) (map[string]string, error) {
