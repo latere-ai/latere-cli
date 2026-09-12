@@ -5,11 +5,13 @@ package commands
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -228,48 +230,140 @@ func TestLuxBearerRefreshesThenMints(t *testing.T) {
 	}
 }
 
-func TestLuxIdentityBearerReturnsRootToken(t *testing.T) {
+// The export commands hand a credential to a stock SDK, so it must be one
+// Lux accepts: an actor token for luxAudience, asking for auth's maximum
+// lifetime. The root token, which names the auth issuer, is never exported.
+func TestLuxEnvBearerMintsLuxActorToken(t *testing.T) {
 	isolateBearer(t)
-	// A server that fails any call proves env/token do NOT mint an actor
-	// token: the identity bearer is the root token itself.
+	var gotAudience string
+	var gotTTL float64
 	authSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Errorf("identity bearer must not call auth (%s); it returns the root token", r.URL.Path)
-		http.Error(w, "no", http.StatusInternalServerError)
+		if r.URL.Path != "/actor-tokens" {
+			t.Errorf("unexpected call %s; the export mints, it does not present the root", r.URL.Path)
+			http.Error(w, "no", http.StatusInternalServerError)
+			return
+		}
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		gotAudience, _ = body["audience"].(string)
+		gotTTL, _ = body["ttl_seconds"].(float64)
+		if got := r.Header.Get("Authorization"); got != "Bearer root-access" {
+			t.Errorf("mint bearer = %q, want the root token", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"actor_token": "lux-actor", "expires_in": 300})
 	}))
 	defer authSrv.Close()
 	writeAuthTokenFile(t, "root-access", "root-refresh", time.Now().Add(time.Hour))
 
-	got, err := luxIdentityBearer(t.Context(), "", "", authSrv.URL)
+	got, provenance, err := luxEnvBearer(t.Context(), "", "", authSrv.URL, 0)
 	if err != nil {
-		t.Fatalf("luxIdentityBearer: %v", err)
+		t.Fatalf("luxEnvBearer: %v", err)
 	}
-	if got != "root-access" {
-		t.Errorf("identity bearer = %q, want the root access token", got)
+	if got != "lux-actor" {
+		t.Errorf("exported bearer = %q, want the minted actor token", got)
+	}
+	if gotAudience != luxAudience || gotTTL != 300 {
+		t.Errorf("mint = audience %q ttl %v, want %q and 300", gotAudience, gotTTL, luxAudience)
+	}
+	if !strings.Contains(provenance, "actor token, expires in 300 seconds") {
+		t.Errorf("provenance = %q, want the actor-token expiry", provenance)
 	}
 }
 
-func TestLuxIdentityBearerRefreshesWhenExpired(t *testing.T) {
+func TestLuxEnvBearerRefreshesWhenExpired(t *testing.T) {
 	isolateBearer(t)
 	authSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/token" {
-			t.Errorf("unexpected call %s (should refresh only, not mint)", r.URL.Path)
-			http.Error(w, "no", http.StatusInternalServerError)
-			return
-		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"access_token": "root-new", "token_type": "Bearer", "expires_in": 3600,
-		})
+		switch r.URL.Path {
+		case "/token":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"access_token": "root-new", "token_type": "Bearer", "expires_in": 3600,
+			})
+		case "/actor-tokens":
+			if got := r.Header.Get("Authorization"); got != "Bearer root-new" {
+				t.Errorf("mint bearer = %q, want the refreshed root", got)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"actor_token": "lux-actor", "expires_in": 300})
+		default:
+			t.Errorf("unexpected call %s", r.URL.Path)
+			http.Error(w, "no", http.StatusInternalServerError)
+		}
 	}))
 	defer authSrv.Close()
 	writeAuthTokenFile(t, "root-old", "root-refresh", time.Now().Add(-time.Hour))
 
-	got, err := luxIdentityBearer(t.Context(), "", "", authSrv.URL)
+	got, _, err := luxEnvBearer(t.Context(), "", "", authSrv.URL, 0)
 	if err != nil {
-		t.Fatalf("luxIdentityBearer: %v", err)
+		t.Fatalf("luxEnvBearer: %v", err)
 	}
-	if got != "root-new" {
-		t.Errorf("identity bearer = %q, want refreshed root-new", got)
+	if got != "lux-actor" {
+		t.Errorf("exported bearer = %q, want the actor token minted from the refreshed root", got)
+	}
+}
+
+// A session bearer holds one actor token until it is within luxRenewMargin
+// of expiry, then mints again. A tunnel heartbeats every ten seconds, so a
+// mint per call would be six a minute, and a token held past its expiry
+// would drop the tunnel.
+func TestLuxSessionBearerCachesAndRenews(t *testing.T) {
+	isolateBearer(t)
+	var mints atomic.Int32
+	lifetime := 300
+	authSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/actor-tokens" {
+			t.Errorf("unexpected call %s", r.URL.Path)
+			http.Error(w, "no", http.StatusInternalServerError)
+			return
+		}
+		n := mints.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"actor_token": fmt.Sprintf("lux-actor-%d", n), "expires_in": lifetime,
+		})
+	}))
+	defer authSrv.Close()
+	writeAuthTokenFile(t, "root-access", "root-refresh", time.Now().Add(time.Hour))
+
+	bearer := luxSessionBearer("", "", authSrv.URL)
+	for i := range 3 {
+		got, err := bearer(t.Context())
+		if err != nil || got != "lux-actor-1" {
+			t.Fatalf("call %d = (%q, %v), want the cached first token", i, got, err)
+		}
+	}
+	if mints.Load() != 1 {
+		t.Errorf("mints = %d over three calls, want 1", mints.Load())
+	}
+
+	// A lifetime inside the margin is already due, so the next call re-mints.
+	lifetime = int(luxRenewMargin/time.Second) - 1
+	if got, err := bearer(t.Context()); err != nil || got != "lux-actor-1" {
+		t.Fatalf("call within the cached lifetime = (%q, %v)", got, err)
+	}
+	mints.Store(0)
+	bearer = luxSessionBearer("", "", authSrv.URL)
+	if got, err := bearer(t.Context()); err != nil || got != "lux-actor-1" {
+		t.Fatalf("first short-lived mint = (%q, %v)", got, err)
+	}
+	if got, err := bearer(t.Context()); err != nil || got != "lux-actor-2" {
+		t.Fatalf("token due for renewal = (%q, %v), want a fresh mint", got, err)
+	}
+}
+
+// A passthrough token is the caller's own credential: it is presented
+// verbatim and auth is never called.
+func TestLuxSessionBearerHonorsPassthrough(t *testing.T) {
+	isolateBearer(t)
+	authSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("passthrough must not call auth (%s)", r.URL.Path)
+		http.Error(w, "no", http.StatusInternalServerError)
+	}))
+	defer authSrv.Close()
+
+	got, err := luxSessionBearer("given-token", "", authSrv.URL)(t.Context())
+	if err != nil || got != "given-token" {
+		t.Errorf("session bearer = (%q, %v), want the passthrough token", got, err)
 	}
 }
 
@@ -972,52 +1066,48 @@ func TestLuxEnvTTLMintsActorToken(t *testing.T) {
 	}
 }
 
-func TestLuxEnvIdentityExpiryNote(t *testing.T) {
+// Without --ttl the export still mints: the value handed to an SDK is an
+// actor token bound to Lux at auth's maximum lifetime, never the root
+// token, and stderr says it is short-lived and how to get another.
+func TestLuxEnvWithoutTTLExportsAnActorToken(t *testing.T) {
 	isolateBearer(t)
-	// A future expiry so the identity path emits the note without
-	// attempting a refresh; derived from now so the fixture cannot rot
-	// into the past and turn the test into a refresh-failure test.
-	exp := time.Now().Add(48 * time.Hour).UTC().Truncate(time.Minute)
-	writeAuthTokenFile(t, fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"openid"}}), "r", exp)
+	var gotTTL float64
+	authSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/actor-tokens" {
+			t.Errorf("unexpected call %s", r.URL.Path)
+			http.Error(w, "no", http.StatusInternalServerError)
+			return
+		}
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		gotTTL, _ = body["ttl_seconds"].(float64)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"actor_token": "lux-actor", "expires_in": 300})
+	}))
+	defer authSrv.Close()
+	writeAuthTokenFile(t, "root-access", "r", time.Now().Add(48*time.Hour))
 
 	var errBuf strings.Builder
-	_, err := captureStdout(func() error {
+	out, err := captureStdout(func() error {
 		root := NewRoot("test")
 		root.SetErr(&errBuf)
-		root.SetArgs([]string{"lux", "env", "openai", "--lux-url", "https://lux.example"})
+		root.SetArgs([]string{"lux", "env", "openai", "--lux-url", "https://lux.example", "--auth-url", authSrv.URL})
 		return root.Execute()
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "identity token, expires " + exp.Format("2006-01-02T15:04Z")
-	if !strings.Contains(errBuf.String(), want) {
-		t.Errorf("stderr = %q, want substring %q", errBuf.String(), want)
+	if strings.Contains(out, "root-access") {
+		t.Errorf("the export carries the root token:\n%s", out)
 	}
-	if !strings.Contains(errBuf.String(), "root credential") || !strings.Contains(errBuf.String(), "--ttl") {
-		t.Errorf("stderr = %q, want the note that the export is the root credential and how to bound it", errBuf.String())
+	if !strings.Contains(out, "export OPENAI_API_KEY=lux-actor") {
+		t.Errorf("exports must embed the actor token:\n%s", out)
 	}
-}
-
-// Without a known expiry the note still says what the exported value is:
-// the root credential is the fact the reader must not miss, whatever the
-// lifetime.
-func TestLuxEnvIdentityNamesRootCredentialWithoutExpiry(t *testing.T) {
-	isolateBearer(t)
-	writeAuthTokenFile(t, fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"openid"}}), "r", time.Time{})
-
-	var errBuf strings.Builder
-	_, err := captureStdout(func() error {
-		root := NewRoot("test")
-		root.SetErr(&errBuf)
-		root.SetArgs([]string{"lux", "env", "openai", "--lux-url", "https://lux.example"})
-		return root.Execute()
-	})
-	if err != nil {
-		t.Fatal(err)
+	if gotTTL != float64(actorTokenTTL) {
+		t.Errorf("mint asked for ttl %v, want the maximum %d", gotTTL, actorTokenTTL)
 	}
-	if s := errBuf.String(); !strings.Contains(s, "identity token") || !strings.Contains(s, "root credential") || strings.Contains(s, "expires") {
-		t.Errorf("stderr = %q, want the identity-token note naming the root credential and no expiry", s)
+	if s := errBuf.String(); !strings.Contains(s, "actor token, expires in 300 seconds") || !strings.Contains(s, "re-run") {
+		t.Errorf("stderr = %q, want the actor-token expiry and the re-run note", s)
 	}
 }
 

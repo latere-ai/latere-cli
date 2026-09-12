@@ -90,11 +90,9 @@ func TestLuxRejectsEmptySavedAuthE2E(t *testing.T) {
 						t.Errorf("empty credential produced shell output: %q", stdout.String())
 					}
 				} else {
-					want := "valid-root"
-					if mode == "actor" {
-						want = "valid-actor"
-					}
-					if err != nil || !strings.Contains(stdout.String(), want) {
+					// Every export mode prints the minted actor token; the root
+					// is presented to auth alone and never exported.
+					if err != nil || !strings.Contains(stdout.String(), "valid-actor") || strings.Contains(stdout.String(), "valid-root") {
 						t.Errorf("valid credential = %v; stdout: %q; stderr: %s", err, stdout.String(), stderr.String())
 					}
 				}
@@ -102,7 +100,7 @@ func TestLuxRejectsEmptySavedAuthE2E(t *testing.T) {
 				if state == "refreshable" {
 					wantRefresh = 1
 				}
-				if mode == "actor" && !invalid {
+				if !invalid {
 					wantMint = 1
 				}
 				if refreshes.Load() != wantRefresh || mints.Load() != wantMint {

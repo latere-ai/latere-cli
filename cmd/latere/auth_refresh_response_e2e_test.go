@@ -51,6 +51,16 @@ func TestAuthRefreshRequiresCompleteResponseE2E(t *testing.T) {
 				}
 				var calls atomic.Int32
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					// A refresh that landed is followed by the export's actor
+					// mint with the new root; the mint is not a refresh call.
+					if r.Method == http.MethodPost && r.URL.Path == "/actor-tokens" {
+						if r.Header.Get("Authorization") != "Bearer new-root" {
+							t.Errorf("mint presented %q, want the refreshed root", r.Header.Get("Authorization"))
+						}
+						w.Header().Set("Content-Type", "application/json")
+						_, _ = w.Write([]byte(`{"actor_token":"lux-actor","expires_in":300}`))
+						return
+					}
 					calls.Add(1)
 					if r.Method != http.MethodPost || r.URL.Path != "/token" {
 						t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
@@ -75,7 +85,7 @@ func TestAuthRefreshRequiresCompleteResponseE2E(t *testing.T) {
 				err := cmd.Run()
 				valid := state == "complete" || state == "exact limit"
 				if valid {
-					if err != nil || stdout.String() != "new-root\n" {
+					if err != nil || stdout.String() != "lux-actor\n" {
 						t.Errorf("valid refresh failed: %v stdout=%q stderr=%q", err, stdout.String(), stderr.String())
 					}
 				} else if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 || !strings.Contains(stderr.String(), "refresh failed") || stdout.Len() != 0 {

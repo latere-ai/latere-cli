@@ -120,7 +120,35 @@ func writeTokenFile(t *testing.T, dir, token string) string {
 		t.Fatalf("writeTokenFile (auth): %v", err)
 	}
 	t.Setenv("LATERE_AUTH_TOKEN_FILE", ap)
+	t.Setenv("AUTH_URL", authMintStub(t))
 	return p
+}
+
+// toposActorToken is the bearer a product receives in these tests: the actor
+// token authMintStub hands back, never the root token on disk.
+const toposActorToken = "topos-actor-token"
+
+// authMintStub stands in for auth so a command that mints a product
+// credential reaches a server the test owns instead of auth.latere.ai. It
+// answers the mint and the refresh; any other path is a 404, which surfaces
+// as the command's own auth error.
+func authMintStub(t *testing.T) string {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/actor-tokens":
+			_ = json.NewEncoder(w).Encode(map[string]any{"actor_token": toposActorToken, "expires_in": 300})
+		case "/token":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"access_token": "refreshed-root", "token_type": "Bearer", "expires_in": 3600,
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL
 }
 
 // TestToposAgentsListCallsCorrectEndpoint verifies that 'latere topos
@@ -173,9 +201,13 @@ func TestToposAgentsListCallsCorrectEndpoint(t *testing.T) {
 	if gotPath != "/v1/agents" {
 		t.Errorf("request path = %q, want /v1/agents", gotPath)
 	}
-	wantAuth := "Bearer " + bearerToken
+	// Topos receives the minted actor token, never the root token on disk.
+	wantAuth := "Bearer " + toposActorToken
 	if gotAuth != wantAuth {
 		t.Errorf("Authorization = %q, want %q", gotAuth, wantAuth)
+	}
+	if strings.Contains(gotAuth, bearerToken) {
+		t.Errorf("Authorization = %q leaks the root token to Topos", gotAuth)
 	}
 
 	// Validate output contains agent fields.
@@ -343,11 +375,10 @@ func TestToposRequiresAuth(t *testing.T) {
 	}
 }
 
-// TestToposClientUsesAuthRootToken pins the Option-B behaviour: the Topos path
-// authenticates with the auth root token (aud=topos, run:agents), not the
-// Cella-audience token that `latere cella` uses. token.json and auth-token.json
-// carry different bearers; toposClient must pick the auth one.
-func TestToposClientUsesAuthRootToken(t *testing.T) {
+// The Topos path mints an actor token for toposAudience from the auth root
+// token. Neither the Cella bearer, which names Cella, nor the root token,
+// which names the auth issuer, is ever presented to Topos.
+func TestToposClientMintsToposActorToken(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("LATERE_TOKEN_FILE", filepath.Join(dir, "token.json"))
 	if err := os.WriteFile(filepath.Join(dir, "token.json"),
@@ -357,12 +388,37 @@ func TestToposClientUsesAuthRootToken(t *testing.T) {
 	writeAuthTokenFile(t, "auth-root-token", "", time.Time{})
 	t.Setenv("TOPOS_TOKEN", "")
 
+	var gotBearer, gotAudience string
+	var gotTTL float64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/actor-tokens" {
+			t.Errorf("unexpected auth request %s", r.URL.Path)
+			http.Error(w, "no", http.StatusInternalServerError)
+			return
+		}
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		gotBearer = r.Header.Get("Authorization")
+		gotAudience, _ = body["audience"].(string)
+		gotTTL, _ = body["ttl_seconds"].(float64)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"actor_token": toposActorToken, "expires_in": 300})
+	}))
+	defer srv.Close()
+	t.Setenv("AUTH_URL", srv.URL)
+
 	c, err := toposClient(t.Context(), "http://localhost:8080")
 	if err != nil {
 		t.Fatalf("toposClient: %v", err)
 	}
-	if c.Token != "auth-root-token" {
-		t.Fatalf("Token = %q, want the auth root token (not the cella token)", c.Token)
+	if c.Token != toposActorToken {
+		t.Fatalf("Token = %q, want the minted actor token", c.Token)
+	}
+	if gotBearer != "Bearer auth-root-token" {
+		t.Errorf("mint bearer = %q, want the auth root token", gotBearer)
+	}
+	if gotAudience != toposAudience || gotTTL != 300 {
+		t.Errorf("mint = audience %q ttl %v, want %q and 300", gotAudience, gotTTL, toposAudience)
 	}
 }
 

@@ -136,8 +136,8 @@ func anthropicDirect(credential string, oauth bool, modelName string) (models.Mo
 }
 
 // luxLocalModel routes inference through Latere Lux's first-party dialect
-// (POST <lux>/lux/v1/generate), authenticated with the caller's latere
-// identity bearer per request (refreshed on expiry).
+// (POST <lux>/lux/v1/generate), authenticated per request with an actor
+// token bound to luxAudience, re-minted as it expires.
 func luxLocalModel(modelName string) models.Model {
 	model := modelName
 	if model == "" {
@@ -145,9 +145,7 @@ func luxLocalModel(modelName string) models.Model {
 	}
 	return toposlux.New("", resolveLuxURL(""),
 		toposlux.WithModel(model),
-		toposlux.WithBearerSource(func(ctx context.Context) (string, error) {
-			return luxIdentityBearer(ctx, "", "", "")
-		}),
+		toposlux.WithBearerSource(luxSessionBearer("", "", "")),
 	)
 }
 

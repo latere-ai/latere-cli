@@ -44,10 +44,20 @@ func TestLuxEnvExportsLiteralShellValuesE2E(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
 			authPath := filepath.Join(root, "auth-token.json")
-			data, _ := json.Marshal(map[string]string{"access_token": tc.token})
+			data, _ := json.Marshal(map[string]string{"access_token": "saved-root"})
 			if err := os.WriteFile(authPath, data, 0600); err != nil {
 				t.Fatal(err)
 			}
+			// The exported value is the actor token auth mints, so the
+			// hostile value under test is what auth hands back.
+			mint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/actor-tokens" || r.Header.Get("Authorization") != "Bearer saved-root" {
+					t.Errorf("unexpected auth request: %s %s", r.Method, r.URL.Path)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]any{"actor_token": tc.token, "expires_in": 300})
+			}))
+			defer mint.Close()
 			base := tc.url
 			if base == "" {
 				base = "https://lux.example"
@@ -66,7 +76,7 @@ func TestLuxEnvExportsLiteralShellValuesE2E(t *testing.T) {
 				wantBase = base + tc.route + "/v1"
 				args = []string{"lux", "env", "custom", "--token", tc.token}
 			}
-			args = append(args, "--lux-url", base)
+			args = append(args, "--lux-url", base, "--auth-url", mint.URL)
 			if tc.raw {
 				args = append(args, "--raw")
 			}

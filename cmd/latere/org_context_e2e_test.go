@@ -208,8 +208,10 @@ func TestOrgSwitchUpdatesCellaIdentityE2E(t *testing.T) {
 			if err != nil || strings.TrimSpace(string(out)) != want {
 				t.Errorf("shown context = %s (%v), want %s", out, err, want)
 			}
+			// The export mints with the new root, which the stub above
+			// asserts, and prints the actor token it got back.
 			out, err = run("lux", "env", "--raw", "--auth-url", server.URL)
-			if err != nil || !strings.HasPrefix(string(out), newAuth+"\n") {
+			if err != nil || !strings.HasPrefix(string(out), "new-actor\n") {
 				t.Errorf("next command could not use the new auth credential: %v: %s", err, out)
 			}
 			if refreshes.Load() != 1 {

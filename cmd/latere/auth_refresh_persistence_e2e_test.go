@@ -43,6 +43,16 @@ func TestAuthRefreshRequiresPersistenceE2E(t *testing.T) {
 				backup := filepath.Join(root, "old-auth.json")
 				var calls atomic.Int32
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					// After the refresh is saved, the export mints an actor
+					// token with the new root; that mint is not a refresh call.
+					if r.Method == http.MethodPost && r.URL.Path == "/actor-tokens" {
+						if r.Header.Get("Authorization") != "Bearer new-root" {
+							t.Errorf("mint presented %q, want the refreshed root", r.Header.Get("Authorization"))
+						}
+						w.Header().Set("Content-Type", "application/json")
+						_, _ = w.Write([]byte(`{"actor_token":"lux-actor","expires_in":300}`))
+						return
+					}
 					calls.Add(1)
 					if r.Method != http.MethodPost || r.URL.Path != "/token" {
 						t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
@@ -86,7 +96,7 @@ func TestAuthRefreshRequiresPersistenceE2E(t *testing.T) {
 				cmd.Stdout, cmd.Stderr = &stdout, &stderr
 				err := cmd.Run()
 				if mode == "writable" {
-					if err != nil || stdout.String() != "new-root\n" {
+					if err != nil || stdout.String() != "lux-actor\n" {
 						t.Errorf("valid refresh failed: %v stdout=%q stderr=%q", err, stdout.String(), stderr.String())
 					}
 					data, readErr := os.ReadFile(authPath)

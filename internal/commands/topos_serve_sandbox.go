@@ -113,13 +113,14 @@ func runServeSandbox(ctx context.Context, apiURL, root string, consent sandbox.C
 }
 
 // toposTunnelBearer returns the bearer the sandbox tunnel dials with: the
-// TOPOS_TOKEN dev override first (matching toposClient), else the auth-issued
-// identity bearer. So TOPOS_TOKEN=dev + a dev-auth toposd is a one-step run.
+// TOPOS_TOKEN dev override first (matching toposClient), else an actor token
+// bound to toposAudience. So TOPOS_TOKEN=dev + a dev-auth toposd is a
+// one-step run, and the hosted dial carries a token Topos verifies.
 func toposTunnelBearer(ctx context.Context) (string, error) {
 	if v := os.Getenv("TOPOS_TOKEN"); v != "" {
 		return v, nil
 	}
-	return toposIdentityBearer(ctx)
+	return toposBearer(ctx)
 }
 
 // toWSURL rewrites an http(s) base URL to its ws(s) form for a websocket dial.

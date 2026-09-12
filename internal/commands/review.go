@@ -111,13 +111,11 @@ func runReview(ctx context.Context, cmd *cobra.Command, o *reviewOpts) error {
 		reviews.Prune(stateDir)
 	}
 
-	// Resolve the identity bearer up front: validates that the user is
-	// signed in for Lux before spending a proposer round. The same closure
-	// is handed to topos so it re-fetches (and refreshes) the bearer on each
-	// model call, since a debate can outlive a single short-lived token.
-	bearerFn := func(ctx context.Context) (string, error) {
-		return luxIdentityBearer(ctx, o.token, o.luxURL, o.authURL)
-	}
+	// Resolve the Lux bearer up front: validates that the user is signed in
+	// for Lux before spending a proposer round. The same closure is handed to
+	// topos so it re-fetches the bearer on each model call, since a debate
+	// outlives the actor token any one call presents.
+	bearerFn := luxSessionBearer(o.token, o.luxURL, o.authURL)
 	bearer, err := bearerFn(ctx)
 	if err != nil {
 		return err

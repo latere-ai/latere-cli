@@ -77,7 +77,7 @@ func ensureToposLogin(ctx context.Context, apiURL string) error {
 	if os.Getenv("TOPOS_TOKEN") != "" {
 		return nil
 	}
-	if _, err := toposIdentityBearer(ctx); err == nil {
+	if _, err := toposRootToken(ctx); err == nil {
 		return nil
 	}
 	fmt.Fprintln(os.Stderr, "Sign in to Topos to continue.")

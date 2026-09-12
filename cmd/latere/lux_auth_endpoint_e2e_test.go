@@ -103,9 +103,11 @@ func TestLuxAndDriveUseConfiguredAuthEndpointE2E(t *testing.T) {
 				if explicit {
 					authEnv = blocked.URL
 				}
+				// The export mints once from the refreshed root and prints the
+				// actor token; it presents nothing to a product.
 				args := []string{"lux", "env", "--raw"}
-				wantOut := "new-root\n"
-				var wantMints, wantProducts int32
+				wantOut := "lux-actor\n"
+				wantMints, wantProducts := int32(1), int32(0)
 				wantRefreshes := int32(1)
 				switch flow {
 				case "lux refresh and actor", "lux actor":

@@ -57,11 +57,15 @@ func TestProductCommandsNeverRefreshCellaCredentialsE2E(t *testing.T) {
 						if source == "expired login" {
 							wantBearer = "renewed-root"
 						}
+						// Each product receives an actor token minted for its own
+						// audience, never the root token on disk.
 						if product == "lux" {
 							wantBearer = "lux-actor"
+						} else {
+							wantBearer = "topos-actor"
 						}
 					}
-					var cellaMints, exchanges, productCalls, luxMints, authRefreshes atomic.Int32
+					var cellaMints, exchanges, productCalls, luxMints, toposMints, authRefreshes atomic.Int32
 					server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 						w.Header().Set("Content-Type", "application/json")
 						switch r.URL.Path {
@@ -78,10 +82,14 @@ func TestProductCommandsNeverRefreshCellaCredentialsE2E(t *testing.T) {
 							if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 								t.Error(err)
 							}
-							if body.Audience == "lux.latere.ai" {
+							switch body.Audience {
+							case "lux.latere.ai":
 								luxMints.Add(1)
 								_, _ = w.Write([]byte(`{"actor_token":"lux-actor"}`))
-							} else {
+							case "toposd":
+								toposMints.Add(1)
+								_, _ = w.Write([]byte(`{"actor_token":"topos-actor"}`))
+							default:
 								cellaMints.Add(1)
 								_, _ = w.Write([]byte(`{"actor_token":"cella-actor"}`))
 							}
@@ -132,9 +140,16 @@ func TestProductCommandsNeverRefreshCellaCredentialsE2E(t *testing.T) {
 					if cellaMints.Load() != 0 || exchanges.Load() != 0 || productCalls.Load() != 1 {
 						t.Errorf("requests: Cella mints=%d exchanges=%d product=%d, want 0/0/1", cellaMints.Load(), exchanges.Load(), productCalls.Load())
 					}
-					wantLuxMints := int32(0)
-					if product == "lux" && source != "override" {
-						wantLuxMints = 1
+					wantLuxMints, wantToposMints := int32(0), int32(0)
+					if source != "override" {
+						if product == "lux" {
+							wantLuxMints = 1
+						} else {
+							wantToposMints = 1
+						}
+					}
+					if toposMints.Load() != wantToposMints {
+						t.Errorf("Topos actor mint calls = %d, want %d", toposMints.Load(), wantToposMints)
 					}
 					if luxMints.Load() != wantLuxMints {
 						t.Errorf("Lux actor mint calls = %d, want %d", luxMints.Load(), wantLuxMints)

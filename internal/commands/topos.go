@@ -370,16 +370,24 @@ func resolveToposURL(flagURL string) string {
 	return "https://topos.latere.ai"
 }
 
+// toposAudience is the aud claim Topos enforces on every bearer it accepts:
+// agents' internal/auth.BuildAuthenticator pins Audiences to AUTH_CLIENT_ID,
+// the registered OIDC client of the Topos console, which is "toposd" in
+// auth's client registry. The login token carries it too, but the login
+// token also names the auth issuer, so every Topos call presents an actor
+// token minted for this audience alone.
+const toposAudience = "toposd"
+
 // toposClient builds an authenticated API client pointed at the Topos
 // control plane. For local development, TOPOS_TOKEN overrides the saved
 // token with a static bearer, so a server running with TOPOS_DEV_AUTH=true +
 // TOPOS_DEV_TOKEN can be reached in one step without `latere login`.
 //
-// Against production, Topos validates an auth-issued, topos-audience bearer
-// carrying run:agents. That is the retained auth root token (which
-// `latere login` now requests run:agents and the topos audience for),
-// NOT the Cella-audience token `latere cella` uses — so the Topos path uses the
-// auth root token, refreshed when expired.
+// Against production, Topos validates an auth-issued bearer that names
+// toposAudience and carries run:agents. That is an actor token minted from
+// the retained root token, not the root token itself: the root also names
+// auth, and a credential valid at the identity service must not travel to
+// a product.
 func toposClient(ctx context.Context, apiURL string) (*api.Client, error) {
 	c := api.NewClient(resolveToposURL(apiURL))
 	c.Refresh = nil // Topos resolves its own auth bearer below, including refresh.
@@ -387,7 +395,7 @@ func toposClient(ctx context.Context, apiURL string) (*api.Client, error) {
 		c.Token = v
 		return c, nil
 	}
-	bearer, err := toposIdentityBearer(ctx)
+	bearer, err := toposBearer(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -395,11 +403,22 @@ func toposClient(ctx context.Context, apiURL string) (*api.Client, error) {
 	return c, nil
 }
 
-// toposIdentityBearer returns the auth-issued bearer Topos accepts: the retained
-// auth root token, refreshed when within a minute of expiry. It mirrors Lux's
-// authIdentityToken but is kept separate so the Topos path has its own clear
-// error messages.
-func toposIdentityBearer(ctx context.Context) (string, error) {
+// toposBearer returns the bearer presented to Topos: an actor token bound
+// to toposAudience, minted at auth with the retained root token. It is the
+// same mint the Drive and Origo paths make, with Topos's audience.
+func toposBearer(ctx context.Context) (string, error) {
+	access, err := toposRootToken(ctx)
+	if err != nil {
+		return "", err
+	}
+	return mintActorToken(ctx, toposAuthBase(), access, toposAudience, "Topos")
+}
+
+// toposRootToken returns the retained auth root token, refreshed when within
+// a minute of expiry. It is what the Topos actor token is minted with, never
+// what Topos receives. It mirrors Lux's authIdentityToken but is kept
+// separate so the Topos path has its own clear error messages.
+func toposRootToken(ctx context.Context) (string, error) {
 	authTok, err := api.LoadAuthToken()
 	if err != nil {
 		if errors.Is(err, api.ErrNoToken) {

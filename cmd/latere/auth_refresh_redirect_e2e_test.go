@@ -38,6 +38,16 @@ func TestAuthRefreshPreservesRequestOnRedirectE2E(t *testing.T) {
 			}
 			var calls, redirects atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// The export mints an actor token once the refresh has landed;
+				// the mint is neither a refresh call nor a redirect.
+				if r.Method == http.MethodPost && r.URL.Path == "/actor-tokens" {
+					if r.Header.Get("Authorization") != "Bearer new-root" {
+						t.Errorf("mint presented %q, want the refreshed root", r.Header.Get("Authorization"))
+					}
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(`{"actor_token":"lux-actor","expires_in":300}`))
+					return
+				}
 				calls.Add(1)
 				if r.URL.Path == "/token" && status != 200 {
 					w.Header().Set("Location", "/redirected")
@@ -69,7 +79,7 @@ func TestAuthRefreshPreservesRequestOnRedirectE2E(t *testing.T) {
 				if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 || !strings.Contains(stderr.String(), "redirect") || stdout.Len() != 0 {
 					t.Errorf("method-changing redirect accepted: err=%v stdout=%q stderr=%q", err, stdout.String(), stderr.String())
 				}
-			} else if err != nil || stdout.String() != "new-root\n" {
+			} else if err != nil || stdout.String() != "lux-actor\n" {
 				t.Errorf("valid refresh failed: %v stdout=%q stderr=%q", err, stdout.String(), stderr.String())
 			}
 			after, err := os.ReadFile(authPath)

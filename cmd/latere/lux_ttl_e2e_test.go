@@ -37,7 +37,7 @@ func TestLuxEnvValidatesAndReportsLifetimeE2E(t *testing.T) {
 			seconds                                  int
 			omitLifetime                             bool
 		}{
-			{name: "default"},
+			{name: "default", seconds: 300, wantNote: "expires in 300 seconds"},
 			{name: "zero", ttl: "0s", wantError: "positive whole number of seconds"},
 			{name: "negative", ttl: "-1m", wantError: "positive whole number of seconds"},
 			{name: "subsecond", ttl: "500ms", wantError: "positive whole number of seconds"},
@@ -106,13 +106,17 @@ func TestLuxEnvValidatesAndReportsLifetimeE2E(t *testing.T) {
 						t.Errorf("invalid lifetime exported a credential: %q", stdout.String())
 					}
 				} else {
-					wantToken := "saved-root"
+					// Without a passthrough token the export is always a mint;
+					// the root on disk is never the exported value.
+					wantToken := "short-actor"
 					if tc.override != "" {
 						wantToken = "provided-token"
 					}
 					if tc.seconds > 0 {
 						wantCalls = 1
-						wantToken = "short-actor"
+					}
+					if strings.Contains(stdout.String(), "saved-root") {
+						t.Errorf("the export carries the root token: %q", stdout.String())
 					}
 					if err != nil || !strings.Contains(stdout.String(), wantToken) || !strings.Contains(stderr.String(), tc.wantNote) {
 						t.Errorf("valid lifetime=%v; stdout=%q stderr=%q, want note %q", err, stdout.String(), stderr.String(), tc.wantNote)

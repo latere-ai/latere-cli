@@ -66,7 +66,7 @@ use `AUTH_CLIENT_ID`, falling back to `latere-cli`.
 
 | File | What it is | Used for |
 |------|------------|----------|
-| `~/.config/latere/auth-token.json` | The **auth root token**: an `auth.latere.ai`-issued access token plus its refresh token. | The source every per-product credential is derived from. Presented directly only by `latere topos` and by `lux env` / `lux token` without `--ttl`; see the table below. |
+| `~/.config/latere/auth-token.json` | The **auth root token**: an `auth.latere.ai`-issued access token plus its refresh token. | The source every per-product credential is derived from. It is presented to auth alone: to refresh itself and to mint the actor tokens below. |
 | `~/.config/latere/token.json` | The **Cella bearer**: a Cella-issued catalog token, labeled `CLI on <hostname>`. | `latere cella ...` and `latere whoami`. |
 
 The split is deliberate. The two tokens have different issuers
@@ -91,24 +91,22 @@ products validate differently.
 | `latere cella ...`, `latere whoami` | the Cella bearer | `token.json`, minted at login through the chain below |
 | `latere drive ...` | an actor token, audience `drive.latere.ai`, 5 minutes | minted per command at auth |
 | `latere lux invoke`, `models`, `usage`, `access` | an actor token, audience `lux.latere.ai`, 5 minutes | minted per command at auth |
-| `latere lux env --ttl`, `lux token --ttl` | an actor token, audience `lux.latere.ai` | minted at auth for the TTL you name |
+| `latere lux env`, `lux token` | an actor token, audience `lux.latere.ai`, 5 minutes, or the shorter `--ttl` you name | minted at auth when the command runs; re-run for a new one |
+| `latere lux serve`, `latere review`, the local model route | an actor token, audience `lux.latere.ai`, re-minted a minute before it expires | minted at auth for the session, so a tunnel that runs for hours never sends the root token |
 | `git` against `code.latere.ai` | an actor token, audience `origo`, 5 minutes | minted per git operation at auth |
-| `latere topos ...` | the auth root token itself | `auth-token.json`, refreshed when near expiry |
-| `latere lux env`, `lux token` without `--ttl` | the auth root token itself | `auth-token.json`, refreshed when near expiry |
+| `latere topos ...` | an actor token, audience `toposd`, 5 minutes | minted per command at auth |
 
 An actor token is auth's `POST /actor-tokens`: you present the root
 token, name one audience, and get back a short-lived token carrying
 your own `sub` and `org_id` and nothing else. It is valid at that one
 product and worthless anywhere else.
 
-The last two rows are the exception to the rule above, and they are
-being closed. Your login token is registered for three audiences: the
-auth issuer, `sandboxd` for Cella, and `toposd` for Topos. Lux's
-audience, `lux.latere.ai`, is not among them, so a value exported by
-`lux env` without `--ttl` is not a credential the hosted Lux accepts;
-pass `--ttl` and get one that is. Both rows become actor tokens in the
-identity work tracked as `specs/infrastructure/identity` (leaf
-id-01).
+Your login token itself is registered for three audiences: the auth
+issuer, `sandboxd` and `toposd`. It is never sent to a product, because
+a token that names the auth issuer is a credential to your account and
+not to one product. `lux env` therefore exports an actor token and
+never the login token; the export lives at most five minutes and the
+command says so on stderr.
 
 ### Cella
 
@@ -254,9 +252,9 @@ ever presented to Lux, a `drive.latere.ai` one only to Drive, an
 `origo` one only to git. Whichever token is on the wire, the person it
 acts for is you.
 
-The two rows above that still send the root token are the places this
-rule is not yet kept, and leaf id-01 of
-`specs/infrastructure/identity` closes them.
+Leaf id-01 of `specs/infrastructure/identity` made the table above
+true for every row on 2026-09-12; a test over a recording transport
+holds it for every product command.
 
 ## Scripting surfaces
 

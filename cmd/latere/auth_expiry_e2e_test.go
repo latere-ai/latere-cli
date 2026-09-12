@@ -68,22 +68,18 @@ func TestProductsRejectExpiredAuthWithoutRefreshE2E(t *testing.T) {
 						_, _ = w.Write([]byte(`{"code":"expired_cella"}`))
 						return
 					}
-					// Audience-bound products (the git helper for Origo, the drive
-					// file commands) first mint an actor token from the usable
-					// root, then present that.
+					// Every product first mints an actor token from the usable
+					// root, presenting the root to auth alone, then presents the
+					// minted token to the product.
 					if r.Method == http.MethodPost && r.URL.Path == "/actor-tokens" {
-						if (product != "git helper" && product != "drive") || r.Header.Get("Authorization") != "Bearer saved-auth" {
+						if r.Header.Get("Authorization") != "Bearer saved-auth" {
 							t.Error("unexpected actor mint or credential")
 						}
 						w.Header().Set("Content-Type", "application/json")
-						_, _ = w.Write([]byte(`{"actor_token":"drive-actor","expires_in":300}`))
+						_, _ = w.Write([]byte(`{"actor_token":"product-actor","expires_in":300}`))
 						return
 					}
-					wantBearer := "Bearer saved-auth"
-					if product == "drive" {
-						wantBearer = "Bearer drive-actor"
-					}
-					if r.Method != http.MethodGet || r.Header.Get("Authorization") != wantBearer {
+					if r.Method != http.MethodGet || r.Header.Get("Authorization") != "Bearer product-actor" {
 						t.Error("unexpected product request or credential")
 					}
 					w.Header().Set("Content-Type", "application/json")
@@ -130,20 +126,16 @@ func TestProductsRejectExpiredAuthWithoutRefreshE2E(t *testing.T) {
 					if err != nil {
 						t.Errorf("usable credential rejected: %v; stderr: %s", err, stderr.String())
 					}
-					wantRequests := int32(1)
+					// One mint per product, then one product call; the two
+					// export commands hand their mint's result to the caller
+					// and make no product call.
+					wantRequests := int32(2)
 					switch product {
-					case "lux export":
-						wantRequests = 0
-						if !strings.Contains(stdout.String(), "saved-auth") {
-							t.Errorf("missing usable credential: %q", stdout.String())
+					case "lux export", "git helper":
+						wantRequests = 1
+						if !strings.Contains(stdout.String(), "product-actor") || strings.Contains(stdout.String(), "saved-auth") {
+							t.Errorf("%s credential = %q, want the minted actor token and never the root", product, stdout.String())
 						}
-					case "git helper":
-						wantRequests = 1 // the Origo mint; git sees only its result
-						if !strings.Contains(stdout.String(), "drive-actor") || strings.Contains(stdout.String(), "saved-auth") {
-							t.Errorf("git helper credential = %q, want the minted actor token", stdout.String())
-						}
-					case "drive":
-						wantRequests = 2 // the Drive mint, then the Drive call
 					}
 					if requests.Load() != wantRequests {
 						t.Errorf("product requests = %d, want %d", requests.Load(), wantRequests)

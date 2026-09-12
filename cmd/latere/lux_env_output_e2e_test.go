@@ -59,7 +59,10 @@ func TestLuxEnvReportsOutputFailuresE2E(t *testing.T) {
 					command.Stdout, command.Stderr = &stdout, file
 				}
 				err = command.Run()
-				wantFailure := mode == "failed stdout" || (mode == "failed stderr" && format != "legacy")
+				// Every export form writes the credential's provenance to
+				// stderr, the hidden alias included, so a failed stderr is a
+				// failure for all three.
+				wantFailure := mode != "writable"
 				if wantFailure {
 					if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 {
 						t.Errorf("output failure reported success: %v: %s", err, stderr.String())
