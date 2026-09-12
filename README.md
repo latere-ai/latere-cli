@@ -83,19 +83,17 @@ Switching uses the auth service's refresh-token grant: no device-code re-prompt,
 | `LATERE_TOKEN_FILE` | Cella bearer file path, default `~/.config/latere/token.json`. |
 | `LATERE_AUTH_TOKEN_FILE` | Auth root token file path, default `~/.config/latere/auth-token.json`. |
 
-## Git with Drive and Latere Code
+## Git with Latere Code
 
-Drive (`drive.latere.ai`) serves repo workspaces over git smart-HTTP, and Latere Code (`code.latere.ai`) hosts repositories. Signing in is all it takes — `latere login` also wires git's credential helper for both hosts, so plain `git clone` authenticates with your saved login, no token in the URL:
+Latere Code (`code.latere.ai`) hosts repositories. Signing in is all it takes — `latere login` also wires git's credential helper for that host, so plain `git clone` authenticates with your saved login, no token in the URL:
 
 ```sh
 latere login
 
-git clone https://drive.latere.ai/git/me/<repo>.git          # your personal Drive repos
-git clone https://drive.latere.ai/git/<org-slug>/<repo>.git  # Drive org repos
-git clone https://code.latere.ai/<owner>/<repo>.git          # Latere Code repos
+git clone https://code.latere.ai/<owner>/<repo>.git
 ```
 
-The helper is scoped to those two hosts only; credentials for every other host keep flowing through your existing helpers. Fetch and clone need read access, push needs write access. A public Latere Code repository clones with no credential at all.
+The helper is scoped to that host only; credentials for every other host keep flowing through your existing helpers. Fetch and clone need read access, push needs write access. A public Latere Code repository clones with no credential at all.
 
 If you'd rather manage the git config yourself, these are the escape hatches:
 
@@ -108,7 +106,7 @@ latere git-credential setup --remove   # undo the wiring
 In CI, skip the helper and embed a token in the URL instead:
 
 ```sh
-git clone https://x:${LATERE_TOKEN}@drive.latere.ai/git/<org-slug>/<repo>.git
+git clone https://x-access-token:${LATERE_TOKEN}@code.latere.ai/<owner>/<repo>.git
 ```
 
 ## Products

@@ -2,7 +2,7 @@
 
 `latere drive` works with files on [Latere Drive](https://drive.latere.ai): upload, download, list, trash, version history, and sharing — from the terminal, with the login you already have. Run `latere login` first (see the [main README](../README.md#sign-in)).
 
-Repo workspaces are a different plane: they are served over git, and plain `git clone https://drive.latere.ai/git/me/<repo>.git` already works after login (see [Git with Drive and Latere Code](../README.md#git-with-drive-and-latere-code)).
+Repo workspaces (`repos/…`) are mountable folders for code checkouts; Drive does not serve git. Repository history lives on Latere Code (`code.latere.ai`), which `latere login` wires git for (see [Git with Latere Code](../README.md#git-with-latere-code)).
 
 ## Paths and spaces
 

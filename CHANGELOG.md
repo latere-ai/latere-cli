@@ -10,4 +10,5 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+- The git credential helper no longer answers for `drive.latere.ai`: Drive does not host git, and repositories live on Latere Code (`code.latere.ai`). `latere login` still wires the helper, for that host only. The `DRIVE_HOST` override is removed; `latere drive` and `DRIVE_API_URL` are unchanged.
 - Cella `wait` and `logs` now detect status-output failures and honor configured stderr streams. Remote exit codes remain intact.

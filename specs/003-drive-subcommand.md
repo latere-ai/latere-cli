@@ -23,9 +23,10 @@ dispatched_task_id: null
 ## Overview
 
 `latere drive` is the CLI face of Latere Drive (`../drive`, live at
-`https://drive.latere.ai`). Today the CLI only wires Drive's git plane
-(`latere git-credential`); the file plane is reachable only through the SPA or
-raw curl. This spec defines a **small, orthogonal** verb set — every command
+`https://drive.latere.ai`). When this spec was written the CLI only wired
+Drive's git plane (`latere git-credential`); the file plane was reachable only
+through the SPA or raw curl. (2026-09-12: Drive no longer serves git; the
+helper targets Latere Code only.) This spec defines a **small, orthogonal** verb set — every command
 does one thing, variations are flags, and the same path addressing works
 everywhere.
 
@@ -44,11 +45,12 @@ everywhere.
 
 ## Current State
 
-- **In this repo**: `internal/commands/git_credential.go` implements the git
-  credential helper (`driveHost()`: env `DRIVE_HOST`, default
-  `drive.latere.ai`); `latere auth login` auto-wires it. The bearer is the
-  refreshed auth.latere.ai identity token via `authIdentityToken`
-  (lux.go:631). No `drive` command exists.
+- **In this repo**: `internal/commands/git_credential.go` implemented the git
+  credential helper for Drive (env `DRIVE_HOST`, default `drive.latere.ai`);
+  `latere auth login` auto-wired it. The bearer was the refreshed
+  auth.latere.ai identity token via `authIdentityToken`. No `drive` command
+  existed. (2026-09-12: the helper answers for Latere Code only; the Drive
+  row, `DRIVE_HOST` and `driveHost()` are gone.)
 - **In ../drive**: the HTTP API under `/api/v1` is described by
   `docs/openapi.yaml` (generated, drift-proof). Drive validates auth-issued
   JWTs directly; authorization is claims-driven, no Drive-specific scopes.
@@ -64,14 +66,13 @@ everywhere.
   Drive's error envelope.
 - **Bearer**: a Drive-audience actor token (`aud=drive.latere.ai`, 300s)
   minted at auth from the refreshed identity token, via
-  `driveCredentialToken` in git_credential.go, the same path as
-  git-credential. Drive enforces the audience, so the root identity token
+  `driveCredentialToken` in drive.go (`actorCredentialToken`, the same
+  path git-credential uses for Latere Code). Drive enforces the audience, so the root identity token
   is never presented to it. `--token` / `LATERE_DRIVE_TOKEN` passthrough
   for CI.
 - **Base URL**: `resolveDriveURL(flag)` — flag `--drive-url` > env
   `DRIVE_API_URL` > default `https://drive.latere.ai`; copies
-  `resolveLuxURL` (lux.go:596). `DRIVE_HOST` (git credential host matching)
-  stays untouched.
+  `resolveLuxURL` (lux.go:596).
 - `drive` is added to `skipUpdateCheck` (root.go:66): `get -o -` streams file
   bytes to stdout and must stay clean.
 
@@ -186,6 +187,6 @@ needs a second identity. None blocking.
   mount contract, driven by cella and the web app.
 - Webhooks, events, stars, quota administration, admin plane, share-approval
   resolution — web-app flows; add individual verbs later only on demand.
-- Git sugar (`clone`) and LFS — plain `git` works through the credential
-  helper already.
+- Git sugar (`clone`) and LFS — Drive does not serve git; repositories live
+  on Latere Code, where plain `git` works through the credential helper.
 - Public share-link download (`/api/v1/s/{token}/…`) — curl-able without auth.
