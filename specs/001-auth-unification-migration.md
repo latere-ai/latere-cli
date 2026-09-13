@@ -137,7 +137,7 @@ If the refresh-grant org-switch is not yet implemented, fall back to forcing the
 
 ### `oidc.Client.RefreshTokenWithExtra` (verify exists or add)
 
-`pkg/oidc/oidc.go:384` provides `RefreshToken(r, token)`; check whether it supports an `extra url.Values` for `org_id`. If not, the migration may need a small additive method `RefreshTokenWithExtra(ctx, tok, extra)`. Verify in implementation and update the parent spec if so.
+`authkit/oidc` provides `RefreshToken(r, token)`; check whether it supports an `extra url.Values` for `org_id`. If not, the migration may need a small additive method `RefreshTokenWithExtra(ctx, tok, extra)`. Verify in implementation and update the parent spec if so.
 
 ### Env prefix
 
@@ -176,7 +176,7 @@ The pkg bump touches `go.mod` + the two auth files. Revert as a single commit if
 ## Risks
 
 - **`pkg v0.13.0` → current is a big jump**. Transitive deps (oauth2, etc.) may have moved. The `go mod tidy` smoke is the first task.
-- **`RefreshTokenWithExtra` may not exist** in `pkg/oidc`. If not, this spec either adds it (small additive method) or falls back to forcing re-auth on org switch. Decide during implementation.
+- **`RefreshTokenWithExtra` may not exist** in `authkit/oidc`. If not, this spec either adds it (small additive method) or falls back to forcing re-auth on org switch. Decide during implementation.
 - **`--token` access-only mode lacks refresh**. Document that the CLI cannot refresh paste-mode tokens; users must rerun `latere auth login` when the token expires.
 - **Shared token file with wallfacer local-mode**: per parent spec, both write to `~/.config/latere/token.json`. The CLI must record which issuer the token came from and refuse to refresh against a different issuer.
 - **Refresh-grant org-switch dependency**: the auth service's design for it is marked complete; verify the endpoint is live in production before shipping `latere auth org switch`.

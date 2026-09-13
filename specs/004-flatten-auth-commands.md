@@ -91,9 +91,9 @@ By class, in migration order:
 5. **Docs and marketing** — product guides in English and Chinese, the
    integration guide, the wallfacer docs and CLI help text, and the
    latere.ai site pages and blog posts that show a sign-in command.
-6. **Not affected** — `pkg/oidclogin` ("latere auth" there names the auth
-   *service*, not the CLI); archived specs stay as written; code comments
-   are cosmetic.
+6. **Not affected** — the shared authkit login helpers ("latere auth" there
+   names the auth *service*, not the CLI); archived specs stay as written;
+   code comments are cosmetic.
 
 Classes 2-5 are per-surface follow-up commits owned by those surfaces, not
 part of this spec's implementation; this spec is done when class 1 ships and

@@ -28,7 +28,10 @@ Every spec in the tree has shipped:
 - `004-flatten-auth-commands.md`: session verbs are top-level
   (`latere login/logout/whoami/print-token/org`).
 - `005-lux-env-redesign.md`: `latere lux env` takes a `--compat` dialect or a
-  provider passthrough, with token provenance and TTL.
+  provider passthrough, and reports the exported token's provenance. The
+  per-command lifetime knob it designed is gone; leaf id-03 of
+  `latere-ai/specs/infrastructure/identity` fixed every token at the
+  issuer's maximum.
 
 Two surfaces shipped without a dedicated design record: the token-lifecycle
 work, which [docs/login-and-tokens.md](../docs/login-and-tokens.md) documents,
@@ -37,8 +40,9 @@ That is a recorded decision, not an open action item.
 
 ## Conventions
 
-- The CLI talks to the auth service (login, org switch) and to product
-  backends (Cella, Drive, Lux, Topos, Eval) using stored bearer tokens. It does
-  not host an HTTP server, does not own a cookie session, and has no frontend.
-- Token storage is `~/.config/latere/token.json`, shared with wallfacer's local
-  mode since the auth unification migration.
+- The CLI talks to the auth service (login, org switch) with the saved login
+  token, and reaches every product backend (Cella, Drive, Lux, Topos, Origo)
+  with a token minted at auth for that one product. It does not host an HTTP
+  server, does not own a cookie session, and has no frontend.
+- Token storage is `~/.config/latere/auth-token.json`: the login token, and
+  nothing else. A product token lives in memory for one command.

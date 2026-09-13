@@ -56,7 +56,7 @@ Auto-upgrade and the daily notice are skipped for `go install`/dev builds, in CI
 latere login
 ```
 
-`latere login` starts the OAuth2 device-code flow against `auth.latere.ai`. It prints a URL and user code, waits for browser approval, then writes two files under `~/.config/latere/`: `auth-token.json` (the auth root token every per-product credential is derived from) and `token.json` (the Cella bearer). One sign-in unlocks every product below. See [docs/login-and-tokens.md](docs/login-and-tokens.md) for what each file is and how each product derives its credential.
+`latere login` starts the OAuth2 device-code flow against `auth.latere.ai`. It prints a URL and user code, waits for browser approval, then writes one file under `~/.config/latere/`: `auth-token.json`, the login token every product credential is minted from. One sign-in unlocks every product below. See [docs/login-and-tokens.md](docs/login-and-tokens.md) for what the file is and how each product gets its credential.
 
 ```sh
 latere whoami
@@ -75,13 +75,14 @@ latere org <org-uuid>             # scope the saved token to <org-uuid>
 latere org --personal             # scope the saved token to the personal context
 ```
 
-Switching uses the auth service's refresh-token grant: no device-code re-prompt, the saved refresh token is exchanged for a new access token scoped to the chosen org. The CLI also replaces the Cella bearer so Cella commands use the same context. Token files are replaced atomically.
+Switching uses the auth service's refresh-token grant: no device-code re-prompt, the saved refresh token is exchanged for a new access token scoped to the chosen org. Every later product token is minted from it, so every command follows the new context. The token file is replaced atomically.
 
 | Setting | Purpose |
 |---------|---------|
-| `--auth-url` | Override the auth URL for `latere login`. |
-| `LATERE_TOKEN_FILE` | Cella bearer file path, default `~/.config/latere/token.json`. |
-| `LATERE_AUTH_TOKEN_FILE` | Auth root token file path, default `~/.config/latere/auth-token.json`. |
+| `--auth-url` | Override the auth URL for `latere login`, `logout`, `whoami` and `org`. |
+| `AUTH_URL` | The same override, from the environment. |
+| `LATERE_AUTH_TOKEN_FILE` | Login token file path, default `~/.config/latere/auth-token.json`. |
+| `LATERE_CELLA_TOKEN` | Present this bearer to Cella instead of minting one. |
 
 ## Git with Latere Code
 
@@ -149,9 +150,9 @@ go run ./cmd/latere --help
 ```
 
 The `internal/commands` test suite uses a temporary config directory and token
-files, overriding inherited `LATERE_TOKEN_FILE` and `LATERE_AUTH_TOKEN_FILE`.
-Tests that need a saved login must create synthetic credentials with `t.Setenv`
-and `t.TempDir`; they must not depend on the developer's signed-in session.
+file, overriding an inherited `LATERE_AUTH_TOKEN_FILE`. Tests that need a saved
+login must create synthetic credentials with `t.Setenv` and `t.TempDir`; they
+must not depend on the developer's signed-in session.
 
 `go test ./...` runs the unit and package tests. The live end-to-end tests are
 opt-in and **skip silently without their environment variables**, so a green

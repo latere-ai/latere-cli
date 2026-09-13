@@ -49,17 +49,14 @@ Export values are shell-quoted when needed so spaces and shell metacharacters st
 details. Check the command's exit status before using redirected output; a failed
 write can leave a partial file.
 
-The command reports on stderr which credential it embedded and when it expires: by default your login identity token, which lasts the sign-in session. That token is your account's root credential, not a key scoped to Lux: whatever holds the exported value holds your login. Pass `--ttl` when the value may spread beyond your shell, for a short-lived token bound to Lux. Missing or empty saved credentials cause an error before any exports are printed; run `latere login` to restore them.
+The command reports on stderr which credential it embedded and when it expires. The exported value is always a token minted for Lux alone and valid five minutes, never your login token: whatever holds the export reaches Lux and nothing else. Re-run the command when it expires. Missing or empty saved credentials cause an error before any exports are printed; run `latere login` to restore them.
 
 ```sh
-eval "$(latere lux env --compat openai --ttl 5m)"  # CI: a short-lived actor token
-TOKEN=$(latere lux env --raw)                      # bare token for curl/scripts
+eval "$(latere lux env --compat openai)"  # a Lux-bound token, five minutes
+TOKEN=$(latere lux env --raw)             # bare token for curl/scripts
 ```
 
-`--ttl` requires a positive whole number of seconds and cannot be combined
-with `--token` or `LATERE_LUX_TOKEN`. Auth may shorten the requested lifetime;
-the stderr note reports its `expires_in` value, or says when expiry is unknown.
-Omit `--ttl` to export your existing credential.
+`--token` or `LATERE_LUX_TOKEN` exports that bearer as given instead of minting one.
 
 ## Verify access with a raw call
 

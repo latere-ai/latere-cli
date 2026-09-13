@@ -1,15 +1,16 @@
 # CLI login and tokens
 
 You sign in to Latere once, and every `latere` command reaches its
-product with your identity. This page explains what `latere login`
-puts on disk, how each product gets the credential it needs, how the
-CLI keeps you signed in, and what `latere logout` tears down.
+product with your identity. This page explains what `latere login` puts
+on disk, how each product gets the credential it needs, how the CLI
+keeps you signed in, and what `latere logout` tears down.
 
-The shape to keep in mind: one human login to auth mints a **root
-token**; each product call derives the credential that product
-accepts from that root. Your identity (`org_id` and `sub`) is the same
-on every hop; the token presented changes at each product boundary,
-because each product accepts only tokens that name it.
+The shape to keep in mind: one human login to auth produces a **login
+token** addressed to auth alone; every product call asks auth for a
+short-lived token addressed to that one product. Your identity (`sub`
+and `org_id`) is the same on every hop; the token on the wire changes at
+each product boundary, because each product accepts only tokens that
+name it.
 
 ## Signing in
 
@@ -20,127 +21,106 @@ latere login
 This runs the OAuth 2.0 device authorization flow (RFC 8628) against
 `auth.latere.ai`. The CLI prints a verification URL and a user code,
 opens your browser, and waits while you approve. On approval, auth
-returns your root token and the CLI writes two files under
+returns your login token and the CLI writes one file under
 `~/.config/latere/`.
 
 ```sh
 latere login --org-id <org-uuid>   # sign in scoped to an organization
-latere login --personal         # sign in in your personal context
-latere login --no-browser       # print the URL instead of opening a browser
+latere login --personal            # sign in in your personal context
+latere login --no-browser          # print the URL instead of opening a browser
 ```
 
 Use `latere org <org-uuid>` or `latere org --personal` to switch context
-without another browser approval. Switching updates the auth root token and
-replaces the Cella bearer so subsequent Cella commands use the selected context.
-Choose either an organization ID or `--personal`; combining them is rejected
-without changing credentials, including through `latere auth org switch`.
-If the Cella exchange fails, the command reports an error and removes the old
-Cella bearer; the new auth root token is retained. Retry the switch or log in
-again before using Cella.
+without another browser approval. Switching replaces the login token, and
+every product token is minted from it, so the next command already follows
+the new context. Choose either an organization ID or `--personal`;
+combining them is rejected without changing credentials, including through
+`latere auth org switch`.
 
-For a pre-issued Cella token, use `latere login --token <token>` or pipe the
+For a pre-issued token, use `latere login --token <token>` or pipe the
 token to `latere login`. A pasted token keeps its existing context: omit
-`--personal` and `--org-id`, which apply only to browser login. The CLI rejects
-these combinations without changing saved credentials.
-The CLI verifies the token before replacing the saved Cella credential.
-A rejected token, verification failure, or cancelled
-attempt leaves your saved credentials intact. After a successful pasted-token
-login, the CLI removes the previous auth root token to avoid using a different
-identity for other products. If that removal fails, login reports an error and
-removes the newly saved Cella token. Fix the reported storage problem before
-retrying login.
+`--personal` and `--org-id`, which apply only to browser login. The CLI
+asks auth to confirm the token before saving it, because auth is who the
+token is addressed to. A rejected token, an unreachable auth, or a
+cancelled attempt leaves your saved login intact. A pasted token carries
+no refresh grant, so nothing of a previous login survives beside it.
 
-Device login reports success after saving both credentials. If saving the auth
-root fails after the Cella token was saved, the CLI removes that Cella token and
-reports an error. Fix the reported storage problem and log in again. This keeps
-a new Cella account from being refreshed using a previous account's auth root.
-If removal also fails, the error reports it; repair storage and run
-`latere logout` before retrying login.
+Device login reports success once the approved token is saved. If saving
+fails, the CLI reports an error and your previous login is untouched. Fix
+the reported storage problem and log in again.
 
-For a custom OAuth client, pass `latere login --client-id <client-id>`. The CLI
-retains that client ID for refresh, organization switching, and logout, even
-if `AUTH_CLIENT_ID` later changes. Older token files without a saved client ID
-use `AUTH_CLIENT_ID`, falling back to `latere-cli`.
+For a custom OAuth client, pass `latere login --client-id <client-id>`.
+The CLI retains that client ID for refresh, organization switching, and
+logout, even if `AUTH_CLIENT_ID` later changes. Older token files without
+a saved client ID use `AUTH_CLIENT_ID`, falling back to `latere-cli`.
 
-## The two token files
+## The one token file
 
 | File | What it is | Used for |
 |------|------------|----------|
-| `~/.config/latere/auth-token.json` | The **auth root token**: an `auth.latere.ai`-issued access token plus its refresh token. | The source every per-product credential is derived from. It is presented to auth alone: to refresh itself and to mint the actor tokens below. |
-| `~/.config/latere/token.json` | The **Cella bearer**: a Cella-issued catalog token, labeled `CLI on <hostname>`. | `latere cella ...` and `latere whoami`. |
+| `~/.config/latere/auth-token.json` | The **login token**: an `auth.latere.ai`-issued access token plus its refresh token. | The one credential on disk. It is presented to auth alone: to refresh itself and to mint the product tokens below. |
 
-The split is deliberate. The two tokens have different issuers
-(`auth.latere.ai` for the root, Cella for the bearer) and different
-lifetimes, so they live in separate files. The root token can mint
-new per-product credentials long after any single product bearer has
-expired.
+Nothing else is stored. A product token lives for one command in memory
+and lapses within five minutes, so writing it beside the login would put
+a second, longer-lived credential on your filesystem for nothing.
 
-Both files are replaced atomically with `0600` permissions on each save
-(best-effort on Windows), including when an existing file has broader access.
-Concurrent readers see a complete token file. A symlink at either token file
-path is replaced; its target is left unchanged.
+The file is replaced atomically with `0600` permissions on each save
+(best-effort on Windows), including when an existing file has broader
+access. Concurrent readers see a complete token file. A symlink at the
+token path is replaced; its target is left unchanged.
 
 ## How each product gets its credential
 
-Every product call starts from the auth root token and derives what
-that product accepts. The derivation differs by product because the
-products validate differently.
+Every product call asks auth for a token addressed to that product. One
+function in the shared library makes the request, so every product
+follows the same rule.
 
 | Command | What is sent | Where it comes from |
 |---|---|---|
-| `latere cella ...`, `latere whoami` | the Cella bearer | `token.json`, minted at login through the chain below |
-| `latere drive ...` | an actor token, audience `drive.latere.ai`, 5 minutes | minted per command at auth |
-| `latere lux invoke`, `models`, `usage`, `access` | an actor token, audience `lux.latere.ai`, 5 minutes | minted per command at auth |
-| `latere lux env`, `lux token` | an actor token, audience `lux.latere.ai`, 5 minutes, or the shorter `--ttl` you name | minted at auth when the command runs; re-run for a new one |
-| `latere lux serve`, `latere review`, the local model route | an actor token, audience `lux.latere.ai`, re-minted a minute before it expires | minted at auth for the session, so a tunnel that runs for hours never sends the root token |
-| `git` against `code.latere.ai` | an actor token, audience `origo`, 5 minutes | minted per git operation at auth |
-| `latere topos ...` | an actor token, audience `toposd`, 5 minutes | minted per command at auth |
+| `latere cella ...` | a token with audience `sandboxd`, 5 minutes | minted per command at auth |
+| `latere drive ...` | a token with audience `drive.latere.ai`, 5 minutes | minted per command at auth |
+| `latere lux invoke`, `models`, `usage`, `access` | a token with audience `lux.latere.ai`, 5 minutes | minted per command at auth |
+| `latere lux env`, `lux token` | a token with audience `lux.latere.ai`, 5 minutes | minted when the command runs; re-run for a new one |
+| `latere lux serve`, `latere review`, the local model route | a token with audience `lux.latere.ai`, re-minted a minute before it expires | minted for the session, so a tunnel that runs for hours never sends the login token |
+| `git` against `code.latere.ai` | a token with audience `origo`, 5 minutes | minted per git operation at auth |
+| `latere topos ...` | a token with audience `toposd`, 5 minutes | minted per command at auth |
+| `latere whoami` | the login token | read from `auth-token.json`; it goes to auth, which is who it names |
 
-An actor token is auth's `POST /actor-tokens`: you present the root
-token, name one audience, and get back a short-lived token carrying
+An actor token comes from auth's `POST /actor-tokens`: you present the
+login token, name one audience, and get back a short-lived token carrying
 your own `sub` and `org_id` and nothing else. It is valid at that one
-product and worthless anywhere else.
+product and worthless anywhere else. Auth mints only for the audiences
+this client is registered to act at, and the token lives at most five
+minutes — the CLI has no shorter-lifetime option, because a mint costs
+one round trip and a command that outlives its token mints again.
 
-Your login token itself is registered for three audiences: the auth
-issuer, `sandboxd` and `toposd`. It is never sent to a product, because
-a token that names the auth issuer is a credential to your account and
-not to one product. `lux env` therefore exports an actor token and
-never the login token; the export lives at most five minutes and the
-command says so on stderr.
+Your login token is addressed to `auth.latere.ai` and opens nothing else.
+A product refuses it, which is the point: a token that names the issuer
+is a credential to your account, not to one product.
 
 ### Cella
 
-`latere cella` presents the Cella bearer from `token.json`. That
-bearer is minted through a two-step chain at login and whenever it
-needs refreshing:
+`latere cella` presents a token with audience `sandboxd`, minted when the
+command builds its client. A transfer or a log follow can outlive five
+minutes; a `401` from Cella mints once more and retries the request.
 
-1. Mint a short-lived actor token at auth (`POST /actor-tokens`, audience
-   `sandboxd`, 60-second TTL), presenting the root token.
-2. Exchange that actor token at Cella (`POST /v1/tokens/exchange`) for a
-   catalog bearer labeled `CLI on <hostname>`.
-
-Cella replaces any previous row with the same label, so repeated
-exchanges rotate the bearer rather than piling up catalog entries.
-Cella is the one product that answers with a credential it signed
-itself; every other product takes an auth-issued token directly.
+Set `LATERE_CELLA_TOKEN` to present a bearer of your own instead, for a
+development deployment or a test. `LATERE_DRIVE_TOKEN`, `LATERE_LUX_TOKEN`
+and `TOPOS_TOKEN` do the same for their products.
 
 ### Lux
 
 For CLI-initiated model calls (`latere lux invoke`, `models`, `usage`,
-`access`), the CLI mints a fresh actor token at auth with audience
-`lux.latere.ai` and a 5-minute TTL, then presents it to Lux for that
-one call. The call finishes in seconds, so the short lifetime bounds a
-leaked value at no cost to you.
+`access`), the CLI mints a token with audience `lux.latere.ai` and
+presents it to Lux for that one call. The call finishes in seconds, so
+the short lifetime bounds a leaked value at no cost to you.
 
-`lux env` and `lux token` export a credential for a stock SDK. Without
-`--ttl` they export your root identity token, which lasts the login
-session but is not bound to Lux, and the command says so on stderr.
-The hosted Lux requires `aud: lux.latere.ai`, which your login token
-does not carry, so pass `--ttl` and get a token Lux accepts:
+`lux env` and `lux token` export a credential for a stock SDK. The value
+they export is always a Lux-bound token, never your login token, and
+stderr reports when it expires:
 
 ```sh
-eval "$(latere lux env --compat openai --ttl 5m)" # a Lux-bound actor token
-eval "$(latere lux env --compat openai)"          # the root identity token, not Lux-scoped
+eval "$(latere lux env --compat openai)"   # a Lux-bound token, five minutes
 ```
 
 `lux env` needs a surface: either `--compat <dialect>` or a passthrough
@@ -152,22 +132,18 @@ provider argument. See the "Models (Lux)" page for the full surface.
 (`code.latere.ai`) in your global git config, so
 `git clone https://code.latere.ai/<owner>/<repo>.git` authenticates with
 no token in the URL. When git asks the helper for a credential on that
-host, the CLI refreshes your login if it has expired, mints an actor token
-at auth for Origo's audience (`origo`) with a 5-minute TTL, and hands git
-that token. Origo accepts only tokens carrying its audience, so your root
-identity token never reaches git and the token is useless anywhere else.
-A git exchange completes in seconds, so the short lifetime bounds a leaked
-value at no cost to you.
+host, the CLI refreshes your login if it has expired, mints a token for
+Origo's audience (`origo`), and hands git that token. Origo accepts only
+tokens carrying its audience, so your login token never reaches git and
+the token is useless anywhere else.
 
-If the login cannot be read or refreshed, or auth cannot mint the token, the
-git helper returns no credential so git can prompt. An existing auth failure
-never causes it to substitute the saved Cella token.
+If the login cannot be read or refreshed, or auth cannot mint the token,
+the git helper returns no credential so git can prompt. Nothing else is
+ever substituted for the token it could not mint.
 
-After a `--token` paste login there is no `auth-token.json`, so there
-is no root token to mint from. Drive and the git helper then refuse
-with `not signed in; run `latere login``, and nothing is sent: the
-saved Cella bearer names Cella and is never presented to another
-product. Run `latere login` to get a root token back.
+Without a saved login there is nothing to mint from. Drive and the git
+helper then refuse with `not logged in; run `latere login``, and nothing
+is sent. Run `latere login` to sign in again.
 
 ```sh
 latere git-credential setup             # wire the helper manually
@@ -175,44 +151,36 @@ latere login --no-git                   # sign in without touching git config
 ```
 
 The helper answers only for that host over HTTPS. A nonblank `CODE_HOST`
-override also permits HTTP for development. Setup registers both HTTPS and
-HTTP for an overridden host; `setup --remove` removes both. Missing or other protocols receive no credential and do not
-trigger token refresh.
-`store` and `erase` are
-no-ops: your tokens live in `~/.config/latere`, managed by `latere
-login` and `latere logout`, never in git's own credential store.
+override also permits HTTP for development. Setup registers both HTTPS
+and HTTP for an overridden host; `setup --remove` removes both. Missing
+or other protocols receive no credential and do not trigger a refresh.
+`store` and `erase` are no-ops: your login lives in `~/.config/latere`,
+managed by `latere login` and `latere logout`, never in git's own
+credential store.
 
 ## Staying signed in
 
-The CLI refreshes tokens near expiry so a long session keeps working
-without re-login. If a saved auth credential has expired and has no refresh
-token, run `latere login` again. The CLI does not export or send that expired
-credential.
+The CLI refreshes the login near expiry so a long session keeps working
+without re-login. If the saved login has expired and has no refresh
+token, run `latere login` again. The CLI does not export or send that
+expired credential.
 
-- **Auth root token.** When the root token is within a minute of
-  expiry, the CLI refreshes it against auth using the stored refresh
-  token, requesting the exact same scope set it requested at login (so
-  a refresh can never silently drop a scope). The refreshed root and
-  its new refresh token are written back to `auth-token.json`.
-  If saving fails, refresh reports an error. Restore access to the credential
-  file and run `latere login` again; auth may already have invalidated the old
-  refresh token.
-- **Cella bearer.** When the bearer in `token.json` is near expiry, or
-  a Cella call comes back `401`, the CLI re-runs the mint-and-exchange
-  chain from the root token (refreshing the root first if it too is
-  near expiry) and writes the replacement bearer back. This happens at
-  most once per command, transparently, before your call is retried.
+When the login token is within a minute of expiry, the CLI refreshes it
+against auth using the stored refresh token, requesting the exact same
+scope set it requested at login (so a refresh can never silently drop a
+scope). The refreshed token and its new refresh token are written back to
+`auth-token.json`. If saving fails, refresh reports an error. Restore
+access to the credential file and run `latere login` again; auth may
+already have invalidated the old refresh token.
 
-Lux and Topos refresh the root token when needed before making a request.
-They do not exchange or replace your Cella credential. If either product
-rejects its bearer, the CLI reports that error without retrying with a
-Cella token.
+Product tokens are not refreshed, only re-minted. There is nothing to
+persist: a lapsed one is replaced by a new mint on the next call.
 
-Because every product credential derives from the root token, keeping
-the root refreshed keeps every product reachable. The one exception is
-a paste-mode login (`latere login --token <token>`): that supplies an
-access token with no refresh token, so the CLI cannot refresh it. When
-it expires, run `latere login` again.
+Because every product credential is minted from the login token, keeping
+it refreshed keeps every product reachable. The one exception is a
+paste-mode login (`latere login --token <token>`): that supplies an access
+token with no refresh token, so the CLI cannot refresh it. When it
+expires, run `latere login` again.
 
 ## Signing out
 
@@ -220,21 +188,20 @@ it expires, run `latere login` again.
 latere logout
 ```
 
-Logout revokes your session on the server, not just the local files:
+Logout revokes your session on the server, not just the local file:
 
-1. It revokes the Cella bearer at Cella (`DELETE /v1/tokens/current`),
-   so the catalog token dies immediately instead of lingering until
-   its TTL.
-2. It revokes the auth refresh token at auth (`POST /revoke`, RFC 7009),
-   so the root credential can mint no further tokens.
-3. It deletes `token.json` and `auth-token.json`.
+1. It revokes the refresh token at auth (`POST /revoke`, RFC 7009), so
+   the login can mint no further tokens.
+2. It deletes `auth-token.json`.
 
-Server-side revocation is best-effort. If a server cannot revoke (for
-example it is unreachable), the CLI prints a note, still clears your
-local files, and the affected token expires on its own. Logout attempts to
-remove both local files even if one removal fails. Any local removal failures
-make the command exit with an error identifying the affected paths. Fix their
-permissions or storage and run `latere logout` again to finish signing out.
+Tokens already minted for a product are not recalled; each lapses within
+five minutes.
+
+Server-side revocation is best-effort. If auth cannot revoke (for example
+it is unreachable), the CLI prints a note, still clears your local file,
+and the refresh token expires on its own. A local removal failure makes
+the command exit with an error identifying the path. Fix its permissions
+or storage and run `latere logout` again to finish signing out.
 
 ## The rule
 
@@ -245,16 +212,16 @@ The CLI holds one rule, which is the platform's:
 > cross-product hop carries an auth-issued token minted for the far
 > product's audience.
 
-In CLI terms: you log in once to auth to obtain the root, and every
-product call derives its credential from that root. The Cella bearer
-is only ever presented to Cella. A `lux.latere.ai` actor token is only
-ever presented to Lux, a `drive.latere.ai` one only to Drive, an
-`origo` one only to git. Whichever token is on the wire, the person it
-acts for is you.
+In CLI terms: you log in once to auth, and every product call mints its
+credential from that login. A `lux.latere.ai` token is only ever
+presented to Lux, a `drive.latere.ai` one only to Drive, a `sandboxd` one
+only to Cella, an `origo` one only to git. Whichever token is on the
+wire, the person it acts for is you.
 
-Leaf id-01 of `specs/infrastructure/identity` made the table above
-true for every row on 2026-09-12; a test over a recording transport
-holds it for every product command.
+Leaf id-01 of `specs/infrastructure/identity` made the table above true
+for every row on 2026-09-12, and leaf id-03 left one minting function and
+one credential on disk; a test over a recording transport holds it for
+every product command.
 
 ## Scripting surfaces
 
@@ -262,33 +229,35 @@ Two commands hand a raw token to your own scripts. They are deliberate
 escape hatches, outside the managed refresh flow above:
 
 ```sh
-latere print-token                # print the Cella bearer from token.json
+latere print-token                # print the login token (opens auth alone)
 latere login --token <token>      # save a pasted access token (no refresh)
 ```
+
+To hand a credential to a product, ask for that product's own, e.g.
+`latere lux env --raw`.
 
 ## Configuration
 
 | Setting | Purpose |
 |---------|---------|
 | `--auth-url` / `AUTH_URL` | Override the auth base URL (default `https://auth.latere.ai`). |
-| `--api-url` / `SANDBOX_API_URL` | Override the Cella API base URL, from which the auth URL is derived. |
+| `--api-url` / `SANDBOX_API_URL` | Override the Cella API base URL. The auth URL is derived from it when no auth override is set. |
+| `LATERE_AUTH_TOKEN_FILE` | Override the login token path. |
+| `LATERE_CELLA_TOKEN` | Present this bearer to Cella instead of minting one. |
 | `CODE_HOST` | Override the Latere Code host the git credential helper answers for. |
 
-Explicit URL flags take precedence over environment variables. Login uses
-the resolved Cella URL for both token exchange and verification. If neither
-`--auth-url` nor `AUTH_URL` is set, the auth URL is derived from that Cella URL.
-`whoami` also uses `AUTH_URL` when probing an auth-issued token. Lux commands
-and the git credential helper use the same auth override precedence
-for refreshing the root token and minting product credentials.
+Explicit URL flags take precedence over environment variables. The
+session commands (`login`, `logout`, `whoami`, `org`) speak to auth and
+take `--auth-url`; product commands derive the auth URL from their own
+product URL when no override is set.
 
 ## Related reading
 
-- Cella: **"Authentication"** and **"Sandbox identity, egress, and
-  agent grants"** cover how the Cella bearer arrives through token
-  exchange, what scopes it may carry, and what it grants inside a
-  sandbox.
-- Drive: **"Authentication"** covers the audience Drive requires and
-  what an actor token is authorized to reach.
-- This repo: `latere lux` details in "Models (Lux)", and git access
-  in the [main README](../README.md#git-with-latere-code). Start any
-  of these with `latere login` (see [Sign in](../README.md#sign-in)).
+- Cella: **"Authentication"** and **"Sandbox identity, egress, and agent
+  grants"** cover the audience Cella requires and what a token grants
+  inside a sandbox.
+- Drive: **"Authentication"** covers the audience Drive requires and what
+  an actor token is authorized to reach.
+- This repo: `latere lux` details in "Models (Lux)", and git access in
+  the [main README](../README.md#git-with-latere-code). Start any of
+  these with `latere login` (see [Sign in](../README.md#sign-in)).
