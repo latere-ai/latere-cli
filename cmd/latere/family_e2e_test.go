@@ -13,7 +13,7 @@ package main
 // Opt-in and tiered, because the higher tiers spend real money and mutate
 // real state:
 //
-//	LATERE_FAMILY_E2E=1        read-only edges: whoami, /tokeninfo,
+//	LATERE_FAMILY_E2E=1        read-only edges: whoami, /api/me,
 //	                           cella list, lux models+access, drive ls,
 //	                           topos reachability, garbage-token 401.
 //	                           No cost, no resource creation.
@@ -138,7 +138,7 @@ func (fe *familyEnv) get(t *testing.T, url, bearer string) (int, string) {
 
 // freshBearer mints a short-lived auth-issued identity token via `lux env`.
 // Unlike the on-disk auth-token.json (which goes stale between runs), this is
-// freshly minted, so a direct /tokeninfo check stays green. Returns "" if lux
+// freshly minted, so a direct /api/me check stays green. Returns "" if lux
 // access is unavailable.
 func (fe *familyEnv) freshBearer(t *testing.T) string {
 	t.Helper()
@@ -203,26 +203,26 @@ func TestFamilyE2E(t *testing.T) {
 		}
 	})
 
-	// A fresh auth-issued bearer verifies at auth /tokeninfo and resolves to
+	// A fresh auth-issued bearer is accepted at auth /api/me and resolves to
 	// the same owner (invariant 1). token.json is cella-issued and would 401
 	// here by design (asserted separately below), so this mints a fresh
 	// identity token via lux env rather than reusing the stale disk token.
-	t.Run("auth/tokeninfo-verifies", func(t *testing.T) {
+	t.Run("auth/api-me-accepts", func(t *testing.T) {
 		bearer := fe.freshBearer(t)
 		if bearer == "" {
 			t.Skip("could not mint a fresh auth bearer via lux env")
 		}
-		status, body := fe.get(t, fe.authURL+"/tokeninfo", bearer)
+		status, body := fe.get(t, fe.authURL+"/api/me", bearer)
 		if status != http.StatusOK {
-			t.Fatalf("/tokeninfo = %d, want 200\n%s", status, body)
+			t.Fatalf("/api/me = %d, want 200\n%s", status, body)
 		}
 		var info map[string]any
 		if err := json.Unmarshal([]byte(body), &info); err != nil {
-			t.Fatalf("tokeninfo not json: %v\n%s", err, body)
+			t.Fatalf("/api/me not json: %v\n%s", err, body)
 		}
 		if fe.sub != "" {
 			if got, _ := info["sub"].(string); got != "" && got != fe.sub {
-				t.Errorf("tokeninfo sub = %q, want owner %q (invariant 1)", got, fe.sub)
+				t.Errorf("/api/me sub = %q, want owner %q (invariant 1)", got, fe.sub)
 			}
 		}
 	})

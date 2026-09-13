@@ -67,7 +67,7 @@ func TestPastedLoginPreservesSessionUntilVerifiedE2E(t *testing.T) {
 				var requests atomic.Int32
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					requests.Add(1)
-					if r.Method != http.MethodGet || r.URL.Path != "/tokeninfo" || r.Header.Get("Authorization") != "Bearer candidate-token" {
+					if r.Method != http.MethodGet || r.URL.Path != "/api/me" || r.Header.Get("Authorization") != "Bearer candidate-token" {
 						t.Error("verification did not present the submitted token to the issuer")
 						w.WriteHeader(http.StatusBadRequest)
 						return

@@ -10,6 +10,13 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Changed
+
+- `latere whoami` prints the claims of the saved token and asks the issuer
+  nothing; `latere auth login` with a pasted token confirms it at the
+  issuer's `/api/me`. The issuer's token-introspection endpoint is gone
+  from the family.
+
 ## v0.9.0 - 2026-09-13
 
 - **Sign in again once.** Your login token now names `auth.latere.ai` and nothing else, so a token saved by an earlier release is refused at every product. Run `latere login`.

@@ -28,28 +28,20 @@ func TestWhoamiReportsOutputFailureE2E(t *testing.T) {
 	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
-	for _, fallback := range []bool{false, true} {
-		for _, prefix := range []string{"", "auth"} {
+	for _, prefix := range []string{"", "auth"} {
+		{
 			for _, mode := range []string{"writable", "read-only"} {
-				t.Run(fmt.Sprintf("fallback=%v/%s/%s", fallback, prefix, mode), func(t *testing.T) {
+				t.Run(fmt.Sprintf("%s/%s", prefix, mode), func(t *testing.T) {
 					root := t.TempDir()
 					tokenPath, outputPath := filepath.Join(root, "auth-token.json"), filepath.Join(root, "output")
 					token := "header." + base64.RawURLEncoding.EncodeToString([]byte(`{"sub":"owner","principal_type":"user"}`)) + ".signature"
 					tokenData := `{"access_token":"` + token + `"}`
 					var probes atomic.Int32
+					// whoami reads the saved token and asks the issuer nothing.
 					server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-						switch r.URL.Path {
-						case "/tokeninfo":
-							probes.Add(1)
-							if fallback {
-								w.WriteHeader(http.StatusUnauthorized)
-								return
-							}
-							_, _ = w.Write([]byte(`{"sub":"owner","principal_type":"user"}`))
-						default:
-							t.Errorf("unexpected request: %s", r.URL.Path)
-							w.WriteHeader(http.StatusNotFound)
-						}
+						probes.Add(1)
+						t.Errorf("unexpected request: %s", r.URL.Path)
+						w.WriteHeader(http.StatusNotFound)
 					}))
 					defer server.Close()
 					if err := os.WriteFile(tokenPath, []byte(tokenData), 0o600); err != nil {
@@ -95,8 +87,8 @@ func TestWhoamiReportsOutputFailureE2E(t *testing.T) {
 					if got, err := os.ReadFile(outputPath); err != nil || string(got) != want {
 						t.Errorf("output contents = %q (%v), want %q", got, err, want)
 					}
-					if probes.Load() != 1 {
-						t.Errorf("issuer requests=%d, want 1", probes.Load())
+					if probes.Load() != 0 {
+						t.Errorf("issuer requests=%d, want none", probes.Load())
 					}
 					if got, err := os.ReadFile(tokenPath); err != nil || string(got) != tokenData {
 						t.Errorf("printing changed the saved token: %v", err)

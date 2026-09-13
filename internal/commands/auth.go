@@ -256,9 +256,9 @@ product refuses it. To reach a product, ask for a token minted for that
 product, e.g. 'latere lux env --raw' for Lux.
 
     TOKEN=$(latere print-token)
-    curl -H "Authorization: Bearer $TOKEN" https://auth.latere.ai/tokeninfo`,
+    curl -H "Authorization: Bearer $TOKEN" https://auth.latere.ai/api/me`,
 		Example: `  TOKEN=$(latere print-token)
-  curl -H "Authorization: Bearer $TOKEN" https://auth.latere.ai/tokeninfo`,
+  curl -H "Authorization: Bearer $TOKEN" https://auth.latere.ai/api/me`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			tok, err := api.LoadAuthToken()
 			if err != nil {
@@ -404,15 +404,16 @@ func loginWithPastedToken(ctx context.Context, authURL, token string) error {
 
 // verifyAtIssuer confirms a pasted token at the issuer before it is
 // stored. The login token is addressed to auth, so auth is who can say
-// whether it is a login at all; storing an unverified string would fail
-// later at every product with an error naming the wrong service.
+// whether it is a login at all: its own /api/me answers a live login and
+// refuses anything else. Storing an unverified string would fail later at
+// every product with an error naming the wrong service.
 func verifyAtIssuer(ctx context.Context, authBase, token string) error {
 	c := api.NewClient(authBase)
 	c.SetBearer(token, time.Time{})
 	verifyCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	var ignored any
-	if err := c.GetJSON(verifyCtx, "/tokeninfo", &ignored); err != nil {
+	if err := c.GetJSON(verifyCtx, "/api/me", &ignored); err != nil {
 		return fmt.Errorf("token rejected by auth: %w", err)
 	}
 	return nil
@@ -569,43 +570,17 @@ func newAuthWhoamiCmd() *cobra.Command {
 		Short: "Print the current principal.",
 		Long: `Print the principal the saved login names.
 
-The login token is addressed to auth.latere.ai, so auth is asked:
 'latere whoami' reads ~/.config/latere/auth-token.json, refreshes it if
-it is due, and calls auth's token-introspection endpoint. If auth
-cannot be reached, the identity claims carried in the saved token are
-printed instead.`,
+it is due, and prints the identity claims the token carries: who, in
+which organisation, as which kind of principal. The token is the
+issuer's signed statement, so nothing is asked of the issuer to read it.`,
 		Example: `  latere whoami
   latere whoami --auth-url https://auth.latere.ai`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			access, authBase, err := api.LoginToken(cmd.Context(), authURL)
+			access, _, err := api.LoginToken(cmd.Context(), authURL)
 			if err != nil {
 				return err
 			}
-			c := api.NewClient(authBase)
-			c.SetBearer(access, time.Time{})
-			var info struct {
-				Sub           string   `json:"sub"`
-				Email         *string  `json:"email,omitempty"`
-				PrincipalType string   `json:"principal_type"`
-				OrgID         *string  `json:"org_id,omitempty"`
-				Scopes        []string `json:"scopes"`
-				ClientID      string   `json:"client_id,omitempty"`
-			}
-			// A successful status with no subject (including null or 204) does
-			// not identify a principal. Use the local fallback in that case.
-			if err := c.GetJSON(cmd.Context(), "/tokeninfo", &info); err == nil && info.Sub != "" {
-				return printPrincipal(cmd.OutOrStdout(), principalInfo{
-					Sub:           info.Sub,
-					Email:         deref(info.Email),
-					PrincipalType: info.PrincipalType,
-					OrgID:         deref(info.OrgID),
-					Scopes:        info.Scopes,
-					ClientID:      info.ClientID,
-				})
-			}
-			// Introspection is best-effort: the inferred auth host may not
-			// resolve on a custom deployment. The saved token carries the
-			// same identity claims, so read them locally.
 			local, err := principalFromJWT(access)
 			if err != nil {
 				return err
@@ -649,13 +624,6 @@ func printPrincipal(dst io.Writer, info principalInfo) error {
 		return fmt.Errorf("write principal: %w", err)
 	}
 	return nil
-}
-
-func deref(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
 }
 
 func principalFromJWT(raw string) (principalInfo, error) {

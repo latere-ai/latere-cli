@@ -115,7 +115,7 @@ func TestAuthLoginTokenReplacesThePreviousLogin(t *testing.T) {
 	}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/tokeninfo" {
+		if r.URL.Path != "/api/me" {
 			http.NotFound(w, r)
 			return
 		}
@@ -160,7 +160,7 @@ func TestAuthWhoamiFallsBackToTheSavedTokensClaims(t *testing.T) {
 		if got := r.Header.Get("Authorization"); got != "Bearer "+token {
 			t.Errorf("Authorization = %q", got)
 		}
-		if r.URL.Path != "/tokeninfo" {
+		if r.URL.Path != "/api/me" {
 			t.Errorf("whoami called %s; it speaks to the issuer alone", r.URL.Path)
 			http.NotFound(w, r)
 			return

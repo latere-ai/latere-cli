@@ -34,7 +34,7 @@ func TestLoginReplacesPermissiveTokenE2E(t *testing.T) {
 		t.Fatal(err)
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/tokeninfo" || r.Header.Get("Authorization") != "Bearer new-test-token" {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/me" || r.Header.Get("Authorization") != "Bearer new-test-token" {
 			t.Error("unexpected login verification request")
 			w.WriteHeader(http.StatusBadRequest)
 			return

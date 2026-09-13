@@ -425,7 +425,7 @@ func TestGitCredentialSetupRemove(t *testing.T) {
 func fakeIssuer(t *testing.T, acceptToken bool) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/tokeninfo" {
+		if r.URL.Path != "/api/me" {
 			http.NotFound(w, r)
 			return
 		}

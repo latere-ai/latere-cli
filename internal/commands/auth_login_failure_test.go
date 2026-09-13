@@ -26,7 +26,7 @@ func TestPastedLoginVerifiesAtTheIssuer(t *testing.T) {
 	}
 	var probes atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/tokeninfo" {
+		if r.URL.Path != "/api/me" {
 			t.Errorf("login called %s; it speaks to the issuer alone", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
 			return

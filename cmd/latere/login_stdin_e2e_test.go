@@ -40,7 +40,7 @@ func TestLoginWithClosedStdinE2E(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				requests.Add(1)
 				w.Header().Set("Content-Type", "application/json")
-				if !explicit || r.URL.Path != "/tokeninfo" || r.Header.Get("Authorization") != "Bearer candidate" {
+				if !explicit || r.URL.Path != "/api/me" || r.Header.Get("Authorization") != "Bearer candidate" {
 					t.Error("unexpected login request")
 				}
 				_, _ = w.Write([]byte(`{"sub":"u-1"}`))
