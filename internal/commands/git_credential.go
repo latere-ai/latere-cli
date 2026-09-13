@@ -14,6 +14,8 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/latere-ai/latere-cli/internal/api"
 )
 
 // defaultCodeHost is the public Latere Code deployment (Origo). CODE_HOST
@@ -310,10 +312,14 @@ func newGitCredentialNoopCmd(op string) *cobra.Command {
 // internal/auth.AudienceOrigo.
 const codeAudience = "origo"
 
-// gitCredentialToken is the bearer presented to a git host: a short-lived
-// actor token bound to that host's audience, minted from the saved login.
+// gitCredentialToken is the bearer presented to a git host: a token minted
+// for that host's audience alone from the saved login.
 func gitCredentialToken(ctx context.Context, authURL string, target gitTarget) (string, error) {
-	return actorCredentialToken(ctx, authURL, target.audience, target.name)
+	bearer, _, err := api.ActorToken(ctx, api.ResolveAuthURL("", authURL), target.audience)
+	if err != nil {
+		return "", fmt.Errorf("cannot authenticate to %s: %w", target.name, err)
+	}
+	return bearer, nil
 }
 
 // parseCredentialAttrs reads git's credential-helper attribute block: one

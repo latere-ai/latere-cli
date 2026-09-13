@@ -12,8 +12,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/latere-ai/latere-cli/internal/api"
 )
 
 type transferTimeoutTransport func(*http.Request) (*http.Response, error)
@@ -24,11 +22,8 @@ func (f transferTimeoutTransport) RoundTrip(r *http.Request) (*http.Response, er
 
 func TestCellaTransferTimeout(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("LATERE_TOKEN_FILE", filepath.Join(root, "token.json"))
 	t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(root, "absent-auth.json"))
-	if err := api.SaveToken("", api.Token{AccessToken: "synthetic-token"}); err != nil {
-		t.Fatal(err)
-	}
+	t.Setenv("LATERE_CELLA_TOKEN", "synthetic-token")
 	source := filepath.Join(root, "file")
 	if err := os.WriteFile(source, []byte("content"), 0600); err != nil {
 		t.Fatal(err)

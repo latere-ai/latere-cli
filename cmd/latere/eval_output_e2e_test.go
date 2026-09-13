@@ -78,7 +78,7 @@ func TestEvalOutputFailureE2E(t *testing.T) {
 				args := append([]string{"eval"}, tc.args...)
 				args = append(args, "--api-url", server.URL)
 				command := exec.CommandContext(ctx, binary, args...)
-				command.Env = append(os.Environ(), "EVAL_ADMIN_TOKEN=synthetic-token", "LATERE_TOKEN_FILE="+filepath.Join(root, "absent-token.json"), "LATERE_AUTH_TOKEN_FILE="+filepath.Join(root, "absent-auth.json"), "XDG_CONFIG_HOME="+root, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
+				command.Env = append(os.Environ(), "EVAL_ADMIN_TOKEN=synthetic-token", "LATERE_AUTH_TOKEN_FILE="+filepath.Join(root, "absent-auth.json"), "XDG_CONFIG_HOME="+root, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
 				var diagnostic bytes.Buffer
 				command.Stdout, command.Stderr = file, &diagnostic
 				err = command.Run()

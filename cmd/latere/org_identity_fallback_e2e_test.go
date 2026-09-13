@@ -38,7 +38,7 @@ func TestOrgContextDoesNotHideAuthFileErrorsE2E(t *testing.T) {
 	}{
 		{name: "auth organization", contents: credential("auth-org"), want: "auth-org"},
 		{name: "auth personal", contents: credential(""), want: "personal"},
-		{name: "missing auth", want: "legacy-org"},
+		{name: "missing auth", wantError: "not logged in"},
 		{name: "malformed JSON", contents: []byte(`{"access_token":`), wantError: "parse token file"},
 		{name: "wrong token type", contents: []byte(`{"access_token":42}`), wantError: "parse token file"},
 		{name: "unreadable directory", directory: true, wantError: "auth-token.json"},
@@ -48,11 +48,7 @@ func TestOrgContextDoesNotHideAuthFileErrorsE2E(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
-			cellaPath, authPath := filepath.Join(root, "token.json"), filepath.Join(root, "auth-token.json")
-			cellaBefore := credential("legacy-org")
-			if err := os.WriteFile(cellaPath, cellaBefore, 0600); err != nil {
-				t.Fatal(err)
-			}
+			authPath := filepath.Join(root, "auth-token.json")
 			if tc.directory {
 				if err := os.Mkdir(authPath, 0700); err != nil {
 					t.Fatal(err)
@@ -65,7 +61,7 @@ func TestOrgContextDoesNotHideAuthFileErrorsE2E(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
 			command := exec.CommandContext(ctx, binary, "org")
-			command.Env = append(os.Environ(), "LATERE_TOKEN_FILE="+cellaPath, "LATERE_AUTH_TOKEN_FILE="+authPath, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
+			command.Env = append(os.Environ(), "LATERE_CELLA_TOKEN=", "LATERE_AUTH_TOKEN_FILE="+authPath, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
 			var stdout, stderr bytes.Buffer
 			command.Stdout, command.Stderr = &stdout, &stderr
 			err := command.Run()
@@ -75,9 +71,6 @@ func TestOrgContextDoesNotHideAuthFileErrorsE2E(t *testing.T) {
 				}
 			} else if err != nil || stdout.String() != tc.want+"\n" || stderr.Len() != 0 {
 				t.Errorf("org context: err=%v, stdout=%q, stderr=%q, want %q", err, stdout.String(), stderr.String(), tc.want)
-			}
-			if contents, err := os.ReadFile(cellaPath); err != nil || !bytes.Equal(contents, cellaBefore) {
-				t.Error("displaying context changed the Cella credential")
 			}
 			if tc.contents != nil {
 				if contents, err := os.ReadFile(authPath); err != nil || !bytes.Equal(contents, tc.contents) {

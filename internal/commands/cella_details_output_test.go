@@ -17,7 +17,7 @@ import (
 
 func TestCellaDetailsConfiguredOutput(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("LATERE_TOKEN_FILE", writeTokenFile(t, dir, "synthetic-token"))
+	t.Setenv("LATERE_CELLA_TOKEN", "synthetic-token")
 	t.Setenv("LATERE_NO_UPDATE_CHECK", "1")
 	manifest := filepath.Join(dir, "manifest.yaml")
 	if err := os.WriteFile(manifest, []byte("apiVersion: cella.latere.ai/v1\nkind: Sandbox\nspec: {image: test}\n"), 0600); err != nil {

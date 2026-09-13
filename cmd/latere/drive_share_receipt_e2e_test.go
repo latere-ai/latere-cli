@@ -79,7 +79,7 @@ func TestDriveShareReceiptE2E(t *testing.T) {
 					args = append(args, "--json")
 				}
 				command := exec.CommandContext(ctx, binary, args...)
-				command.Env = append(os.Environ(), "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+dir, "LATERE_TOKEN_FILE="+filepath.Join(dir, "absent-token.json"), "LATERE_AUTH_TOKEN_FILE="+filepath.Join(dir, "absent-auth.json"))
+				command.Env = append(os.Environ(), "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+dir, "LATERE_AUTH_TOKEN_FILE="+filepath.Join(dir, "absent-auth.json"))
 				var out, diagnostic bytes.Buffer
 				command.Stdout, command.Stderr = &out, &diagnostic
 				err := command.Run()

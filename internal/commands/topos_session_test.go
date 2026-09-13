@@ -22,8 +22,7 @@ import (
 func toposTestEnv(t *testing.T, srvURL string) {
 	t.Helper()
 	t.Setenv("TOPOS_API_URL", srvURL)
-	dir := t.TempDir()
-	t.Setenv("LATERE_TOKEN_FILE", writeTokenFile(t, dir, "test-bearer"))
+	t.Setenv("TOPOS_TOKEN", "test-bearer")
 }
 
 // wsFrame writes one server→client frame.

@@ -17,7 +17,7 @@ import (
 
 func TestCellaCommandStatusOutput(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("LATERE_TOKEN_FILE", writeTokenFile(t, dir, "synthetic-token"))
+	t.Setenv("LATERE_CELLA_TOKEN", "synthetic-token")
 	t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(dir, "absent-auth.json"))
 	t.Setenv("XDG_CONFIG_HOME", dir)
 	t.Setenv("LATERE_NO_UPDATE_CHECK", "1")

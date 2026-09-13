@@ -10,7 +10,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -28,11 +27,7 @@ func (f oneShotLifecycleTransport) RoundTrip(r *http.Request) (*http.Response, e
 // real lifecycle delays would otherwise add many minutes to every test run.
 func TestOneShotLifecycleTimeoutE2E(t *testing.T) {
 	root := t.TempDir()
-	token := filepath.Join(root, "token.json")
-	if err := os.WriteFile(token, []byte(`{"access_token":"test-token"}`), 0600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("LATERE_TOKEN_FILE", token)
+	t.Setenv("LATERE_CELLA_TOKEN", "test-token")
 	t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(root, "absent-auth.json"))
 	t.Setenv("XDG_CONFIG_HOME", root)
 	t.Setenv("LATERE_NO_UPDATE_CHECK", "1")

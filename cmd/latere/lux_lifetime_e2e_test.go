@@ -35,20 +35,15 @@ func TestLuxEnvValidatesAndReportsLifetimeE2E(t *testing.T) {
 		for _, tc := range []struct {
 			name, ttl, override, wantError, wantNote string
 			seconds                                  int
-			omitLifetime                             bool
+			noLifetime                               bool
 		}{
+			// The lifetime is the issuer's maximum and the CLI never asks
+			// for another: --ttl is not a flag any more.
 			{name: "default", seconds: 300, wantNote: "expires in 300 seconds"},
-			{name: "zero", ttl: "0s", wantError: "positive whole number of seconds"},
-			{name: "negative", ttl: "-1m", wantError: "positive whole number of seconds"},
-			{name: "subsecond", ttl: "500ms", wantError: "positive whole number of seconds"},
-			{name: "fractional", ttl: "1500ms", wantError: "positive whole number of seconds"},
-			{name: "one second", ttl: "1s", seconds: 1, wantNote: "expires in 1 second"},
-			{name: "server capped", ttl: "1h", seconds: 3600, wantNote: "expires in 300 seconds"},
-			{name: "unknown expiry", ttl: "1m", seconds: 60, omitLifetime: true, wantNote: "expiry not reported by auth"},
-			{name: "flag override with ttl", ttl: "1m", override: "flag", wantError: "--ttl cannot be combined"},
-			{name: "env override with ttl", ttl: "1m", override: "env", wantError: "--ttl cannot be combined"},
-			{name: "flag override without ttl", override: "flag"},
-			{name: "env override without ttl", override: "env"},
+			{name: "rejects ttl", ttl: "1m", wantError: "unknown flag: --ttl"},
+			{name: "issuer reports no lifetime", seconds: 300, noLifetime: true, wantError: "the issuer returned no token"},
+			{name: "flag override", override: "flag"},
+			{name: "env override", override: "env"},
 		} {
 			t.Run(mode+"/"+tc.name, func(t *testing.T) {
 				root := t.TempDir()
@@ -67,7 +62,7 @@ func TestLuxEnvValidatesAndReportsLifetimeE2E(t *testing.T) {
 						t.Errorf("invalid mint request: %s %s, ttl=%d want %d", r.Method, r.URL.Path, body.TTL, tc.seconds)
 					}
 					response := map[string]any{"actor_token": "short-actor"}
-					if !tc.omitLifetime {
+					if !tc.noLifetime {
 						response["expires_in"] = min(max(body.TTL, 1), 300)
 					}
 					w.Header().Set("Content-Type", "application/json")
@@ -93,11 +88,14 @@ func TestLuxEnvValidatesAndReportsLifetimeE2E(t *testing.T) {
 				if tc.override == "env" {
 					envToken = "provided-token"
 				}
-				command.Env = append(os.Environ(), "LATERE_LUX_TOKEN="+envToken, "LATERE_TOKEN_FILE="+filepath.Join(root, "token.json"), "LATERE_AUTH_TOKEN_FILE="+authPath, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
+				command.Env = append(os.Environ(), "LATERE_LUX_TOKEN="+envToken, "LATERE_AUTH_TOKEN_FILE="+authPath, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
 				var stdout, stderr bytes.Buffer
 				command.Stdout, command.Stderr = &stdout, &stderr
 				err := command.Run()
 				var wantCalls int32
+				if tc.noLifetime {
+					wantCalls = 1
+				}
 				if tc.wantError != "" {
 					if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 || !strings.Contains(stderr.String(), tc.wantError) {
 						t.Errorf("invalid lifetime=%v; stderr=%q, want %q", err, stderr.String(), tc.wantError)

@@ -19,7 +19,7 @@ import (
 
 func TestCellaConfiguredInput(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("LATERE_TOKEN_FILE", writeTokenFile(t, dir, "synthetic-token"))
+	t.Setenv("LATERE_CELLA_TOKEN", "synthetic-token")
 	t.Setenv("LATERE_NO_UPDATE_CHECK", "1")
 	// Two zero tar blocks form an empty archive; write accepts arbitrary bytes.
 	want := make([]byte, 1024)
@@ -121,7 +121,7 @@ func TestCellaConfiguredInput(t *testing.T) {
 
 func TestCellaWriteConfiguredInputError(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("LATERE_TOKEN_FILE", writeTokenFile(t, dir, "synthetic-token"))
+	t.Setenv("LATERE_CELLA_TOKEN", "synthetic-token")
 	t.Setenv("LATERE_NO_UPDATE_CHECK", "1")
 	empty, err := os.CreateTemp(dir, "process-input")
 	if err != nil {

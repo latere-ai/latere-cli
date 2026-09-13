@@ -12,7 +12,7 @@ import (
 
 func TestCellaWaitRejectsInvalidTimeoutBeforeAuthentication(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("LATERE_TOKEN_FILE", filepath.Join(root, "absent-token.json"))
+	t.Setenv("LATERE_CELLA_TOKEN", "")
 	t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(root, "absent-auth.json"))
 	for _, value := range []string{"0", "-1", "9223372037", "18446744074", "9223372036854775807"} {
 		t.Run(value, func(t *testing.T) {

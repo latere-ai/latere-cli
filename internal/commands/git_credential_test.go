@@ -11,7 +11,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -114,7 +113,7 @@ const codeActorOutput = "username=x-access-token\npassword=" + mintedActor + "\n
 // CODE_HOST override from the environment.
 func isolateTokens(t *testing.T) {
 	t.Helper()
-	t.Setenv("LATERE_TOKEN_FILE", filepath.Join(t.TempDir(), "absent-token.json"))
+	t.Setenv("LATERE_CELLA_TOKEN", "")
 	t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(t.TempDir(), "absent-auth-token.json"))
 	t.Setenv("CODE_HOST", "")
 }
@@ -287,18 +286,10 @@ func TestGitCredentialGetRefreshesExpiredToken(t *testing.T) {
 func TestGitCredentialGetRefusesWithoutAuthToken(t *testing.T) {
 	isolateTokens(t)
 	auth := newAuthStub(t)
-	// No auth-token.json (a --token paste login clears it); token.json holds
-	// the pasted Cella bearer.
-	p := filepath.Join(t.TempDir(), "token.json")
-	b, _ := json.Marshal(map[string]any{"access_token": "pasted-token", "token_type": "Bearer"})
-	if err := os.WriteFile(p, b, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("LATERE_TOKEN_FILE", p)
 
 	if _, err := gitCredentialToken(t.Context(), auth.srv.URL, gitTargets()[0]); err == nil ||
-		err.Error() != "not signed in; run `latere login`" {
-		t.Errorf("token without a login = %v, want the not-signed-in sentence", err)
+		!strings.Contains(err.Error(), "not logged in; run `latere login`") {
+		t.Errorf("token without a login = %v, want the not-logged-in sentence", err)
 	}
 	// git must still be able to prompt, so the helper exits 0 and says nothing.
 	out, err := runGitCredential(t, codeGetInput, "get", "--auth-url", auth.srv.URL)
@@ -429,19 +420,22 @@ func TestGitCredentialSetupRemove(t *testing.T) {
 
 // fakeSandboxAPI serves the /v1/sandboxes probe saveAndVerify uses to
 // confirm a pasted token.
-func fakeSandboxAPI(t *testing.T, acceptToken bool) *httptest.Server {
+// fakeIssuer stands in for auth when a login is verified: /tokeninfo
+// accepts or refuses the pasted token.
+func fakeIssuer(t *testing.T, acceptToken bool) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/sandboxes" {
+		if r.URL.Path != "/tokeninfo" {
 			http.NotFound(w, r)
 			return
 		}
+		w.Header().Set("Content-Type", "application/json")
 		if !acceptToken {
 			w.WriteHeader(http.StatusUnauthorized)
 			_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
 			return
 		}
-		_, _ = w.Write([]byte(`[]`))
+		_, _ = w.Write([]byte(`{"sub":"u-1"}`))
 	}))
 	t.Cleanup(srv.Close)
 	return srv
@@ -470,9 +464,9 @@ func runAuthLogin(t *testing.T, args ...string) error {
 func TestAuthLoginWiresGitHelperOnce(t *testing.T) {
 	isolateTokens(t)
 	calls := swapGitWiring(t)
-	srv := fakeSandboxAPI(t, true)
+	srv := fakeIssuer(t, true)
 
-	if err := runAuthLogin(t, "--token", "pasted-token", "--api-url", srv.URL); err != nil {
+	if err := runAuthLogin(t, "--token", "pasted-token", "--auth-url", srv.URL); err != nil {
 		t.Fatalf("login --token: %v", err)
 	}
 	if *calls != 1 {
@@ -483,9 +477,9 @@ func TestAuthLoginWiresGitHelperOnce(t *testing.T) {
 func TestAuthLoginNoGitSkipsWiring(t *testing.T) {
 	isolateTokens(t)
 	calls := swapGitWiring(t)
-	srv := fakeSandboxAPI(t, true)
+	srv := fakeIssuer(t, true)
 
-	if err := runAuthLogin(t, "--token", "pasted-token", "--api-url", srv.URL, "--no-git"); err != nil {
+	if err := runAuthLogin(t, "--token", "pasted-token", "--auth-url", srv.URL, "--no-git"); err != nil {
 		t.Fatalf("login --token --no-git: %v", err)
 	}
 	if *calls != 0 {
@@ -496,9 +490,9 @@ func TestAuthLoginNoGitSkipsWiring(t *testing.T) {
 func TestAuthLoginFailureSkipsWiring(t *testing.T) {
 	isolateTokens(t)
 	calls := swapGitWiring(t)
-	srv := fakeSandboxAPI(t, false)
+	srv := fakeIssuer(t, false)
 
-	if err := runAuthLogin(t, "--token", "bad-token", "--api-url", srv.URL); err == nil {
+	if err := runAuthLogin(t, "--token", "bad-token", "--auth-url", srv.URL); err == nil {
 		t.Fatal("login with rejected token succeeded, want error")
 	}
 	if *calls != 0 {
@@ -530,7 +524,7 @@ func TestAutoConfigureGitIdempotent(t *testing.T) {
 
 func TestAuthLoginSucceedsWithoutGitBinary(t *testing.T) {
 	isolateTokens(t)
-	srv := fakeSandboxAPI(t, true)
+	srv := fakeIssuer(t, true)
 	// An empty PATH hides git; login must still succeed and the real
 	// wiring hook must skip silently.
 	t.Setenv("PATH", t.TempDir())
@@ -540,7 +534,7 @@ func TestAuthLoginSucceedsWithoutGitBinary(t *testing.T) {
 	var errb bytes.Buffer
 	cmd.SetOut(&bytes.Buffer{})
 	cmd.SetErr(&errb)
-	cmd.SetArgs([]string{"--token", "pasted-token", "--api-url", srv.URL})
+	cmd.SetArgs([]string{"--token", "pasted-token", "--auth-url", srv.URL})
 	if _, err := captureStdout(func() error { return cmd.Execute() }); err != nil {
 		t.Fatalf("login without git on PATH: %v", err)
 	}

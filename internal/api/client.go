@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: 2026 Latere AI
 // SPDX-License-Identifier: MIT
 
-// Package api is the HTTP client every `latere sandbox …` command
-// shares. Uses the public sandboxd surface at cella.latere.ai. The
-// client carries a Bearer token loaded from ~/.config/latere/token.json,
-// written by `latere login`.
+// Package api is the HTTP client every `latere cella …` command shares.
+// It talks to the public Cella surface at cella.latere.ai and carries a
+// bearer the caller supplies: an actor token minted for that product from
+// the login saved by `latere login`.
 package api
 
 import (
@@ -17,54 +17,38 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
-	"latere.ai/x/pkg/atomicfile"
 	"latere.ai/x/pkg/otel"
-
-	"github.com/latere-ai/latere-cli/internal/config"
 )
 
 // DefaultAPIURL is overridden by SANDBOX_API_URL or --api-url.
 const DefaultAPIURL = "https://cella.latere.ai"
 
-// Token is what `latere login` writes to disk. Shape matches an
-// OAuth2 token response so an eventual device-code flow can dump its
-// reply directly. Only AccessToken is required for now.
-type Token struct {
-	AccessToken  string    `json:"access_token"`
-	RefreshToken string    `json:"refresh_token,omitempty"`
-	ClientID     string    `json:"client_id,omitempty"`
-	TokenType    string    `json:"token_type,omitempty"`
-	ExpiresAt    time.Time `json:"expires_at"`
-	IssuedAt     time.Time `json:"issued_at"`
-}
-
-// Client wraps the HTTP plumbing. Build with NewClient.
+// Client wraps the HTTP plumbing. Build with NewClient, then attach the
+// bearer with SetBearer.
 type Client struct {
 	BaseURL string
 	Token   string
 	HTTP    *http.Client
 
-	// Refresh, when set, re-derives the bearer and is invoked at most
-	// once per client: proactively when the saved token is within 60s
-	// of a known expiry, or reactively after a 401. NewClient wires the
-	// default (re-exchange through the retained auth root token); set
-	// nil to disable, e.g. when the client must never mint credentials.
+	// Refresh, when set, re-mints the bearer and is invoked at most once
+	// per client: proactively when the held token is within a minute of
+	// its known expiry, or reactively after a 401. An actor token lives
+	// five minutes and a file transfer or a log follow can outlive it,
+	// which is what this covers.
 	Refresh func(ctx context.Context) (string, bool)
 
-	// expiresAt is token.json's recorded expiry at construction. Zero
-	// means unknown (cella's exchange response carries no expiry) and
-	// skips the proactive refresh; the 401 path still applies.
+	// expiresAt is when the held bearer lapses. Zero means unknown and
+	// skips the proactive re-mint; the 401 path still applies.
 	expiresAt time.Time
 	refreshed bool
 }
 
-// NewClient builds a Client from env + the token file. Returns the
-// client even when the token file is missing — commands that need auth
-// will fail with a clear error, but `--help` and `auth login` work.
+// NewClient builds a Client for apiURL, or for $SANDBOX_API_URL, or for
+// the public deployment. It carries no credential: `--help` and `latere
+// login` need a client before there is anything to present.
 func NewClient(apiURL string) *Client {
 	if apiURL == "" {
 		if v := os.Getenv("SANDBOX_API_URL"); v != "" {
@@ -73,21 +57,21 @@ func NewClient(apiURL string) *Client {
 			apiURL = DefaultAPIURL
 		}
 	}
-	apiURL = strings.TrimRight(apiURL, "/")
-	tok, _ := LoadToken("")
-	c := &Client{
-		BaseURL: apiURL,
-		Token:   tok.AccessToken,
+	return &Client{
+		BaseURL: strings.TrimRight(apiURL, "/"),
 		HTTP: &http.Client{
 			Timeout: 60 * time.Second, Transport: otel.Transport(nil),
 			CheckRedirect: PreserveMethodOnRedirect,
 		},
-		expiresAt: tok.ExpiresAt,
 	}
-	c.Refresh = func(ctx context.Context) (string, bool) {
-		return RefreshCellaToken(ctx, c.BaseURL)
-	}
-	return c
+}
+
+// SetBearer attaches the bearer and when it lapses. A zero expiry means
+// unknown, which leaves the proactive re-mint off.
+func (c *Client) SetBearer(token string, expiry time.Time) {
+	c.Token = token
+	c.expiresAt = expiry
+	c.refreshed = false
 }
 
 // PreserveMethodOnRedirect is an http.Client.CheckRedirect callback that
@@ -99,170 +83,6 @@ func PreserveMethodOnRedirect(req *http.Request, via []*http.Request) error {
 	}
 	if previous := via[len(via)-1].Method; req.Method != previous {
 		return fmt.Errorf("redirect changed request method from %s to %s", previous, req.Method)
-	}
-	return nil
-}
-
-// RefreshCellaToken re-derives the cella bearer from the retained auth
-// root token: refresh the root when it is expiring, mint a sandboxd
-// actor token, exchange it at /v1/tokens/exchange, and persist the
-// replacement (cella's catalog replaces the previous row by label, so
-// this rotates the credential). Returns ok=false when no auth root
-// token exists (paste-mode login has none) or any step fails; callers
-// keep their original error.
-func RefreshCellaToken(ctx context.Context, apiBase string) (string, bool) {
-	authTok, err := LoadAuthToken()
-	if err != nil || authTok.AccessToken == "" {
-		return "", false
-	}
-	if authTok.RefreshToken == "" && !authTok.ExpiresAt.IsZero() && !time.Now().Before(authTok.ExpiresAt) {
-		return "", false
-	}
-	authBase := strings.TrimRight(os.Getenv("AUTH_URL"), "/")
-	if authBase == "" {
-		authBase = InferAuthURL(apiBase)
-	}
-	access := authTok.AccessToken
-	if authTok.RefreshToken != "" && !authTok.ExpiresAt.IsZero() &&
-		time.Now().After(authTok.ExpiresAt.Add(-60*time.Second)) {
-		refreshed, rerr := RefreshAuthToken(ctx, authBase, authTok)
-		if rerr != nil {
-			return "", false
-		}
-		access = refreshed.AccessToken
-	}
-	httpc := &http.Client{Timeout: 15 * time.Second, Transport: otel.Transport(nil)}
-	bearer, err := MintActorToken(ctx, httpc, authBase, access, "sandboxd", 60)
-	if errors.Is(err, ErrActorAudienceMismatch) {
-		// Legacy audience shape: the root token itself is accepted by
-		// sandboxd, mirror the login-time fallback.
-		bearer = access
-	} else if err != nil {
-		return "", false
-	}
-	cellaTok, err := ExchangeAtCella(ctx, httpc, apiBase, bearer)
-	if err != nil {
-		return "", false
-	}
-	_ = SaveToken("", Token{
-		AccessToken: cellaTok,
-		TokenType:   "Bearer",
-		IssuedAt:    time.Now().UTC(),
-	}) // best-effort; the in-memory token still works this run
-	return cellaTok, true
-}
-
-// ---- token storage ----
-
-// TokenPath returns the canonical path to token.json (the Cella-issued
-// bearer used by `latere cella`/`whoami`). Callers can override with
-// LATERE_TOKEN_FILE for testing.
-func TokenPath() string {
-	return tokenFilePath("LATERE_TOKEN_FILE", "token.json")
-}
-
-// AuthTokenPath returns the path to auth-token.json — the retained
-// auth.latere.ai root token (access + refresh) used to mint short-lived
-// Lux actor tokens. Kept separate from token.json because the two have
-// different issuers and lifecycles; clobbering one must never disturb
-// the other. Override with LATERE_AUTH_TOKEN_FILE for testing.
-func AuthTokenPath() string {
-	return tokenFilePath("LATERE_AUTH_TOKEN_FILE", "auth-token.json")
-}
-
-// tokenFilePath resolves a token file: the env override wins, otherwise
-// $XDG_CONFIG_HOME/latere/<name> (falling back to ~/.config).
-func tokenFilePath(envVar, name string) string {
-	if v := os.Getenv(envVar); v != "" {
-		return v
-	}
-	return config.Path(name)
-}
-
-// ErrNoToken means the file does not exist (the user hasn't logged in).
-var ErrNoToken = errors.New("not logged in; run `latere login`")
-
-// LoadToken reads token.json. Empty path uses TokenPath().
-func LoadToken(path string) (Token, error) {
-	if path == "" {
-		path = TokenPath()
-	}
-	if path == "" {
-		return Token{}, ErrNoToken
-	}
-	b, err := os.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return Token{}, ErrNoToken
-		}
-		return Token{}, err
-	}
-	var t Token
-	if err := json.Unmarshal(b, &t); err != nil {
-		return Token{}, fmt.Errorf("parse token file: %w", err)
-	}
-	return t, nil
-}
-
-// SaveToken atomically replaces token.json with 0600 perms, syncing the write
-// before publishing it. Creates the directory if missing. Empty path uses
-// TokenPath(). Permissions are best-effort on Windows.
-func SaveToken(path string, t Token) error {
-	if path == "" {
-		path = TokenPath()
-	}
-	if path == "" {
-		return errors.New("cannot determine token path")
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	b, err := json.MarshalIndent(t, "", "  ")
-	if err != nil {
-		return err
-	}
-	return atomicfile.WriteSync(path, b, 0o600)
-}
-
-// LoadAuthToken reads the retained auth.latere.ai root token. Returns
-// ErrNoToken when the file is absent (login never ran, or ran via the
-// --token paste path which produces no auth root token).
-func LoadAuthToken() (Token, error) {
-	p := AuthTokenPath()
-	if p == "" {
-		return Token{}, ErrNoToken
-	}
-	return LoadToken(p)
-}
-
-// SaveAuthToken persists the auth.latere.ai root token (0600).
-func SaveAuthToken(t Token) error {
-	p := AuthTokenPath()
-	if p == "" {
-		return errors.New("cannot determine auth token path")
-	}
-	return SaveToken(p, t)
-}
-
-// ClearAuthToken deletes auth-token.json. Idempotent.
-func ClearAuthToken() error {
-	p := AuthTokenPath()
-	if p == "" {
-		return nil
-	}
-	return ClearToken(p)
-}
-
-// ClearToken deletes token.json. Idempotent.
-func ClearToken(path string) error {
-	if path == "" {
-		path = TokenPath()
-	}
-	if path == "" {
-		return nil
-	}
-	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
 	}
 	return nil
 }
@@ -477,12 +297,3 @@ func parseAPIError(resp *http.Response) error {
 // PathEscape is a re-export of url.PathEscape so callers don't need to
 // import net/url alongside this package.
 func PathEscape(s string) string { return url.PathEscape(s) }
-
-// MustRequireAuth returns ErrNoToken when the client has no token. Use
-// at the start of any command that hits sandboxd.
-func (c *Client) MustRequireAuth() error {
-	if c.Token == "" {
-		return ErrNoToken
-	}
-	return nil
-}

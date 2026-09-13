@@ -27,7 +27,7 @@ func TestLuxRejectsEmptySavedAuthE2E(t *testing.T) {
 	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
-	for _, mode := range []string{"raw", "exports", "alias", "actor"} {
+	for _, mode := range []string{"raw", "exports", "alias"} {
 		for _, state := range []string{"empty object", "null", "valid", "refreshable"} {
 			t.Run(mode+"/"+state, func(t *testing.T) {
 				root := t.TempDir()
@@ -59,7 +59,7 @@ func TestLuxRejectsEmptySavedAuthE2E(t *testing.T) {
 							w.WriteHeader(http.StatusUnauthorized)
 							return
 						}
-						_, _ = w.Write([]byte(`{"actor_token":"valid-actor"}`))
+						_, _ = w.Write([]byte(`{"actor_token":"valid-actor","expires_in":300}`))
 					default:
 						t.Errorf("unexpected endpoint: %s", r.URL.Path)
 						w.WriteHeader(http.StatusNotFound)
@@ -72,13 +72,11 @@ func TestLuxRejectsEmptySavedAuthE2E(t *testing.T) {
 					args = []string{"lux", "env", "--compat", "openai"}
 				case "alias":
 					args = []string{"lux", "token"}
-				case "actor":
-					args = append(args, "--ttl", "1m")
 				}
 				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 				defer cancel()
 				command := exec.CommandContext(ctx, binary, args...)
-				command.Env = append(os.Environ(), "LATERE_TOKEN_FILE="+filepath.Join(root, "token.json"), "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_URL="+server.URL, "LUX_API_URL="+server.URL, "LATERE_LUX_TOKEN=", "AUTH_CLIENT_ID=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
+				command.Env = append(os.Environ(), "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_URL="+server.URL, "LUX_API_URL="+server.URL, "LATERE_LUX_TOKEN=", "AUTH_CLIENT_ID=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
 				var stdout, stderr bytes.Buffer
 				command.Stdout, command.Stderr = &stdout, &stderr
 				err := command.Run()

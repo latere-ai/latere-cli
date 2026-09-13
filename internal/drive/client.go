@@ -26,8 +26,14 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// DefaultBaseURL is the production Drive deployment.
-const DefaultBaseURL = "https://drive.latere.ai"
+// Audience is the aud claim Drive enforces on every bearer it accepts.
+// It is the production audience whatever DRIVE_API_URL names: the URL
+// selects the deployment, the audience is what the issuer stamps.
+const Audience = "drive.latere.ai"
+
+// DefaultBaseURL is the production Drive deployment. Host and audience
+// are one string here so neither can drift from the other.
+const DefaultBaseURL = "https://" + Audience
 
 // PartSize is Drive's fixed multipart part size (16 MiB). Files larger
 // than this use the multipart plane; smaller ones stream through a

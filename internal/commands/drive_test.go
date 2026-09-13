@@ -64,7 +64,6 @@ func TestSkipUpdateCheckForDrive(t *testing.T) {
 
 func TestDriveBearerPrecedence(t *testing.T) {
 	t.Setenv("LATERE_AUTH_TOKEN_FILE", "/nonexistent/auth.json")
-	t.Setenv("LATERE_TOKEN_FILE", "/nonexistent/token.json")
 
 	t.Run("flag wins", func(t *testing.T) {
 		t.Setenv("LATERE_DRIVE_TOKEN", "env-tok")
@@ -83,7 +82,7 @@ func TestDriveBearerPrecedence(t *testing.T) {
 	t.Run("not signed in", func(t *testing.T) {
 		t.Setenv("LATERE_DRIVE_TOKEN", "")
 		_, err := driveBearer(t.Context(), "", "")
-		if err == nil || !strings.Contains(err.Error(), "not signed in") || !strings.Contains(err.Error(), "latere login") {
+		if err == nil || !strings.Contains(err.Error(), "not logged in") || !strings.Contains(err.Error(), "latere login") {
 			t.Errorf("want login hint, got %v", err)
 		}
 	})
@@ -109,32 +108,23 @@ func TestDriveBearerMintsDriveActorToken(t *testing.T) {
 		auth := newAuthStub(t)
 		auth.mintStatus = http.StatusServiceUnavailable
 		_, err := driveBearer(t.Context(), "", auth.srv.URL)
-		if err == nil || !strings.Contains(err.Error(), "mint Drive token") || strings.Contains(err.Error(), "not signed in") {
+		if err == nil || !strings.Contains(err.Error(), "503") || strings.Contains(err.Error(), "not logged in") {
 			t.Errorf("driveBearer error = %v, want the mint failure, not a missing login", err)
 		}
 	})
 }
 
-// A --token paste login leaves only token.json, a Cella-issued bearer that
-// names Cella alone. Drive must refuse with one sentence and send nothing:
-// a bearer minted for one product is never presented to another.
-func TestDriveBearerRefusesCellaTokenWithoutAuthToken(t *testing.T) {
+// Without a saved login Drive refuses with one sentence and sends
+// nothing: there is no other credential on disk to fall back to, and a
+// bearer minted for one product is never presented to another.
+func TestDriveBearerRefusesWithoutALogin(t *testing.T) {
 	isolateTokens(t)
 	t.Setenv("LATERE_DRIVE_TOKEN", "")
-	p := filepath.Join(t.TempDir(), "token.json")
-	b, _ := json.Marshal(map[string]any{"access_token": "pasted-cella", "token_type": "Bearer"})
-	if err := os.WriteFile(p, b, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("LATERE_TOKEN_FILE", p)
 	auth := newAuthStub(t)
 
 	got, err := driveBearer(t.Context(), "", auth.srv.URL)
-	if err == nil || err.Error() != "not signed in; run `latere login`" {
-		t.Errorf("driveBearer = (%q, %v), want the not-signed-in sentence", got, err)
-	}
-	if got == "pasted-cella" {
-		t.Error("driveBearer handed Drive the Cella bearer")
+	if err == nil || !strings.Contains(err.Error(), "not logged in; run `latere login`") {
+		t.Errorf("driveBearer = (%q, %v), want the not-logged-in sentence", got, err)
 	}
 	if refreshes, mints := auth.counts(); refreshes != 0 || mints != 0 {
 		t.Errorf("auth calls = %d refreshes, %d mints; want none without a login", refreshes, mints)
@@ -579,7 +569,7 @@ func TestDriveVersionCommandsRequirePath(t *testing.T) {
 }
 
 func TestDrivePutEmptyFile(t *testing.T) {
-	t.Setenv("LATERE_TOKEN_FILE", writeTokenFile(t, t.TempDir(), "test-tok"))
+	t.Setenv("LATERE_CELLA_TOKEN", "test-tok")
 	src := filepath.Join(t.TempDir(), "empty.txt")
 	if err := os.WriteFile(src, nil, 0600); err != nil {
 		t.Fatal(err)

@@ -62,7 +62,7 @@ func TestGitCredentialSetupMatchesSupportedSchemesE2E(t *testing.T) {
 				_, _ = w.Write([]byte(`{"actor_token":"code-actor","expires_in":300}`))
 			}))
 			defer auth.Close()
-			env := append(os.Environ(), "PATH="+filepath.Dir(binary)+string(os.PathListSeparator)+os.Getenv("PATH"), "CODE_HOST="+tc.override, "AUTH_URL="+auth.URL, "LATERE_TOKEN_FILE="+filepath.Join(root, "token.json"), "LATERE_AUTH_TOKEN_FILE="+authPath, "GIT_CONFIG_GLOBAL="+config, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_COUNT=0", "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=", "SSH_ASKPASS=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
+			env := append(os.Environ(), "PATH="+filepath.Dir(binary)+string(os.PathListSeparator)+os.Getenv("PATH"), "CODE_HOST="+tc.override, "AUTH_URL="+auth.URL, "LATERE_AUTH_TOKEN_FILE="+authPath, "GIT_CONFIG_GLOBAL="+config, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_COUNT=0", "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=", "SSH_ASKPASS=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
 			run := func(program, input string, args ...string) (string, error) {
 				t.Helper()
 				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)

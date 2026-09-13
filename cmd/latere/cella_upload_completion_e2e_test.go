@@ -117,7 +117,7 @@ func TestCellaMultipartRequiresCompleteUploadE2E(t *testing.T) {
 					defer func() { _ = writer.Close() }()
 					command.Stdin = reader
 				}
-				command.Env = append(os.Environ(), "LATERE_TOKEN_FILE="+tokenPath, "LATERE_AUTH_TOKEN_FILE="+filepath.Join(root, "absent-auth.json"),
+				command.Env = append(os.Environ(), "LATERE_CELLA_TOKEN=test-token", "LATERE_AUTH_TOKEN_FILE="+filepath.Join(root, "absent-auth.json"),
 					"XDG_CONFIG_HOME="+root, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
 				var out, diagnostic bytes.Buffer
 				command.Stdout, command.Stderr = &out, &diagnostic

@@ -52,7 +52,7 @@ language.`,
   latere cella shell sb-019dc976-2b28-7c55-8778-bf7d5ae6c58d`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := authedClient(apiURL)
+			c, err := authedClient(cmd.Context(), apiURL)
 			if err != nil {
 				return err
 			}

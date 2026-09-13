@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -40,76 +39,57 @@ func TestWhoamiRequiresIdentifiedPrincipalE2E(t *testing.T) {
 		{"null reply", `null`, 200, false},
 		{"no content", ``, 204, false},
 	} {
-		for _, allowed := range []bool{false, true} {
-			name := "fallback rejected"
-			if allowed {
-				name = "fallback accepted"
+		t.Run(reply.name, func(t *testing.T) {
+			root := t.TempDir()
+			authPath := filepath.Join(root, "auth-token.json")
+			t.Setenv("LATERE_AUTH_TOKEN_FILE", authPath)
+			token := "header." + base64.RawURLEncoding.EncodeToString([]byte(`{"sub":"saved-owner","org_id":"saved-org"}`)) + ".signature"
+			if err := api.SaveAuthToken(api.Token{AccessToken: token}); err != nil {
+				t.Fatal(err)
 			}
-			t.Run(reply.name+"/"+name, func(t *testing.T) {
-				root := t.TempDir()
-				tokenPath := filepath.Join(root, "token.json")
-				token := "header." + base64.RawURLEncoding.EncodeToString([]byte(`{"sub":"cella-owner","org_id":"cella-org"}`)) + ".signature"
-				if err := api.SaveToken(tokenPath, api.Token{AccessToken: token}); err != nil {
-					t.Fatal(err)
+			before, err := os.ReadFile(authPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var probes atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("Authorization") != "Bearer "+token {
+					t.Error("identity introspection used a different token")
 				}
-				var probes, verifications atomic.Int32
-				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					if r.Header.Get("Authorization") != "Bearer "+token {
-						t.Error("identity verification used a different token")
-					}
-					w.Header().Set("Content-Type", "application/json")
-					switch r.URL.Path {
-					case "/tokeninfo":
-						probes.Add(1)
-						w.WriteHeader(reply.status)
-						_, _ = w.Write([]byte(reply.body))
-					case "/v1/sandboxes":
-						verifications.Add(1)
-						if !allowed {
-							w.WriteHeader(http.StatusUnauthorized)
-							_, _ = w.Write([]byte(`{"code":"invalid_token"}`))
-							return
-						}
-						_, _ = w.Write([]byte(`[]`))
-					default:
-						t.Errorf("unexpected endpoint: %s", r.URL.Path)
-						w.WriteHeader(http.StatusNotFound)
-					}
-				}))
-				defer server.Close()
-				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-				defer cancel()
-				command := exec.CommandContext(ctx, binary, "whoami")
-				command.Env = append(os.Environ(), "LATERE_TOKEN_FILE="+tokenPath, "LATERE_AUTH_TOKEN_FILE="+filepath.Join(root, "missing-auth.json"),
-					"AUTH_URL="+server.URL, "SANDBOX_API_URL="+server.URL, "XDG_CONFIG_HOME="+root,
-					"LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
-				var out, diagnostic bytes.Buffer
-				command.Stdout, command.Stderr = &out, &diagnostic
-				err := command.Run()
-				if !reply.valid && !allowed {
-					if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 || !strings.Contains(diagnostic.String(), "invalid_token") {
-						t.Errorf("unverified identity returned %v: %s", err, diagnostic.String())
-					}
-					if out.Len() != 0 {
-						t.Errorf("unverified identity was printed: %s", out.String())
-					}
-				} else {
-					owner, org := "cella-owner", "cella-org"
-					if reply.valid {
-						owner, org = "auth-owner", "auth-org"
-					}
-					if err != nil || !strings.Contains(out.String(), owner) || !strings.Contains(out.String(), org) {
-						t.Errorf("verified identity missing: %v: %s %s", err, out.String(), diagnostic.String())
-					}
+				w.Header().Set("Content-Type", "application/json")
+				if r.URL.Path != "/tokeninfo" {
+					t.Errorf("whoami called %s; it speaks to the issuer alone", r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+					return
 				}
-				wantVerifications := int32(1)
-				if reply.valid {
-					wantVerifications = 0
-				}
-				if probes.Load() != 1 || verifications.Load() != wantVerifications {
-					t.Errorf("auth/Cella requests=%d/%d, want 1/%d", probes.Load(), verifications.Load(), wantVerifications)
-				}
-			})
-		}
+				probes.Add(1)
+				w.WriteHeader(reply.status)
+				_, _ = w.Write([]byte(reply.body))
+			}))
+			defer server.Close()
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			command := exec.CommandContext(ctx, binary, "whoami")
+			command.Env = append(os.Environ(), "LATERE_AUTH_TOKEN_FILE="+authPath,
+				"AUTH_URL="+server.URL, "XDG_CONFIG_HOME="+root,
+				"LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
+			var out, diagnostic bytes.Buffer
+			command.Stdout, command.Stderr = &out, &diagnostic
+			// An answer that identifies nobody falls back to the claims the
+			// saved login itself carries; the command never fails over it.
+			owner, org := "saved-owner", "saved-org"
+			if reply.valid {
+				owner, org = "auth-owner", "auth-org"
+			}
+			if err := command.Run(); err != nil || !strings.Contains(out.String(), owner) || !strings.Contains(out.String(), org) {
+				t.Errorf("identity missing: %v: %s %s", err, out.String(), diagnostic.String())
+			}
+			if probes.Load() != 1 {
+				t.Errorf("issuer requests=%d, want 1", probes.Load())
+			}
+			if data, err := os.ReadFile(authPath); err != nil || string(data) != string(before) {
+				t.Errorf("the identity probe changed the saved login: %v", err)
+			}
+		})
 	}
 }

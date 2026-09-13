@@ -14,7 +14,7 @@ import (
 )
 
 func TestPolicyConfiguredOutput(t *testing.T) {
-	t.Setenv("LATERE_TOKEN_FILE", writeTokenFile(t, t.TempDir(), "synthetic-token"))
+	t.Setenv("LATERE_CELLA_TOKEN", "synthetic-token")
 	t.Setenv("LATERE_NO_UPDATE_CHECK", "1")
 	const body = `[{"name":"restricted","label":"Restricted","is_default":true,"selectable":true,"sidecar_required":true},{"name":"second"}]`
 	const first = "policy:     restricted\nlabel:      Restricted\ndefault:    yes\nselectable: yes\nsidecar:    yes\ncapability: -\nsource:     -\ndescription:-\n"

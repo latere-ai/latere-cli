@@ -78,7 +78,7 @@ func TestToposStreamConfiguredOutputE2E(t *testing.T) {
 					ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 					defer cancel()
 					command := exec.CommandContext(ctx, binary, "-test.run=^TestToposStreamOutputHelperProcess$", "--", "topos", "session", operation, argument, "-p", "test prompt", "--api-url", server.URL)
-					command.Env = append(os.Environ(), "TOPOS_TOKEN=test-topos", "LATERE_TOKEN_FILE="+filepath.Join(root, "token.json"), "LATERE_AUTH_TOKEN_FILE="+filepath.Join(root, "auth-token.json"), "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root, "LATERE_TEST_STREAM_OUTPUT="+dest, "LATERE_TEST_STREAM_WRITABLE="+mode, "LATERE_TEST_STREAM_EVENT="+event.name)
+					command.Env = append(os.Environ(), "TOPOS_TOKEN=test-topos", "LATERE_AUTH_TOKEN_FILE="+filepath.Join(root, "auth-token.json"), "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root, "LATERE_TEST_STREAM_OUTPUT="+dest, "LATERE_TEST_STREAM_WRITABLE="+mode, "LATERE_TEST_STREAM_EVENT="+event.name)
 					var output, diagnostic bytes.Buffer
 					command.Stdout, command.Stderr = &output, &diagnostic
 					err := command.Run()

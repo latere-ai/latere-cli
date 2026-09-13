@@ -102,24 +102,17 @@ func TestToposPrintWithoutLocalRejected(t *testing.T) {
 
 // ---- client request / response tests ----
 
-// writeTokenFile writes a minimal token.json to dir and returns the path. It
-// sets LATERE_TOKEN_FILE (the Cella token NewClient reads) and ALSO writes an
-// auth-token.json under LATERE_AUTH_TOKEN_FILE carrying the same bearer, because
-// the Topos path (toposClient) authenticates with the auth root token, not the
-// Cella token. Isolating both keeps tests off ~/.config/latere — without the
-// auth-token isolation a developer's real login would leak into the assertions.
+// writeTokenFile writes a login to dir, points the CLI at it, and points
+// AUTH_URL at a mint stub the test owns. Every product path mints from the
+// login, so this is all a command test needs to stay off ~/.config/latere.
 func writeTokenFile(t *testing.T, dir, token string) string {
 	t.Helper()
-	p := filepath.Join(dir, "token.json")
+	p := filepath.Join(dir, "auth-token.json")
 	data := `{"access_token":"` + token + `","token_type":"Bearer"}`
 	if err := os.WriteFile(p, []byte(data), 0o600); err != nil {
 		t.Fatalf("writeTokenFile: %v", err)
 	}
-	ap := filepath.Join(dir, "auth-token.json")
-	if err := os.WriteFile(ap, []byte(data), 0o600); err != nil {
-		t.Fatalf("writeTokenFile (auth): %v", err)
-	}
-	t.Setenv("LATERE_AUTH_TOKEN_FILE", ap)
+	t.Setenv("LATERE_AUTH_TOKEN_FILE", p)
 	t.Setenv("AUTH_URL", authMintStub(t))
 	return p
 }
@@ -182,8 +175,7 @@ func TestToposAgentsListCallsCorrectEndpoint(t *testing.T) {
 
 	// Write a token file so MustRequireAuth passes.
 	dir := t.TempDir()
-	tokenPath := writeTokenFile(t, dir, bearerToken)
-	t.Setenv("LATERE_TOKEN_FILE", tokenPath)
+	writeTokenFile(t, dir, bearerToken)
 
 	// captureStdout (defined in auth_test.go) captures os.Stdout.
 	output, execErr := captureStdout(func() error {
@@ -229,8 +221,7 @@ func TestToposAgentsListEmptyResponse(t *testing.T) {
 
 	t.Setenv("TOPOS_API_URL", srv.URL)
 	dir := t.TempDir()
-	tokenPath := writeTokenFile(t, dir, "tok")
-	t.Setenv("LATERE_TOKEN_FILE", tokenPath)
+	writeTokenFile(t, dir, "tok")
 
 	output, execErr := captureStdout(func() error {
 		root := NewRoot("test")
@@ -261,8 +252,7 @@ func TestToposAgentsListJSONOutput(t *testing.T) {
 
 	t.Setenv("TOPOS_API_URL", srv.URL)
 	dir := t.TempDir()
-	tokenPath := writeTokenFile(t, dir, "tok")
-	t.Setenv("LATERE_TOKEN_FILE", tokenPath)
+	writeTokenFile(t, dir, "tok")
 
 	output, execErr := captureStdout(func() error {
 		root := NewRoot("test")
@@ -303,8 +293,7 @@ func TestToposAgentsGetCallsCorrectEndpoint(t *testing.T) {
 
 	t.Setenv("TOPOS_API_URL", srv.URL)
 	dir := t.TempDir()
-	tokenPath := writeTokenFile(t, dir, "tok")
-	t.Setenv("LATERE_TOKEN_FILE", tokenPath)
+	writeTokenFile(t, dir, "tok")
 
 	output, execErr := captureStdout(func() error {
 		root := NewRoot("test")
@@ -357,7 +346,6 @@ func TestToposURLResolution(t *testing.T) {
 // TestToposRequiresAuth verifies that 'agents list' fails with the
 // not-logged-in error when no token file exists.
 func TestToposRequiresAuth(t *testing.T) {
-	t.Setenv("LATERE_TOKEN_FILE", filepath.Join(t.TempDir(), "nonexistent.json"))
 	t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(t.TempDir(), "nonexistent.json"))
 	t.Setenv("TOPOS_API_URL", "http://localhost:1") // unreachable; error is pre-flight
 
@@ -380,7 +368,6 @@ func TestToposRequiresAuth(t *testing.T) {
 // which names the auth issuer, is ever presented to Topos.
 func TestToposClientMintsToposActorToken(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("LATERE_TOKEN_FILE", filepath.Join(dir, "token.json"))
 	if err := os.WriteFile(filepath.Join(dir, "token.json"),
 		[]byte(`{"access_token":"cella-token","token_type":"Bearer"}`), 0o600); err != nil {
 		t.Fatal(err)
@@ -426,7 +413,6 @@ func TestToposClientMintsToposActorToken(t *testing.T) {
 // directly for local development, bypassing the token file and login.
 func TestToposTokenEnvOverride(t *testing.T) {
 	// Ensure no token file is present for either subtest.
-	t.Setenv("LATERE_TOKEN_FILE", filepath.Join(t.TempDir(), "nonexistent.json"))
 	t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(t.TempDir(), "nonexistent.json"))
 
 	t.Run("TOPOS_TOKEN satisfies auth without a token file", func(t *testing.T) {
@@ -467,7 +453,7 @@ func TestToposAgentsCreatePostsBody(t *testing.T) {
 	defer srv.Close()
 
 	t.Setenv("TOPOS_API_URL", srv.URL)
-	t.Setenv("LATERE_TOKEN_FILE", writeTokenFile(t, t.TempDir(), bearerToken))
+	writeTokenFile(t, t.TempDir(), bearerToken)
 
 	output, execErr := captureStdout(func() error {
 		root := NewRoot("test")
@@ -491,7 +477,7 @@ func TestToposAgentsCreatePostsBody(t *testing.T) {
 
 // TestToposAgentsCreateRequiresNameAndKind verifies the client-side guard.
 func TestToposAgentsCreateRequiresNameAndKind(t *testing.T) {
-	t.Setenv("LATERE_TOKEN_FILE", writeTokenFile(t, t.TempDir(), "tok"))
+	t.Setenv("LATERE_CELLA_TOKEN", "tok")
 	root := NewRoot("test")
 	root.SetErr(&strings.Builder{})
 	root.SetOut(&strings.Builder{})
@@ -522,7 +508,7 @@ func TestToposSessionCreatePostsPrompt(t *testing.T) {
 	defer srv.Close()
 
 	t.Setenv("TOPOS_API_URL", srv.URL)
-	t.Setenv("LATERE_TOKEN_FILE", writeTokenFile(t, t.TempDir(), bearerToken))
+	writeTokenFile(t, t.TempDir(), bearerToken)
 
 	output, execErr := captureStdout(func() error {
 		root := NewRoot("test")
@@ -548,7 +534,7 @@ func TestToposSessionCreatePostsPrompt(t *testing.T) {
 
 // TestToposSessionCreateRequiresPrompt verifies the client-side guard.
 func TestToposSessionCreateRequiresPrompt(t *testing.T) {
-	t.Setenv("LATERE_TOKEN_FILE", writeTokenFile(t, t.TempDir(), "tok"))
+	t.Setenv("LATERE_CELLA_TOKEN", "tok")
 	root := NewRoot("test")
 	root.SetErr(&strings.Builder{})
 	root.SetOut(&strings.Builder{})

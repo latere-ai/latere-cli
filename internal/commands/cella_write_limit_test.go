@@ -13,7 +13,7 @@ import (
 
 func TestCellaWriteRejectsOversizedInputBeforeAuthentication(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("LATERE_TOKEN_FILE", filepath.Join(root, "absent-token.json"))
+	t.Setenv("LATERE_CELLA_TOKEN", "")
 	t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(root, "absent-auth.json"))
 	input := filepath.Join(root, "large.bin")
 	file, err := os.Create(input)

@@ -118,7 +118,7 @@ func TestCellaUploadValidatesSourcesE2E(t *testing.T) {
 				uploadTimeout = "5s"
 			}
 			command := exec.CommandContext(ctx, binary, "cella", "upload", "dev", source, "--dest", "/workspace", "--timeout", uploadTimeout, "--api-url", server.URL)
-			command.Env = append(os.Environ(), "LATERE_TOKEN_FILE="+tokenPath, "LATERE_AUTH_TOKEN_FILE="+filepath.Join(root, "absent-auth.json"), "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
+			command.Env = append(os.Environ(), "LATERE_CELLA_TOKEN=test-token", "LATERE_AUTH_TOKEN_FILE="+filepath.Join(root, "absent-auth.json"), "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
 			out, err := command.CombinedOutput()
 			if kind == "files" {
 				if err != nil {
@@ -218,7 +218,7 @@ func TestCellaUploadParentPathsE2E(t *testing.T) {
 			defer cancel()
 			command := exec.CommandContext(ctx, binary, "cella", "upload", "dev", tc.source, "--dest", "/workspace", "--api-url", server.URL)
 			command.Dir = tc.cwd
-			command.Env = append(os.Environ(), "LATERE_TOKEN_FILE="+tokenPath, "LATERE_AUTH_TOKEN_FILE="+filepath.Join(root, "absent-auth.json"), "XDG_CONFIG_HOME="+root, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
+			command.Env = append(os.Environ(), "LATERE_CELLA_TOKEN=test-token", "LATERE_AUTH_TOKEN_FILE="+filepath.Join(root, "absent-auth.json"), "XDG_CONFIG_HOME="+root, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
 			out, err := command.CombinedOutput()
 			if err != nil || !strings.Contains(string(out), "uploaded 1 files (6 bytes)") {
 				t.Errorf("upload = %v; output: %s", err, out)

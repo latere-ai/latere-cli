@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -145,11 +144,7 @@ func TestSandboxListPrintsReadableRecords(t *testing.T) {
 
 func writeTestToken(t *testing.T) {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "token.json")
-	if err := os.WriteFile(path, []byte(`{"access_token":"test-token","token_type":"Bearer"}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("LATERE_TOKEN_FILE", path)
+	t.Setenv("LATERE_CELLA_TOKEN", "test-token")
 }
 
 func capturePolicyStdout(t *testing.T, fn func()) string {

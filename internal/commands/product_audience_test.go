@@ -13,6 +13,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/latere-ai/latere-cli/internal/drive"
 )
 
 // audienceIssuer is the auth issuer the stub stamps on every token it mints.
@@ -52,6 +54,10 @@ func newProductStub(t *testing.T) *productStub {
 			return
 		}
 		s.record(r.Header.Get("Authorization"))
+		if r.URL.Path == "/v1/sandboxes" {
+			_, _ = w.Write([]byte(`[]`))
+			return
+		}
 		_, _ = w.Write([]byte(`{"items":[],"entries":[],"agents":[]}`))
 	}))
 	t.Cleanup(s.srv.Close)
@@ -94,7 +100,7 @@ func audienceOf(t *testing.T, token string) string {
 }
 
 // Every CLI path that reaches a product presents a token minted for that
-// product and no other. The root token names the auth issuer, so a product
+// product and no other. The login token names the auth issuer, so a product
 // that received it would hold a credential to the account itself; this is
 // the invariant leaf id-01 of specs/infrastructure/identity closes.
 func TestProductCredentialsCarryOnlyTheirOwnAudience(t *testing.T) {
@@ -102,7 +108,19 @@ func TestProductCredentialsCarryOnlyTheirOwnAudience(t *testing.T) {
 		name, audience string
 		run            func(t *testing.T, s *productStub)
 	}{
-		{"drive ls", driveAudience, func(t *testing.T, s *productStub) {
+		{"cella ls", cellaAudience, func(t *testing.T, s *productStub) {
+			t.Setenv("LATERE_CELLA_TOKEN", "")
+			t.Setenv("AUTH_URL", s.srv.URL)
+			c, err := authedClient(t.Context(), s.srv.URL)
+			if err != nil {
+				t.Fatalf("cella client: %v", err)
+			}
+			var out []json.RawMessage
+			if err := c.GetJSON(t.Context(), "/v1/sandboxes", &out); err != nil {
+				t.Fatalf("cella ls: %v", err)
+			}
+		}},
+		{"drive ls", drive.Audience, func(t *testing.T, s *productStub) {
 			t.Setenv("LATERE_DRIVE_TOKEN", "")
 			cmd := newDriveCmd()
 			cmd.SetOut(io.Discard)
@@ -122,7 +140,7 @@ func TestProductCredentialsCarryOnlyTheirOwnAudience(t *testing.T) {
 			}
 		}},
 		{"lux env", luxAudience, func(t *testing.T, s *productStub) {
-			bearer, _, err := luxEnvBearer(t.Context(), "", s.srv.URL, s.srv.URL, 0)
+			bearer, _, err := luxEnvBearer(t.Context(), "", s.srv.URL, s.srv.URL)
 			if err != nil {
 				t.Fatalf("lux env: %v", err)
 			}

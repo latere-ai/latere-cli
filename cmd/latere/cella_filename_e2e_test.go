@@ -107,7 +107,7 @@ func TestCellaMultipartFilenamesE2E(t *testing.T) {
 				}
 				args = append(args, source, "--api-url", server.URL)
 				command := exec.CommandContext(ctx, binary, args...)
-				command.Env = append(os.Environ(), "LATERE_TOKEN_FILE="+tokenPath, "LATERE_AUTH_TOKEN_FILE="+filepath.Join(root, "absent-auth.json"), "XDG_CONFIG_HOME="+root, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
+				command.Env = append(os.Environ(), "LATERE_CELLA_TOKEN=test-token", "LATERE_AUTH_TOKEN_FILE="+filepath.Join(root, "absent-auth.json"), "XDG_CONFIG_HOME="+root, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
 				if out, err := command.CombinedOutput(); err != nil {
 					t.Errorf("%s: %v\n%s", action, err, out)
 				}

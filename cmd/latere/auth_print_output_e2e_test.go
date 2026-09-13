@@ -27,7 +27,7 @@ func TestPrintTokenReportsOutputFailureE2E(t *testing.T) {
 		for _, mode := range []string{"writable", "read-only"} {
 			t.Run(prefix+"/"+mode, func(t *testing.T) {
 				root := t.TempDir()
-				tokenPath, outputPath := filepath.Join(root, "token.json"), filepath.Join(root, "output")
+				tokenPath, outputPath := filepath.Join(root, "auth-token.json"), filepath.Join(root, "output")
 				const tokenData = `{"access_token":"synthetic-token"}`
 				if err := os.WriteFile(tokenPath, []byte(tokenData), 0o600); err != nil {
 					t.Fatal(err)
@@ -52,7 +52,7 @@ func TestPrintTokenReportsOutputFailureE2E(t *testing.T) {
 				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 				defer cancel()
 				command := exec.CommandContext(ctx, binary, args...)
-				command.Env = append(os.Environ(), "LATERE_TOKEN_FILE="+tokenPath, "LATERE_AUTH_TOKEN_FILE="+filepath.Join(root, "auth-token.json"),
+				command.Env = append(os.Environ(), "LATERE_AUTH_TOKEN_FILE="+tokenPath,
 					"XDG_CONFIG_HOME="+root, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
 				var diagnostic bytes.Buffer
 				command.Stdout, command.Stderr = file, &diagnostic

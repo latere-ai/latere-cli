@@ -112,7 +112,7 @@ func TestWaitCommandCompletedAndFailedRequests(t *testing.T) {
 }
 
 func TestCellaWaitCommandEnforcesTimeout(t *testing.T) {
-	t.Setenv("LATERE_TOKEN_FILE", writeTokenFile(t, t.TempDir(), "test-token"))
+	t.Setenv("LATERE_CELLA_TOKEN", "test-token")
 	requestStopped := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/v1/sandboxes/dev/commands/command" {

@@ -17,7 +17,7 @@ import (
 
 func TestApplyConfiguredManifestInput(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("LATERE_TOKEN_FILE", writeTokenFile(t, dir, "synthetic-token"))
+	t.Setenv("LATERE_CELLA_TOKEN", "synthetic-token")
 	t.Setenv("EVAL_ADMIN_TOKEN", "synthetic-token")
 	t.Setenv("LATERE_NO_UPDATE_CHECK", "1")
 	process, err := os.CreateTemp(dir, "process-stdin")

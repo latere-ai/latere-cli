@@ -103,7 +103,7 @@ func TestDriveMultipartRequiresCompletePartResponseE2E(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()
 			command := exec.CommandContext(ctx, binary, "drive", "put", source, "files/test", "--drive-url", server.URL, "--token", "test-drive")
-			command.Env = append(os.Environ(), "LATERE_TOKEN_FILE="+filepath.Join(root, "token.json"), "LATERE_AUTH_TOKEN_FILE="+filepath.Join(root, "auth-token.json"), "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
+			command.Env = append(os.Environ(), "LATERE_AUTH_TOKEN_FILE="+filepath.Join(root, "auth-token.json"), "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
 			out, err := command.CombinedOutput()
 			wantCompletes, wantAborts := int32(1), int32(0)
 			if wantError != "" {

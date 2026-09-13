@@ -64,7 +64,7 @@ func TestCellaImportRejectsSpecialFilesE2E(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 			defer cancel()
 			command := exec.CommandContext(ctx, binary, "cella", "import", "dev", "--input", source, "--timeout", "100ms", "--api-url", server.URL)
-			command.Env = append(os.Environ(), "LATERE_TOKEN_FILE="+tokenPath, "LATERE_AUTH_TOKEN_FILE="+filepath.Join(root, "absent-auth.json"), "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
+			command.Env = append(os.Environ(), "LATERE_CELLA_TOKEN=test-token", "LATERE_AUTH_TOKEN_FILE="+filepath.Join(root, "absent-auth.json"), "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
 			out, err := command.CombinedOutput()
 			if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 || !strings.Contains(string(out), "not a regular file") {
 				t.Errorf("special input result = %v; output: %s", err, out)

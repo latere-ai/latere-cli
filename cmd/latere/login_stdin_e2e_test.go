@@ -31,37 +31,37 @@ func TestLoginWithClosedStdinE2E(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			root := t.TempDir()
-			tokenPath, authPath := filepath.Join(root, "token.json"), filepath.Join(root, "auth-token.json")
-			before := map[string]string{tokenPath: `{"access_token":"old-cella"}`, authPath: `{"access_token":"old-auth"}`}
-			for path, data := range before {
-				if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
-					t.Fatal(err)
-				}
+			authPath := filepath.Join(root, "auth-token.json")
+			const before = `{"access_token":"old-auth"}`
+			if err := os.WriteFile(authPath, []byte(before), 0o600); err != nil {
+				t.Fatal(err)
 			}
 			var requests atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				requests.Add(1)
-				if !explicit || r.URL.Path != "/v1/sandboxes" || r.Header.Get("Authorization") != "Bearer candidate" {
+				w.Header().Set("Content-Type", "application/json")
+				if !explicit || r.URL.Path != "/tokeninfo" || r.Header.Get("Authorization") != "Bearer candidate" {
 					t.Error("unexpected login request")
 				}
-				_, _ = w.Write([]byte(`[]`))
+				_, _ = w.Write([]byte(`{"sub":"u-1"}`))
 			}))
 			defer server.Close()
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
-			args := []string{"-test.run=^TestLoginClosedStdinHelperProcess$", "--", "login", "--no-git", "--no-browser", "--api-url", server.URL}
+			args := []string{"-test.run=^TestLoginClosedStdinHelperProcess$", "--", "login", "--no-git", "--no-browser", "--auth-url", server.URL}
 			if explicit {
 				args = append(args, "--token", "candidate")
 			}
 			command := exec.CommandContext(ctx, binary, args...)
-			command.Env = append(os.Environ(), "LATERE_TOKEN_FILE="+tokenPath, "LATERE_AUTH_TOKEN_FILE="+authPath,
+			command.Env = append(os.Environ(), "LATERE_AUTH_TOKEN_FILE="+authPath,
 				"AUTH_URL="+server.URL, "XDG_CONFIG_HOME="+root, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "LATERE_TEST_LOGIN_CLOSED_STDIN=1")
 			out, err := command.CombinedOutput()
 			if explicit {
 				if err != nil || requests.Load() != 1 {
 					t.Fatalf("explicit token login failed: %v (%d requests): %s", err, requests.Load(), out)
 				}
-				if token, err := api.LoadToken(tokenPath); err != nil || token.AccessToken != "candidate" {
+				t.Setenv("LATERE_AUTH_TOKEN_FILE", authPath)
+				if token, err := api.LoadAuthToken(); err != nil || token.AccessToken != "candidate" {
 					t.Errorf("explicit token was not saved: %v", err)
 				}
 				return
@@ -72,10 +72,8 @@ func TestLoginWithClosedStdinE2E(t *testing.T) {
 			if requests.Load() != 0 {
 				t.Errorf("unavailable stdin made %d requests", requests.Load())
 			}
-			for path, data := range before {
-				if got, err := os.ReadFile(path); err != nil || string(got) != data {
-					t.Errorf("unavailable stdin changed credentials: %v", err)
-				}
+			if got, err := os.ReadFile(authPath); err != nil || string(got) != before {
+				t.Errorf("unavailable stdin changed credentials: %v", err)
 			}
 		})
 	}

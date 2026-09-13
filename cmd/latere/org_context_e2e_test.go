@@ -21,7 +21,7 @@ import (
 	"github.com/latere-ai/latere-cli/internal/api"
 )
 
-func TestOrgSwitchUpdatesCellaIdentityE2E(t *testing.T) {
+func TestOrgSwitchUpdatesTheSavedLoginE2E(t *testing.T) {
 	if testing.Short() {
 		t.Skip("binary e2e skipped with -short")
 	}
@@ -32,7 +32,7 @@ func TestOrgSwitchUpdatesCellaIdentityE2E(t *testing.T) {
 	for _, tc := range []struct {
 		name, org, authSuffix      string
 		expiryState                string
-		failExchange, failRefresh  bool
+		failRefresh                bool
 		authFromEnv                bool
 		alias, conflict, falseFlag bool
 	}{
@@ -47,7 +47,6 @@ func TestOrgSwitchUpdatesCellaIdentityE2E(t *testing.T) {
 		{name: "organization zero expiry", org: "new-org", expiryState: "zero"},
 		{name: "personal without expiry", expiryState: "missing"},
 		{name: "personal zero expiry", expiryState: "zero"},
-		{name: "exchange failure", org: "new-org", failExchange: true},
 		{name: "refresh failure", org: "new-org", failRefresh: true},
 		{name: "flag trailing slash", org: "new-org", authSuffix: "/"},
 		{name: "flag trailing slashes", org: "new-org", authSuffix: "///"},
@@ -55,12 +54,10 @@ func TestOrgSwitchUpdatesCellaIdentityE2E(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
-			tokenPath, authPath := filepath.Join(root, "token.json"), filepath.Join(root, "auth-token.json")
+			authPath := filepath.Join(root, "auth-token.json")
+			t.Setenv("LATERE_AUTH_TOKEN_FILE", authPath)
 			oldAuth := api.Token{AccessToken: "old-auth", RefreshToken: "old-refresh"}
-			if err := api.SaveToken(tokenPath, api.Token{AccessToken: "old-cella"}); err != nil {
-				t.Fatal(err)
-			}
-			if err := api.SaveToken(authPath, oldAuth); err != nil {
+			if err := api.SaveAuthToken(oldAuth); err != nil {
 				t.Fatal(err)
 			}
 			claims, _ := json.Marshal(map[string]string{"org_id": tc.org, "sub": "test-user"})
@@ -97,19 +94,9 @@ func TestOrgSwitchUpdatesCellaIdentityE2E(t *testing.T) {
 					if r.Header.Get("Authorization") != "Bearer "+newAuth {
 						t.Error("actor token minted from previous identity")
 					}
-					_, _ = w.Write([]byte(`{"actor_token":"new-actor"}`))
-				case "/v1/tokens/exchange":
-					if r.Header.Get("Authorization") != "Bearer new-actor" {
-						t.Error("Cella exchange used previous identity")
-					}
-					if tc.failExchange {
-						w.WriteHeader(http.StatusServiceUnavailable)
-						_, _ = w.Write([]byte(`{"code":"unavailable"}`))
-						return
-					}
-					_, _ = w.Write([]byte(`{"access_token":"new-cella"}`))
+					_, _ = w.Write([]byte(`{"actor_token":"new-actor","expires_in":300}`))
 				case "/v1/sandboxes":
-					if r.Header.Get("Authorization") != "Bearer new-cella" {
+					if r.Header.Get("Authorization") != "Bearer new-actor" {
 						t.Error("Cella command still uses the previous organization")
 					}
 					_, _ = w.Write([]byte(`[]`))
@@ -119,7 +106,7 @@ func TestOrgSwitchUpdatesCellaIdentityE2E(t *testing.T) {
 				}
 			}))
 			defer server.Close()
-			env := append(os.Environ(), "LATERE_TOKEN_FILE="+tokenPath, "LATERE_AUTH_TOKEN_FILE="+authPath, "SANDBOX_API_URL="+server.URL, "AUTH_URL="+server.URL+tc.authSuffix, "XDG_CONFIG_HOME="+root, "LATERE_LUX_TOKEN=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
+			env := append(os.Environ(), "LATERE_CELLA_TOKEN=", "LATERE_AUTH_TOKEN_FILE="+authPath, "SANDBOX_API_URL="+server.URL, "AUTH_URL="+server.URL+tc.authSuffix, "XDG_CONFIG_HOME="+root, "LATERE_LUX_TOKEN=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
 			run := func(args ...string) ([]byte, error) {
 				ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 				defer cancel()
@@ -152,32 +139,25 @@ func TestOrgSwitchUpdatesCellaIdentityE2E(t *testing.T) {
 				if refreshes.Load() != 0 {
 					t.Errorf("conflicting context sent %d refresh requests", refreshes.Load())
 				}
-				if got, err := api.LoadToken(authPath); err != nil || got != oldAuth {
-					t.Errorf("conflicting context changed auth credentials: %v", err)
-				}
-				if got, err := api.LoadToken(tokenPath); err != nil || got.AccessToken != "old-cella" {
-					t.Errorf("conflicting context changed Cella credentials: %v", err)
+				if got, err := api.LoadAuthToken(); err != nil || got != oldAuth {
+					t.Errorf("conflicting context changed the saved login: %v", err)
 				}
 				return
 			}
-			if tc.failExchange || tc.failRefresh {
+			if tc.failRefresh {
 				if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 {
 					t.Errorf("switch error = %v; output: %s", err, out)
 				}
 			} else if err != nil {
 				t.Fatalf("org switch: %v\n%s", err, out)
 			}
-			gotAuth, err := api.LoadToken(authPath)
+			gotAuth, err := api.LoadAuthToken()
 			if err != nil {
 				t.Fatal(err)
 			}
 			if tc.failRefresh {
 				if gotAuth != oldAuth {
-					t.Error("rejected refresh changed auth token")
-				}
-				got, err := api.LoadToken(tokenPath)
-				if err != nil || got.AccessToken != "old-cella" {
-					t.Errorf("rejected refresh changed Cella token: %v", err)
+					t.Error("rejected refresh changed the saved login")
 				}
 				return
 			}
@@ -189,16 +169,6 @@ func TestOrgSwitchUpdatesCellaIdentityE2E(t *testing.T) {
 			}
 			if tc.expiryState == "" && !gotAuth.ExpiresAt.After(time.Now().Add(50*time.Minute)) {
 				t.Error("known lifetime was not retained")
-			}
-			if tc.failExchange {
-				if _, err := os.Stat(tokenPath); !errors.Is(err, os.ErrNotExist) {
-					t.Error("failed exchange retained the previous organization's Cella token")
-				}
-				return
-			}
-			got, err := api.LoadToken(tokenPath)
-			if err != nil || got.AccessToken != "new-cella" {
-				t.Errorf("Cella credential not updated: %v", err)
 			}
 			out, err = run("org")
 			want := tc.org

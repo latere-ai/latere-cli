@@ -30,12 +30,10 @@ func TestProductsRejectExpiredAuthWithoutRefreshE2E(t *testing.T) {
 	}
 	for _, product := range []string{"lux export", "git helper", "drive", "topos", "cella"} {
 		for _, state := range []string{"expired", "near expiry", "unknown expiry"} {
-			if product == "cella" && state != "expired" {
-				continue // Cella's ordinary refresh is covered by the session e2e.
-			}
 			t.Run(product+"/"+state, func(t *testing.T) {
 				root := t.TempDir()
-				cellaPath, authPath := filepath.Join(root, "token.json"), filepath.Join(root, "auth-token.json")
+				authPath := filepath.Join(root, "auth-token.json")
+				t.Setenv("LATERE_AUTH_TOKEN_FILE", authPath)
 				var expiry time.Time
 				switch state {
 				case "expired":
@@ -43,33 +41,18 @@ func TestProductsRejectExpiredAuthWithoutRefreshE2E(t *testing.T) {
 				case "near expiry":
 					expiry = time.Now().Add(45 * time.Second)
 				}
-				if err := api.SaveToken(cellaPath, api.Token{AccessToken: "saved-cella"}); err != nil {
+				if err := api.SaveAuthToken(api.Token{AccessToken: "saved-auth", ExpiresAt: expiry}); err != nil {
 					t.Fatal(err)
 				}
-				if err := api.SaveToken(authPath, api.Token{AccessToken: "saved-auth", ExpiresAt: expiry}); err != nil {
+				before, err := os.ReadFile(authPath)
+				if err != nil {
 					t.Fatal(err)
-				}
-				before := map[string][]byte{}
-				for _, path := range []string{cellaPath, authPath} {
-					data, err := os.ReadFile(path)
-					if err != nil {
-						t.Fatal(err)
-					}
-					before[path] = data
 				}
 				var requests atomic.Int32
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					requests.Add(1)
-					if product == "cella" {
-						if r.Method != http.MethodGet || r.URL.Path != "/v1/sandboxes" || r.Header.Get("Authorization") != "Bearer saved-cella" {
-							t.Error("Cella tried to refresh using the expired auth root")
-						}
-						w.WriteHeader(http.StatusUnauthorized)
-						_, _ = w.Write([]byte(`{"code":"expired_cella"}`))
-						return
-					}
 					// Every product first mints an actor token from the usable
-					// root, presenting the root to auth alone, then presents the
+					// login, presenting it to auth alone, then presents the
 					// minted token to the product.
 					if r.Method == http.MethodPost && r.URL.Path == "/actor-tokens" {
 						if r.Header.Get("Authorization") != "Bearer saved-auth" {
@@ -83,6 +66,10 @@ func TestProductsRejectExpiredAuthWithoutRefreshE2E(t *testing.T) {
 						t.Error("unexpected product request or credential")
 					}
 					w.Header().Set("Content-Type", "application/json")
+					if r.URL.Path == "/v1/sandboxes" {
+						_, _ = w.Write([]byte(`[]`))
+						return
+					}
 					_, _ = w.Write([]byte(`{"entries":[],"agents":[]}`))
 				}))
 				defer server.Close()
@@ -96,22 +83,20 @@ func TestProductsRejectExpiredAuthWithoutRefreshE2E(t *testing.T) {
 					args = []string{"topos", "agents", "list"}
 				case "cella":
 					args = []string{"cella", "list", "--api-url", server.URL}
+					// SANDBOX_API_URL and AUTH_URL both point at the stub, so
+					// the mint and the product call reach the same server.
 				}
 				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 				defer cancel()
 				command := exec.CommandContext(ctx, binary, args...)
 				command.Stdin = strings.NewReader("protocol=https\nhost=code.latere.ai\n\n")
-				command.Env = append(os.Environ(), "LATERE_TOKEN_FILE="+cellaPath, "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_URL="+server.URL, "DRIVE_API_URL="+server.URL, "TOPOS_API_URL="+server.URL, "LUX_API_URL="+server.URL, "LATERE_DRIVE_TOKEN=", "LATERE_LUX_TOKEN=", "TOPOS_TOKEN=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
+				command.Env = append(os.Environ(), "LATERE_CELLA_TOKEN=", "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_URL="+server.URL, "DRIVE_API_URL="+server.URL, "TOPOS_API_URL="+server.URL, "LUX_API_URL="+server.URL, "LATERE_DRIVE_TOKEN=", "LATERE_LUX_TOKEN=", "TOPOS_TOKEN=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
 				var stdout, stderr bytes.Buffer
 				command.Stdout, command.Stderr = &stdout, &stderr
-				err := command.Run()
+				err = command.Run()
 				if state == "expired" {
-					wantError := "latere login"
+					const wantError = "latere login"
 					var wantRequests int32
-					if product == "cella" {
-						wantError = "expired_cella"
-						wantRequests = 1 // The Cella bearer is checked before root refresh.
-					}
 					if product == "git helper" {
 						if err != nil {
 							t.Errorf("git credential miss must be quiet: %v", err)
@@ -141,10 +126,8 @@ func TestProductsRejectExpiredAuthWithoutRefreshE2E(t *testing.T) {
 						t.Errorf("product requests = %d, want %d", requests.Load(), wantRequests)
 					}
 				}
-				for path, contents := range before {
-					if data, err := os.ReadFile(path); err != nil || !bytes.Equal(data, contents) {
-						t.Errorf("credential resolution changed %s: %v", filepath.Base(path), err)
-					}
+				if data, err := os.ReadFile(authPath); err != nil || !bytes.Equal(data, before) {
+					t.Errorf("credential resolution changed %s: %v", filepath.Base(authPath), err)
 				}
 			})
 		}

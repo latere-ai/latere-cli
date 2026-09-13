@@ -70,7 +70,7 @@ func TestAuthRefreshPreservesRequestOnRedirectE2E(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
 			cmd := exec.CommandContext(ctx, binary, "lux", "env", "--raw", "--auth-url", server.URL)
-			cmd.Env = append(os.Environ(), "LATERE_LUX_TOKEN=", "LATERE_AUTH_TOKEN_FILE="+authPath, "LATERE_TOKEN_FILE="+filepath.Join(root, "token.json"), "AUTH_CLIENT_ID=unrelated-client", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
+			cmd.Env = append(os.Environ(), "LATERE_LUX_TOKEN=", "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_CLIENT_ID=unrelated-client", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
 			var stdout, stderr bytes.Buffer
 			cmd.Stdout, cmd.Stderr = &stdout, &stderr
 			err := cmd.Run()

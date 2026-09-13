@@ -33,10 +33,10 @@ func TestWhoamiReportsOutputFailureE2E(t *testing.T) {
 			for _, mode := range []string{"writable", "read-only"} {
 				t.Run(fmt.Sprintf("fallback=%v/%s/%s", fallback, prefix, mode), func(t *testing.T) {
 					root := t.TempDir()
-					tokenPath, outputPath := filepath.Join(root, "token.json"), filepath.Join(root, "output")
+					tokenPath, outputPath := filepath.Join(root, "auth-token.json"), filepath.Join(root, "output")
 					token := "header." + base64.RawURLEncoding.EncodeToString([]byte(`{"sub":"owner","principal_type":"user"}`)) + ".signature"
 					tokenData := `{"access_token":"` + token + `"}`
-					var probes, verifications atomic.Int32
+					var probes atomic.Int32
 					server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 						switch r.URL.Path {
 						case "/tokeninfo":
@@ -46,9 +46,6 @@ func TestWhoamiReportsOutputFailureE2E(t *testing.T) {
 								return
 							}
 							_, _ = w.Write([]byte(`{"sub":"owner","principal_type":"user"}`))
-						case "/v1/sandboxes":
-							verifications.Add(1)
-							_, _ = w.Write([]byte(`[]`))
 						default:
 							t.Errorf("unexpected request: %s", r.URL.Path)
 							w.WriteHeader(http.StatusNotFound)
@@ -78,8 +75,8 @@ func TestWhoamiReportsOutputFailureE2E(t *testing.T) {
 					ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 					defer cancel()
 					command := exec.CommandContext(ctx, binary, args...)
-					command.Env = append(os.Environ(), "LATERE_TOKEN_FILE="+tokenPath, "LATERE_AUTH_TOKEN_FILE="+filepath.Join(root, "auth-token.json"),
-						"AUTH_URL="+server.URL, "SANDBOX_API_URL="+server.URL, "XDG_CONFIG_HOME="+root, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
+					command.Env = append(os.Environ(), "LATERE_AUTH_TOKEN_FILE="+tokenPath,
+						"AUTH_URL="+server.URL, "XDG_CONFIG_HOME="+root, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
 					var diagnostic bytes.Buffer
 					command.Stdout, command.Stderr = file, &diagnostic
 					err = command.Run()
@@ -98,12 +95,8 @@ func TestWhoamiReportsOutputFailureE2E(t *testing.T) {
 					if got, err := os.ReadFile(outputPath); err != nil || string(got) != want {
 						t.Errorf("output contents = %q (%v), want %q", got, err, want)
 					}
-					wantVerifications := int32(0)
-					if fallback {
-						wantVerifications = 1
-					}
-					if probes.Load() != 1 || verifications.Load() != wantVerifications {
-						t.Errorf("auth/Cella requests=%d/%d, want 1/%d", probes.Load(), verifications.Load(), wantVerifications)
+					if probes.Load() != 1 {
+						t.Errorf("issuer requests=%d, want 1", probes.Load())
 					}
 					if got, err := os.ReadFile(tokenPath); err != nil || string(got) != tokenData {
 						t.Errorf("printing changed the saved token: %v", err)

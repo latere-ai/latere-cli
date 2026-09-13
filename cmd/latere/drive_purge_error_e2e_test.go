@@ -73,7 +73,7 @@ func TestDriveRmPurgeErrorE2E(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
 			command := exec.CommandContext(ctx, binary, "drive", "rm", "files/item", "--permanent", "--owner", "org", "--drive-url", server.URL, "--token", "synthetic-token")
-			command.Env = append(os.Environ(), "LATERE_TOKEN_FILE="+filepath.Join(root, "absent-token.json"), "LATERE_AUTH_TOKEN_FILE="+filepath.Join(root, "absent-auth.json"), "XDG_CONFIG_HOME="+root, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
+			command.Env = append(os.Environ(), "LATERE_AUTH_TOKEN_FILE="+filepath.Join(root, "absent-auth.json"), "XDG_CONFIG_HOME="+root, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
 			var out, diagnostic bytes.Buffer
 			command.Stdout, command.Stderr = &out, &diagnostic
 			err := command.Run()

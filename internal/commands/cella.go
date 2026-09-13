@@ -172,7 +172,7 @@ the remote command's exit code when the command finishes.`,
   latere cella exec sb-019dc976-2b28-7c55-8778-bf7d5ae6c58d -- env`,
 		Args: cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := authedClient(apiURL)
+			c, err := authedClient(cmd.Context(), apiURL)
 			if err != nil {
 				return err
 			}
@@ -228,7 +228,7 @@ Full field reference: https://cella.latere.ai/docs/cella/manifest`,
 			if err != nil {
 				return err
 			}
-			c, err := authedClient(apiURL)
+			c, err := authedClient(cmd.Context(), apiURL)
 			if err != nil {
 				return err
 			}
@@ -297,7 +297,7 @@ cellas returned by the backend, including warm-pool cellas.`,
 		Example: `  latere cella list
   latere cella list --json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := authedClient(apiURL)
+			c, err := authedClient(cmd.Context(), apiURL)
 			if err != nil {
 				return err
 			}
@@ -367,7 +367,7 @@ an admin to configure the sidecar client for your token.`,
 }
 
 func runPolicyList(ctx context.Context, out io.Writer, apiURL string, jsonF bool) error {
-	c, err := authedClient(apiURL)
+	c, err := authedClient(ctx, apiURL)
 	if err != nil {
 		return err
 	}
@@ -425,7 +425,7 @@ func newCeGetCmd() *cobra.Command {
   latere cella get sb-019dc976-2b28-7c55-8778-bf7d5ae6c58d`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := authedClient(apiURL)
+			c, err := authedClient(cmd.Context(), apiURL)
 			if err != nil {
 				return err
 			}
@@ -450,7 +450,7 @@ func newCeRenameCmd() *cobra.Command {
   latere cella rename sb-019dc976-2b28-7c55-8778-bf7d5ae6c58d dev`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := authedClient(apiURL)
+			c, err := authedClient(cmd.Context(), apiURL)
 			if err != nil {
 				return err
 			}
@@ -483,7 +483,7 @@ func simpleAction(verb, short string) *cobra.Command {
   latere cella %s sb-019dc976-2b28-7c55-8778-bf7d5ae6c58d`, verb, verb),
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := authedClient(apiURL)
+			c, err := authedClient(cmd.Context(), apiURL)
 			if err != nil {
 				return err
 			}
@@ -512,7 +512,7 @@ keep them.`,
   latere cella delete dev`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := authedClient(apiURL)
+			c, err := authedClient(cmd.Context(), apiURL)
 			if err != nil {
 				return err
 			}
@@ -582,7 +582,7 @@ to start that one-shot run and return immediately with a run id.`,
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := authedClient(apiURL)
+			c, err := authedClient(cmd.Context(), apiURL)
 			if err != nil {
 				return err
 			}
@@ -663,7 +663,7 @@ func newCeRunStatusCmd() *cobra.Command {
   latere cella run status run_123 --json`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := authedClient(apiURL)
+			c, err := authedClient(cmd.Context(), apiURL)
 			if err != nil {
 				return err
 			}
@@ -704,7 +704,7 @@ call. Use --follow to keep streaming until the run exits.`,
   latere cella run logs run_123 --follow`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := authedClient(apiURL)
+			c, err := authedClient(cmd.Context(), apiURL)
 			if err != nil {
 				return err
 			}
@@ -742,7 +742,7 @@ func newCeRunCancelCmd() *cobra.Command {
   latere cella run cancel run_123 --json`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := authedClient(apiURL)
+			c, err := authedClient(cmd.Context(), apiURL)
 			if err != nil {
 				return err
 			}
@@ -782,7 +782,7 @@ the command exits.`,
   latere cella logs dev cmd_123 --follow`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := authedClient(apiURL)
+			c, err := authedClient(cmd.Context(), apiURL)
 			if err != nil {
 				return err
 			}
@@ -827,7 +827,7 @@ func newCeWaitCmd() *cobra.Command {
 			if secs <= 0 || int64(secs) > maxTimeoutSeconds {
 				return fmt.Errorf("--timeout must be between 1 and %d seconds", maxTimeoutSeconds)
 			}
-			c, err := authedClient(apiURL)
+			c, err := authedClient(cmd.Context(), apiURL)
 			if err != nil {
 				return err
 			}
@@ -874,7 +874,7 @@ to stdout. Pass --output to write the archive to a local file.`,
 			if out == "" {
 				return errors.New("--output cannot be empty; use '-' for stdout")
 			}
-			c, err := authedClient(apiURL)
+			c, err := authedClient(cmd.Context(), apiURL)
 			if err != nil {
 				return err
 			}
@@ -940,7 +940,7 @@ destination directory.`,
 			if timeout < 0 {
 				return fmt.Errorf("--timeout must not be negative")
 			}
-			c, err := authedClient(apiURL)
+			c, err := authedClient(cmd.Context(), apiURL)
 			if err != nil {
 				return err
 			}
@@ -1270,7 +1270,7 @@ only applies to ephemeral cellas.`,
 				}
 				body["auto_delete_hours"] = hours
 			}
-			c, err := authedClient(apiURL)
+			c, err := authedClient(cmd.Context(), apiURL)
 			if err != nil {
 				return err
 			}
@@ -1318,7 +1318,7 @@ explicit.`,
 			if to != "ephemeral" && to != "persistent" {
 				return fmt.Errorf("--to must be ephemeral or persistent")
 			}
-			c, err := authedClient(apiURL)
+			c, err := authedClient(cmd.Context(), apiURL)
 			if err != nil {
 				return err
 			}
@@ -1371,7 +1371,7 @@ Only persistent cellas can be resized.`,
 			if diskGB <= 0 {
 				return fmt.Errorf("--disk-gb must be a positive size")
 			}
-			c, err := authedClient(apiURL)
+			c, err := authedClient(cmd.Context(), apiURL)
 			if err != nil {
 				return err
 			}
@@ -1406,7 +1406,7 @@ func newCeCatCmd() *cobra.Command {
 		Example: `  latere cella cat dev /workspace/out.log`,
 		Args:    cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := authedClient(apiURL)
+			c, err := authedClient(cmd.Context(), apiURL)
 			if err != nil {
 				return err
 			}
@@ -1459,7 +1459,7 @@ func newCeWriteCmd() *cobra.Command {
 			if len(content) > maxContentBytes {
 				return fmt.Errorf("content exceeds the 10 MiB write limit; use upload for larger files")
 			}
-			c, err := authedClient(apiURL)
+			c, err := authedClient(cmd.Context(), apiURL)
 			if err != nil {
 				return err
 			}
@@ -1489,7 +1489,7 @@ func newCeLsCmd() *cobra.Command {
 		Example: `  latere cella ls dev /workspace`,
 		Args:    cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := authedClient(apiURL)
+			c, err := authedClient(cmd.Context(), apiURL)
 			if err != nil {
 				return err
 			}
@@ -1612,7 +1612,7 @@ func newCeUploadCmd() *cobra.Command {
 			if timeout < 0 {
 				return fmt.Errorf("--timeout must not be negative")
 			}
-			c, err := authedClient(apiURL)
+			c, err := authedClient(cmd.Context(), apiURL)
 			if err != nil {
 				return err
 			}
@@ -1687,7 +1687,7 @@ func newCeMkdirCmd() *cobra.Command {
 		Example: `  latere cella mkdir dev /workspace/build`,
 		Args:    cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := authedClient(apiURL)
+			c, err := authedClient(cmd.Context(), apiURL)
 			if err != nil {
 				return err
 			}
@@ -1712,7 +1712,7 @@ func newCeRmCmd() *cobra.Command {
 		Example: `  latere cella rm dev /workspace/old`,
 		Args:    cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := authedClient(apiURL)
+			c, err := authedClient(cmd.Context(), apiURL)
 			if err != nil {
 				return err
 			}
@@ -1733,7 +1733,7 @@ func newCeMvCmd() *cobra.Command {
 		Example: `  latere cella mv dev /workspace/a.txt /workspace/b.txt`,
 		Args:    cobra.ExactArgs(3),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := authedClient(apiURL)
+			c, err := authedClient(cmd.Context(), apiURL)
 			if err != nil {
 				return err
 			}
@@ -1751,10 +1751,36 @@ func newCeMvCmd() *cobra.Command {
 
 // ---- helpers (HTTP composition + UI) ----
 
-func authedClient(apiURL string) (*api.Client, error) {
+// cellaAudience is the aud claim Cella enforces on every bearer it
+// accepts. It is the production audience whatever --api-url names: the
+// URL selects the deployment, the audience is what the issuer stamps.
+const cellaAudience = "sandboxd"
+
+// authedClient builds the Cella client for one command run. The bearer is
+// a token minted for cellaAudience alone from the saved login, so the
+// login token never reaches Cella; Refresh re-mints it for a transfer or
+// a log follow that outlives the five-minute lifetime.
+//
+// LATERE_CELLA_TOKEN presents a bearer as given, for a development
+// deployment or a test, the same escape every other product has.
+func authedClient(ctx context.Context, apiURL string) (*api.Client, error) {
 	c := api.NewClient(apiURL)
-	if err := c.MustRequireAuth(); err != nil {
-		return nil, err
+	if t := strings.TrimSpace(os.Getenv("LATERE_CELLA_TOKEN")); t != "" {
+		c.SetBearer(t, time.Time{})
+		return c, nil
+	}
+	authBase := api.ResolveAuthURL(c.BaseURL, "")
+	token, expiry, err := api.ActorToken(ctx, authBase, cellaAudience)
+	if err != nil {
+		return nil, fmt.Errorf("cannot authenticate to Cella: %w", err)
+	}
+	c.SetBearer(token, expiry)
+	c.Refresh = func(ctx context.Context) (string, bool) {
+		fresh, _, err := api.ActorToken(ctx, authBase, cellaAudience)
+		if err != nil {
+			return "", false
+		}
+		return fresh, true
 	}
 	return c, nil
 }

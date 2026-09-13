@@ -16,11 +16,12 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/latere-ai/latere-cli/internal/api"
 	"github.com/latere-ai/latere-cli/internal/drive"
 )
 
 // newDriveCmd groups the Drive file-plane verbs (specs/003-drive-subcommand.md):
-// eight orthogonal commands over https://drive.latere.ai/v1. Paths are
+// eight orthogonal commands over the Drive base URL's /v1. Paths are
 // namespace-rooted exactly as in the API (files/…, memory/…, repos/…,
 // workspaces/…); variations are flags, not subcommand groups.
 func newDriveCmd() *cobra.Command {
@@ -34,7 +35,7 @@ func newDriveCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "drive",
 		Short: "Store, fetch, and share files on Latere Drive.",
-		Long: `Work with files on Latere Drive (https://drive.latere.ai).
+		Long: "Work with files on Latere Drive (" + drive.DefaultBaseURL + `).
 
 Paths are namespace-rooted as in the Drive API: files/…, memory/…,
 repos/…, workspaces/…. Commands operate in your personal space by
@@ -52,7 +53,7 @@ folders for code checkouts; repository history lives on Latere Code
   latere drive share files/reports/ --link`,
 	}
 	pf := cmd.PersistentFlags()
-	pf.StringVar(&driveURL, "drive-url", "", "Drive base URL (default $DRIVE_API_URL or https://drive.latere.ai)")
+	pf.StringVar(&driveURL, "drive-url", "", "Drive base URL (default $DRIVE_API_URL or "+drive.DefaultBaseURL+")")
 	pf.StringVar(&authURL, "auth-url", "", "auth base URL for token refresh (default https://auth.latere.ai)")
 	pf.StringVar(&token, "token", "", "present this bearer instead of the saved login (default $LATERE_DRIVE_TOKEN)")
 	pf.StringVar(&owner, "owner", "me", "space to operate in: me, org, u-<uuid>, o-<uuid>")
@@ -92,15 +93,14 @@ func (o *driveOpts) client(ctx context.Context) (*drive.Client, error) {
 // the saved login, the same path the git credential helper uses. A missing
 // login reads as "not signed in"; a refresh or mint failure is reported as
 // itself, since re-login is not always the fix.
-// driveAudience is the aud claim Drive enforces on the bearer the file
-// commands present. It is the production audience regardless of
-// DRIVE_API_URL: the URL selects the deployment, not what auth stamps.
-const driveAudience = "drive.latere.ai"
-
-// driveCredentialToken is the bearer presented to Drive: an actor token
-// bound to driveAudience, minted from the saved login.
+// driveCredentialToken is the bearer presented to Drive: a token minted
+// for drive.Audience alone from the saved login.
 func driveCredentialToken(ctx context.Context, authURL string) (string, error) {
-	return actorCredentialToken(ctx, authURL, driveAudience, "Drive")
+	bearer, _, err := api.ActorToken(ctx, api.ResolveAuthURL(drive.ResolveURL(""), authURL), drive.Audience)
+	if err != nil {
+		return "", fmt.Errorf("cannot authenticate to Drive: %w", err)
+	}
+	return bearer, nil
 }
 
 func driveBearer(ctx context.Context, tokenFlag, authURL string) (string, error) {

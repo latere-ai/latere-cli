@@ -36,15 +36,13 @@ func TestLuxAndDriveUseConfiguredAuthEndpointE2E(t *testing.T) {
 			}
 			t.Run(flow+"/"+config, func(t *testing.T) {
 				root := t.TempDir()
-				cellaPath, authPath := filepath.Join(root, "token.json"), filepath.Join(root, "auth-token.json")
-				if err := api.SaveToken(cellaPath, api.Token{AccessToken: "saved-cella"}); err != nil {
-					t.Fatal(err)
-				}
+				authPath := filepath.Join(root, "auth-token.json")
+				t.Setenv("LATERE_AUTH_TOKEN_FILE", authPath)
 				expires := time.Now().Add(-time.Hour)
 				if flow == "lux actor" {
 					expires = time.Now().Add(time.Hour)
 				}
-				if err := api.SaveToken(authPath, api.Token{AccessToken: "old-root", RefreshToken: "old-refresh", ExpiresAt: expires}); err != nil {
+				if err := api.SaveAuthToken(api.Token{AccessToken: "old-root", RefreshToken: "old-refresh", ExpiresAt: expires}); err != nil {
 					t.Fatal(err)
 				}
 				var refreshes, mints, products, misrouted atomic.Int32
@@ -84,7 +82,7 @@ func TestLuxAndDriveUseConfiguredAuthEndpointE2E(t *testing.T) {
 						if body.Audience != wantAudience {
 							t.Errorf("actor mint audience = %q, want %q", body.Audience, wantAudience)
 						}
-						_, _ = w.Write([]byte(`{"actor_token":"` + actor + `"}`))
+						_, _ = w.Write([]byte(`{"actor_token":"` + actor + `","expires_in":300}`))
 					default:
 						t.Errorf("unexpected auth endpoint: %s", r.URL.Path)
 						w.WriteHeader(http.StatusNotFound)
@@ -129,7 +127,7 @@ func TestLuxAndDriveUseConfiguredAuthEndpointE2E(t *testing.T) {
 				defer cancel()
 				command := exec.CommandContext(ctx, binary, args...)
 				command.Stdin = strings.NewReader("protocol=https\nhost=code.latere.ai\n\n")
-				command.Env = append(os.Environ(), "LATERE_TOKEN_FILE="+cellaPath, "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_URL="+authEnv, "LUX_API_URL="+productServer.URL, "LATERE_LUX_TOKEN=", "AUTH_CLIENT_ID=", "XDG_CONFIG_HOME="+root,
+				command.Env = append(os.Environ(), "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_URL="+authEnv, "LUX_API_URL="+productServer.URL, "LATERE_LUX_TOKEN=", "AUTH_CLIENT_ID=", "XDG_CONFIG_HOME="+root,
 					"HTTP_PROXY="+blocked.URL, "HTTPS_PROXY="+blocked.URL, "ALL_PROXY="+blocked.URL, "NO_PROXY=127.0.0.1,localhost", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
 				var stdout, stderr bytes.Buffer
 				command.Stdout, command.Stderr = &stdout, &stderr
@@ -139,12 +137,9 @@ func TestLuxAndDriveUseConfiguredAuthEndpointE2E(t *testing.T) {
 				if refreshes.Load() != wantRefreshes || mints.Load() != wantMints || products.Load() != wantProducts || misrouted.Load() != 0 {
 					t.Errorf("requests: refresh=%d mint=%d product=%d unconfigured=%d; want %d/%d/%d/0", refreshes.Load(), mints.Load(), products.Load(), misrouted.Load(), wantRefreshes, wantMints, wantProducts)
 				}
-				if got, err := api.LoadToken(cellaPath); err != nil || got.AccessToken != "saved-cella" {
-					t.Errorf("product authentication changed Cella credentials: %v", err)
-				}
 				if wantRefreshes != 0 {
-					if got, err := api.LoadToken(authPath); err != nil || got.AccessToken != "new-root" || got.RefreshToken != "new-refresh" {
-						t.Errorf("refreshed auth credential not saved: %v", err)
+					if got, err := api.LoadAuthToken(); err != nil || got.AccessToken != "new-root" || got.RefreshToken != "new-refresh" {
+						t.Errorf("refreshed login not saved: %v", err)
 					}
 				}
 			})

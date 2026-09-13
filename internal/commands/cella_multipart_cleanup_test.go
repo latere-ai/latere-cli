@@ -21,7 +21,7 @@ func TestCellaMultipartRequestFailureStopsProducer(t *testing.T) {
 	if err := os.WriteFile(source, []byte("upload content"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("LATERE_TOKEN_FILE", writeTokenFile(t, t.TempDir(), "test-token"))
+	t.Setenv("LATERE_CELLA_TOKEN", "test-token")
 	for _, name := range []string{"upload", "import"} {
 		for _, dest := range []bool{false, true} {
 			label := name + "/file"

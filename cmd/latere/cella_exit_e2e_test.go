@@ -73,7 +73,7 @@ func TestCellaCompletionExitStatusE2E(t *testing.T) {
 				ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 				defer cancel()
 				command := exec.CommandContext(ctx, binary, args...)
-				command.Env = append(os.Environ(), "SANDBOX_API_URL="+server.URL, "LATERE_TOKEN_FILE="+tokenFile, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
+				command.Env = append(os.Environ(), "SANDBOX_API_URL="+server.URL, "LATERE_CELLA_TOKEN=test-token", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
 				out, err := command.CombinedOutput()
 				code := 0
 				if err != nil {

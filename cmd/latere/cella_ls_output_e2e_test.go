@@ -61,7 +61,7 @@ func TestCellaLsOutputFailureE2E(t *testing.T) {
 				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 				defer cancel()
 				command := exec.CommandContext(ctx, binary, prefix, "ls", "dev", "/workspace", "--api-url", server.URL)
-				command.Env = append(os.Environ(), "LATERE_TOKEN_FILE="+token, "LATERE_AUTH_TOKEN_FILE="+filepath.Join(root, "absent-auth.json"), "XDG_CONFIG_HOME="+root, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
+				command.Env = append(os.Environ(), "LATERE_CELLA_TOKEN=test-token", "LATERE_AUTH_TOKEN_FILE="+filepath.Join(root, "absent-auth.json"), "XDG_CONFIG_HOME="+root, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
 				var diagnostic bytes.Buffer
 				command.Stdout, command.Stderr = file, &diagnostic
 				err = command.Run()

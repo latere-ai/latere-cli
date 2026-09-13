@@ -74,7 +74,7 @@ func TestHelpIncludesUserExamples(t *testing.T) {
 			want: []string{
 				"latere login --personal",
 				"latere login --no-browser",
-				"override Cella API base URL",
+				"override auth base URL",
 			},
 		},
 		{

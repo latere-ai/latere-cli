@@ -12,7 +12,7 @@ import (
 
 func TestCellaExtendRejectsInvalidHoursBeforeAuthentication(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("LATERE_TOKEN_FILE", filepath.Join(root, "absent-token.json"))
+	t.Setenv("LATERE_CELLA_TOKEN", "")
 	t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(root, "absent-auth.json"))
 	for _, hours := range []string{"0", "-1", "-24"} {
 		t.Run(hours, func(t *testing.T) {
@@ -29,7 +29,7 @@ func TestCellaExtendRejectsInvalidHoursBeforeAuthentication(t *testing.T) {
 
 func TestCellaExtendRejectsInvalidDeadlineBeforeAuthentication(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("LATERE_TOKEN_FILE", filepath.Join(root, "absent-token.json"))
+	t.Setenv("LATERE_CELLA_TOKEN", "")
 	t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(root, "absent-auth.json"))
 	for _, tc := range []struct{ value, message string }{
 		{"", "--deadline must be RFC3339"},

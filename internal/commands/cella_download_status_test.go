@@ -18,7 +18,7 @@ import (
 )
 
 func TestCellaExportDownloadStatus(t *testing.T) {
-	t.Setenv("LATERE_TOKEN_FILE", writeTokenFile(t, t.TempDir(), "synthetic-token"))
+	t.Setenv("LATERE_CELLA_TOKEN", "synthetic-token")
 	for _, status := range []int{200, 202, 204, 206} {
 		for _, existing := range []bool{false, true} {
 			t.Run(fmt.Sprintf("status=%d/existing=%t", status, existing), func(t *testing.T) {

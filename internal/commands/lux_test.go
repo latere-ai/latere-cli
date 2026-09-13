@@ -14,6 +14,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"latere.ai/x/pkg/authkit/oidc"
 )
 
 // ---- helpers ----
@@ -81,7 +83,7 @@ func TestLuxHelpText(t *testing.T) {
 		want []string
 	}{
 		{[]string{"lux", "--help"}, []string{"lux.latere.ai", "allocating an API key", "LUX_API_URL", "latere login"}},
-		{[]string{"lux", "env", "--help"}, []string{"stock SDK at a Lux surface", "ANTHROPIC_AUTH_TOKEN", "--ttl"}},
+		{[]string{"lux", "env", "--help"}, []string{"stock SDK at a Lux surface", "ANTHROPIC_AUTH_TOKEN", "--compat"}},
 		{[]string{"lux", "invoke", "--help"}, []string{"diagnostic, not an assistant", "latere topos -p", "--model"}},
 		{[]string{"lux", "access", "set", "--help"}, []string{"provider key", "fallback"}},
 	}
@@ -205,7 +207,7 @@ func TestLuxBearerRefreshesThenMints(t *testing.T) {
 			})
 		case "/actor-tokens":
 			mintBearer = r.Header.Get("Authorization")
-			_ = json.NewEncoder(w).Encode(map[string]any{"actor_token": "minted-after-refresh"})
+			_ = json.NewEncoder(w).Encode(map[string]any{"actor_token": "minted-after-refresh", "expires_in": 300})
 		default:
 			http.Error(w, "unexpected "+r.URL.Path, http.StatusNotFound)
 		}
@@ -256,7 +258,7 @@ func TestLuxEnvBearerMintsLuxActorToken(t *testing.T) {
 	defer authSrv.Close()
 	writeAuthTokenFile(t, "root-access", "root-refresh", time.Now().Add(time.Hour))
 
-	got, provenance, err := luxEnvBearer(t.Context(), "", "", authSrv.URL, 0)
+	got, provenance, err := luxEnvBearer(t.Context(), "", "", authSrv.URL)
 	if err != nil {
 		t.Fatalf("luxEnvBearer: %v", err)
 	}
@@ -293,7 +295,7 @@ func TestLuxEnvBearerRefreshesWhenExpired(t *testing.T) {
 	defer authSrv.Close()
 	writeAuthTokenFile(t, "root-old", "root-refresh", time.Now().Add(-time.Hour))
 
-	got, _, err := luxEnvBearer(t.Context(), "", "", authSrv.URL, 0)
+	got, _, err := luxEnvBearer(t.Context(), "", "", authSrv.URL)
 	if err != nil {
 		t.Fatalf("luxEnvBearer: %v", err)
 	}
@@ -1029,45 +1031,23 @@ func TestLuxEnvRaw(t *testing.T) {
 	}
 }
 
-func TestLuxEnvTTLMintsActorToken(t *testing.T) {
+// Every actor token lives the issuer's maximum. There is no per-command
+// lifetime knob: a shorter one bought nothing and made two callers of the
+// same mint ask for different things.
+func TestLuxEnvRejectsATTLFlag(t *testing.T) {
 	isolateBearer(t)
-	var gotTTL float64
-	authSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/actor-tokens" {
-			http.Error(w, "unexpected", http.StatusNotFound)
-			return
-		}
-		var body map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		gotTTL, _ = body["ttl_seconds"].(float64)
-		_ = json.NewEncoder(w).Encode(map[string]any{"actor_token": "short-lived", "expires_in": 300})
-	}))
-	defer authSrv.Close()
-	writeAuthTokenFile(t, fakeJWT(t, map[string]any{"sub": "u", "scp": []string{"openid"}}), "r", time.Now().Add(time.Hour))
-
-	var errBuf strings.Builder
-	out, err := captureStdout(func() error {
-		root := NewRoot("test")
-		root.SetErr(&errBuf)
-		root.SetArgs([]string{"lux", "env", "openai", "--ttl", "1h", "--lux-url", "https://lux.example", "--auth-url", authSrv.URL})
-		return root.Execute()
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if gotTTL != 3600 {
-		t.Errorf("ttl_seconds = %v, want 3600", gotTTL)
-	}
-	if !strings.Contains(out, "export OPENAI_API_KEY=short-lived") {
-		t.Errorf("exports must embed the actor token:\n%s", out)
-	}
-	if !strings.Contains(errBuf.String(), "actor token, expires in 300 seconds") {
-		t.Errorf("stderr = %q", errBuf.String())
+	root := NewRoot("test")
+	root.SetOut(&strings.Builder{})
+	root.SetErr(&strings.Builder{})
+	root.SetArgs([]string{"lux", "env", "openai", "--ttl", "1m"})
+	err := root.Execute()
+	if err == nil || !strings.Contains(err.Error(), "unknown flag: --ttl") {
+		t.Fatalf("err = %v, want an unknown-flag error for --ttl", err)
 	}
 }
 
-// Without --ttl the export still mints: the value handed to an SDK is an
-// actor token bound to Lux at auth's maximum lifetime, never the root
+// The export mints: the value handed to an SDK is an actor token bound to
+// Lux at the issuer's maximum lifetime, never the login
 // token, and stderr says it is short-lived and how to get another.
 func TestLuxEnvWithoutTTLExportsAnActorToken(t *testing.T) {
 	isolateBearer(t)
@@ -1103,8 +1083,8 @@ func TestLuxEnvWithoutTTLExportsAnActorToken(t *testing.T) {
 	if !strings.Contains(out, "export OPENAI_API_KEY=lux-actor") {
 		t.Errorf("exports must embed the actor token:\n%s", out)
 	}
-	if gotTTL != float64(actorTokenTTL) {
-		t.Errorf("mint asked for ttl %v, want the maximum %d", gotTTL, actorTokenTTL)
+	if gotTTL != float64(oidc.ActorTokenLifetime/time.Second) {
+		t.Errorf("mint asked for ttl %v, want the maximum %v", gotTTL, oidc.ActorTokenLifetime)
 	}
 	if s := errBuf.String(); !strings.Contains(s, "actor token, expires in 300 seconds") || !strings.Contains(s, "re-run") {
 		t.Errorf("stderr = %q, want the actor-token expiry and the re-run note", s)

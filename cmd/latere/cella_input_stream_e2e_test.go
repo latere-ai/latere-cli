@@ -117,7 +117,7 @@ func TestCellaConfiguredInputE2E(t *testing.T) {
 					defer cancel()
 					command := exec.CommandContext(ctx, binary, args...)
 					command.Stdin = strings.NewReader("unrelated process stdin")
-					command.Env = append(os.Environ(), "LATERE_TOKEN_FILE="+token, "LATERE_AUTH_TOKEN_FILE="+filepath.Join(root, "absent-auth.json"), "XDG_CONFIG_HOME="+root, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "LATERE_TEST_CONFIGURED_INPUT="+source)
+					command.Env = append(os.Environ(), "LATERE_CELLA_TOKEN=synthetic-token", "LATERE_AUTH_TOKEN_FILE="+filepath.Join(root, "absent-auth.json"), "XDG_CONFIG_HOME="+root, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "LATERE_TEST_CONFIGURED_INPUT="+source)
 					out, err := command.CombinedOutput()
 					wantRequests := int32(1)
 					if mode == "import" && strings.HasPrefix(input, "empty") {

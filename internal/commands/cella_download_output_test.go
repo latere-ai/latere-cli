@@ -17,7 +17,7 @@ import (
 )
 
 func TestCellaDownloadConfiguredOutput(t *testing.T) {
-	t.Setenv("LATERE_TOKEN_FILE", writeTokenFile(t, t.TempDir(), "synthetic-token"))
+	t.Setenv("LATERE_CELLA_TOKEN", "synthetic-token")
 	t.Setenv("LATERE_NO_UPDATE_CHECK", "1")
 	const body = "complete\x00file contents\n"
 	for _, prefix := range []string{"cella", "sandbox"} {

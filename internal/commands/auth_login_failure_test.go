@@ -10,131 +10,92 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync/atomic"
 	"testing"
 
 	"github.com/latere-ai/latere-cli/internal/api"
 )
 
-func TestLoginVerificationDoesNotRefreshCandidate(t *testing.T) {
+// A pasted token is verified at the issuer, which is who addresses it. A
+// rejected one must not replace the login already on file.
+func TestPastedLoginVerifiesAtTheIssuer(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("LATERE_TOKEN_FILE", filepath.Join(root, "token.json"))
 	t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(root, "auth-token.json"))
-	if err := api.SaveToken("", api.Token{AccessToken: "old-cella"}); err != nil {
+	if err := api.SaveAuthToken(api.Token{AccessToken: "old-login"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := api.SaveAuthToken(api.Token{AccessToken: "old-auth"}); err != nil {
-		t.Fatal(err)
-	}
-	var refreshes atomic.Int32
+	var probes atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Path {
-		case "/v1/sandboxes":
-			if r.Header.Get("Authorization") == "Bearer refreshed-token" {
-				_, _ = w.Write([]byte(`[]`))
-				return
-			}
-			w.WriteHeader(http.StatusUnauthorized)
-			_, _ = w.Write([]byte(`{"code":"invalid_token"}`))
-		case "/actor-tokens":
-			refreshes.Add(1)
-			_, _ = w.Write([]byte(`{"actor_token":"test-actor"}`))
-		case "/v1/tokens/exchange":
-			_, _ = w.Write([]byte(`{"access_token":"refreshed-token"}`))
-		default:
-			t.Error("unexpected request")
+		if r.URL.Path != "/tokeninfo" {
+			t.Errorf("login called %s; it speaks to the issuer alone", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
+			return
 		}
+		probes.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		if r.Header.Get("Authorization") == "Bearer good-candidate" {
+			_, _ = w.Write([]byte(`{"sub":"u-1"}`))
+			return
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"code":"invalid_token"}`))
 	}))
 	defer server.Close()
-	t.Setenv("AUTH_URL", server.URL)
-	if err := saveAndVerify(t.Context(), server.URL, "rejected-candidate"); err == nil {
-		t.Error("candidate rejection was masked by credential refresh")
+
+	if err := loginWithPastedToken(t.Context(), server.URL, "rejected-candidate"); err == nil {
+		t.Error("a token the issuer refused was accepted as a login")
 	}
-	if refreshes.Load() != 0 {
-		t.Error("login refreshed a different credential instead of validating the candidate")
+	if got, err := api.LoadAuthToken(); err != nil || got.AccessToken != "old-login" {
+		t.Errorf("failed verification changed the saved login: %q (%v)", got.AccessToken, err)
 	}
-	if got, err := api.LoadToken(""); err != nil || got.AccessToken != "old-cella" {
-		t.Errorf("failed verification changed saved token: %v", err)
+	if err := loginWithPastedToken(t.Context(), server.URL, "good-candidate"); err != nil {
+		t.Fatalf("accepted token rejected: %v", err)
+	}
+	if got, err := api.LoadAuthToken(); err != nil || got.AccessToken != "good-candidate" {
+		t.Errorf("saved login = %q (%v), want the pasted token", got.AccessToken, err)
+	}
+	if probes.Load() != 2 {
+		t.Errorf("issuer probes = %d, want one per login", probes.Load())
 	}
 }
 
-func TestPastedLoginSaveFailureKeepsAuthToken(t *testing.T) {
+// The login token is the only credential written. A pasted login must not
+// leave a second file beside it.
+func TestPastedLoginWritesOneCredential(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("LATERE_TOKEN_FILE", root) // Saving cannot replace a directory.
-	authPath := filepath.Join(root, "auth-token.json")
-	t.Setenv("LATERE_AUTH_TOKEN_FILE", authPath)
-	if err := api.SaveAuthToken(api.Token{AccessToken: "old-auth"}); err != nil {
+	t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(root, "auth-token.json"))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"sub":"u-1"}`))
+	}))
+	defer server.Close()
+
+	if err := loginWithPastedToken(t.Context(), server.URL, "candidate"); err != nil {
 		t.Fatal(err)
 	}
-	server := fakeSandboxAPI(t, true)
-	if err := runAuthLogin(t, "--token", "candidate", "--api-url", server.URL, "--no-git"); err == nil {
-		t.Fatal("save failure reported success")
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got, err := api.LoadAuthToken(); err != nil || got.AccessToken != "old-auth" {
-		t.Errorf("save failure removed auth token: %v", err)
+	if len(entries) != 1 || entries[0].Name() != "auth-token.json" {
+		t.Fatalf("login wrote %v, want auth-token.json alone", entries)
 	}
 }
 
 func TestLoginCancellationPreservesSavedToken(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "token.json")
-	t.Setenv("LATERE_TOKEN_FILE", path)
-	before := `{"access_token":"old-cella"}`
+	root := t.TempDir()
+	path := filepath.Join(root, "auth-token.json")
+	t.Setenv("LATERE_AUTH_TOKEN_FILE", path)
+	before := `{"access_token":"old-login"}`
 	if err := os.WriteFile(path, []byte(before), 0600); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	if err := saveAndVerify(ctx, "http://127.0.0.1:1", "candidate"); !errors.Is(err, context.Canceled) {
+	if err := loginWithPastedToken(ctx, "http://127.0.0.1:1", "candidate"); !errors.Is(err, context.Canceled) {
 		t.Errorf("error = %v, want context cancellation", err)
 	}
 	if data, err := os.ReadFile(path); err != nil || string(data) != before {
-		t.Errorf("cancelled login changed saved token: %v", err)
-	}
-}
-
-func TestDiscardCellaAfterAuthFailure(t *testing.T) {
-	for _, mode := range []string{"saved token", "absent token", "cleanup blocked"} {
-		t.Run(mode, func(t *testing.T) {
-			root := t.TempDir()
-			path := filepath.Join(root, "token.json")
-			t.Setenv("LATERE_TOKEN_FILE", path)
-			t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(root, "auth-token.json"))
-			t.Setenv("XDG_CONFIG_HOME", root)
-			switch mode {
-			case "cleanup blocked":
-				if err := os.Mkdir(path, 0700); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(filepath.Join(path, "child"), nil, 0600); err != nil {
-					t.Fatal(err)
-				}
-			case "saved token":
-				if err := api.SaveToken("", api.Token{AccessToken: "new-cella"}); err != nil {
-					t.Fatal(err)
-				}
-			}
-			cause := errors.New("auth storage failed")
-			err := discardCellaAfterAuthFailure(cause)
-			if !errors.Is(err, cause) {
-				t.Fatalf("original auth failure lost: %v", err)
-			}
-			if mode == "cleanup blocked" {
-				pathErr, ok := errors.AsType[*os.PathError](err)
-				if !ok || pathErr.Path != path {
-					t.Errorf("cleanup failure lost: %v", err)
-				}
-				if !strings.Contains(err.Error(), "run `latere logout`") {
-					t.Errorf("missing recovery instructions: %v", err)
-				}
-				if _, err := os.Stat(filepath.Join(path, "child")); err != nil {
-					t.Errorf("cleanup removed unexpected directory contents: %v", err)
-				}
-			} else if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
-				t.Errorf("Cella token retained: %v", err)
-			}
-		})
+		t.Errorf("cancelled login changed the saved login: %v", err)
 	}
 }

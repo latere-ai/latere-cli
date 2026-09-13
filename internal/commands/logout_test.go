@@ -17,27 +17,22 @@ import (
 	"github.com/latere-ai/latere-cli/internal/api"
 )
 
-// seedLogoutFiles isolates both token files and seeds them with a cella
-// bearer and an auth root token carrying a refresh token.
-func seedLogoutFiles(t *testing.T) (tokenPath, authPath string) {
+// seedLogin isolates the one credential file and seeds a login carrying a
+// refresh token, which is what logout revokes.
+func seedLogin(t *testing.T) (authPath string) {
 	t.Helper()
-	dir := t.TempDir()
-	tokenPath = filepath.Join(dir, "token.json")
-	authPath = filepath.Join(dir, "auth-token.json")
-	t.Setenv("LATERE_TOKEN_FILE", tokenPath)
+	authPath = filepath.Join(t.TempDir(), "auth-token.json")
 	t.Setenv("LATERE_AUTH_TOKEN_FILE", authPath)
-	if err := api.SaveToken("", api.Token{AccessToken: "cella-tok", TokenType: "Bearer"}); err != nil {
-		t.Fatal(err)
-	}
+	t.Setenv("AUTH_URL", "")
 	if err := api.SaveAuthToken(api.Token{
-		AccessToken:  "root-access",
-		RefreshToken: "root-refresh",
+		AccessToken:  "login-access",
+		RefreshToken: "login-refresh",
 		TokenType:    "Bearer",
 		ExpiresAt:    time.Now().Add(time.Hour),
 	}); err != nil {
 		t.Fatal(err)
 	}
-	return tokenPath, authPath
+	return authPath
 }
 
 func runLogout(t *testing.T, args ...string) string {
@@ -53,83 +48,72 @@ func runLogout(t *testing.T, args ...string) string {
 	return errBuf.String()
 }
 
-func TestLogoutRevokesBothSidesAndClearsFiles(t *testing.T) {
-	var cellaRevokes, authRevokes atomic.Int32
-	var gotBearer, gotForm atomic.Value
+// Logout speaks to the issuer and to nobody else. There is no product-held
+// credential to recall: an actor token lapses within five minutes.
+func TestLogoutRevokesAtTheIssuerAndClearsTheLogin(t *testing.T) {
+	var revokes atomic.Int32
+	var gotForm atomic.Value
 	mux := http.NewServeMux()
-	mux.HandleFunc("DELETE /v1/tokens/current", func(w http.ResponseWriter, r *http.Request) {
-		cellaRevokes.Add(1)
-		gotBearer.Store(r.Header.Get("Authorization"))
-		w.WriteHeader(http.StatusNoContent)
-	})
 	mux.HandleFunc("POST /revoke", func(w http.ResponseWriter, r *http.Request) {
-		authRevokes.Add(1)
+		revokes.Add(1)
 		_ = r.ParseForm()
 		gotForm.Store(r.PostForm.Encode())
 		w.WriteHeader(http.StatusOK)
 	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("logout called %s; it speaks to the issuer alone", r.URL.Path)
+		w.WriteHeader(http.StatusNotFound)
+	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
-	tokenPath, authPath := seedLogoutFiles(t)
+	authPath := seedLogin(t)
 
-	errOut := runLogout(t, "--api-url", srv.URL, "--auth-url", srv.URL)
+	errOut := runLogout(t, "--auth-url", srv.URL)
 
-	if cellaRevokes.Load() != 1 || authRevokes.Load() != 1 {
-		t.Errorf("revoke calls cella=%d auth=%d, want 1 and 1", cellaRevokes.Load(), authRevokes.Load())
-	}
-	if got, _ := gotBearer.Load().(string); got != "Bearer cella-tok" {
-		t.Errorf("cella revoke bearer = %q", got)
+	if revokes.Load() != 1 {
+		t.Errorf("revoke calls = %d, want 1", revokes.Load())
 	}
 	form, _ := gotForm.Load().(string)
-	for _, want := range []string{"token=root-refresh", "token_type_hint=refresh_token", "client_id=latere-cli"} {
+	for _, want := range []string{"token=login-refresh", "token_type_hint=refresh_token", "client_id=latere-cli"} {
 		if !strings.Contains(form, want) {
 			t.Errorf("revoke form = %q, missing %q", form, want)
 		}
 	}
-	for _, p := range []string{tokenPath, authPath} {
-		if _, err := os.Stat(p); !os.IsNotExist(err) {
-			t.Errorf("%s still exists after logout", p)
-		}
+	if _, err := os.Stat(authPath); !os.IsNotExist(err) {
+		t.Errorf("%s still exists after logout", authPath)
 	}
 	if !strings.Contains(errOut, "Logged out.") {
 		t.Errorf("stderr = %q", errOut)
 	}
 }
 
-func TestLogoutSucceedsWhenServersAreDown(t *testing.T) {
+func TestLogoutSucceedsWhenTheIssuerIsDown(t *testing.T) {
 	srv := httptest.NewServer(http.NotFoundHandler())
 	deadURL := srv.URL
 	srv.Close() // connection refused from here on
-	tokenPath, authPath := seedLogoutFiles(t)
+	authPath := seedLogin(t)
 
-	errOut := runLogout(t, "--api-url", deadURL, "--auth-url", deadURL)
+	errOut := runLogout(t, "--auth-url", deadURL)
 
-	for _, p := range []string{tokenPath, authPath} {
-		if _, err := os.Stat(p); !os.IsNotExist(err) {
-			t.Errorf("%s still exists; logout must clear locally even offline", p)
-		}
+	if _, err := os.Stat(authPath); !os.IsNotExist(err) {
+		t.Errorf("%s still exists; logout must clear locally even offline", authPath)
 	}
-	if !strings.Contains(errOut, "warning: could not revoke the cella token") ||
-		!strings.Contains(errOut, "warning: could not revoke the auth refresh token") {
-		t.Errorf("stderr should warn about both failed revocations, got %q", errOut)
+	if !strings.Contains(errOut, "warning: could not revoke the refresh token") {
+		t.Errorf("stderr should warn about the failed revocation, got %q", errOut)
 	}
 	if !strings.Contains(errOut, "Logged out.") {
 		t.Errorf("stderr = %q", errOut)
 	}
 }
 
-func TestLogoutOlderServerDegradesToNote(t *testing.T) {
-	mux := http.NewServeMux() // no /v1/tokens/current route -> 404
-	mux.HandleFunc("POST /revoke", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-	srv := httptest.NewServer(mux)
-	defer srv.Close()
-	seedLogoutFiles(t)
-
-	errOut := runLogout(t, "--api-url", srv.URL, "--auth-url", srv.URL)
-	if !strings.Contains(errOut, "server-side token revocation unavailable (404)") {
-		t.Errorf("stderr = %q, want the 404 degradation note", errOut)
+func TestLogoutSkipsRevocationWithNothingSaved(t *testing.T) {
+	t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(t.TempDir(), "auth-token.json"))
+	errOut := runLogout(t) // no file, no server: nothing to revoke, still succeeds
+	if !strings.Contains(errOut, "Logged out.") {
+		t.Errorf("stderr = %q", errOut)
+	}
+	if strings.Contains(errOut, "warning") {
+		t.Errorf("no saved login must produce no warnings, got %q", errOut)
 	}
 }
 
@@ -146,54 +130,32 @@ func TestLoginAndRefreshShareOneScopeSet(t *testing.T) {
 	}
 }
 
-func TestLogoutAuthRevocationDegrades(t *testing.T) {
+func TestLogoutRevocationDegrades(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("DELETE /v1/tokens/current", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
-	})
 	mux.HandleFunc("POST /revoke", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
-	seedLogoutFiles(t)
+	seedLogin(t)
 
 	// The auth base resolves through AUTH_URL when no flag is given.
 	t.Setenv("AUTH_URL", srv.URL)
-	errOut := runLogout(t, "--api-url", srv.URL)
+	errOut := runLogout(t)
 	if !strings.Contains(errOut, "revocation returned 500") {
 		t.Errorf("stderr = %q, want the 500 warning", errOut)
 	}
 }
 
 func TestLogoutBadAuthURLWarnsAndCompletes(t *testing.T) {
-	mux := http.NewServeMux()
-	mux.HandleFunc("DELETE /v1/tokens/current", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
-	})
-	srv := httptest.NewServer(mux)
-	defer srv.Close()
-	tokenPath, _ := seedLogoutFiles(t)
+	authPath := seedLogin(t)
 
-	errOut := runLogout(t, "--api-url", srv.URL, "--auth-url", "http://[bad")
-	if !strings.Contains(errOut, "could not revoke the auth refresh token") {
+	errOut := runLogout(t, "--auth-url", "http://[bad")
+	if !strings.Contains(errOut, "could not revoke the refresh token") {
 		t.Errorf("stderr = %q, want the request-build warning", errOut)
 	}
-	if _, err := os.Stat(tokenPath); !os.IsNotExist(err) {
-		t.Error("token.json must be cleared regardless")
-	}
-}
-
-func TestLogoutSkipsRevocationWithNothingSaved(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("LATERE_TOKEN_FILE", filepath.Join(dir, "token.json"))
-	t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(dir, "auth-token.json"))
-	errOut := runLogout(t) // no files, no servers: nothing to revoke, still succeeds
-	if !strings.Contains(errOut, "Logged out.") {
-		t.Errorf("stderr = %q", errOut)
-	}
-	if strings.Contains(errOut, "warning") {
-		t.Errorf("no saved tokens must produce no warnings, got %q", errOut)
+	if _, err := os.Stat(authPath); !os.IsNotExist(err) {
+		t.Error("the login must be cleared regardless")
 	}
 }
 
@@ -203,10 +165,9 @@ func TestLogoutSurfacesFileClearErrors(t *testing.T) {
 	if err := os.Mkdir(locked, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	tokenPath := filepath.Join(locked, "token.json")
-	t.Setenv("LATERE_TOKEN_FILE", tokenPath)
-	t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(dir, "auth-token.json"))
-	if err := api.SaveToken("", api.Token{AccessToken: "x"}); err != nil {
+	authPath := filepath.Join(locked, "auth-token.json")
+	t.Setenv("LATERE_AUTH_TOKEN_FILE", authPath)
+	if err := api.SaveAuthToken(api.Token{AccessToken: "x"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Chmod(locked, 0o500); err != nil { // parent unwritable: Remove fails
@@ -219,7 +180,7 @@ func TestLogoutSurfacesFileClearErrors(t *testing.T) {
 	root.SetErr(new(bytes.Buffer))
 	server := httptest.NewServer(http.NotFoundHandler())
 	defer server.Close()
-	root.SetArgs([]string{"logout", "--api-url", server.URL, "--auth-url", server.URL})
+	root.SetArgs([]string{"logout", "--auth-url", server.URL})
 	if err := root.Execute(); err == nil {
 		t.Fatal("logout with an undeletable token file: want error")
 	}

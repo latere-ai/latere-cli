@@ -610,30 +610,23 @@ func printLuxItems(out io.Writer, items []map[string]any, what string) error {
 // ---- SDK enablement: env / token ----
 
 // luxEnvBearer resolves the credential `lux env` and `lux token` export,
-// and says what it is: a passthrough token (flag/env), or an actor token
-// bound to luxAudience. Without --ttl the export asks for the longest
-// lifetime auth grants, actorTokenTTL seconds; the export is short-lived
-// either way, which is why the provenance always carries the expiry.
-func luxEnvBearer(ctx context.Context, tokenFlag, luxURL, authURLFlag string, ttl time.Duration) (bearer, provenance string, err error) {
+// and says what it is: a passthrough token (flag/env), or a token minted
+// for Lux alone. The export is short-lived either way, which is why the
+// provenance always carries the expiry.
+func luxEnvBearer(ctx context.Context, tokenFlag, luxURL, authURLFlag string) (bearer, provenance string, err error) {
 	if t, ok := passthroughToken(tokenFlag); ok {
 		return t, "passthrough token (--token or $LATERE_LUX_TOKEN)", nil
 	}
-	seconds := actorTokenTTL
-	if ttl > 0 {
-		seconds = int(ttl / time.Second)
-	}
-	actor, expiresIn, err := mintLuxActorToken(ctx, luxURL, authURLFlag, seconds)
+	actor, expiry, err := mintLuxActorToken(ctx, luxURL, authURLFlag)
 	if err != nil {
 		return "", "", err
 	}
-	if expiresIn > 0 {
-		unit := "seconds"
-		if expiresIn == 1 {
-			unit = "second"
-		}
-		return actor, fmt.Sprintf("actor token, expires in %d %s; re-run for a new one", expiresIn, unit), nil
+	seconds := int(time.Until(expiry).Round(time.Second) / time.Second)
+	unit := "seconds"
+	if seconds == 1 {
+		unit = "second"
 	}
-	return actor, "actor token, expiry not reported by auth", nil
+	return actor, fmt.Sprintf("actor token, expires in %d %s; re-run for a new one", seconds, unit), nil
 }
 
 // resolveEnvSurface applies the two axes: a [provider] argument selects
@@ -689,7 +682,6 @@ func resolveEnvSurface(
 func newLuxEnvCmd(luxURL, authURL, token *string) *cobra.Command {
 	var provider string
 	var compat string
-	var ttl time.Duration
 	var raw bool
 	cmd := &cobra.Command{
 		Use: "env [provider] [--compat DIALECT]",
@@ -739,27 +731,15 @@ Gemini's SDK has no bearer path; use 'latere lux invoke' or an
 OpenRouter route.
 
 The embedded credential and its lifetime are reported on stderr (stdout
-stays eval-clean). It is always a short-lived actor token bound to Lux,
-never your login token: auth caps an actor token at 5 minutes, and
-without --ttl the export asks for that maximum. Re-run the command for a
-new one when it expires. --ttl requests a shorter lifetime, as a positive
-whole number of seconds, without --token or LATERE_LUX_TOKEN. Auth may
-shorten the requested lifetime; stderr reports what auth returned.`,
+stays eval-clean). It is always a token minted for Lux alone, never your
+login token, and it lives five minutes. Re-run the command for a new one
+when it expires.`,
 		Example: `  eval "$(latere lux env openai)"
   eval "$(latere lux env --compat anthropic)"
   eval "$(latere lux env --compat lux)"
-  eval "$(latere lux env --compat openai --ttl 1m)"
   TOKEN=$(latere lux env --raw)`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if cmd.Flags().Changed("ttl") {
-				if ttl <= 0 || ttl%time.Second != 0 {
-					return errors.New("--ttl must be a positive whole number of seconds (e.g. 1s or 5m)")
-				}
-				if _, supplied := passthroughToken(*token); supplied {
-					return errors.New("--ttl cannot be combined with --token or LATERE_LUX_TOKEN; use your saved login to mint an actor token")
-				}
-			}
 			route := provider
 			if len(args) == 1 {
 				route = args[0]
@@ -768,7 +748,7 @@ shorten the requested lifetime; stderr reports what auth returned.`,
 			if err != nil {
 				return err
 			}
-			bearer, provenance, err := luxEnvBearer(cmd.Context(), *token, *luxURL, *authURL, ttl)
+			bearer, provenance, err := luxEnvBearer(cmd.Context(), *token, *luxURL, *authURL)
 			if err != nil {
 				return err
 			}
@@ -806,7 +786,6 @@ shorten the requested lifetime; stderr reports what auth returned.`,
 		func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 			return compatDialectNames(), cobra.ShellCompDirectiveNoFileComp
 		})
-	cmd.Flags().DurationVar(&ttl, "ttl", 0, "request a shorter actor-token lifetime in whole seconds (e.g. 1m); the default is auth's 5-minute maximum")
 	cmd.Flags().BoolVar(&raw, "raw", false, "print the bare token only, no exports")
 	return cmd
 }
@@ -820,7 +799,7 @@ func newLuxTokenCmd(luxURL, authURL, token *string) *cobra.Command {
 		Hidden: true,
 		Args:   cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			bearer, provenance, err := luxEnvBearer(cmd.Context(), *token, *luxURL, *authURL, 0)
+			bearer, provenance, err := luxEnvBearer(cmd.Context(), *token, *luxURL, *authURL)
 			if err != nil {
 				return err
 			}
@@ -1335,44 +1314,6 @@ func passthroughToken(tokenFlag string) (string, bool) {
 	return "", false
 }
 
-// authIdentityToken loads the retained auth.latere.ai root token,
-// refreshing it when expired, and returns the access token plus the
-// resolved auth base. This token is what actor tokens are minted with,
-// never what a product receives: Lux enforces aud whenever AUTH_AUDIENCES
-// is set, and the hosted deployment sets it to luxAudience.
-func authIdentityToken(ctx context.Context, luxURL, authURLFlag string) (access, authBase string, err error) {
-	authTok, err := api.LoadAuthToken()
-	if err != nil {
-		if errors.Is(err, api.ErrNoToken) {
-			return "", "", fmt.Errorf("cannot authenticate to Lux: %w", err)
-		}
-		// A saved login that exists but cannot be read is only repaired by
-		// signing in again, so carry the hint every other failure here has.
-		return "", "", fmt.Errorf("read saved login: %w; run `latere login`", err)
-	}
-	authBase = resolveAuthURL(resolveLuxURL(luxURL), authURLFlag)
-
-	access = authTok.AccessToken
-	if authTok.RefreshToken == "" && !authTok.ExpiresAt.IsZero() && !time.Now().Before(authTok.ExpiresAt) {
-		return "", "", errors.New("auth token expired without a refresh token; run `latere login`")
-	}
-	// Refresh when the token is known to be expired (or within a small
-	// skew). A zero ExpiresAt means "unknown"; skip refresh and let the
-	// downstream call surface a re-login error if it is in fact expired.
-	if authTok.RefreshToken != "" && !authTok.ExpiresAt.IsZero() &&
-		time.Now().After(authTok.ExpiresAt.Add(-60*time.Second)) {
-		refreshed, rerr := api.RefreshAuthToken(ctx, authBase, authTok)
-		if rerr != nil {
-			return "", "", fmt.Errorf("auth token expired and refresh failed (%w); run `latere login`", rerr)
-		}
-		access = refreshed.AccessToken
-	}
-	if access == "" {
-		return "", "", errors.New("saved auth credential has no access token; run `latere login`")
-	}
-	return access, authBase, nil
-}
-
 // luxRenewMargin is how long before expiry a session bearer re-mints. The
 // tunnel asks for a bearer on every heartbeat, so the cache is what keeps
 // this to one mint per token lifetime rather than six a minute; the margin
@@ -1381,12 +1322,10 @@ const luxRenewMargin = 60 * time.Second
 
 // luxSessionBearer returns the bearer source for a Lux session that outlives
 // one call: the `lux serve` tunnel, a review debate, the local model route.
-// Each call yields an actor token bound to luxAudience, re-minted once the
-// held one is within luxRenewMargin of expiry. A session runs for hours and
-// an actor token lives at most actorTokenTTL seconds, so it must renew;
-// renewing here keeps the root token off the wire for the whole session. An
-// unreported lifetime leaves the cache due, so the next call re-mints rather
-// than present a token of unknown age.
+// Each call yields a token minted for Lux alone, re-minted once the held one
+// is within luxRenewMargin of expiry. A session runs for hours and an actor
+// token lives five minutes, so it must renew; renewing here keeps the login
+// token off the wire for the whole session.
 func luxSessionBearer(tokenFlag, luxURL, authURL string) func(context.Context) (string, error) {
 	var (
 		mu      sync.Mutex
@@ -1402,46 +1341,36 @@ func luxSessionBearer(tokenFlag, luxURL, authURL string) func(context.Context) (
 		if cached != "" && time.Now().Before(expires.Add(-luxRenewMargin)) {
 			return cached, nil
 		}
-		bearer, lifetime, err := mintLuxActorToken(ctx, luxURL, authURL, actorTokenTTL)
+		bearer, expiry, err := mintLuxActorToken(ctx, luxURL, authURL)
 		if err != nil {
 			return "", err
 		}
-		cached, expires = bearer, time.Time{}
-		if lifetime > 0 {
-			expires = time.Now().Add(time.Duration(lifetime) * time.Second)
-		}
+		cached, expires = bearer, expiry
 		return bearer, nil
 	}
 }
 
-// luxBearer returns a short-lived bearer for a single CLI-initiated call
-// (chat, discovery, usage, access): a passthrough token, or a freshly
-// minted luxAudience actor token (at most 5 minutes, audience-bound; the
-// call completes in seconds, so the short TTL costs nothing and bounds a
-// leaked value).
+// luxBearer returns the bearer for a single CLI-initiated call (chat,
+// discovery, usage, access): a passthrough token, or a token minted for
+// Lux alone. The call completes in seconds, so the five-minute lifetime
+// costs nothing and bounds a leaked value.
 func luxBearer(ctx context.Context, tokenFlag, luxURL, authURL string) (string, error) {
 	if t, ok := passthroughToken(tokenFlag); ok {
 		return t, nil
 	}
-	bearer, _, err := mintLuxActorToken(ctx, luxURL, authURL, actorTokenTTL)
+	bearer, _, err := mintLuxActorToken(ctx, luxURL, authURL)
 	return bearer, err
 }
 
-// mintLuxActorToken refreshes the root token when it is due and exchanges
-// it for an actor token bound to luxAudience, returning the lifetime auth
-// granted in seconds (0 when auth reported none). Every Lux path mints
-// here, so the audience and the failure sentence are stated once.
-func mintLuxActorToken(ctx context.Context, luxURL, authURL string, ttlSeconds int) (string, int64, error) {
-	access, authBase, err := authIdentityToken(ctx, luxURL, authURL)
+// mintLuxActorToken mints the token Lux receives: audience luxAudience,
+// through the family's one mint. Every Lux path comes here, so the
+// audience and the failure sentence are stated once.
+func mintLuxActorToken(ctx context.Context, luxURL, authURL string) (string, time.Time, error) {
+	bearer, expiry, err := api.ActorToken(ctx, api.ResolveAuthURL(resolveLuxURL(luxURL), authURL), luxAudience)
 	if err != nil {
-		return "", 0, err
+		return "", time.Time{}, fmt.Errorf("cannot authenticate to Lux: %w", err)
 	}
-	httpc := &http.Client{Timeout: 15 * time.Second, Transport: otel.Transport(nil)}
-	bearer, lifetime, err := api.MintActorTokenWithLifetime(ctx, httpc, authBase, access, luxAudience, ttlSeconds)
-	if err != nil {
-		return "", 0, fmt.Errorf("mint Lux token: %w; if this persists run `latere login`", err)
-	}
-	return bearer, lifetime, nil
+	return bearer, expiry, nil
 }
 
 // inferInvokeProvider resolves which provider serves model by looking it
@@ -1498,16 +1427,15 @@ func inferInvokeProvider(ctx context.Context, luxURL, authURL, token, model stri
 }
 
 // luxClient builds an authenticated API client pointed at Lux, using the
-// resolved identity bearer (not the stored Cella token). The bearer is
-// also returned for callers that need to present it directly.
+// token minted for Lux alone. The bearer is also returned for callers
+// that need to present it directly.
 func luxClient(ctx context.Context, luxURL, authURL, tokenFlag string) (*api.Client, string, error) {
 	bearer, err := luxBearer(ctx, tokenFlag, luxURL, authURL)
 	if err != nil {
 		return nil, "", err
 	}
 	c := api.NewClient(resolveLuxURL(luxURL))
-	c.Refresh = nil  // luxBearer handles auth refresh; never exchange for Cella here.
-	c.Token = bearer // override NewClient's auto-loaded Cella token
+	c.SetBearer(bearer, time.Time{})
 	return c, bearer, nil
 }
 

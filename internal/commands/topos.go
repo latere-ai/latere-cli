@@ -383,75 +383,33 @@ const toposAudience = "toposd"
 // token with a static bearer, so a server running with TOPOS_DEV_AUTH=true +
 // TOPOS_DEV_TOKEN can be reached in one step without `latere login`.
 //
-// Against production, Topos validates an auth-issued bearer that names
-// toposAudience and carries run:agents. That is an actor token minted from
-// the retained root token, not the root token itself: the root also names
-// auth, and a credential valid at the identity service must not travel to
-// a product.
+// Against production, Topos validates a bearer that names toposAudience
+// and carries run:agents. That is a token minted for Topos alone, not the
+// login token: the login token names the issuer, and a credential valid
+// at the identity service must not travel to a product.
 func toposClient(ctx context.Context, apiURL string) (*api.Client, error) {
 	c := api.NewClient(resolveToposURL(apiURL))
-	c.Refresh = nil // Topos resolves its own auth bearer below, including refresh.
 	if v := os.Getenv("TOPOS_TOKEN"); v != "" {
-		c.Token = v
+		c.SetBearer(v, time.Time{})
 		return c, nil
 	}
 	bearer, err := toposBearer(ctx)
 	if err != nil {
 		return nil, err
 	}
-	c.Token = bearer
+	c.SetBearer(bearer, time.Time{})
 	return c, nil
 }
 
-// toposBearer returns the bearer presented to Topos: an actor token bound
-// to toposAudience, minted at auth with the retained root token. It is the
-// same mint the Drive and Origo paths make, with Topos's audience.
+// toposBearer returns the bearer presented to Topos: a token minted for
+// toposAudience alone from the saved login. It is the same mint every
+// other product path makes, with Topos's audience.
 func toposBearer(ctx context.Context) (string, error) {
-	access, err := toposRootToken(ctx)
+	bearer, _, err := api.ActorToken(ctx, api.ResolveAuthURL("", ""), toposAudience)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("cannot authenticate to Topos: %w; `latere login` grants the run:agents scope Topos needs", err)
 	}
-	return mintActorToken(ctx, toposAuthBase(), access, toposAudience, "Topos")
-}
-
-// toposRootToken returns the retained auth root token, refreshed when within
-// a minute of expiry. It is what the Topos actor token is minted with, never
-// what Topos receives. It mirrors Lux's authIdentityToken but is kept
-// separate so the Topos path has its own clear error messages.
-func toposRootToken(ctx context.Context) (string, error) {
-	authTok, err := api.LoadAuthToken()
-	if err != nil {
-		if errors.Is(err, api.ErrNoToken) {
-			return "", errors.New("not signed in for Topos; run `latere login` (it grants the run:agents scope Topos needs)")
-		}
-		return "", err
-	}
-	access := authTok.AccessToken
-	if authTok.RefreshToken == "" && !authTok.ExpiresAt.IsZero() && !time.Now().Before(authTok.ExpiresAt) {
-		return "", errors.New("auth token expired without a refresh token; run `latere login`")
-	}
-	if authTok.RefreshToken != "" && !authTok.ExpiresAt.IsZero() &&
-		time.Now().After(authTok.ExpiresAt.Add(-60*time.Second)) {
-		rctx, cancel := context.WithTimeout(ctx, 15*time.Second)
-		defer cancel()
-		refreshed, rerr := api.RefreshAuthToken(rctx, toposAuthBase(), authTok)
-		if rerr != nil {
-			return "", fmt.Errorf("auth token expired and refresh failed (%w); run `latere login`", rerr)
-		}
-		access = refreshed.AccessToken
-	}
-	if access == "" {
-		return "", errors.New("no auth token on file; run `latere login`")
-	}
-	return access, nil
-}
-
-// toposAuthBase resolves the auth service base URL for token refresh.
-func toposAuthBase() string {
-	if v := strings.TrimRight(os.Getenv("AUTH_URL"), "/"); v != "" {
-		return v
-	}
-	return "https://auth.latere.ai"
+	return bearer, nil
 }
 
 func agentPath(id string) string {

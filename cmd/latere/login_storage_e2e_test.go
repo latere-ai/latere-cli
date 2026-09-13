@@ -26,7 +26,7 @@ func TestLoginReplacesPermissiveTokenE2E(t *testing.T) {
 	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
-	path := filepath.Join(root, "token.json")
+	path := filepath.Join(root, "auth-token.json")
 	if err := os.WriteFile(path, []byte(`{"access_token":"old-test-token"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -34,23 +34,24 @@ func TestLoginReplacesPermissiveTokenE2E(t *testing.T) {
 		t.Fatal(err)
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/v1/sandboxes" || r.Header.Get("Authorization") != "Bearer new-test-token" {
+		if r.Method != http.MethodGet || r.URL.Path != "/tokeninfo" || r.Header.Get("Authorization") != "Bearer new-test-token" {
 			t.Error("unexpected login verification request")
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`[]`))
+		_, _ = w.Write([]byte(`{"sub":"u-1"}`))
 	}))
 	defer server.Close()
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
-	command := exec.CommandContext(ctx, binary, "login", "--token", "new-test-token", "--no-git", "--api-url", server.URL)
-	command.Env = append(os.Environ(), "LATERE_TOKEN_FILE="+path, "LATERE_AUTH_TOKEN_FILE="+filepath.Join(root, "auth-token.json"), "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
+	command := exec.CommandContext(ctx, binary, "login", "--token", "new-test-token", "--no-git", "--auth-url", server.URL)
+	command.Env = append(os.Environ(), "LATERE_AUTH_TOKEN_FILE="+path, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
 	if out, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("login: %v\n%s", err, out)
 	}
-	got, err := api.LoadToken(path)
+	t.Setenv("LATERE_AUTH_TOKEN_FILE", path)
+	got, err := api.LoadAuthToken()
 	if err != nil || got.AccessToken != "new-test-token" {
 		t.Fatalf("login did not save the new token: %v", err)
 	}

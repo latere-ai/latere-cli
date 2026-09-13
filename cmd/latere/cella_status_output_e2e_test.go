@@ -63,7 +63,7 @@ func TestCellaCommandStatusOutputE2E(t *testing.T) {
 					ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 					defer cancel()
 					command := exec.CommandContext(ctx, binary, "-test.run=^TestCellaStatusOutputHelperProcess$", "--", prefix, tc.mode, "dev", "cmd-1", "--api-url", server.URL)
-					command.Env = append(os.Environ(), "LATERE_TOKEN_FILE="+token, "LATERE_AUTH_TOKEN_FILE="+filepath.Join(dir, "absent-auth.json"), "XDG_CONFIG_HOME="+dir, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "LATERE_TEST_STATUS_OUTPUT="+status, fmt.Sprintf("LATERE_TEST_STATUS_WRITABLE=%t", writable))
+					command.Env = append(os.Environ(), "LATERE_CELLA_TOKEN=synthetic-token", "LATERE_AUTH_TOKEN_FILE="+filepath.Join(dir, "absent-auth.json"), "XDG_CONFIG_HOME="+dir, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "LATERE_TEST_STATUS_OUTPUT="+status, fmt.Sprintf("LATERE_TEST_STATUS_WRITABLE=%t", writable))
 					var out, diagnostic bytes.Buffer
 					command.Stdout, command.Stderr = &out, &diagnostic
 					err := command.Run()

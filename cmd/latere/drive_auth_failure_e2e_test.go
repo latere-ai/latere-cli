@@ -43,18 +43,15 @@ func TestDriveDoesNotSubstituteCellaAfterAuthFailureE2E(t *testing.T) {
 			{name: "unreadable auth"},
 			{name: "healthy auth", wantRoot: "root-access", wantBearer: "drive-actor"},
 			{name: "refreshed auth", wantRoot: "new-root", wantBearer: "drive-actor", refreshStatus: 200},
-			// A paste login leaves only the Cella bearer, which names Cella
-			// alone. Nothing is substituted for it and nothing is sent.
-			{name: "pasted token"},
+			// With no login on file nothing is substituted and nothing is sent.
+			{name: "no login"},
 		} {
 			t.Run(kind+"/"+tc.name, func(t *testing.T) {
 				root := t.TempDir()
-				cellaPath, authPath := filepath.Join(root, "token.json"), filepath.Join(root, "auth-token.json")
-				if err := api.SaveToken(cellaPath, api.Token{AccessToken: "saved-cella"}); err != nil {
-					t.Fatal(err)
-				}
+				authPath := filepath.Join(root, "auth-token.json")
+				t.Setenv("LATERE_AUTH_TOKEN_FILE", authPath)
 				switch tc.name {
-				case "pasted token": // Paste login removes the auth file.
+				case "no login": // nothing on disk
 				case "unreadable auth":
 					if err := os.Mkdir(authPath, 0700); err != nil {
 						t.Fatal(err)
@@ -72,7 +69,7 @@ func TestDriveDoesNotSubstituteCellaAfterAuthFailureE2E(t *testing.T) {
 					if tc.refreshStatus != 0 {
 						expiry = time.Now().Add(-time.Hour)
 					}
-					if err := api.SaveToken(authPath, api.Token{AccessToken: "root-access", RefreshToken: "root-refresh", ExpiresAt: expiry}); err != nil {
+					if err := api.SaveAuthToken(api.Token{AccessToken: "root-access", RefreshToken: "root-refresh", ExpiresAt: expiry}); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -117,15 +114,12 @@ func TestDriveDoesNotSubstituteCellaAfterAuthFailureE2E(t *testing.T) {
 				defer cancel()
 				command := exec.CommandContext(ctx, binary, args...)
 				command.Stdin = strings.NewReader("protocol=https\nhost=code.latere.ai\n\n")
-				command.Env = append(os.Environ(), "LATERE_TOKEN_FILE="+cellaPath, "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_URL="+server.URL, "DRIVE_API_URL="+server.URL, "LATERE_DRIVE_TOKEN=", "AUTH_CLIENT_ID=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
+				command.Env = append(os.Environ(), "LATERE_CELLA_TOKEN=", "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_URL="+server.URL, "DRIVE_API_URL="+server.URL, "LATERE_DRIVE_TOKEN=", "AUTH_CLIENT_ID=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
 				var stdout, stderr bytes.Buffer
 				command.Stdout, command.Stderr = &stdout, &stderr
 				err := command.Run()
 				if kind == "file command" && tc.wantBearer == "" {
-					want := "latere login"
-					if tc.name == "pasted token" {
-						want = "not signed in; run `latere login`"
-					}
+					const want = "latere login"
 					if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 || !strings.Contains(stderr.String(), want) {
 						t.Errorf("failed Drive auth = %v; stderr: %s", err, stderr.String())
 					}
@@ -151,9 +145,6 @@ func TestDriveDoesNotSubstituteCellaAfterAuthFailureE2E(t *testing.T) {
 				}
 				if driveCalls.Load() != wantDrive || refreshes.Load() != wantRefresh || mints.Load() != wantMint {
 					t.Errorf("requests: Drive=%d refresh=%d mint=%d, want %d/%d/%d", driveCalls.Load(), refreshes.Load(), mints.Load(), wantDrive, wantRefresh, wantMint)
-				}
-				if got, err := api.LoadToken(cellaPath); err != nil || got.AccessToken != "saved-cella" {
-					t.Errorf("Drive changed Cella credentials: %v", err)
 				}
 			})
 		}

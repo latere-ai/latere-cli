@@ -25,87 +25,75 @@ func TestLogoutAttemptsBothLocalCredentialsE2E(t *testing.T) {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 	for _, tc := range []struct {
-		name                                    string
-		blockCella, blockAuth, readOnly, absent bool
+		name                      string
+		blocked, readOnly, absent bool
 	}{
 		{name: "success"},
 		{name: "already logged out", absent: true},
-		{name: "Cella directory", blockCella: true},
-		{name: "auth directory", blockAuth: true},
-		{name: "both directories", blockCella: true, blockAuth: true},
-		{name: "Cella removal denied", blockCella: true, readOnly: true},
+		{name: "login directory", blocked: true},
+		{name: "removal denied", blocked: true, readOnly: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
-			paths := []string{filepath.Join(root, "cella", "token.json"), filepath.Join(root, "auth", "auth-token.json")}
-			blocked := []bool{tc.blockCella, tc.blockAuth}
-			contents := []string{`{"access_token":"test-cella"}`, `{"access_token":"test-auth","refresh_token":"test-refresh"}`}
-			for i, path := range paths {
-				if tc.absent {
-					continue
-				}
-				if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			authPath := filepath.Join(root, "auth", "auth-token.json")
+			const contents = `{"access_token":"test-auth","refresh_token":"test-refresh"}`
+			if !tc.absent {
+				if err := os.MkdirAll(filepath.Dir(authPath), 0700); err != nil {
 					t.Fatal(err)
 				}
-				if blocked[i] && !tc.readOnly {
+				path := authPath
+				if tc.blocked && !tc.readOnly {
 					if err := os.Mkdir(path, 0700); err != nil {
 						t.Fatal(err)
 					}
 					path = filepath.Join(path, "child")
 				}
-				if err := os.WriteFile(path, []byte(contents[i]), 0600); err != nil {
+				if err := os.WriteFile(path, []byte(contents), 0600); err != nil {
 					t.Fatal(err)
 				}
-				if blocked[i] && tc.readOnly {
+				if tc.blocked && tc.readOnly {
 					makeTokenDirectoryReadOnly(t, filepath.Dir(path))
 				}
 			}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				switch {
-				case r.Method == http.MethodDelete && r.URL.Path == "/v1/tokens/current":
-					if r.Header.Get("Authorization") != "Bearer test-cella" {
-						t.Error("revocation used unexpected Cella credential")
-					}
-				case r.Method == http.MethodPost && r.URL.Path == "/revoke":
-					if err := r.ParseForm(); err != nil || r.PostForm.Get("token") != "test-refresh" {
-						t.Error("revocation used unexpected auth credential")
-					}
-				default:
-					t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+				if r.Method != http.MethodPost || r.URL.Path != "/revoke" {
+					t.Errorf("unexpected request: %s %s; logout speaks to the issuer alone", r.Method, r.URL.Path)
+				} else if err := r.ParseForm(); err != nil || r.PostForm.Get("token") != "test-refresh" {
+					t.Error("revocation used an unexpected credential")
 				}
-				// Even when remote revocation fails, remove every local token possible.
+				// Even when remote revocation fails, remove the local login.
 				w.WriteHeader(http.StatusServiceUnavailable)
 			}))
 			defer server.Close()
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()
-			command := exec.CommandContext(ctx, binary, "logout", "--api-url", server.URL, "--auth-url", server.URL)
-			command.Env = append(os.Environ(), "LATERE_TOKEN_FILE="+paths[0], "LATERE_AUTH_TOKEN_FILE="+paths[1], "AUTH_URL="+server.URL, "SANDBOX_API_URL="+server.URL, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
+			command := exec.CommandContext(ctx, binary, "logout", "--auth-url", server.URL)
+			command.Env = append(os.Environ(), "LATERE_CELLA_TOKEN=", "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_URL="+server.URL, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
 			out, err := command.CombinedOutput()
-			if tc.blockCella || tc.blockAuth {
+			if tc.blocked {
 				if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 {
-					t.Errorf("partial logout exit = %v: %s", err, out)
+					t.Errorf("blocked logout exit = %v: %s", err, out)
 				}
 				if strings.Contains(string(out), "Logged out.") {
-					t.Errorf("partial logout reported success: %s", out)
+					t.Errorf("blocked logout reported success: %s", out)
 				}
-			} else if err != nil || !strings.Contains(string(out), "Logged out.") {
+				if !strings.Contains(string(out), authPath) {
+					t.Errorf("missing removal error for %s: %s", filepath.Base(authPath), out)
+				}
+				path := authPath
+				if !tc.readOnly {
+					path = filepath.Join(path, "child")
+				}
+				if data, err := os.ReadFile(path); err != nil || string(data) != contents {
+					t.Errorf("failed cleanup changed blocked path: %v", err)
+				}
+				return
+			}
+			if err != nil || !strings.Contains(string(out), "Logged out.") {
 				t.Errorf("logout = %v: %s", err, out)
 			}
-			for i, path := range paths {
-				if blocked[i] {
-					if !strings.Contains(string(out), path) {
-						t.Errorf("missing removal error for %s: %s", filepath.Base(path), out)
-					}
-					if !tc.readOnly {
-						path = filepath.Join(path, "child")
-					}
-					if data, err := os.ReadFile(path); err != nil || string(data) != contents[i] {
-						t.Errorf("failed cleanup changed blocked path: %v", err)
-					}
-				} else if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
-					t.Errorf("logout left removable %s behind: %v", filepath.Base(path), err)
-				}
+			if _, err := os.Stat(authPath); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("logout left removable %s behind: %v", filepath.Base(authPath), err)
 			}
 		})
 	}

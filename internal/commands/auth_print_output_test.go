@@ -13,8 +13,8 @@ import (
 )
 
 func TestPrintTokenHonorsOutputWriter(t *testing.T) {
-	t.Setenv("LATERE_TOKEN_FILE", filepath.Join(t.TempDir(), "token.json"))
-	if err := api.SaveToken("", api.Token{AccessToken: "synthetic-token"}); err != nil {
+	t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(t.TempDir(), "auth-token.json"))
+	if err := api.SaveAuthToken(api.Token{AccessToken: "synthetic-token"}); err != nil {
 		t.Fatal(err)
 	}
 	for _, fail := range []bool{false, true} {

@@ -16,7 +16,7 @@ import (
 )
 
 func TestDownloadsPreserveOutputOnTruncatedResponse(t *testing.T) {
-	t.Setenv("LATERE_TOKEN_FILE", writeTokenFile(t, t.TempDir(), "test-tok"))
+	t.Setenv("LATERE_CELLA_TOKEN", "test-tok")
 	for _, command := range []string{"drive", "cella"} {
 		for _, existing := range []bool{false, true} {
 			t.Run(command+map[bool]string{false: "/new", true: "/existing"}[existing], func(t *testing.T) {
@@ -70,7 +70,7 @@ func TestDownloadsPreserveOutputOnTruncatedResponse(t *testing.T) {
 }
 
 func TestDownloadsReplaceOutputAfterCompleteResponse(t *testing.T) {
-	t.Setenv("LATERE_TOKEN_FILE", writeTokenFile(t, t.TempDir(), "test-tok"))
+	t.Setenv("LATERE_CELLA_TOKEN", "test-tok")
 	for _, command := range []string{"drive", "cella"} {
 		t.Run(command, func(t *testing.T) {
 			dir := t.TempDir()

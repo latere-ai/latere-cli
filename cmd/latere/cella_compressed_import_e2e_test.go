@@ -92,7 +92,7 @@ func TestCellaCompressedTarImportE2E(t *testing.T) {
 					defer file.Close()
 					command.Stdin = file
 				}
-				command.Env = append(os.Environ(), "LATERE_TOKEN_FILE="+tokenPath, "LATERE_AUTH_TOKEN_FILE="+filepath.Join(root, "absent-auth.json"), "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
+				command.Env = append(os.Environ(), "LATERE_CELLA_TOKEN=test-token", "LATERE_AUTH_TOKEN_FILE="+filepath.Join(root, "absent-auth.json"), "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
 				if out, err := command.CombinedOutput(); err != nil {
 					t.Fatalf("import: %v\n%s", err, out)
 				}

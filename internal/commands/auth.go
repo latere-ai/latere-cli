@@ -133,11 +133,6 @@ func newAuthOrgSwitchCmd() *cobra.Command {
 // the org UUID, bare, so it is scriptable.
 func showOrgContext(cmd *cobra.Command) error {
 	tok, err := api.LoadAuthToken()
-	// Legacy logins may have only a Cella token. A damaged auth file must
-	// not silently select that credential's potentially different scope.
-	if errors.Is(err, api.ErrNoToken) {
-		tok, err = api.LoadToken("")
-	}
 	if err != nil {
 		return err
 	}
@@ -236,10 +231,7 @@ func switchOrgContext(cmd *cobra.Command, authURL, clientID, orgID string) error
 		ExpiresAt:    expiry,
 		IssuedAt:     time.Now().UTC(),
 	}); err != nil {
-		return fmt.Errorf("save auth token: %w", err)
-	}
-	if err := replaceCellaOrgToken(cmd.Context(), authBase, got.AccessToken); err != nil {
-		return fmt.Errorf("auth context changed, but Cella credentials could not be updated: %w; retry the org switch or run `latere login`", err)
+		return fmt.Errorf("save login token: %w", err)
 	}
 	if orgID == "" {
 		fprintln(cmd.ErrOrStderr(), "Switched to personal context.")
@@ -249,42 +241,26 @@ func switchOrgContext(cmd *cobra.Command, authURL, clientID, orgID string) error
 	return nil
 }
 
-// replaceCellaOrgToken discards the previous scope before exchanging the new
-// root token. If exchange fails, later commands must not use the old scope.
-func replaceCellaOrgToken(ctx context.Context, authBase, rootToken string) error {
-	if err := api.ClearToken(""); err != nil {
-		return fmt.Errorf("remove previous Cella token: %w", err)
-	}
-	cellaBase := api.NewClient("").BaseURL
-	token, err := exchangeForCellaToken(ctx, deviceFlowOpts{AuthURL: authBase, APIURL: cellaBase}, rootToken)
-	if err != nil {
-		return err
-	}
-	return api.SaveToken("", api.Token{
-		AccessToken: token,
-		TokenType:   "Bearer",
-		IssuedAt:    time.Now().UTC(),
-	})
-}
-
-// newAuthPrintTokenCmd prints the saved access token to stdout so it
+// newAuthPrintTokenCmd prints the saved login token to stdout so it
 // can be embedded in shell scripts: `TOKEN=$(latere print-token)`.
 // Writes one trailing newline, which shell command substitution removes.
 func newAuthPrintTokenCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "print-token",
 		Args:  cobra.NoArgs,
-		Short: "Print the saved access token to stdout (for use in scripts).",
-		Long: `Print the OAuth access token from ~/.config/latere/token.json.
+		Short: "Print the saved login token to stdout (for use in scripts).",
+		Long: `Print the access token from ~/.config/latere/auth-token.json.
 
-Useful for piping into shell tools without depending on jq:
+The token is addressed to auth.latere.ai and opens nothing else: a
+product refuses it. To reach a product, ask for a token minted for that
+product, e.g. 'latere lux env --raw' for Lux.
 
     TOKEN=$(latere print-token)
-    curl -H "Authorization: Bearer $TOKEN" https://cella.latere.ai/v1/sandboxes`,
+    curl -H "Authorization: Bearer $TOKEN" https://auth.latere.ai/tokeninfo`,
 		Example: `  TOKEN=$(latere print-token)
-  curl -H "Authorization: Bearer $TOKEN" https://cella.latere.ai/v1/sandboxes`,
+  curl -H "Authorization: Bearer $TOKEN" https://auth.latere.ai/tokeninfo`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			tok, err := api.LoadToken("")
+			tok, err := api.LoadAuthToken()
 			if err != nil {
 				return err
 			}
@@ -300,7 +276,6 @@ Useful for piping into shell tools without depending on jq:
 func newAuthLoginCmd() *cobra.Command {
 	var (
 		token     string
-		apiURL    string
 		authURL   string
 		clientID  string
 		scopes    string
@@ -319,8 +294,10 @@ By default, login starts the OAuth2 device-code flow against
 auth.latere.ai: it prints a short user code and a URL, you visit the
 URL in any browser to approve, choose the Personal or Organization
 context for the token, and the CLI then polls until the approval lands.
-The resulting access token is written to ~/.config/latere/token.json
-with 0600 perms.
+The resulting access token is written to
+~/.config/latere/auth-token.json with 0600 perms. It is addressed to
+auth.latere.ai alone; every product call presents a five-minute token
+minted from it for that one product.
 
 Use --personal or --org-id to preselect the token context from the
 terminal. Re-run login with a different context to switch which cellas
@@ -354,7 +331,7 @@ context; --personal and --org-id apply only to browser login.`,
 				if personal || strings.TrimSpace(orgID) != "" {
 					return errors.New("--personal and --org-id cannot change a pasted token's context; omit these flags or sign in through the browser")
 				}
-				return loginWithPastedToken(ctx, apiURL, t)
+				return loginWithPastedToken(ctx, authURL, t)
 			}
 			login := func() error {
 				if t := strings.TrimSpace(token); t != "" {
@@ -375,7 +352,6 @@ context; --personal and --org-id apply only to browser login.`,
 				}
 				return runDeviceFlow(ctx, deviceFlowOpts{
 					AuthURL:   authURL,
-					APIURL:    apiURL,
 					ClientID:  clientID,
 					Scopes:    scopes,
 					OrgID:     strings.TrimSpace(orgID),
@@ -397,8 +373,7 @@ context; --personal and --org-id apply only to browser login.`,
 	}
 	f := cmd.Flags()
 	f.StringVar(&token, "token", "", "skip device flow; store an access token directly")
-	f.StringVar(&apiURL, "api-url", "", "override Cella API base URL (default https://cella.latere.ai)")
-	f.StringVar(&authURL, "auth-url", "", "override auth base URL (default https://auth.latere.ai)")
+	f.StringVar(&authURL, "auth-url", "", "override auth base URL (default $AUTH_URL or https://auth.latere.ai)")
 	f.StringVar(&clientID, "client-id", "latere-cli", "OAuth client_id used for the device-code request")
 	f.StringVar(&scopes, "scopes", api.LoginScopes,
 		"space-delimited scope list")
@@ -409,48 +384,36 @@ context; --personal and --org-id apply only to browser login.`,
 	return cmd
 }
 
-func loginWithPastedToken(ctx context.Context, apiURL, token string) error {
-	if err := saveAndVerify(ctx, apiURL, token); err != nil {
+func loginWithPastedToken(ctx context.Context, authURL, token string) error {
+	authBase := api.ResolveAuthURL("", authURL)
+	if err := verifyAtIssuer(ctx, authBase, token); err != nil {
 		return err
 	}
-	// A pasted token has no refresh grant. Retaining a previous root would
-	// let other products and automatic Cella refresh use another identity.
-	if err := api.ClearAuthToken(); err != nil {
-		return discardCellaAfterAuthFailure(fmt.Errorf("clear previous auth token: %w", err))
-	}
-	fmt.Fprintf(os.Stderr, "Logged in. Token saved to %s\n", api.TokenPath())
-	return nil
-}
-
-// discardCellaAfterAuthFailure prevents a new Cella identity from remaining
-// paired with a previous auth root after login fails to update or clear it.
-func discardCellaAfterAuthFailure(cause error) error {
-	if err := api.ClearToken(""); err != nil {
-		return errors.Join(cause, fmt.Errorf("remove new Cella token: %w; credentials may use different accounts; run `latere logout` before retrying login", err))
-	}
-	return fmt.Errorf("%w; Cella credential removed; fix token file permissions or storage and retry `latere login`", cause)
-}
-
-// saveAndVerify confirms the candidate by listing sandboxes before storing it.
-// Shared by the --token fast path and the device-code happy path.
-func saveAndVerify(ctx context.Context, apiURL, token string) error {
-	c := api.NewClient(apiURL)
-	c.Token = token
-	// A refresh would verify a different bearer, potentially from the previous
-	// identity, and persist it even though the submitted token was rejected.
-	c.Refresh = nil
-	verifyCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	var ignored any
-	if err := c.GetJSON(verifyCtx, "/v1/sandboxes", &ignored); err != nil {
-		return fmt.Errorf("token rejected by Cella API: %w", err)
-	}
-	if err := api.SaveToken("", api.Token{
+	// A pasted token has no refresh grant, so nothing of a previous login
+	// survives beside it: the file holds one credential and this is it.
+	if err := api.SaveAuthToken(api.Token{
 		AccessToken: token,
 		TokenType:   "Bearer",
 		IssuedAt:    time.Now().UTC(),
 	}); err != nil {
 		return err
+	}
+	fmt.Fprintf(os.Stderr, "Logged in. Token saved to %s\n", api.AuthTokenPath())
+	return nil
+}
+
+// verifyAtIssuer confirms a pasted token at the issuer before it is
+// stored. The login token is addressed to auth, so auth is who can say
+// whether it is a login at all; storing an unverified string would fail
+// later at every product with an error naming the wrong service.
+func verifyAtIssuer(ctx context.Context, authBase, token string) error {
+	c := api.NewClient(authBase)
+	c.SetBearer(token, time.Time{})
+	verifyCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	var ignored any
+	if err := c.GetJSON(verifyCtx, "/tokeninfo", &ignored); err != nil {
+		return fmt.Errorf("token rejected by auth: %w", err)
 	}
 	return nil
 }
@@ -458,32 +421,15 @@ func saveAndVerify(ctx context.Context, apiURL, token string) error {
 // ---- device-code flow ----
 
 type deviceFlowOpts struct {
-	AuthURL, APIURL, ClientID, Scopes string
-	OrgID                             string
-	OrgIDSet                          bool
-	NoBrowser                         bool
+	AuthURL, ClientID, Scopes string
+	OrgID                     string
+	OrgIDSet                  bool
+	NoBrowser                 bool
 }
 
-// Resolve the same configured endpoints for device authorization, token
-// exchange, and verification. Explicit flags override environment defaults.
-func (opts deviceFlowOpts) endpoints() (authBase, apiBase string) {
-	apiBase = api.NewClient(opts.APIURL).BaseURL
-	return resolveAuthURL(apiBase, opts.AuthURL), apiBase
-}
-
-func resolveAuthURL(apiBase, authBase string) string {
-	if authBase == "" {
-		authBase = os.Getenv("AUTH_URL")
-	}
-	if authBase == "" {
-		authBase = api.InferAuthURL(apiBase)
-	}
-	return strings.TrimRight(authBase, "/")
-}
-
-// captureStore holds the device-flow candidate in memory until Cella exchange,
-// verification, and token storage succeed. A rejected login must not replace
-// the auth identity used by other commands while retaining the old Cella token.
+// captureStore holds the device-flow candidate in memory until the login
+// is complete. A rejected login must not replace the credential the
+// commands already work with.
 type captureStore struct {
 	disk     *cli.FileTokenStore
 	last     *oauth2.Token
@@ -510,13 +456,10 @@ func (s *captureStore) Save(t *oauth2.Token) error {
 	return nil
 }
 
-// persist retains the verified login's root token for refresh and Lux access.
-// The caller must finish saving the Cella credential before invoking it.
+// persist writes the approved login: the one credential on disk, from
+// which every product token is minted.
 func (s *captureStore) persist() error {
 	t := s.last
-	// Persist in the api.Token shape so `latere lux` (which reads via
-	// api.LoadAuthToken) finds the auth-issued root token where it
-	// expects it. The root is also the source of future Cella refreshes.
 	if err := api.SaveAuthToken(api.Token{
 		AccessToken:  t.AccessToken,
 		RefreshToken: t.RefreshToken,
@@ -525,7 +468,7 @@ func (s *captureStore) persist() error {
 		ExpiresAt:    t.Expiry,
 		IssuedAt:     time.Now().UTC(),
 	}); err != nil {
-		return fmt.Errorf("save auth token: %w", err)
+		return fmt.Errorf("save login token: %w", err)
 	}
 	return nil
 }
@@ -534,10 +477,10 @@ func (s *captureStore) Load() (*oauth2.Token, error) { return s.disk.Load() }
 func (s *captureStore) Clear() error                 { return s.disk.Clear() }
 
 // runDeviceFlow drives the RFC 8628 device-code flow against
-// auth.latere.ai via pkg/cli.DeviceCodeClient, then trades the
-// resulting auth-issued token for a Cella-scoped one.
+// auth.latere.ai via pkg/cli.DeviceCodeClient and saves the approved
+// token. Auth issues it for auth alone; nothing is traded anywhere else.
 func runDeviceFlow(ctx context.Context, opts deviceFlowOpts) error {
-	opts.AuthURL, opts.APIURL = opts.endpoints()
+	opts.AuthURL = api.ResolveAuthURL("", opts.AuthURL)
 
 	client := oidc.New(oidc.Config{
 		AuthURL:  opts.AuthURL,
@@ -590,22 +533,10 @@ func runDeviceFlow(ctx context.Context, opts deviceFlowOpts) error {
 		return errors.New("token endpoint returned no access_token")
 	}
 
-	// Best-effort: trade the auth-issued token for a cella-issued
-	// bearer. Falls back to the auth token during the deprecation
-	// window so installs without the cella catalog keep working.
-	candidate := tok.AccessToken
-	if cellaTok, err := exchangeForCellaToken(ctx, opts, tok.AccessToken); err == nil && cellaTok != "" {
-		candidate = cellaTok
-	} else if err != nil {
-		fmt.Fprintf(os.Stderr, "  cella token exchange unavailable (%v); using auth-issued token\n", err)
-	}
-	if err := saveAndVerify(ctx, opts.APIURL, candidate); err != nil {
+	if err := store.persist(); err != nil {
 		return err
 	}
-	if err := store.persist(); err != nil {
-		return discardCellaAfterAuthFailure(err)
-	}
-	fmt.Fprintf(os.Stderr, "Logged in. Token saved to %s\n", api.TokenPath())
+	fmt.Fprintf(os.Stderr, "Logged in. Token saved to %s\n", api.AuthTokenPath())
 	return nil
 }
 
@@ -630,64 +561,28 @@ func browserCommand(rawURL string) (string, []string, error) {
 	}
 }
 
-// exchangeForCellaToken trades an auth-issued user JWT for a cella
-// bearer token. The preferred path mints a short-TTL actor token at
-// auth, then exchanges it at cella's /v1/tokens/exchange.
-//
-// Some deployed auth versions stamp device-code tokens with sandboxd's
-// audience, then reject those same tokens on /actor-tokens because the
-// auth middleware expects the auth issuer as audience. In that case the
-// device token is still accepted by sandboxd, so use it directly for the
-// cella exchange instead of persisting the short-lived auth token.
-func exchangeForCellaToken(ctx context.Context, opts deviceFlowOpts, authToken string) (string, error) {
-	authBase, apiBase := opts.endpoints()
-
-	httpc := &http.Client{Timeout: 15 * time.Second, Transport: otel.Transport(nil)}
-
-	// 1. Mint an actor token at auth.
-	// Sandboxd validates auth-issued actor tokens against SANDBOXD_AUDIENCE.
-	actorToken, err := api.MintActorToken(ctx, httpc, authBase, authToken, "sandboxd", 60)
-	if err != nil {
-		// Auth degrades device tokens to the sandboxd-only audience when
-		// the client's allowed_audiences lookup fails; /actor-tokens then
-		// rejects them (audience mismatch). The device token is still
-		// accepted by sandboxd, so fall back to exchanging it directly.
-		if errors.Is(err, api.ErrActorAudienceMismatch) {
-			return api.ExchangeAtCella(ctx, httpc, apiBase, authToken)
-		}
-		return "", err
-	}
-
-	// 2. Exchange the actor token at cella.
-	return api.ExchangeAtCella(ctx, httpc, apiBase, actorToken)
-}
-
 func newAuthWhoamiCmd() *cobra.Command {
-	var apiURL string
+	var authURL string
 	cmd := &cobra.Command{
 		Use:   "whoami",
 		Args:  cobra.NoArgs,
 		Short: "Print the current principal.",
-		Long: `Print the principal and token context currently used by the CLI.
+		Long: `Print the principal the saved login names.
 
-For auth-issued tokens this asks auth.latere.ai for token information.
-For Cella-issued tokens, it first confirms the token is accepted by
-Cella, then prints the identity claims embedded in the saved JWT.`,
+The login token is addressed to auth.latere.ai, so auth is asked:
+'latere whoami' reads ~/.config/latere/auth-token.json, refreshes it if
+it is due, and calls auth's token-introspection endpoint. If auth
+cannot be reached, the identity claims carried in the saved token are
+printed instead.`,
 		Example: `  latere whoami
-  latere whoami --api-url https://cella.latere.ai`,
+  latere whoami --auth-url https://auth.latere.ai`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c := api.NewClient(apiURL)
-			if err := c.MustRequireAuth(); err != nil {
+			access, authBase, err := api.LoginToken(cmd.Context(), authURL)
+			if err != nil {
 				return err
 			}
-			// Use the same configured auth endpoint as login; only infer an
-			// issuer from the Cella URL when no AUTH_URL override is present.
-			authURL := resolveAuthURL(c.BaseURL, "")
-			req := *c
-			req.BaseURL = authURL
-			// The probe 401s by design for cella-issued tokens; a
-			// bearer refresh cannot change that outcome.
-			req.Refresh = nil
+			c := api.NewClient(authBase)
+			c.SetBearer(access, time.Time{})
 			var info struct {
 				Sub           string   `json:"sub"`
 				Email         *string  `json:"email,omitempty"`
@@ -697,8 +592,8 @@ Cella, then prints the identity claims embedded in the saved JWT.`,
 				ClientID      string   `json:"client_id,omitempty"`
 			}
 			// A successful status with no subject (including null or 204) does
-			// not identify a principal. Use the verified fallback in that case.
-			if err := req.GetJSON(cmd.Context(), "/tokeninfo", &info); err == nil && info.Sub != "" {
+			// not identify a principal. Use the local fallback in that case.
+			if err := c.GetJSON(cmd.Context(), "/tokeninfo", &info); err == nil && info.Sub != "" {
 				return printPrincipal(cmd.OutOrStdout(), principalInfo{
 					Sub:           info.Sub,
 					Email:         deref(info.Email),
@@ -708,27 +603,17 @@ Cella, then prints the identity claims embedded in the saved JWT.`,
 					ClientID:      info.ClientID,
 				})
 			}
-			// /tokeninfo is best-effort: it 401s on cella- and sandbox-issued
-			// tokens, and is unreachable when the inferred auth host does not
-			// resolve (custom or local --api-url). On any failure, fall back to
-			// verifying the bearer against sandboxd and printing the JWT claims.
-
-			// Auth cannot introspect cella-issued tokens, and current
-			// auth deployments also reject sandbox-audience device
-			// tokens on /tokeninfo. Confirm sandboxd accepts the bearer,
-			// then print the identity claims embedded in the JWT.
-			var ignored any
-			if err := c.GetJSON(cmd.Context(), "/v1/sandboxes", &ignored); err != nil {
-				return err
-			}
-			local, err := principalFromJWT(c.Token)
+			// Introspection is best-effort: the inferred auth host may not
+			// resolve on a custom deployment. The saved token carries the
+			// same identity claims, so read them locally.
+			local, err := principalFromJWT(access)
 			if err != nil {
 				return err
 			}
 			return printPrincipal(cmd.OutOrStdout(), local)
 		},
 	}
-	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
+	cmd.Flags().StringVar(&authURL, "auth-url", "", "override auth base URL (default $AUTH_URL or https://auth.latere.ai)")
 	return cmd
 }
 
@@ -832,76 +717,42 @@ func scopesClaim(claims map[string]any) []string {
 }
 
 func newAuthLogoutCmd() *cobra.Command {
-	var apiURL, authURL string
+	var authURL string
 	cmd := &cobra.Command{
 		Use:   "logout",
 		Args:  cobra.NoArgs,
-		Short: "Sign out: revoke the session server-side and clear local tokens.",
+		Short: "Sign out: revoke the session server-side and clear the saved login.",
 		Long: `Sign out of Latere.
 
-Revokes the saved cella token server-side (DELETE /v1/tokens/current)
-and the retained auth refresh token (RFC 7009 /revoke), then clears
-~/.config/latere/token.json and auth-token.json. Server-side revocation
-is best-effort: an unreachable or older server prints a warning and the
-local sign-out still completes.`,
+Revokes the saved refresh token at auth (RFC 7009 /revoke), then
+deletes ~/.config/latere/auth-token.json. Revocation is best-effort: an
+unreachable or older server prints a warning and the local sign-out
+still completes. Tokens already minted for a product are not recalled;
+each lapses within five minutes.`,
 		Example: `  latere logout
   latere login`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			revokeCellaTokenServerSide(cmd.Context(), apiURL, cmd.ErrOrStderr())
-			revokeAuthRefreshToken(cmd.Context(), apiURL, authURL, cmd.ErrOrStderr())
-			// Attempt both removals even if one fails, and report every failure.
-			if err := errors.Join(api.ClearToken(""), api.ClearAuthToken()); err != nil {
+			revokeAuthRefreshToken(cmd.Context(), authURL, cmd.ErrOrStderr())
+			if err := api.ClearAuthToken(); err != nil {
 				return err
 			}
 			fprintln(cmd.ErrOrStderr(), "Logged out.")
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL (default https://cella.latere.ai)")
-	cmd.Flags().StringVar(&authURL, "auth-url", "", "override auth base URL (default derived from the API URL)")
+	cmd.Flags().StringVar(&authURL, "auth-url", "", "override auth base URL (default $AUTH_URL or https://auth.latere.ai)")
 	return cmd
 }
 
-// revokeCellaTokenServerSide best-effort revokes the saved cella
-// catalog token via DELETE /v1/tokens/current so it dies now instead
-// of at TTL expiry. A sandbox-kind bearer (403), an older cella
-// without the endpoint (404), or an unreachable server degrades to a
-// stderr note; the local sign-out proceeds regardless.
-func revokeCellaTokenServerSide(ctx context.Context, apiURL string, errw io.Writer) {
-	c := api.NewClient(apiURL)
-	c.Refresh = nil // never mint a fresh credential just to revoke it
-	if c.Token == "" {
-		return
-	}
-	rctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	err := c.Do(rctx, http.MethodDelete, "/v1/tokens/current", nil, "", nil)
-	if err == nil {
-		return
-	}
-	var apiErr *api.APIError
-	if errors.As(err, &apiErr) && (apiErr.Status == http.StatusNotFound || apiErr.Status == http.StatusForbidden) {
-		fprintf(errw, "  note: server-side token revocation unavailable (%d); the token expires on its own\n", apiErr.Status)
-		return
-	}
-	fprintf(errw, "  warning: could not revoke the cella token server-side (%v); it remains valid until expiry\n", err)
-}
-
-// revokeAuthRefreshToken best-effort revokes the retained auth refresh
-// token via RFC 7009 (POST {auth}/revoke, public client) so the root
-// credential cannot mint further access tokens after sign-out.
-func revokeAuthRefreshToken(ctx context.Context, apiURL, authURL string, errw io.Writer) {
+// revokeAuthRefreshToken best-effort revokes the saved refresh token via
+// RFC 7009 (POST {auth}/revoke, public client) so the login cannot mint
+// further access tokens after sign-out.
+func revokeAuthRefreshToken(ctx context.Context, authURL string, errw io.Writer) {
 	tok, err := api.LoadAuthToken()
 	if err != nil || tok.RefreshToken == "" {
 		return
 	}
-	authBase := strings.TrimRight(authURL, "/")
-	if authBase == "" {
-		authBase = strings.TrimRight(os.Getenv("AUTH_URL"), "/")
-	}
-	if authBase == "" {
-		authBase = api.InferAuthURL(api.NewClient(apiURL).BaseURL)
-	}
+	authBase := api.ResolveAuthURL("", authURL)
 	cid := api.AuthClientID(tok.ClientID)
 	form := url.Values{
 		"token":           {tok.RefreshToken},
@@ -912,21 +763,21 @@ func revokeAuthRefreshToken(ctx context.Context, apiURL, authURL string, errw io
 	defer cancel()
 	req, err := http.NewRequestWithContext(rctx, http.MethodPost, authBase+"/revoke", strings.NewReader(form.Encode()))
 	if err != nil {
-		fprintf(errw, "  warning: could not revoke the auth refresh token (%v)\n", err)
+		fprintf(errw, "  warning: could not revoke the refresh token (%v)\n", err)
 		return
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := (&http.Client{Timeout: 10 * time.Second, Transport: otel.Transport(nil), CheckRedirect: api.PreserveMethodOnRedirect}).Do(req)
 	if err != nil {
-		fprintf(errw, "  warning: could not revoke the auth refresh token (%v); it remains valid until expiry\n", err)
+		fprintf(errw, "  warning: could not revoke the refresh token (%v); it remains valid until expiry\n", err)
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
 	_, readErr := io.Copy(io.Discard, resp.Body)
 	if resp.StatusCode/100 != 2 {
-		fprintf(errw, "  warning: auth refresh-token revocation returned %d; it may remain valid until expiry\n", resp.StatusCode)
+		fprintf(errw, "  warning: refresh-token revocation returned %d; it may remain valid until expiry\n", resp.StatusCode)
 	} else if readErr != nil {
-		fprintf(errw, "  warning: could not confirm auth refresh-token revocation (%v); it may remain valid until expiry\n", readErr)
+		fprintf(errw, "  warning: could not confirm refresh-token revocation (%v); it may remain valid until expiry\n", readErr)
 	}
 }
 

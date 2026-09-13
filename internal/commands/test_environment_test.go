@@ -38,8 +38,8 @@ func runIsolatedCommandTests(m *testing.M) int {
 	defer os.RemoveAll(root)
 	for key, value := range map[string]string{
 		"XDG_CONFIG_HOME":        root,
-		"LATERE_TOKEN_FILE":      filepath.Join(root, "latere", "token.json"),
 		"LATERE_AUTH_TOKEN_FILE": filepath.Join(root, "latere", "auth-token.json"),
+		"LATERE_CELLA_TOKEN":     "",
 		// os.TempDir reads TMPDIR on unix, and TMP then TEMP on Windows.
 		"TMPDIR": root,
 		"TMP":    root,
@@ -72,28 +72,24 @@ func TestCommandSuiteIsolatesSavedLogin(t *testing.T) {
 			if err := os.MkdirAll(credentials, 0700); err != nil {
 				t.Fatal(err)
 			}
-			tokenPath, authPath := filepath.Join(credentials, "token.json"), filepath.Join(credentials, "auth-token.json")
+			authPath := filepath.Join(credentials, "auth-token.json")
 			before := `{"access_token":"synthetic-caller-token","refresh_token":"synthetic-refresh"}`
-			for _, path := range []string{tokenPath, authPath} {
-				if err := os.WriteFile(path, []byte(before), 0600); err != nil {
-					t.Fatal(err)
-				}
+			if err := os.WriteFile(authPath, []byte(before), 0600); err != nil {
+				t.Fatal(err)
 			}
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()
 			child := exec.CommandContext(ctx, binary, "-test.run=^TestCommandSuiteLoginIsolationHelper$", "-test.count=1")
-			child.Env = append(os.Environ(), "LATERE_TEST_LOGIN_ISOLATION_HELPER=1", "XDG_CONFIG_HOME="+callerConfig, "LATERE_TOKEN_FILE=", "LATERE_AUTH_TOKEN_FILE=")
+			child.Env = append(os.Environ(), "LATERE_TEST_LOGIN_ISOLATION_HELPER=1", "XDG_CONFIG_HOME="+callerConfig, "LATERE_AUTH_TOKEN_FILE=")
 			if explicit {
-				child.Env = append(child.Env, "LATERE_TOKEN_FILE="+tokenPath, "LATERE_AUTH_TOKEN_FILE="+authPath)
+				child.Env = append(child.Env, "LATERE_AUTH_TOKEN_FILE="+authPath)
 			}
 			if out, err := child.CombinedOutput(); err != nil {
 				t.Errorf("command test subprocess: %v\n%s", err, out)
 			}
-			for _, path := range []string{tokenPath, authPath} {
-				data, err := os.ReadFile(path)
-				if err != nil || string(data) != before {
-					t.Errorf("command tests modified the caller's %s: %v", filepath.Base(path), err)
-				}
+			data, err := os.ReadFile(authPath)
+			if err != nil || string(data) != before {
+				t.Errorf("command tests modified the caller's %s: %v", filepath.Base(authPath), err)
 			}
 		})
 	}
@@ -106,19 +102,10 @@ func TestCommandSuiteLoginIsolationHelper(t *testing.T) {
 	if os.Getenv("LATERE_TEST_LOGIN_ISOLATION_HELPER") != "1" {
 		t.Skip("subprocess helper")
 	}
-	if _, err := api.LoadToken(""); !errors.Is(err, api.ErrNoToken) {
-		t.Errorf("test suite inherited Cella credentials: %v", err)
-	}
 	if _, err := api.LoadAuthToken(); !errors.Is(err, api.ErrNoToken) {
-		t.Errorf("test suite inherited auth credentials: %v", err)
+		t.Errorf("test suite inherited the caller's login: %v", err)
 	}
-	if err := api.SaveToken("", api.Token{AccessToken: "synthetic-test-token"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := api.SaveAuthToken(api.Token{AccessToken: "synthetic-test-auth"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := api.ClearToken(""); err != nil {
+	if err := api.SaveAuthToken(api.Token{AccessToken: "synthetic-test-login"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := api.ClearAuthToken(); err != nil {

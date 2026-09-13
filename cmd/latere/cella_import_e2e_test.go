@@ -18,8 +18,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/latere-ai/latere-cli/internal/api"
 )
 
 func TestCellaImportRegularFileE2E(t *testing.T) {
@@ -70,10 +68,7 @@ type archiveEntry struct {
 func runCellaImportE2E(t *testing.T, inputName string, wantEntries []archiveEntry) {
 	t.Helper()
 	dir := t.TempDir()
-	tokenPath := filepath.Join(dir, "token.json")
-	if err := api.SaveToken(tokenPath, api.Token{AccessToken: "test-token"}); err != nil {
-		t.Fatal(err)
-	}
+	t.Setenv("LATERE_CELLA_TOKEN", "test-token")
 
 	inputPath := filepath.Join(dir, inputName)
 	if strings.HasSuffix(inputName, ".zip") {
@@ -151,7 +146,7 @@ func runCellaImportE2E(t *testing.T, inputName string, wantEntries []archiveEntr
 		"--timeout", "0",
 	)
 	cmd.Env = append(os.Environ(),
-		"LATERE_TOKEN_FILE="+tokenPath,
+		"LATERE_CELLA_TOKEN=test-token",
 		"LATERE_AUTH_TOKEN_FILE="+filepath.Join(dir, "absent-auth.json"),
 		"LATERE_NO_UPDATE_CHECK=1",
 		"OTEL_SDK_DISABLED=true",

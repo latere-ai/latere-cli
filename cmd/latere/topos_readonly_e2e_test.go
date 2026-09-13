@@ -79,14 +79,14 @@ func TestToposReadOnlyRejectsPromptBeforeAttachE2E(t *testing.T) {
 					ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 					defer cancel()
 					command := exec.CommandContext(ctx, binary, args...)
-					command.Env = append(os.Environ(), "TOPOS_TOKEN="+bearer, "AUTH_URL="+server.URL, "LATERE_TOKEN_FILE="+filepath.Join(root, "token.json"), "LATERE_AUTH_TOKEN_FILE="+filepath.Join(root, "auth-token.json"), "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
+					command.Env = append(os.Environ(), "TOPOS_TOKEN="+bearer, "AUTH_URL="+server.URL, "LATERE_AUTH_TOKEN_FILE="+filepath.Join(root, "auth-token.json"), "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
 					out, err := command.CombinedOutput()
 					wantError := ""
 					switch {
 					case readonly:
 						wantError = "--readonly cannot be combined with --print"
 					case auth == "missing":
-						wantError = "not signed in for Topos"
+						wantError = "cannot authenticate to Topos"
 					}
 					wantRequests := int32(1)
 					if wantError != "" {

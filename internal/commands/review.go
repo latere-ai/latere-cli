@@ -58,9 +58,9 @@ recent Claude Code session.
 The proposer forks your real Claude Code session
 (claude --resume <id> --fork-session) so it argues with the full
 transcript, harness context, and working tree. The critics run through
-topos with model calls routed via Lux (lux.latere.ai), authenticated by
-your retained Latere identity bearer, so critic cost is tracked on your
-Latere account with no provider key needed locally.
+topos with model calls routed via Lux, authenticated by a token minted
+for Lux from your saved login, so critic cost is tracked on your Latere
+account with no provider key needed locally.
 
 Run 'latere login' first to sign in. The proposer additionally needs
 the 'claude' CLI installed and authenticated.

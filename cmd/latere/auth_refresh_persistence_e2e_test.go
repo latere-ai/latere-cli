@@ -91,7 +91,7 @@ func TestAuthRefreshRequiresPersistenceE2E(t *testing.T) {
 				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 				defer cancel()
 				cmd := exec.CommandContext(ctx, binary, "lux", "env", "--raw", "--auth-url", server.URL)
-				cmd.Env = append(os.Environ(), "LATERE_LUX_TOKEN=", "LATERE_AUTH_TOKEN_FILE="+authPath, "LATERE_TOKEN_FILE="+filepath.Join(root, "token.json"), "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
+				cmd.Env = append(os.Environ(), "LATERE_LUX_TOKEN=", "LATERE_AUTH_TOKEN_FILE="+authPath, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
 				var stdout, stderr bytes.Buffer
 				cmd.Stdout, cmd.Stderr = &stdout, &stderr
 				err := cmd.Run()
@@ -109,7 +109,7 @@ func TestAuthRefreshRequiresPersistenceE2E(t *testing.T) {
 						t.Errorf("new credentials not saved correctly: %v", readErr)
 					}
 				} else {
-					if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 || !strings.Contains(stderr.String(), "save refreshed auth token") || !strings.Contains(stderr.String(), "latere login") || stdout.Len() != 0 {
+					if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 || !strings.Contains(stderr.String(), "save refreshed login token") || !strings.Contains(stderr.String(), "latere login") || stdout.Len() != 0 {
 						t.Errorf("save failure not reported: %v stdout=%q stderr=%q", err, stdout.String(), stderr.String())
 					}
 					if data, err := os.ReadFile(backup); err != nil || !bytes.Equal(data, before) {

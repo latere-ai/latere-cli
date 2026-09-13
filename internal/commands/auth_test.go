@@ -104,96 +104,45 @@ func TestRunDeviceFlowNoBrowserSkipsOpen(t *testing.T) {
 	}
 }
 
-func TestExchangeForCellaTokenFallsBackToDirectExchangeOnActorAudienceMismatch(t *testing.T) {
-	authSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/actor-tokens" {
-			http.NotFound(w, r)
-			return
-		}
-		if got := r.Header.Get("Authorization"); got != "Bearer auth-token" {
-			t.Errorf("auth Authorization = %q", got)
-		}
-		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = w.Write([]byte(`{"error":"unauthorized","message":"invalid token: audience mismatch"}`))
-	}))
-	defer authSrv.Close()
-
-	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/tokens/exchange" {
-			http.NotFound(w, r)
-			return
-		}
-		if got := r.Header.Get("Authorization"); got != "Bearer auth-token" {
-			t.Errorf("cella Authorization = %q", got)
-		}
-		var body map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Errorf("decode body: %v", err)
-		}
-		if label, _ := body["label"].(string); !strings.HasPrefix(label, "CLI on ") {
-			t.Errorf("label = %q", label)
-		}
-		_, _ = w.Write([]byte(`{"access_token":"cella-token"}`))
-	}))
-	defer apiSrv.Close()
-
-	got, err := exchangeForCellaToken(context.Background(), deviceFlowOpts{
-		AuthURL: authSrv.URL,
-		APIURL:  apiSrv.URL,
-	}, "auth-token")
-	if err != nil {
-		t.Fatalf("exchangeForCellaToken: %v", err)
-	}
-	if got != "cella-token" {
-		t.Fatalf("token = %q, want cella-token", got)
-	}
-}
-
-func TestAuthLoginTokenClearsStaleAuthToken(t *testing.T) {
-	tokenPath := filepath.Join(t.TempDir(), "token.json")
+// A pasted login replaces whatever was on file: one credential, one
+// principal. A stale login left beside it would let a later command
+// attribute work to the previous account.
+func TestAuthLoginTokenReplacesThePreviousLogin(t *testing.T) {
 	authTokenPath := filepath.Join(t.TempDir(), "auth-token.json")
-	t.Setenv("LATERE_TOKEN_FILE", tokenPath)
 	t.Setenv("LATERE_AUTH_TOKEN_FILE", authTokenPath)
-
-	// A prior login left an auth root token on disk that lux would reuse.
-	if err := api.SaveAuthToken(api.Token{AccessToken: "stale-auth-token", TokenType: "Bearer"}); err != nil {
-		t.Fatalf("seed auth token: %v", err)
-	}
-	if _, err := os.Stat(authTokenPath); err != nil {
-		t.Fatalf("auth token not seeded: %v", err)
+	if err := api.SaveAuthToken(api.Token{AccessToken: "stale-login", TokenType: "Bearer"}); err != nil {
+		t.Fatalf("seed login: %v", err)
 	}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v1/sandboxes" {
-			_, _ = w.Write([]byte(`[]`))
+		if r.URL.Path != "/tokeninfo" {
+			http.NotFound(w, r)
 			return
 		}
-		http.NotFound(w, r)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"sub":"u-1"}`))
 	}))
 	defer srv.Close()
 
 	cmd := newAuthLoginCmd()
-	cmd.SetArgs([]string{"--token", "pasted-cella-token", "--api-url", srv.URL})
+	cmd.SetArgs([]string{"--token", "pasted-login", "--auth-url", srv.URL, "--no-git"})
 	if _, err := captureStdout(func() error { return cmd.Execute() }); err != nil {
 		t.Fatalf("login --token: %v", err)
 	}
 
-	// The stale auth-token.json must be gone so lux falls back to not-signed-in
-	// instead of attributing cost to the previous principal.
-	if _, err := os.Stat(authTokenPath); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("auth-token.json not cleared: stat err = %v", err)
-	}
-	// The pasted token is saved as the Cella token.
-	got, err := api.LoadToken(tokenPath)
+	got, err := api.LoadAuthToken()
 	if err != nil {
-		t.Fatalf("LoadToken: %v", err)
+		t.Fatalf("LoadAuthToken: %v", err)
 	}
-	if got.AccessToken != "pasted-cella-token" {
-		t.Fatalf("cella token = %q, want pasted-cella-token", got.AccessToken)
+	if got.AccessToken != "pasted-login" {
+		t.Fatalf("saved login = %q, want pasted-login", got.AccessToken)
+	}
+	if got.RefreshToken != "" {
+		t.Error("a pasted login kept a refresh token from the previous principal")
 	}
 }
 
-func TestAuthWhoamiFallsBackToVerifiedJWTClaims(t *testing.T) {
+func TestAuthWhoamiFallsBackToTheSavedTokensClaims(t *testing.T) {
 	token := fakeJWT(t, map[string]any{
 		"sub":            "user-123",
 		"email":          "dev@example.com",
@@ -202,31 +151,27 @@ func TestAuthWhoamiFallsBackToVerifiedJWTClaims(t *testing.T) {
 		"client_id":      "latere-cli",
 		"scp":            []string{scopes.AgentsRun.Name, scopes.AgentsRead.Name, scopes.AgentsWrite.Name},
 	})
-	tokenPath := filepath.Join(t.TempDir(), "token.json")
-	t.Setenv("LATERE_TOKEN_FILE", tokenPath)
-	if err := api.SaveToken(tokenPath, api.Token{AccessToken: token, TokenType: "Bearer"}); err != nil {
-		t.Fatalf("SaveToken: %v", err)
+	t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(t.TempDir(), "auth-token.json"))
+	if err := api.SaveAuthToken(api.Token{AccessToken: token, TokenType: "Bearer"}); err != nil {
+		t.Fatalf("SaveAuthToken: %v", err)
 	}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Bearer "+token {
 			t.Errorf("Authorization = %q", got)
 		}
-		switch r.URL.Path {
-		case "/tokeninfo":
-			w.WriteHeader(http.StatusUnauthorized)
-			_, _ = w.Write([]byte(`{"error":"unauthorized","message":"invalid token: audience mismatch"}`))
-		case "/v1/sandboxes":
-			_, _ = w.Write([]byte(`[]`))
-		default:
+		if r.URL.Path != "/tokeninfo" {
+			t.Errorf("whoami called %s; it speaks to the issuer alone", r.URL.Path)
 			http.NotFound(w, r)
+			return
 		}
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
 	}))
 	defer srv.Close()
 
-	t.Setenv("AUTH_URL", srv.URL)
 	cmd := newAuthWhoamiCmd()
-	cmd.SetArgs([]string{"--api-url", srv.URL})
+	cmd.SetArgs([]string{"--auth-url", srv.URL})
 	out, err := captureStdout(func() error { return cmd.Execute() })
 	if err != nil {
 		t.Fatalf("whoami: %v", err)

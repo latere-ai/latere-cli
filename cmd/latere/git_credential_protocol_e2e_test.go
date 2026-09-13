@@ -78,7 +78,7 @@ func TestGitCredentialValidatesProtocolBeforeRefreshE2E(t *testing.T) {
 				defer cancel()
 				command := exec.CommandContext(ctx, binary, "git-credential", "get", "--auth-url", server.URL)
 				command.Stdin = strings.NewReader(input)
-				command.Env = append(os.Environ(), "CODE_HOST="+deployment.override, "LATERE_TOKEN_FILE="+filepath.Join(root, "token.json"), "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_CLIENT_ID=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
+				command.Env = append(os.Environ(), "CODE_HOST="+deployment.override, "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_CLIENT_ID=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
 				var stdout, stderr bytes.Buffer
 				command.Stdout, command.Stderr = &stdout, &stderr
 				err := command.Run()

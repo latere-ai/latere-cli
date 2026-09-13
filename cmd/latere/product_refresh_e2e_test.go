@@ -85,13 +85,13 @@ func TestProductCommandsNeverRefreshCellaCredentialsE2E(t *testing.T) {
 							switch body.Audience {
 							case "lux.latere.ai":
 								luxMints.Add(1)
-								_, _ = w.Write([]byte(`{"actor_token":"lux-actor"}`))
+								_, _ = w.Write([]byte(`{"actor_token":"lux-actor","expires_in":300}`))
 							case "toposd":
 								toposMints.Add(1)
-								_, _ = w.Write([]byte(`{"actor_token":"topos-actor"}`))
+								_, _ = w.Write([]byte(`{"actor_token":"topos-actor","expires_in":300}`))
 							default:
 								cellaMints.Add(1)
-								_, _ = w.Write([]byte(`{"actor_token":"cella-actor"}`))
+								_, _ = w.Write([]byte(`{"actor_token":"cella-actor","expires_in":300}`))
 							}
 						case "/v1/tokens/exchange":
 							exchanges.Add(1)

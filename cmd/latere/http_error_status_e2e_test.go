@@ -34,13 +34,12 @@ func TestCommandsPreserveHTTPErrorStatusE2E(t *testing.T) {
 	}{
 		{"rates", 503, 200, "status 503: try later"},
 		{"invoke", 503, 200, "status 503: try later"},
-		{"logout unavailable", 503, 404, "warning: could not revoke the cella token server-side"},
-		{"logout unsupported", 404, 503, "note: server-side token revocation unavailable (404)"},
+		{"logout unavailable", 503, 404, "warning: refresh-token revocation returned 503"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
-			tokenPath := filepath.Join(root, "token.json")
-			if err := os.WriteFile(tokenPath, []byte(`{"access_token":"test-cella"}`), 0600); err != nil {
+			authPath := filepath.Join(root, "auth-token.json")
+			if err := os.WriteFile(authPath, []byte(`{"access_token":"test-login","refresh_token":"test-refresh"}`), 0600); err != nil {
 				t.Fatal(err)
 			}
 			logout := strings.HasPrefix(tc.name, "logout")
@@ -48,7 +47,7 @@ func TestCommandsPreserveHTTPErrorStatusE2E(t *testing.T) {
 			if tc.name == "invoke" {
 				path, method = "/openai/v1/chat/completions", http.MethodPost
 			} else if logout {
-				path, method = "/v1/tokens/current", http.MethodDelete
+				path, method = "/revoke", http.MethodPost
 			}
 			var calls atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -69,12 +68,12 @@ func TestCommandsPreserveHTTPErrorStatusE2E(t *testing.T) {
 			if tc.name == "invoke" {
 				args = []string{"lux", "invoke", "--token", "test-lux", "--lux-url", server.URL, "--provider", "openai", "--model", "test-model", "Hello"}
 			} else if logout {
-				args = []string{"logout", "--api-url", server.URL, "--auth-url", server.URL}
+				args = []string{"logout", "--auth-url", server.URL}
 			}
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()
 			command := exec.CommandContext(ctx, binary, args...)
-			command.Env = append(os.Environ(), "LATERE_TOKEN_FILE="+tokenPath, "LATERE_AUTH_TOKEN_FILE="+filepath.Join(root, "auth-token.json"), "AUTH_URL="+server.URL, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
+			command.Env = append(os.Environ(), "LATERE_CELLA_TOKEN=", "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_URL="+server.URL, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
 			var stdout, stderr bytes.Buffer
 			command.Stdout, command.Stderr = &stdout, &stderr
 			err := command.Run()
@@ -82,7 +81,7 @@ func TestCommandsPreserveHTTPErrorStatusE2E(t *testing.T) {
 				if err != nil {
 					t.Errorf("logout failed: %v; %s", err, stderr.String())
 				}
-				if _, err := os.Stat(tokenPath); !errors.Is(err, os.ErrNotExist) {
+				if _, err := os.Stat(authPath); !errors.Is(err, os.ErrNotExist) {
 					t.Errorf("logout retained local credential: %v", err)
 				}
 			} else if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 {

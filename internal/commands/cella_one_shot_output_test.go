@@ -12,8 +12,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/latere-ai/latere-cli/internal/api"
 )
 
 func TestOneShotRunFailureDiagnostics(t *testing.T) {
@@ -34,11 +32,8 @@ func TestOneShotRunFailureDiagnostics(t *testing.T) {
 
 func TestOneShotRunOutput(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("LATERE_TOKEN_FILE", filepath.Join(root, "token.json"))
 	t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(root, "absent-auth.json"))
-	if err := api.SaveToken("", api.Token{AccessToken: "synthetic-token"}); err != nil {
-		t.Fatal(err)
-	}
+	t.Setenv("LATERE_CELLA_TOKEN", "synthetic-token")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"state":"exited","exit_code":0,"sandbox_name":"test","stdout":"result\n","stderr":"warning\n"}`))
 	}))

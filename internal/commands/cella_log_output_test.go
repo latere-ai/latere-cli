@@ -14,17 +14,12 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
-
-	"github.com/latere-ai/latere-cli/internal/api"
 )
 
 func TestCellaLogOutput(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("LATERE_TOKEN_FILE", filepath.Join(root, "token.json"))
 	t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(root, "absent-auth.json"))
-	if err := api.SaveToken("", api.Token{AccessToken: "synthetic-token"}); err != nil {
-		t.Fatal(err)
-	}
+	t.Setenv("LATERE_CELLA_TOKEN", "synthetic-token")
 	for _, tc := range []struct {
 		name    string
 		factory func() *cobra.Command
