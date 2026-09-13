@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.10.0 - 2026-09-13
+
 ### Changed
 
 - `latere whoami` prints the claims of the saved token and asks the issuer
