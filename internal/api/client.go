@@ -33,18 +33,22 @@ type Client struct {
 	Token   string
 	HTTP    *http.Client
 
-	// Refresh, when set, re-mints the bearer and is invoked at most once
-	// per client: proactively when the held token is within a minute of
-	// its known expiry, or reactively after a 401. An actor token lives
-	// five minutes and a file transfer or a log follow can outlive it,
-	// which is what this covers.
-	Refresh func(ctx context.Context) (string, bool)
+	// Refresh, when set, re-mints the bearer and returns it with its own
+	// expiry. It runs before a request whose held token is within
+	// remintMargin of a known expiry, and once more on a 401. A product
+	// token lives five minutes and a transfer or a log follow outlives
+	// several of them, so this is per request, not once per client.
+	Refresh func(ctx context.Context) (string, time.Time, bool)
 
 	// expiresAt is when the held bearer lapses. Zero means unknown and
 	// skips the proactive re-mint; the 401 path still applies.
 	expiresAt time.Time
-	refreshed bool
 }
+
+// remintMargin is how long before expiry the bearer is replaced: enough
+// for the request it is attached to, and its retry, to reach the product
+// before the token lapses.
+const remintMargin = 60 * time.Second
 
 // NewClient builds a Client for apiURL, or for $SANDBOX_API_URL, or for
 // the public deployment. It carries no credential: `--help` and `latere
@@ -71,7 +75,22 @@ func NewClient(apiURL string) *Client {
 func (c *Client) SetBearer(token string, expiry time.Time) {
 	c.Token = token
 	c.expiresAt = expiry
-	c.refreshed = false
+}
+
+// remintIfDue replaces the bearer before sending when the held one is
+// within remintMargin of a known expiry. A mint that fails leaves the
+// held token in place with an unknown expiry, so the next request does
+// not ask again; a refusal from the product still triggers one retry.
+func (c *Client) remintIfDue(ctx context.Context) {
+	if c.Refresh == nil || c.expiresAt.IsZero() || time.Now().Before(c.expiresAt.Add(-remintMargin)) {
+		return
+	}
+	token, expiry, ok := c.Refresh(ctx)
+	if !ok {
+		c.expiresAt = time.Time{}
+		return
+	}
+	c.SetBearer(token, expiry)
 }
 
 // PreserveMethodOnRedirect is an http.Client.CheckRedirect callback that
@@ -119,10 +138,10 @@ func (c *Client) Do(ctx context.Context, method, path string, body io.Reader, co
 }
 
 // DoWithHeaders is Do with extra request headers (e.g. Idempotency-Key).
-// When a Refresh hook is set it fires at most once: before the request
-// if the saved token has a known expiry within 60s, or after a 401,
-// retrying the request once with the fresh bearer (only when the body
-// is nil or rewindable, so a consumed stream is never resent corrupt).
+// When a Refresh hook is set it runs before a request whose held token
+// is within remintMargin of expiry, and once more after a 401, retrying
+// the request with the fresh bearer (only when the body is nil or
+// rewindable, so a consumed stream is never resent corrupt).
 func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body io.Reader, contentType string, headers map[string]string, out any) error {
 	return c.doWithHeaders(ctx, method, path, body, contentType, headers, func(resp *http.Response) error {
 		return decodeResponse(resp, out, 0)
@@ -132,14 +151,7 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body io
 // doWithHeaders owns response closure and shares authentication/retry behavior
 // between ordinary requests and endpoints with structured error results.
 func (c *Client) doWithHeaders(ctx context.Context, method, path string, body io.Reader, contentType string, headers map[string]string, decode func(*http.Response) error) error {
-	if c.Refresh != nil && !c.refreshed && !c.expiresAt.IsZero() &&
-		time.Now().After(c.expiresAt.Add(-60*time.Second)) {
-		c.refreshed = true
-		if t, ok := c.Refresh(ctx); ok {
-			c.Token = t
-			c.expiresAt = time.Time{}
-		}
-	}
+	c.remintIfDue(ctx)
 	// A rewindable body is read once and each attempt gets its own reader.
 	// Seeking the caller's reader back after a 401 raced the transport,
 	// which may still be writing the first attempt when the response
@@ -170,15 +182,16 @@ func (c *Client) doWithHeaders(ctx context.Context, method, path string, body io
 	if err != nil {
 		return err
 	}
-	if resp.StatusCode == http.StatusUnauthorized && c.Refresh != nil && !c.refreshed {
+	// One retry per request: a lapsed token is replaced and the request
+	// sent again, and the second refusal is the caller's to report.
+	if resp.StatusCode == http.StatusUnauthorized && c.Refresh != nil {
 		rewindable := body == nil || buffered != nil
 		if rewindable {
-			c.refreshed = true
-			if t, ok := c.Refresh(ctx); ok {
+			if token, expiry, ok := c.Refresh(ctx); ok {
 				// The rejected body is no longer needed. Draining it can
 				// block the retry indefinitely if the server stalls.
 				_ = resp.Body.Close()
-				c.Token = t
+				c.SetBearer(token, expiry)
 				resp, err = send()
 				if err != nil {
 					return err

@@ -1758,8 +1758,10 @@ const cellaAudience = "sandboxd"
 
 // authedClient builds the Cella client for one command run. The bearer is
 // a token minted for cellaAudience alone from the saved login, so the
-// login token never reaches Cella; Refresh re-mints it for a transfer or
-// a log follow that outlives the five-minute lifetime.
+// login token never reaches Cella; Refresh re-mints it whenever the held
+// one is due, which a transfer, a wait, or a log follow outlives several
+// times over. A streaming response (DoRaw) holds the token it started
+// with, so a stream that outlives it ends and the command reports it.
 //
 // LATERE_CELLA_TOKEN presents a bearer as given, for a development
 // deployment or a test, the same escape every other product has.
@@ -1775,12 +1777,12 @@ func authedClient(ctx context.Context, apiURL string) (*api.Client, error) {
 		return nil, fmt.Errorf("cannot authenticate to Cella: %w", err)
 	}
 	c.SetBearer(token, expiry)
-	c.Refresh = func(ctx context.Context) (string, bool) {
-		fresh, _, err := api.ActorToken(ctx, authBase, cellaAudience)
+	c.Refresh = func(ctx context.Context) (string, time.Time, bool) {
+		fresh, freshExpiry, err := api.ActorToken(ctx, authBase, cellaAudience)
 		if err != nil {
-			return "", false
+			return "", time.Time{}, false
 		}
-		return fresh, true
+		return fresh, freshExpiry, true
 	}
 	return c, nil
 }

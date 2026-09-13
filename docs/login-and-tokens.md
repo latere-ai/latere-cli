@@ -92,7 +92,10 @@ your own `sub` and `org_id` and nothing else. It is valid at that one
 product and worthless anywhere else. Auth mints only for the audiences
 this client is registered to act at, and the token lives at most five
 minutes — the CLI has no shorter-lifetime option, because a mint costs
-one round trip and a command that outlives its token mints again.
+one round trip and a command that outlives its token mints again before
+its next request. A streaming response — `latere cella logs --follow`, a
+file export — holds the token it opened with; a stream that outlives it
+ends and the command reports it.
 
 Your login token is addressed to `auth.latere.ai` and opens nothing else.
 A product refuses it, which is the point: a token that names the issuer
@@ -101,8 +104,10 @@ is a credential to your account, not to one product.
 ### Cella
 
 `latere cella` presents a token with audience `sandboxd`, minted when the
-command builds its client. A transfer or a log follow can outlive five
-minutes; a `401` from Cella mints once more and retries the request.
+command builds its client. A command that outlives it re-mints before the
+next request, and a `401` from Cella mints once more and retries that
+request. A streaming response is the exception: it holds the token it
+opened with.
 
 Set `LATERE_CELLA_TOKEN` to present a bearer of your own instead, for a
 development deployment or a test. `LATERE_DRIVE_TOKEN`, `LATERE_LUX_TOKEN`

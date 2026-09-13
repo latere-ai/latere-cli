@@ -4,6 +4,7 @@
 package api
 
 import (
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -140,7 +141,7 @@ func TestOnlyTheLoginTokenIsWrittenToDisk(t *testing.T) {
 
 func TestLoadAuthTokenReportsAbsenceAsErrNoToken(t *testing.T) {
 	setTokenPath(t, filepath.Join(t.TempDir(), "absent.json"))
-	if _, err := LoadAuthToken(); err != ErrNoToken {
+	if _, err := LoadAuthToken(); !errors.Is(err, ErrNoToken) {
 		t.Fatalf("err = %v, want ErrNoToken", err)
 	}
 }

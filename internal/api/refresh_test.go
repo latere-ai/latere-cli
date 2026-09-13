@@ -120,7 +120,7 @@ func TestClientRetriesSeekableBodyAfterRefresh(t *testing.T) {
 
 	c := NewClient(srv.URL)
 	c.SetBearer("stale-actor", time.Time{})
-	c.Refresh = func(context.Context) (string, bool) { return "fresh-actor", true }
+	c.Refresh = func(context.Context) (string, time.Time, bool) { return "fresh-actor", time.Time{}, true }
 	if err := c.PostJSON(context.Background(), "/v1/things", map[string]int{"x": 1}, nil); err != nil {
 		t.Fatalf("PostJSON: %v", err)
 	}

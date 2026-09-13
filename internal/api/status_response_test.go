@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestPostJSONWithStatusRequiresCompleteResponse(t *testing.T) {
@@ -83,7 +84,7 @@ func TestPostJSONWithStatusRefreshesOnce(t *testing.T) {
 	}))
 	defer server.Close()
 	var refreshes int
-	client := &Client{BaseURL: server.URL, HTTP: server.Client(), Token: "old", Refresh: func(_ context.Context) (string, bool) { refreshes++; return "fresh", true }}
+	client := &Client{BaseURL: server.URL, HTTP: server.Client(), Token: "old", Refresh: func(_ context.Context) (string, time.Time, bool) { refreshes++; return "fresh", time.Time{}, true }}
 	var out struct{ Result string }
 	status, err := client.PostJSONWithStatus(t.Context(), "/runs", json.RawMessage(body), &out, 500)
 	if err != nil || status != 500 || out.Result != result || requests.Load() != 2 || refreshes != 1 {
