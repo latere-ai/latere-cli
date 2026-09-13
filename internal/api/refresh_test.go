@@ -175,7 +175,6 @@ func TestRefreshAuthTokenUsesIssuingClient(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
 			t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(root, "auth-token.json"))
-			t.Setenv("LATERE_TOKEN_FILE", filepath.Join(root, "token.json"))
 			t.Setenv("XDG_CONFIG_HOME", root)
 			t.Setenv("AUTH_CLIENT_ID", tc.env)
 			previous := Token{AccessToken: "old-root", RefreshToken: "old-refresh", ClientID: tc.saved}

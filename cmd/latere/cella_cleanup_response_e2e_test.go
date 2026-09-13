@@ -29,10 +29,6 @@ func TestOneShotCleanupFailurePreservesOutputE2E(t *testing.T) {
 	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
-	token := filepath.Join(root, "token.json")
-	if err := os.WriteFile(token, []byte(`{"access_token":"test-token"}`), 0600); err != nil {
-		t.Fatal(err)
-	}
 	output := strings.Repeat("result\n", 5000)
 	for _, asJSON := range []bool{false, true} {
 		for _, code := range []int{0, 7} {

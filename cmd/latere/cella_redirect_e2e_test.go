@@ -32,10 +32,6 @@ func TestCellaRedirectsPreserveRequestMethodsE2E(t *testing.T) {
 		for _, status := range []int{301, 302, 303, 307, 308} {
 			t.Run(operation+"/"+strconv.Itoa(status), func(t *testing.T) {
 				root := t.TempDir()
-				tokenPath := filepath.Join(root, "token.json")
-				if err := os.WriteFile(tokenPath, []byte(`{"access_token":"test-cella"}`), 0600); err != nil {
-					t.Fatal(err)
-				}
 				args := []string{"cella", operation, "dev"}
 				method, path, body := http.MethodGet, "/v1/sandboxes/dev", ""
 				switch operation {

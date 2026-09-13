@@ -28,10 +28,6 @@ func TestCellaDetailsOutputFailureE2E(t *testing.T) {
 	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
-	token := filepath.Join(dir, "token.json")
-	if err := os.WriteFile(token, []byte(`{"access_token":"synthetic-token"}`), 0600); err != nil {
-		t.Fatal(err)
-	}
 	const detail = `{"id":"sb-test","name":"dev","state":"running","tier":"ephemeral"}`
 	const record = "cella:      dev\nid:         sb-test\nstate:      running\ntier:       ephemeral\n"
 	for _, prefix := range []string{"cella", "sandbox"} {

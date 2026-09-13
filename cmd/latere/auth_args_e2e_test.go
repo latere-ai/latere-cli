@@ -30,26 +30,19 @@ func TestAuthExtraArgumentsHaveNoEffectsE2E(t *testing.T) {
 		for _, prefix := range []string{"", "auth"} {
 			t.Run(prefix+"/"+verb, func(t *testing.T) {
 				root := t.TempDir()
-				tokenPath, authPath := filepath.Join(root, "token.json"), filepath.Join(root, "auth-token.json")
-				before := map[string]string{
-					tokenPath: `{"access_token":"old-cella"}`,
-					authPath:  `{"access_token":"old-auth","refresh_token":"old-refresh"}`,
-				}
-				for path, contents := range before {
-					if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
-						t.Fatal(err)
-					}
+				authPath := filepath.Join(root, "auth-token.json")
+				const before = `{"access_token":"old-auth","refresh_token":"old-refresh"}`
+				if err := os.WriteFile(authPath, []byte(before), 0o600); err != nil {
+					t.Fatal(err)
 				}
 				var requests atomic.Int32
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					requests.Add(1)
 					w.Header().Set("Content-Type", "application/json")
 					switch r.URL.Path {
-					case "/v1/sandboxes":
-						_, _ = w.Write([]byte(`[]`))
 					case "/tokeninfo":
 						_, _ = w.Write([]byte(`{"sub":"test-user","principal_type":"user"}`))
-					case "/v1/tokens/current", "/revoke":
+					case "/revoke":
 						w.WriteHeader(http.StatusNoContent)
 					default:
 						t.Errorf("unexpected endpoint: %s", r.URL.Path)
@@ -67,8 +60,8 @@ func TestAuthExtraArgumentsHaveNoEffectsE2E(t *testing.T) {
 				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 				defer cancel()
 				command := exec.CommandContext(ctx, binary, args...)
-				command.Env = append(os.Environ(), "LATERE_TOKEN_FILE="+tokenPath, "LATERE_AUTH_TOKEN_FILE="+authPath,
-					"AUTH_URL="+server.URL, "SANDBOX_API_URL="+server.URL, "XDG_CONFIG_HOME="+root,
+				command.Env = append(os.Environ(), "LATERE_CELLA_TOKEN=", "LATERE_AUTH_TOKEN_FILE="+authPath,
+					"AUTH_URL="+server.URL, "XDG_CONFIG_HOME="+root,
 					"LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
 				var out, diagnostics bytes.Buffer
 				command.Stdout, command.Stderr = &out, &diagnostics
@@ -82,10 +75,8 @@ func TestAuthExtraArgumentsHaveNoEffectsE2E(t *testing.T) {
 				if requests.Load() != 0 {
 					t.Errorf("invalid command made %d requests", requests.Load())
 				}
-				for path, contents := range before {
-					if got, err := os.ReadFile(path); err != nil || string(got) != contents {
-						t.Errorf("invalid command changed %s: %v", filepath.Base(path), err)
-					}
+				if got, err := os.ReadFile(authPath); err != nil || string(got) != before {
+					t.Errorf("invalid command changed %s: %v", filepath.Base(authPath), err)
 				}
 			})
 		}

@@ -31,10 +31,6 @@ func TestCellaUploadValidatesSourcesE2E(t *testing.T) {
 	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
-	tokenPath := filepath.Join(root, "token.json")
-	if err := os.WriteFile(tokenPath, []byte(`{"access_token":"test-token"}`), 0600); err != nil {
-		t.Fatal(err)
-	}
 	for _, kind := range []string{"device", "pipe", "nested device", "nested pipe", "files"} {
 		t.Run(kind, func(t *testing.T) {
 			source := os.DevNull
@@ -156,9 +152,7 @@ func TestCellaUploadParentPathsE2E(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(root, "child"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	tokenPath := filepath.Join(root, "token.json")
 	for path, data := range map[string]string{
-		tokenPath:                     `{"access_token":"test-token"}`,
 		filepath.Join(parent, "file"): "wanted",
 		filepath.Join(root, "file"):   "wrong file",
 	} {

@@ -30,10 +30,6 @@ func TestCellaConfiguredDownloadOutputE2E(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := t.TempDir()
-	token := filepath.Join(root, "token.json")
-	if err := os.WriteFile(token, []byte(`{"access_token":"synthetic-token"}`), 0600); err != nil {
-		t.Fatal(err)
-	}
 	for _, prefix := range []string{"cella", "sandbox"} {
 		for _, mode := range []string{"cat", "export"} {
 			for _, writable := range []string{"1", "0"} {

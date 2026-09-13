@@ -28,10 +28,6 @@ func TestCellaLsOutputFailureE2E(t *testing.T) {
 	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
-	token := filepath.Join(root, "token.json")
-	if err := os.WriteFile(token, []byte(`{"access_token":"test-token"}`), 0600); err != nil {
-		t.Fatal(err)
-	}
 	for _, prefix := range []string{"cella", "sandbox"} {
 		for _, mode := range []string{"writable", "read-only"} {
 			t.Run(prefix+"/"+mode, func(t *testing.T) {

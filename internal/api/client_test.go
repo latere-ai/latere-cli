@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -75,7 +74,6 @@ func TestClientErrorsPreserveHTTPStatus(t *testing.T) {
 }
 
 func TestClientRedirectLoopRemainsBounded(t *testing.T) {
-	t.Setenv("LATERE_TOKEN_FILE", filepath.Join(t.TempDir(), "token.json"))
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)

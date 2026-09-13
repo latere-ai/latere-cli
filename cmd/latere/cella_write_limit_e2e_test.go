@@ -30,10 +30,6 @@ func TestCellaWriteSizeLimitE2E(t *testing.T) {
 	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
-	token := filepath.Join(root, "token.json")
-	if err := os.WriteFile(token, []byte(`{"access_token":"test-token"}`), 0600); err != nil {
-		t.Fatal(err)
-	}
 	const limit = 10 << 20
 	for _, mode := range []string{"file", "stdin", "open stdin"} {
 		for _, size := range []int{0, 7, limit, limit + 1} {

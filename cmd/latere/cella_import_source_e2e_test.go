@@ -30,10 +30,6 @@ func TestCellaImportRejectsSpecialFilesE2E(t *testing.T) {
 	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
-	tokenPath := filepath.Join(root, "token.json")
-	if err := os.WriteFile(tokenPath, []byte(`{"access_token":"test-token"}`), 0600); err != nil {
-		t.Fatal(err)
-	}
 	for _, kind := range []string{"device", "device.tar", "device.zip", "pipe", "pipe.tar", "directory"} {
 		t.Run(kind, func(t *testing.T) {
 			source := filepath.Join(t.TempDir(), kind)

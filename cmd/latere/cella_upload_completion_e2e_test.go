@@ -39,10 +39,6 @@ func TestCellaMultipartRequiresCompleteUploadE2E(t *testing.T) {
 	if err := f.Close(); err != nil {
 		t.Fatal(err)
 	}
-	tokenPath := filepath.Join(root, "token.json")
-	if err := os.WriteFile(tokenPath, []byte(`{"access_token":"test-token"}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	for _, verb := range []string{"upload", "import", "import stdin"} {
 		for _, early := range []bool{false, true} {
 			if verb == "import stdin" && !early {

@@ -363,15 +363,10 @@ func TestToposRequiresAuth(t *testing.T) {
 	}
 }
 
-// The Topos path mints an actor token for toposAudience from the auth root
-// token. Neither the Cella bearer, which names Cella, nor the root token,
-// which names the auth issuer, is ever presented to Topos.
+// The Topos path mints a token for toposAudience from the saved login.
+// The login token, which names the auth issuer, is never presented to
+// Topos.
 func TestToposClientMintsToposActorToken(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "token.json"),
-		[]byte(`{"access_token":"cella-token","token_type":"Bearer"}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	writeAuthTokenFile(t, "auth-root-token", "", time.Time{})
 	t.Setenv("TOPOS_TOKEN", "")
 

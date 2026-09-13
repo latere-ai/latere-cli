@@ -28,10 +28,6 @@ func TestCellaCompressedTarImportE2E(t *testing.T) {
 	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
-	tokenPath := filepath.Join(root, "token.json")
-	if err := os.WriteFile(tokenPath, []byte(`{"access_token":"test-token"}`), 0600); err != nil {
-		t.Fatal(err)
-	}
 	for _, format := range []string{"tar", "tar.gz", "tar.bz2", "tar.xz", "v7.tar", "v7.tar.gz"} {
 		for _, mode := range []string{"file", "stdin", "without extension"} {
 			t.Run(format+"/"+mode, func(t *testing.T) {

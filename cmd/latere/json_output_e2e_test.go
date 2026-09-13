@@ -28,10 +28,6 @@ func TestSharedJSONConfiguredOutputE2E(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	token := filepath.Join(dir, "token.json")
-	if err := os.WriteFile(token, []byte(`{"access_token":"synthetic-token"}`), 0600); err != nil {
-		t.Fatal(err)
-	}
 	for _, tc := range []struct {
 		name                   string
 		args                   []string

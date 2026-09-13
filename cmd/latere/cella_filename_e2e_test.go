@@ -32,10 +32,6 @@ func TestCellaMultipartFilenamesE2E(t *testing.T) {
 	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
-	tokenPath := filepath.Join(root, "token.json")
-	if err := os.WriteFile(tokenPath, []byte(`{"access_token":"test-token"}`), 0600); err != nil {
-		t.Fatal(err)
-	}
 	var archive bytes.Buffer
 	tw := tar.NewWriter(&archive)
 	if err := tw.WriteHeader(&tar.Header{Name: "file", Mode: 0600, Size: 7}); err != nil {

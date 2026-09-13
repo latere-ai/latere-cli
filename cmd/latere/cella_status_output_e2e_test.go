@@ -30,11 +30,6 @@ func TestCellaCommandStatusOutputE2E(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	root := t.TempDir()
-	token := filepath.Join(root, "token.json")
-	if err := os.WriteFile(token, []byte(`{"access_token":"synthetic-token"}`), 0600); err != nil {
-		t.Fatal(err)
-	}
 	for _, prefix := range []string{"cella", "sandbox"} {
 		for _, tc := range []struct {
 			name, mode, response, status, stdout string

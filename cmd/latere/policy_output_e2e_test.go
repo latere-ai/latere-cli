@@ -29,10 +29,6 @@ func TestPolicyOutputFailureE2E(t *testing.T) {
 	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
-	token := filepath.Join(dir, "token.json")
-	if err := os.WriteFile(token, []byte(`{"access_token":"synthetic-token"}`), 0600); err != nil {
-		t.Fatal(err)
-	}
 	for _, prefix := range []string{"cella", "sandbox"} {
 		for _, verb := range [][]string{{"policy"}, {"policy", "list"}, {"policies"}} {
 			for _, empty := range []bool{false, true} {

@@ -32,10 +32,7 @@ func TestCellaConfiguredInputE2E(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := t.TempDir()
-	token, source := filepath.Join(root, "token.json"), filepath.Join(root, "source.tar")
-	if err := os.WriteFile(token, []byte(`{"access_token":"synthetic-token"}`), 0600); err != nil {
-		t.Fatal(err)
-	}
+	source := filepath.Join(root, "source.tar")
 	want := make([]byte, 1024)
 	if err := os.WriteFile(source, want, 0600); err != nil {
 		t.Fatal(err)

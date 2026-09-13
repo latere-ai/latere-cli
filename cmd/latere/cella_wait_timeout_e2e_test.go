@@ -27,10 +27,6 @@ func TestCellaWaitTimeoutValidationE2E(t *testing.T) {
 	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
-	tokenPath := filepath.Join(root, "token.json")
-	if err := os.WriteFile(tokenPath, []byte(`{"access_token":"test-token"}`), 0600); err != nil {
-		t.Fatal(err)
-	}
 	for _, prefix := range []string{"cella", "sandbox"} {
 		for _, tc := range []struct {
 			value string

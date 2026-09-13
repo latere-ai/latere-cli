@@ -34,10 +34,6 @@ func TestCellaCommandsRequireCompleteResponsesE2E(t *testing.T) {
 			}
 			t.Run(operation+"/"+state, func(t *testing.T) {
 				root := t.TempDir()
-				tokenPath := filepath.Join(root, "token.json")
-				if err := os.WriteFile(tokenPath, []byte(`{"access_token":"test-cella"}`), 0600); err != nil {
-					t.Fatal(err)
-				}
 				payload := `{"id":"test-id","name":"dev"}`
 				wantError := ""
 				switch state {

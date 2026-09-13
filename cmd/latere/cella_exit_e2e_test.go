@@ -26,10 +26,6 @@ func TestCellaCompletionExitStatusE2E(t *testing.T) {
 	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build CLI: %v\n%s", err, out)
 	}
-	tokenFile := filepath.Join(root, "token.json")
-	if err := os.WriteFile(tokenFile, []byte(`{"access_token":"test-token"}`), 0600); err != nil {
-		t.Fatal(err)
-	}
 	methods := map[string][]string{
 		"exec":          {"cella", "exec", "dev", "--", "true"},
 		"follow":        {"cella", "run", "dev", "--follow", "--", "true"},

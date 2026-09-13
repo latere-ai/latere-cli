@@ -26,7 +26,7 @@ func TestGitCredentialRejectsProtocolControlBytesE2E(t *testing.T) {
 	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
-	for _, source := range []string{"saved auth", "pasted", "refreshed"} {
+	for _, source := range []string{"saved auth", "no login", "refreshed"} {
 		for _, tc := range []struct {
 			name, token string
 			invalid     bool
@@ -40,22 +40,12 @@ func TestGitCredentialRejectsProtocolControlBytesE2E(t *testing.T) {
 		} {
 			t.Run(source+"/"+tc.name, func(t *testing.T) {
 				root := t.TempDir()
-				cellaPath, authPath := filepath.Join(root, "token.json"), filepath.Join(root, "auth-token.json")
-				// The pasted source puts the candidate value in token.json, the
-				// Cella bearer, to prove none of it reaches git.
-				cellaToken := "unrelated-cella"
-				if source == "pasted" {
-					cellaToken = tc.token
-				}
-				cellaBefore, _ := json.Marshal(map[string]string{"access_token": cellaToken})
-				if err := os.WriteFile(cellaPath, cellaBefore, 0600); err != nil {
-					t.Fatal(err)
-				}
-				// The value git receives is the minted Origo token; the root
+				authPath := filepath.Join(root, "auth-token.json")
+				// The value git receives is the minted Origo token; the login
 				// token (saved or refreshed) is only the bearer of the mint.
 				var authBefore []byte
 				wantBearer := "Bearer saved-root"
-				if source != "pasted" {
+				if source != "no login" {
 					value := map[string]any{"access_token": "saved-root"}
 					if source == "refreshed" {
 						value = map[string]any{"access_token": "old-root", "refresh_token": "test-refresh", "expires_at": time.Now().Add(-time.Hour)}
@@ -89,7 +79,7 @@ func TestGitCredentialRejectsProtocolControlBytesE2E(t *testing.T) {
 				defer cancel()
 				command := exec.CommandContext(ctx, binary, "git-credential", "get", "--auth-url", server.URL)
 				command.Stdin = strings.NewReader("protocol=https\nhost=code.latere.ai\n\n")
-				command.Env = append(os.Environ(), "LATERE_TOKEN_FILE="+cellaPath, "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_CLIENT_ID=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
+				command.Env = append(os.Environ(), "LATERE_CELLA_TOKEN=", "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_CLIENT_ID=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
 				var stdout, stderr bytes.Buffer
 				command.Stdout, command.Stderr = &stdout, &stderr
 				err := command.Run()
@@ -97,9 +87,9 @@ func TestGitCredentialRejectsProtocolControlBytesE2E(t *testing.T) {
 				if tc.invalid {
 					want = ""
 				}
-				// A paste login leaves no root token, so there is no mint and
-				// nothing to emit whatever the saved Cella value looks like.
-				if source == "pasted" {
+				// With no login there is nothing to mint from, so the helper
+				// emits nothing and git prompts.
+				if source == "no login" {
 					want = ""
 				}
 				if err != nil || stdout.String() != want || stderr.Len() != 0 {
@@ -109,18 +99,15 @@ func TestGitCredentialRejectsProtocolControlBytesE2E(t *testing.T) {
 				if source == "refreshed" {
 					wantRefreshes = 1
 				}
-				if source == "pasted" {
-					wantMints = 0 // no root token to mint from, and the Cella bearer is never substituted
+				if source == "no login" {
+					wantMints = 0 // nothing to mint from, and nothing is substituted
 				}
 				if refreshes.Load() != wantRefreshes || mints.Load() != wantMints {
 					t.Errorf("refresh requests=%d mint requests=%d, want %d and %d", refreshes.Load(), mints.Load(), wantRefreshes, wantMints)
 				}
-				if data, err := os.ReadFile(cellaPath); err != nil || !bytes.Equal(data, cellaBefore) {
-					t.Errorf("helper changed saved Cella token: %v", err)
-				}
 				if source == "saved auth" {
 					if data, err := os.ReadFile(authPath); err != nil || !bytes.Equal(data, authBefore) {
-						t.Errorf("helper changed saved auth token: %v", err)
+						t.Errorf("helper changed the saved login: %v", err)
 					}
 				}
 			})
