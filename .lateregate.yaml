@@ -45,3 +45,18 @@ waive:
     reason: >-
       the tree is at 66.1% against a 90% per-package floor; the command layer drives a terminal UI that the suite does not exercise yet
     until: 2026-12-01
+
+# The identity shape of the family: specs/infrastructure/identity.md in latere-ai/specs
+identity:
+  role: client
+  audiences: [sandboxd, toposd, lux.latere.ai, drive.latere.ai, origo]
+  waive:
+    delegation:
+      until: 2026-11-30
+      reason: the Cella token exchange goes with D2 in id-03
+    client-audiences:
+      until: 2026-11-30
+      reason: two files mint for sandboxd and the Drive and Lux audience constants are declared twice; id-03 leaves one minting file per product
+    documents:
+      until: 2026-11-30
+      reason: two live specs name retired packages; id-02 corrects them
