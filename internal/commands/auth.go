@@ -5,7 +5,6 @@ package commands
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,6 +22,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/oauth2"
 	"latere.ai/x/pkg/authkit/cli"
+	"latere.ai/x/pkg/authkit/jwt"
 	"latere.ai/x/pkg/authkit/oidc"
 
 	"github.com/latere-ai/latere-cli/internal/api"
@@ -627,28 +627,26 @@ func printPrincipal(dst io.Writer, info principalInfo) error {
 }
 
 func principalFromJWT(raw string) (principalInfo, error) {
-	parts := strings.Split(raw, ".")
-	if len(parts) < 2 {
-		return principalInfo{}, errors.New("saved token is not a JWT")
-	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	// The identity claims come from the shared decoder, which requires a
+	// three-segment token, a base64url JSON payload, and a non-empty sub. It
+	// folds the old "not a JWT", payload-decode, and "missing sub" errors into
+	// one; the whoami path only distinguishes success from failure.
+	c, err := jwt.ParseUnverified(raw)
 	if err != nil {
-		return principalInfo{}, fmt.Errorf("decode token payload: %w", err)
+		return principalInfo{}, fmt.Errorf("saved token is not a valid JWT: %w", err)
 	}
+	// The scope claim has broader shapes than the identity claims ("scope" as
+	// a space-delimited string, "scp" as a string or an array), so it is still
+	// read from the decoded payload rather than off the identity.
 	var claims map[string]any
-	if err := json.Unmarshal(payload, &claims); err != nil {
-		return principalInfo{}, fmt.Errorf("parse token payload: %w", err)
-	}
+	_ = jwt.DecodePayload(raw, &claims)
 	info := principalInfo{
-		Sub:           stringClaim(claims, "sub"),
-		Email:         stringClaim(claims, "email"),
-		PrincipalType: stringClaim(claims, "principal_type"),
-		OrgID:         stringClaim(claims, "org_id"),
+		Sub:           c.Sub,
+		Email:         c.Email,
+		PrincipalType: string(c.PrincipalType),
+		OrgID:         c.OrgID,
 		Scopes:        scopesClaim(claims),
-		ClientID:      stringClaim(claims, "client_id"),
-	}
-	if info.Sub == "" {
-		return principalInfo{}, errors.New("saved token is missing sub")
+		ClientID:      c.ClientID,
 	}
 	if info.PrincipalType == "" {
 		info.PrincipalType = "user"
