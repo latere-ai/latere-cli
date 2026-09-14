@@ -627,13 +627,20 @@ func printPrincipal(dst io.Writer, info principalInfo) error {
 }
 
 func principalFromJWT(raw string) (principalInfo, error) {
-	// The identity claims come from the shared decoder, which requires a
-	// three-segment token, a base64url JSON payload, and a non-empty sub. It
-	// folds the old "not a JWT", payload-decode, and "missing sub" errors into
-	// one; the whoami path only distinguishes success from failure.
+	// The identity claims come from the shared decoder. It rejects a malformed
+	// token and one with an empty sub with the same error, so the two cases are
+	// split back apart here to keep the original messages: a payload that
+	// decodes but names no subject is "missing sub", anything else is "not a
+	// JWT".
 	c, err := jwt.ParseUnverified(raw)
 	if err != nil {
-		return principalInfo{}, fmt.Errorf("saved token is not a valid JWT: %w", err)
+		var probe struct {
+			Sub string `json:"sub"`
+		}
+		if jwt.DecodePayload(raw, &probe) == nil {
+			return principalInfo{}, errors.New("saved token is missing sub")
+		}
+		return principalInfo{}, errors.New("saved token is not a JWT")
 	}
 	// The scope claim has broader shapes than the identity claims ("scope" as
 	// a space-delimited string, "scp" as a string or an array), so it is still
