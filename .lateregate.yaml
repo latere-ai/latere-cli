@@ -50,3 +50,4 @@ waive:
 identity:
   role: client
   audiences: [sandboxd, toposd, lux.latere.ai, drive.latere.ai, origo]
+  roles_only: true
