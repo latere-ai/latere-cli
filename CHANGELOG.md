@@ -10,6 +10,12 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Changed
+
+- The identity gate reads the frontend for the retired admin flag and
+  refuses a second copy of the authorizer envelope (ci-gate v0.42.0).
+  Nothing changes for a user of `latere`.
+
 ## v0.10.0 - 2026-09-13
 
 ### Changed
