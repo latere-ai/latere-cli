@@ -17,7 +17,7 @@ import (
 
 func TestDownloadsPreserveOutputOnTruncatedResponse(t *testing.T) {
 	t.Setenv("LATERE_CELLA_TOKEN", "test-tok")
-	for _, command := range []string{"drive", "cella"} {
+	for _, command := range []string{"arca", "cella"} {
 		for _, existing := range []bool{false, true} {
 			t.Run(command+map[bool]string{false: "/new", true: "/existing"}[existing], func(t *testing.T) {
 				dir := t.TempDir()
@@ -33,8 +33,8 @@ func TestDownloadsPreserveOutputOnTruncatedResponse(t *testing.T) {
 				}))
 				defer srv.Close()
 				var err error
-				if command == "drive" {
-					_, _, err = execDrive(t, srv, "get", "files/download", "-o", dest)
+				if command == "arca" {
+					_, _, err = execArca(t, srv, "get", "files/download", "-o", dest)
 				} else {
 					cmd := newCeExportCmd()
 					cmd.SetOut(new(bytes.Buffer))
@@ -71,7 +71,7 @@ func TestDownloadsPreserveOutputOnTruncatedResponse(t *testing.T) {
 
 func TestDownloadsReplaceOutputAfterCompleteResponse(t *testing.T) {
 	t.Setenv("LATERE_CELLA_TOKEN", "test-tok")
-	for _, command := range []string{"drive", "cella"} {
+	for _, command := range []string{"arca", "cella"} {
 		t.Run(command, func(t *testing.T) {
 			dir := t.TempDir()
 			dest := filepath.Join(dir, "download")
@@ -87,8 +87,8 @@ func TestDownloadsReplaceOutputAfterCompleteResponse(t *testing.T) {
 			}))
 			defer srv.Close()
 			var err error
-			if command == "drive" {
-				_, _, err = execDrive(t, srv, "get", "files/download", "-o", link)
+			if command == "arca" {
+				_, _, err = execArca(t, srv, "get", "files/download", "-o", link)
 			} else {
 				cmd := newCeExportCmd()
 				cmd.SetArgs([]string{"dev", "--api-url", srv.URL, "-o", link})

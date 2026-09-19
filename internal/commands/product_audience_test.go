@@ -13,8 +13,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/latere-ai/latere-cli/internal/drive"
 )
 
 // audienceIssuer is the auth issuer the stub stamps on every token it mints.
@@ -120,14 +118,14 @@ func TestProductCredentialsCarryOnlyTheirOwnAudience(t *testing.T) {
 				t.Fatalf("cella ls: %v", err)
 			}
 		}},
-		{"drive ls", drive.Audience, func(t *testing.T, s *productStub) {
-			t.Setenv("LATERE_DRIVE_TOKEN", "")
-			cmd := newDriveCmd()
+		{"arca ls", arcaAudience, func(t *testing.T, s *productStub) {
+			t.Setenv("LATERE_ARCA_TOKEN", "")
+			cmd := newArcaCmd()
 			cmd.SetOut(io.Discard)
 			cmd.SetErr(io.Discard)
-			cmd.SetArgs([]string{"--drive-url", s.srv.URL, "--auth-url", s.srv.URL, "ls"})
+			cmd.SetArgs([]string{"--api-url", s.srv.URL, "--auth-url", s.srv.URL, "ls"})
 			if err := cmd.Execute(); err != nil {
-				t.Fatalf("drive ls: %v", err)
+				t.Fatalf("arca ls: %v", err)
 			}
 		}},
 		{"lux models", luxAudience, func(t *testing.T, s *productStub) {

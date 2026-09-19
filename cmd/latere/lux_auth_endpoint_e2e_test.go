@@ -20,7 +20,7 @@ import (
 	"github.com/latere-ai/latere-cli/internal/api"
 )
 
-func TestLuxAndDriveUseConfiguredAuthEndpointE2E(t *testing.T) {
+func TestProductsUseConfiguredAuthEndpointE2E(t *testing.T) {
 	if testing.Short() {
 		t.Skip("binary e2e skipped with -short")
 	}

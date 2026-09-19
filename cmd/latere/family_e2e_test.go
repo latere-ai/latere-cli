@@ -7,17 +7,17 @@ package main
 // one `latere` CLI identity and asserts each identity-fabric edge end to
 // end against live production. It is the reproducible companion to
 // specs/products/identity-fabric/release-and-verification.md: one login,
-// then every edge a CLI user can reach (cella, lux, drive, topos, auth),
+// then every edge a CLI user can reach (cella, lux, arca, topos, auth),
 // plus the two invariants (owner-rooted subject, trust-root rule).
 //
 // Opt-in and tiered, because the higher tiers spend real money and mutate
 // real state:
 //
 //	LATERE_FAMILY_E2E=1        read-only edges: whoami, /api/me,
-//	                           cella list, lux models+access, drive ls,
+//	                           cella list, lux models+access, arca ls,
 //	                           topos reachability, garbage-token 401.
 //	                           No cost, no resource creation.
-//	LATERE_FAMILY_E2E_WRITE=1  also: lux invoke (a token), drive put/get/rm
+//	LATERE_FAMILY_E2E_WRITE=1  also: lux invoke (a token), arca put/get/rm
 //	                           round-trip, cross-product 401. Spends money;
 //	                           cleans up after itself.
 //	LATERE_FAMILY_E2E_LOGOUT=1 also: logout then reuse the old bearer ->
@@ -29,7 +29,7 @@ package main
 //	LATERE_FAMILY_E2E=1 go test ./cmd/latere/ -run TestFamilyE2E -v
 //
 // Service URLs default to production and are overridable:
-// CELLA_API_URL, AUTH_URL, LUX_API_URL, DRIVE_API_URL, TOPOS_API_URL.
+// CELLA_API_URL, AUTH_URL, LUX_API_URL, ARCA_API_URL, TOPOS_API_URL.
 
 import (
 	"context"
@@ -51,7 +51,7 @@ type familyEnv struct {
 	cellaURL string
 	authURL  string
 	luxURL   string
-	driveURL string
+	arcaURL  string
 	toposURL string
 	sub      string // owner subject, read from whoami
 	httpc    *http.Client
@@ -79,7 +79,7 @@ func setupFamily(t *testing.T) *familyEnv {
 		cellaURL: urlOr("CELLA_API_URL", "https://cella.latere.ai"),
 		authURL:  urlOr("AUTH_URL", "https://auth.latere.ai"),
 		luxURL:   urlOr("LUX_API_URL", "https://lux.latere.ai"),
-		driveURL: urlOr("DRIVE_API_URL", "https://drive.latere.ai"),
+		arcaURL:  urlOr("ARCA_API_URL", "https://api.latere.ai"),
 		toposURL: urlOr("TOPOS_API_URL", "https://topos.latere.ai"),
 		httpc:    &http.Client{Timeout: 30 * time.Second},
 	}
@@ -253,10 +253,10 @@ func TestFamilyE2E(t *testing.T) {
 		}
 	})
 
-	// Edge: CLI -> drive (per-request auth).
-	t.Run("cli->drive-ls", func(t *testing.T) {
-		if _, errOut, err := fe.run(t, 30*time.Second, "drive", "ls"); err != nil {
-			t.Fatalf("drive ls: %v\n%s", err, errOut)
+	// Edge: CLI -> arca (per-request auth).
+	t.Run("cli->arca-ls", func(t *testing.T) {
+		if _, errOut, err := fe.run(t, 30*time.Second, "arca", "ls"); err != nil {
+			t.Fatalf("arca ls: %v\n%s", err, errOut)
 		}
 	})
 
@@ -305,7 +305,7 @@ func TestFamilyE2E(t *testing.T) {
 }
 
 // runWriteTier exercises the cost/mutation edges: a live lux completion and a
-// drive round-trip. Each cleans up after itself.
+// arca round-trip. Each cleans up after itself.
 func (fe *familyEnv) runWriteTier(t *testing.T) {
 	// Edge: CLI -> lux invoke (a real one-shot completion) using whatever
 	// model the identity has bound.
@@ -325,8 +325,8 @@ func (fe *familyEnv) runWriteTier(t *testing.T) {
 		}
 	})
 
-	// Edge: CLI -> drive round-trip (put, ls sees it, get matches, rm).
-	t.Run("cli->drive-roundtrip", func(t *testing.T) {
+	// Edge: CLI -> arca round-trip (put, ls sees it, get matches, rm).
+	t.Run("cli->arca-roundtrip", func(t *testing.T) {
 		dir := t.TempDir()
 		src := filepath.Join(dir, "e2e-probe.txt")
 		want := fmt.Sprintf("family-e2e %d", time.Now().UnixNano())
@@ -334,16 +334,16 @@ func (fe *familyEnv) runWriteTier(t *testing.T) {
 			t.Fatal(err)
 		}
 		dest := "files/family-e2e-probe.txt"
-		if _, errOut, err := fe.run(t, 40*time.Second, "drive", "put", src, dest); err != nil {
-			t.Fatalf("drive put: %v\n%s", err, errOut)
+		if _, errOut, err := fe.run(t, 40*time.Second, "arca", "put", src, dest); err != nil {
+			t.Fatalf("arca put: %v\n%s", err, errOut)
 		}
-		t.Cleanup(func() { _, _, _ = fe.run(t, 30*time.Second, "drive", "rm", "--permanent", dest) })
-		got, errOut, err := fe.run(t, 40*time.Second, "drive", "get", dest, "-o", "-")
+		t.Cleanup(func() { _, _, _ = fe.run(t, 30*time.Second, "arca", "rm", "--permanent", dest) })
+		got, errOut, err := fe.run(t, 40*time.Second, "arca", "get", dest, "-o", "-")
 		if err != nil {
-			t.Fatalf("drive get: %v\n%s", err, errOut)
+			t.Fatalf("arca get: %v\n%s", err, errOut)
 		}
 		if !strings.Contains(got, want) {
-			t.Errorf("drive get mismatch: got %q, want to contain %q", got, want)
+			t.Errorf("arca get mismatch: got %q, want to contain %q", got, want)
 		}
 	})
 }
