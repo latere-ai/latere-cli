@@ -12,9 +12,9 @@ committed: the commit log already holds that.
 
 ### Changed
 
-- **`latere drive` is now `latere arca`.** Every verb, flag and output is
-  the same; the group's name is not. The service behind it is the family's
-  open storage core, and the CLI reaches it at the platform's API origin
+- **`latere drive` is now `latere arca`.** The ten verbs and what each one
+  does are unchanged. The service behind them is the family's open storage
+  core, and the CLI reaches it at the platform's API origin
   (`https://api.latere.ai`) rather than at a host of its own.
 - `--drive-url` is `--api-url`, `DRIVE_API_URL` is `ARCA_API_URL`, and
   `LATERE_DRIVE_TOKEN` is `LATERE_ARCA_TOKEN`. `--api-url` now also decides
@@ -36,10 +36,17 @@ committed: the commit log already holds that.
   repositories live on Latere Code. `memory/` is a folder under `files/`
   like any other, and writing to it no longer demands `--if-match` or
   `--create-only`: those flags are yours to use on any write, or not.
+- **If you parse `--json`, read this one.** The shapes follow the new API.
+  A share carries `grantee_kind` (`subject`, `link` or `public`) and one
+  `grantee` field, in place of `grantee_type` with `grantee_id`,
+  `grantee_email` and `grantee_role`; `existing`, `grantee_display` and
+  `created_by_display` are gone. `history` therefore prints the subject who
+  wrote a version where it printed a display name, and `mv` and
+  `restore --version` answer the file itself, without `moved_from` or
+  `restored_version`. A file gains `checksum_kind`, and a trashed file gains
+  `purges_at`, the day it stops being restorable.
 - Failures now read as `code: sentence`, followed by the detail and the
   request id, so you can quote the id when you report one.
-- There is no quota to read. A limit is a property of your plan, and a
-  space's usage is shown in the console.
 - The identity gate reads the frontend for the retired admin flag and
   refuses a second copy of the authorizer envelope (ci-gate v0.42.0).
   Nothing changes for a user of `latere`.

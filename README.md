@@ -115,7 +115,7 @@ git clone https://x-access-token:${LATERE_TOKEN}@code.latere.ai/<owner>/<repo>.g
 | Product | What it does | Guide |
 |---------|--------------|-------|
 | **Cella** | Named sandboxes (ephemeral or persistent): create, exec, shell, logs, file transfer. | [docs/cella.md](docs/cella.md) |
-| **Storage** | Your files: upload and download (an upload session for big ones), trash and restore, version history, sharing by link or recipient. Repositories clone over plain git (above). | [docs/arca.md](docs/arca.md) |
+| **Arca** | Storage for your files: upload and download (an upload session for big ones), trash and restore, version history, sharing by link or recipient. Repositories clone over plain git (above). | [docs/arca.md](docs/arca.md) |
 | **Lux** | Call language models on your identity, no key to allocate: model discovery with rates, SDK enablement, usage, and serving your own local models (Ollama/vLLM/LM Studio/llama.cpp/MLX) through Lux. | [docs/lux.md](docs/lux.md) |
 | **Review** | Adversarial review of your latest Claude Code session: a proposer defends the diff, critics attack it through Lux, unresolved attacks surface. | [docs/review.md](docs/review.md) |
 | **Topos** | Coding-assistant sessions, local or hosted. `latere topos --local` runs an agent on this machine against your own files with no control plane and no login; `latere topos` runs it on the Latere agent platform, where you can detach and reattach with state intact, approve tool calls inline, or run one prompt headless with `-p`. | [docs/topos.md](docs/topos.md) |
