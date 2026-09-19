@@ -42,6 +42,13 @@ func TestArcaPaginationCyclesE2E(t *testing.T) {
 				t.Run(strings.Join(verb, " ")+"/"+tc.name+"/"+format, func(t *testing.T) {
 					var requests atomic.Int32
 					server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						// `shares` reads grants and links; the second
+						// resource answers one empty page and takes no part
+						// in the cycle under test.
+						if r.URL.Path == "/v1/shares/links" {
+							_ = json.NewEncoder(w).Encode(map[string]any{"entries": []any{}})
+							return
+						}
 						i := int(requests.Add(1)) - 1
 						if i >= len(tc.next) {
 							w.WriteHeader(http.StatusBadGateway)

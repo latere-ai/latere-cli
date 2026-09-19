@@ -14,15 +14,17 @@ import (
 )
 
 func TestArcaPaginationCycles(t *testing.T) {
+	// A listing that reads two resources names the second in quiet: it
+	// answers one empty page and takes no part in the cycle under test.
 	for _, verb := range []struct {
-		name, path string
-		args       []string
+		name, path, quiet string
+		args              []string
 	}{
-		{"files", "/v1/files/me/files", []string{"ls"}},
-		{"trash", "/v1/trash", []string{"ls", "--trashed"}},
-		{"history", "/v1/files/me/files/item", []string{"history", "files/item"}},
-		{"shares", "/v1/shares", []string{"shares"}},
-		{"inbox", "/v1/shared-with-me", []string{"shares", "--inbox"}},
+		{"files", "/v1/files/me/files", "", []string{"ls"}},
+		{"trash", "/v1/trash", "", []string{"ls", "--trashed"}},
+		{"history", "/v1/files/me/files/item", "", []string{"history", "files/item"}},
+		{"shares", "/v1/shares", "/v1/shares/links", []string{"shares"}},
+		{"inbox", "/v1/shares/with-me", "", []string{"shares", "--inbox"}},
 	} {
 		for _, tc := range []struct {
 			name  string
@@ -36,6 +38,10 @@ func TestArcaPaginationCycles(t *testing.T) {
 			t.Run(verb.name+"/"+tc.name, func(t *testing.T) {
 				var requests atomic.Int32
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if verb.quiet != "" && r.URL.Path == verb.quiet {
+						_ = json.NewEncoder(w).Encode(map[string]any{"entries": []any{}})
+						return
+					}
 					i := int(requests.Add(1)) - 1
 					// Stop the unfixed loop deterministically after it requests a repeated page.
 					if i >= len(tc.next) {

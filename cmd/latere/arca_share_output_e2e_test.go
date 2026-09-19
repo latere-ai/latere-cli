@@ -29,17 +29,22 @@ func TestArcaShareOutputFailureE2E(t *testing.T) {
 	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
-	for _, existing := range []bool{false, true} {
-		for _, format := range []string{"text", "json"} {
+	for _, format := range []string{"text", "json"} {
+		{
 			for _, writable := range []bool{false, true} {
-				t.Run(fmt.Sprintf("existing=%t/%s/writable=%t", existing, format, writable), func(t *testing.T) {
+				t.Run(fmt.Sprintf("%s/writable=%t", format, writable), func(t *testing.T) {
 					var requests atomic.Int32
 					server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 						requests.Add(1)
-						if r.Method != http.MethodPost || r.URL.Path != "/v1/shares" || r.Header.Get("Authorization") != "Bearer synthetic-token" {
+						if r.Method != http.MethodPost || r.URL.Path != "/v1/shares/links" || r.Header.Get("Authorization") != "Bearer synthetic-token" {
 							t.Errorf("unexpected request: %s %s", r.Method, r.URL)
 						}
-						_ = json.NewEncoder(w).Encode(map[string]any{"id": "share-1", "status": "active", "permission": "read", "grantee_type": "link", "path_prefix": "files/item", "owner": "u-test", "existing": existing, "url": "/s/synthetic-link"})
+						w.WriteHeader(http.StatusCreated)
+						_ = json.NewEncoder(w).Encode(map[string]any{
+							"id": "share-1", "status": "active", "permission": "read", "grantee_kind": "link",
+							"path_prefix": "files/item", "owner": "https://auth.latere.ai|9ab3",
+							"token": "synthetic-link-value", "url": "/v1/shares/links/synthetic-link-value",
+						})
 					}))
 					defer server.Close()
 					output := filepath.Join(t.TempDir(), "output")
@@ -80,15 +85,15 @@ func TestArcaShareOutputFailureE2E(t *testing.T) {
 						}
 						result := data[len(previous):]
 						if format == "text" {
-							if string(result) != server.URL+"/s/synthetic-link\n" {
+							if string(result) != server.URL+"/v1/shares/links/synthetic-link-value\n" {
 								t.Errorf("URL=%q", result)
 							}
 						} else {
 							var got struct {
-								ID, URL  string
-								Existing bool
+								ID, URL, Token string
 							}
-							if json.Unmarshal(result, &got) != nil || got.ID != "share-1" || got.URL != "/s/synthetic-link" || got.Existing != existing {
+							if json.Unmarshal(result, &got) != nil || got.ID != "share-1" ||
+								got.URL != "/v1/shares/links/synthetic-link-value" || got.Token != "synthetic-link-value" {
 								t.Errorf("JSON=%q", result)
 							}
 						}
@@ -96,7 +101,7 @@ func TestArcaShareOutputFailureE2E(t *testing.T) {
 						if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 || diagnostic.Len() == 0 {
 							t.Errorf("failed output: err=%v stderr=%q", err, diagnostic.String())
 						}
-						if format == "text" && (!strings.Contains(diagnostic.String(), "write share URL") || !strings.Contains(diagnostic.String(), "share-1")) {
+						if format == "text" && (!strings.Contains(diagnostic.String(), "write the address") || !strings.Contains(diagnostic.String(), "share-1")) {
 							t.Errorf("missing share recovery diagnostic: %q", diagnostic.String())
 						}
 						if string(data) != previous {

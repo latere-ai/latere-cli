@@ -578,76 +578,104 @@ func newArcaShareCmd(o *arcaOpts) *cobra.Command {
 	var link, public bool
 	cmd := &cobra.Command{
 		Use:   "share <path-prefix>",
-		Short: "Grant access to a path prefix (a person via --to, or a link via --link).",
+		Short: "Grant access to a path prefix (someone via --to, or a link via --link).",
 		Long: `Share files under a path prefix.
 
---link mints a tokenized viewer URL (read-only). --to grants a person:
-an email address, or a principal id. --permission read|write|manage
-applies to person grants; links are always read-only.`,
+--to grants one recipient, named by the subject a listing showed you or
+by an address your organization resolves, with --permission read, write
+or manage. --link mints a tokenized address anyone holding it can read
+from, and --public makes the prefix readable without one. A link and the
+public are read-only.`,
 		Example: `  latere arca share files/reports/ --link
-  latere arca share files/reports/ --to teammate@example.com
-  latere arca share files/data/ --to u-1234… --permission write`,
+  latere arca share files/reports/ --to "https://auth.latere.ai|9ab3"
+  latere arca share files/data/ --to teammate@example.com --permission write`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			req := arca.CreateShareRequest{
-				Owner:      *o.owner,
-				PathPrefix: args[0],
-				Permission: permission,
-				ExpiresAt:  expires,
-			}
-			switch {
-			case link && to == "" && !public:
-				req.GranteeType = "link"
-			case public && to == "" && !link:
-				req.GranteeType = "public"
-			case to != "" && !link && !public:
-				if strings.Contains(to, "@") {
-					req.GranteeType = "email"
-					req.GranteeEmail = to
-				} else {
-					req.GranteeType = "principal"
-					req.GranteeID = to
+			chosen := 0
+			for _, on := range []bool{to != "", link, public} {
+				if on {
+					chosen++
 				}
-			default:
-				return errors.New("pass exactly one of --to <email|principal-id>, --link, or --public")
+			}
+			if chosen != 1 {
+				return errors.New("pass exactly one of --to <recipient>, --link, or --public")
+			}
+			if (link || public) && cmd.Flags().Changed("permission") && permission != "read" {
+				return errors.New("a link and the public are read-only; --permission applies to --to alone")
 			}
 			c, err := o.client(cmd.Context())
 			if err != nil {
 				return err
 			}
-			res, err := c.CreateShare(cmd.Context(), req)
-			if err != nil {
-				return err
+			if to != "" {
+				return runShareToSubject(cmd, c, o, args[0], to, permission, expires)
 			}
-			if *o.jsonOut {
-				return printArcaJSON(cmd.OutOrStdout(), res)
+			kind := arca.GranteeLink
+			if public {
+				kind = arca.GranteePublic
 			}
-			state := "created"
-			if res.Existing {
-				state = "already exists"
-			}
-			fprintf(cmd.ErrOrStderr(), "Share %s (%s, %s, id %s)\n", state, res.Status, res.Permission, res.ID)
-			if res.URL != "" {
-				if _, err := fmt.Fprintln(cmd.OutOrStdout(), arca.ResolveURL(*o.apiURL)+res.URL); err != nil {
-					return fmt.Errorf("write share URL for share %s: %w", res.ID, err)
-				}
-			}
-			return nil
+			return runShareLink(cmd, c, o, args[0], kind, expires)
 		},
 	}
-	cmd.Flags().StringVar(&to, "to", "", "grantee: an email address or principal id")
-	cmd.Flags().BoolVar(&link, "link", false, "mint a read-only viewer link")
+	cmd.Flags().StringVar(&to, "to", "", "recipient: a subject, or an address your organization resolves")
+	cmd.Flags().BoolVar(&link, "link", false, "mint a read-only link anyone holding it can read from")
 	cmd.Flags().BoolVar(&public, "public", false, "make the prefix publicly readable")
-	cmd.Flags().StringVar(&permission, "permission", "read", "read, write, or manage (person grants only)")
+	cmd.Flags().StringVar(&permission, "permission", "read", "read, write, or manage (--to grants only)")
 	cmd.Flags().StringVar(&expires, "expires", "", "expiry as RFC3339 (e.g. 2026-12-31T00:00:00Z)")
 	return cmd
+}
+
+func runShareToSubject(cmd *cobra.Command, c *arca.Client, o *arcaOpts, prefix, to, permission, expires string) error {
+	res, err := c.CreateGrant(cmd.Context(), arca.CreateGrantRequest{
+		Owner:      *o.owner,
+		PathPrefix: prefix,
+		Grantee:    to,
+		Permission: permission,
+		ExpiresAt:  expires,
+	})
+	if err != nil {
+		return err
+	}
+	if *o.jsonOut {
+		return printArcaJSON(cmd.OutOrStdout(), res)
+	}
+	fprintf(cmd.ErrOrStderr(), "Shared %s with %s (%s, id %s)\n", res.PathPrefix, res.Grantee, res.Permission, res.ID)
+	return nil
+}
+
+func runShareLink(cmd *cobra.Command, c *arca.Client, o *arcaOpts, prefix, kind, expires string) error {
+	res, err := c.CreateLink(cmd.Context(), arca.CreateLinkRequest{
+		Owner:      *o.owner,
+		PathPrefix: prefix,
+		Kind:       kind,
+		ExpiresAt:  expires,
+	})
+	if err != nil {
+		return err
+	}
+	if *o.jsonOut {
+		return printArcaJSON(cmd.OutOrStdout(), res)
+	}
+	fprintf(cmd.ErrOrStderr(), "Shared %s by %s (read, id %s)\n", res.PathPrefix, kind, res.ID)
+	// The token is answered once. Print the address on stdout so it can be
+	// piped, and print it even when writing it is the only thing left.
+	if _, err := fmt.Fprintln(cmd.OutOrStdout(), arca.ResolveURL(*o.apiURL)+res.URL); err != nil {
+		return fmt.Errorf("write the address of share %s: %w", res.ID, err)
+	}
+	return nil
 }
 
 func newArcaSharesCmd(o *arcaOpts) *cobra.Command {
 	var inbox bool
 	cmd := &cobra.Command{
 		Use:   "shares",
-		Short: "List shares you created (--inbox: shares granted to you).",
+		Short: "List shares you granted (--inbox: shares granted to you).",
+		Long: `List shares.
+
+Grants to a recipient and links are two resources in the API, and this
+reads both, so one listing is everyone who can reach the space: the
+recipient column carries the subject on a grant, and "link" or "public"
+on a token grant.`,
 		Example: `  latere arca shares
   latere arca shares --inbox`,
 		Args: cobra.NoArgs,
@@ -656,36 +684,33 @@ func newArcaSharesCmd(o *arcaOpts) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			var entries []arca.Share
-			seen := make(map[string]bool)
-			for cursor := ""; ; {
-				page, err := c.Shares(cmd.Context(), inbox, cursor, 1000)
+			var entries []arca.Grant
+			pages := []func(ctx context.Context, cursor string, limit int) (*arca.GrantPage, error){
+				func(ctx context.Context, cursor string, limit int) (*arca.GrantPage, error) {
+					return c.Grants(ctx, *o.owner, cursor, limit)
+				},
+				func(ctx context.Context, cursor string, limit int) (*arca.GrantPage, error) {
+					return c.Links(ctx, *o.owner, cursor, limit)
+				},
+			}
+			if inbox {
+				pages = []func(ctx context.Context, cursor string, limit int) (*arca.GrantPage, error){c.SharedWithMe}
+			}
+			for _, read := range pages {
+				page, err := readAllGrants(cmd.Context(), read)
 				if err != nil {
 					return err
 				}
-				entries = append(entries, page.Entries...)
-				if page.NextCursor == "" {
-					break
-				}
-				if err := trackArcaCursor(seen, page.NextCursor); err != nil {
-					return err
-				}
-				cursor = page.NextCursor
+				entries = append(entries, page...)
 			}
 			if *o.jsonOut {
 				return printArcaJSON(cmd.OutOrStdout(), entries)
 			}
 			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
 			for _, s := range entries {
-				who := s.GranteeDisplay
+				who := s.Grantee
 				if who == "" {
-					who = s.GranteeEmail
-				}
-				if who == "" {
-					who = s.GranteeID
-				}
-				if who == "" {
-					who = s.GranteeType
+					who = s.GranteeKind
 				}
 				fprintf(w, "%s\t%s\t%s\t%s\t%s\n", s.ID, s.Status, s.Permission, who, s.PathPrefix)
 			}
@@ -694,6 +719,26 @@ func newArcaSharesCmd(o *arcaOpts) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&inbox, "inbox", false, "list shares granted to you instead of by you")
 	return cmd
+}
+
+// readAllGrants reads every page of one grant listing.
+func readAllGrants(ctx context.Context, read func(ctx context.Context, cursor string, limit int) (*arca.GrantPage, error)) ([]arca.Grant, error) {
+	var entries []arca.Grant
+	seen := make(map[string]bool)
+	for cursor := ""; ; {
+		page, err := read(ctx, cursor, 1000)
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, page.Entries...)
+		if page.NextCursor == "" {
+			return entries, nil
+		}
+		if err := trackArcaCursor(seen, page.NextCursor); err != nil {
+			return nil, err
+		}
+		cursor = page.NextCursor
+	}
 }
 
 func newArcaUnshareCmd(o *arcaOpts) *cobra.Command {

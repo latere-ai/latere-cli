@@ -36,22 +36,26 @@ func TestArcaShareReceiptE2E(t *testing.T) {
 			valid       bool
 		}{
 			{"active", "extra", true, true},
-			{"pending", "status", "pending", true},
-			{"existing", "existing", true, true},
 			{"null", "", nil, false},
 			{"missing id", "id", nil, false},
 			{"revoked", "status", "revoked", false},
-			{"wrong permission", "permission", "manage", false},
+			{"above read", "permission", "write", false},
 			{"wrong prefix", "path_prefix", "files/other", false},
-			{"wrong grantee", "grantee_type", "public", false},
+			{"wrong kind", "grantee_kind", "public", false},
 			{"wrong owner", "owner", "https://auth.latere.ai|7c22", false},
+			{"missing token", "token", nil, false},
 			{"missing url", "url", nil, false},
 		} {
 			t.Run(format+"/"+tc.name, func(t *testing.T) {
-				body := map[string]any{"id": "share-1", "status": "active", "permission": "read", "grantee_type": "link", "path_prefix": "files/item", "owner": "https://auth.latere.ai|9ab3", "url": "/s/synthetic-link"}
-				body[tc.field] = tc.value
-				if tc.name == "pending" {
-					delete(body, "url")
+				body := map[string]any{
+					"id": "share-1", "status": "active", "permission": "read", "grantee_kind": "link",
+					"path_prefix": "files/item", "owner": "https://auth.latere.ai|9ab3",
+					"token": "synthetic-link-value", "url": "/v1/shares/links/synthetic-link-value",
+				}
+				if tc.value == nil && tc.field != "" {
+					delete(body, tc.field)
+				} else {
+					body[tc.field] = tc.value
 				}
 				var requests atomic.Int32
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -61,7 +65,7 @@ func TestArcaShareReceiptE2E(t *testing.T) {
 						t.Error(err)
 						return
 					}
-					if r.Method != http.MethodPost || r.URL.Path != "/v1/shares" || r.Header.Get("Authorization") != "Bearer synthetic-token" || fields["owner"] != "https://auth.latere.ai|9ab3" || fields["path_prefix"] != "files/item" || fields["grantee_type"] != "link" || fields["permission"] != "read" {
+					if r.Method != http.MethodPost || r.URL.Path != "/v1/shares/links" || r.Header.Get("Authorization") != "Bearer synthetic-token" || fields["owner"] != "https://auth.latere.ai|9ab3" || fields["path_prefix"] != "files/item" || fields["kind"] != "link" {
 						t.Errorf("request=%s %s body=%+v", r.Method, r.URL, fields)
 					}
 					w.WriteHeader(http.StatusCreated)
@@ -93,15 +97,12 @@ func TestArcaShareReceiptE2E(t *testing.T) {
 							t.Errorf("JSON=%q stderr=%q", out.String(), diagnostic.String())
 						}
 					} else {
-						want := ""
-						if tc.name != "pending" {
-							want = server.URL + "/s/synthetic-link\n"
-						}
+						want := server.URL + "/v1/shares/links/synthetic-link-value\n"
 						if out.String() != want || !strings.Contains(diagnostic.String(), "id share-1") {
 							t.Errorf("stdout=%q stderr=%q", out.String(), diagnostic.String())
 						}
 					}
-				} else if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 || out.Len() != 0 || !strings.Contains(diagnostic.String(), "share creation receipt") || !strings.Contains(diagnostic.String(), "outcome is unknown") || strings.Contains(diagnostic.String(), "Share created") || strings.Contains(diagnostic.String(), "synthetic-link") {
+				} else if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 || out.Len() != 0 || !strings.Contains(diagnostic.String(), "share creation receipt") || !strings.Contains(diagnostic.String(), "outcome is unknown") || strings.Contains(diagnostic.String(), "Shared files/item") || strings.Contains(diagnostic.String(), "synthetic-link-value") {
 					t.Errorf("invalid receipt: error=%v stdout=%q stderr=%q", err, out.String(), diagnostic.String())
 				}
 				if requests.Load() != 1 {

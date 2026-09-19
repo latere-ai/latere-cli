@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -413,27 +414,42 @@ func TestArcaHistory(t *testing.T) {
 	}
 }
 
-func TestArcaShareGranteeInference(t *testing.T) {
-	cases := []struct {
+// One recipient per share, and the three ways of naming one reach two
+// routes: a subject grant, and a token grant of either kind.
+func TestArcaShareRoutesByRecipient(t *testing.T) {
+	for _, tc := range []struct {
 		name     string
 		args     []string
-		wantType string
+		wantPath string
+		wantKind string
 		wantErr  string
 	}{
-		{"link", []string{"--link"}, "link", ""},
-		{"public", []string{"--public"}, "public", ""},
-		{"email", []string{"--to", "a@b.c"}, "email", ""},
-		{"principal", []string{"--to", "u-1234"}, "principal", ""},
-		{"none", nil, "", "exactly one of"},
-		{"conflicting", []string{"--link", "--public"}, "", "exactly one of"},
-	}
-	for _, tc := range cases {
+		{"link", []string{"--link"}, "/v1/shares/links", arca.GranteeLink, ""},
+		{"public", []string{"--public"}, "/v1/shares/links", arca.GranteePublic, ""},
+		{"subject", []string{"--to", "https://auth.latere.ai|7c22"}, "/v1/shares", arca.GranteeSubject, ""},
+		{"address", []string{"--to", "a@b.c"}, "/v1/shares", arca.GranteeSubject, ""},
+		{"none", nil, "", "", "exactly one of"},
+		{"conflicting", []string{"--link", "--public"}, "", "", "exactly one of"},
+		{"link above read", []string{"--link", "--permission", "write"}, "", "", "read-only"},
+	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var got arca.CreateShareRequest
+			var gotPath string
+			var body map[string]any
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				_ = json.NewDecoder(r.Body).Decode(&got)
+				gotPath = r.URL.Path
+				_ = json.NewDecoder(r.Body).Decode(&body)
 				w.WriteHeader(http.StatusCreated)
-				_ = json.NewEncoder(w).Encode(arca.ShareCreated{ID: "s1", Status: "active", Permission: got.Permission, GranteeType: got.GranteeType, PathPrefix: got.PathPrefix, Owner: "u-test", URL: "/s/tok"})
+				out := arca.Link{
+					ID: "s1", Status: "active", Permission: "read", GranteeKind: tc.wantKind,
+					PathPrefix: "files/x/", Owner: "https://auth.latere.ai|9ab3"}
+				if tc.wantKind == arca.GranteeSubject {
+					out.Permission, _ = body["permission"].(string)
+					out.Grantee, _ = body["grantee"].(string)
+					_ = json.NewEncoder(w).Encode(out.Grant)
+					return
+				}
+				out.Token, out.URL = "tok", "/v1/shares/links/tok"
+				_ = json.NewEncoder(w).Encode(out)
 			}))
 			defer srv.Close()
 
@@ -442,40 +458,78 @@ func TestArcaShareGranteeInference(t *testing.T) {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 					t.Fatalf("want %q error, got %v", tc.wantErr, err)
 				}
+				if gotPath != "" {
+					t.Errorf("a refused share still sent a request to %q", gotPath)
+				}
 				return
 			}
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got.GranteeType != tc.wantType {
-				t.Errorf("grantee_type = %q, want %q", got.GranteeType, tc.wantType)
+			if gotPath != tc.wantPath {
+				t.Errorf("path = %q, want %q", gotPath, tc.wantPath)
 			}
-			if !strings.Contains(out, srv.URL+"/s/tok") {
-				t.Errorf("share URL not printed: %q", out)
+			if tc.wantKind == arca.GranteeSubject {
+				if body["grantee"] != tc.args[1] {
+					t.Errorf("grantee = %v, want %q", body["grantee"], tc.args[1])
+				}
+				if out != "" {
+					t.Errorf("a subject grant printed an address: %q", out)
+				}
+				return
+			}
+			if body["kind"] != tc.wantKind {
+				t.Errorf("kind = %v, want %q", body["kind"], tc.wantKind)
+			}
+			if !strings.Contains(out, srv.URL+"/v1/shares/links/tok") {
+				t.Errorf("the address was not printed: %q", out)
 			}
 		})
 	}
 }
 
-func TestArcaSharesInbox(t *testing.T) {
-	var gotPath string
+// A grant and a link are two resources, so one listing reads both; the
+// inbox is a third route and reads alone.
+func TestArcaSharesReadsGrantsAndLinks(t *testing.T) {
+	var paths []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		_ = json.NewEncoder(w).Encode(arca.ShareListPage{Entries: []arca.Share{
-			{ID: "s1", Status: "active", Permission: "read", GranteeEmail: "a@b.c", PathPrefix: "files/x/"},
-		}})
+		paths = append(paths, r.URL.Path)
+		switch r.URL.Path {
+		case "/v1/shares":
+			_ = json.NewEncoder(w).Encode(arca.GrantPage{Entries: []arca.Grant{
+				{ID: "s1", Status: "active", Permission: "write", GranteeKind: arca.GranteeSubject,
+					Grantee: "https://auth.latere.ai|7c22", PathPrefix: "files/x/"},
+			}})
+		case "/v1/shares/links":
+			_ = json.NewEncoder(w).Encode(arca.GrantPage{Entries: []arca.Grant{
+				{ID: "s2", Status: "active", Permission: "read", GranteeKind: arca.GranteeLink, PathPrefix: "files/x/"},
+			}})
+		default:
+			_ = json.NewEncoder(w).Encode(arca.GrantPage{Entries: []arca.Grant{
+				{ID: "s3", Status: "active", Permission: "read", GranteeKind: arca.GranteeSubject,
+					Grantee: "https://auth.latere.ai|9ab3", PathPrefix: "files/y/"},
+			}})
+		}
 	}))
 	defer srv.Close()
 
 	out, _, err := execArca(t, srv, "shares")
-	if err != nil || gotPath != "/v1/shares" {
-		t.Errorf("shares: %v path=%q", err, gotPath)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(out, "a@b.c") {
-		t.Errorf("out = %q", out)
+	if want := []string{"/v1/shares", "/v1/shares/links"}; !slices.Equal(paths, want) {
+		t.Errorf("paths = %v, want %v", paths, want)
 	}
-	if _, _, err := execArca(t, srv, "shares", "--inbox"); err != nil || gotPath != "/v1/shared-with-me" {
-		t.Errorf("shares --inbox: %v path=%q", err, gotPath)
+	if !strings.Contains(out, "https://auth.latere.ai|7c22") || !strings.Contains(out, arca.GranteeLink) {
+		t.Errorf("a listing of both resources did not print both: %q", out)
+	}
+
+	paths = nil
+	if _, _, err := execArca(t, srv, "shares", "--inbox"); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"/v1/shares/with-me"}; !slices.Equal(paths, want) {
+		t.Errorf("inbox paths = %v, want %v", paths, want)
 	}
 }
 

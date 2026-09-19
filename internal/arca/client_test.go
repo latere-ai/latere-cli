@@ -369,26 +369,52 @@ func TestMultipartUploadAbortsOnPartFailure(t *testing.T) {
 	}
 }
 
+// A subject grant and a token grant are two routes and two receipts.
 func TestCreateShareRoundtrip(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var req CreateShareRequest
-		_ = json.NewDecoder(r.Body).Decode(&req)
-		if req.GranteeType != "link" || req.Permission != "read" || req.PathPrefix != "files/reports/" {
-			t.Errorf("req = %+v", req)
+		switch r.URL.Path {
+		case "/v1/shares":
+			var req CreateGrantRequest
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			if req.Grantee != "https://auth.latere.ai|7c22" || req.Permission != "write" || req.PathPrefix != "files/reports/" {
+				t.Errorf("req = %+v", req)
+			}
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(Grant{
+				ID: "s1", Status: "active", Permission: req.Permission, GranteeKind: GranteeSubject,
+				Grantee: req.Grantee, PathPrefix: req.PathPrefix, Owner: "https://auth.latere.ai|9ab3",
+			})
+		case "/v1/shares/links":
+			var req CreateLinkRequest
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			if req.Kind != GranteeLink || req.PathPrefix != "files/reports/" {
+				t.Errorf("req = %+v", req)
+			}
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(Link{
+				ID: "s2", Status: "active", Permission: "read", GranteeKind: GranteeLink,
+				PathPrefix: req.PathPrefix, Owner: "https://auth.latere.ai|9ab3", Token: "tok123",
+				URL: "/v1/shares/links/tok123",
+			})
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
 		}
-		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(ShareCreated{ID: "s1", Status: "active", Permission: req.Permission, GranteeType: req.GranteeType, PathPrefix: req.PathPrefix, Owner: "u-test", URL: "/s/tok123"})
 	}))
 	defer srv.Close()
+	c := New(srv.URL, "tok")
 
-	got, err := New(srv.URL, "tok").CreateShare(context.Background(), CreateShareRequest{
-		Owner: "me", PathPrefix: "files/reports/", GranteeType: "link", Permission: "read",
+	grant, err := c.CreateGrant(context.Background(), CreateGrantRequest{
+		Owner: "me", PathPrefix: "files/reports/", Grantee: "https://auth.latere.ai|7c22", Permission: "write",
 	})
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || grant.ID != "s1" || grant.GranteeKind != GranteeSubject {
+		t.Errorf("CreateGrant = %+v, %v", grant, err)
 	}
-	if got.URL != "/s/tok123" {
-		t.Errorf("got %+v", got)
+	link, err := c.CreateLink(context.Background(), CreateLinkRequest{
+		Owner: "me", PathPrefix: "files/reports/", Kind: GranteeLink,
+	})
+	if err != nil || link.Token != "tok123" || link.URL != "/v1/shares/links/tok123" {
+		t.Errorf("CreateLink = %+v, %v", link, err)
 	}
 }
 
@@ -415,9 +441,11 @@ func TestSimpleEndpointRoundtrips(t *testing.T) {
 		case r.URL.Path == "/v1/trash/restore":
 			_ = json.NewEncoder(w).Encode(Object{Path: "files/t.txt", Size: 1, Checksum: "c"})
 		case r.URL.Path == "/v1/shares" && r.Method == http.MethodGet:
-			_ = json.NewEncoder(w).Encode(ShareListPage{Entries: []Share{{ID: "s1", Status: "active"}}})
-		case r.URL.Path == "/v1/shared-with-me":
-			_ = json.NewEncoder(w).Encode(ShareListPage{Entries: []Share{{ID: "s2"}}})
+			_ = json.NewEncoder(w).Encode(GrantPage{Entries: []Grant{{ID: "s1", Status: "active"}}})
+		case r.URL.Path == "/v1/shares/links" && r.Method == http.MethodGet:
+			_ = json.NewEncoder(w).Encode(GrantPage{Entries: []Grant{{ID: "s2", GranteeKind: GranteeLink}}})
+		case r.URL.Path == "/v1/shares/with-me":
+			_ = json.NewEncoder(w).Encode(GrantPage{Entries: []Grant{{ID: "s3"}}})
 		case r.URL.Path == "/v1/shares/s1" && r.Method == http.MethodDelete:
 			w.WriteHeader(http.StatusNoContent)
 		default:
@@ -444,10 +472,13 @@ func TestSimpleEndpointRoundtrips(t *testing.T) {
 	if err := c.TrashRestore(ctx, "me", "files/t.txt"); err != nil {
 		t.Errorf("TrashRestore: %v", err)
 	}
-	if sh, err := c.Shares(ctx, false, "", 0); err != nil || sh.Entries[0].ID != "s1" {
-		t.Errorf("Shares: %v %+v", err, sh)
+	if sh, err := c.Grants(ctx, "me", "", 0); err != nil || sh.Entries[0].ID != "s1" {
+		t.Errorf("Grants: %v %+v", err, sh)
 	}
-	if in, err := c.Shares(ctx, true, "", 0); err != nil || in.Entries[0].ID != "s2" {
+	if ln, err := c.Links(ctx, "me", "", 0); err != nil || ln.Entries[0].ID != "s2" {
+		t.Errorf("Links: %v %+v", err, ln)
+	}
+	if in, err := c.SharedWithMe(ctx, "", 0); err != nil || in.Entries[0].ID != "s3" {
 		t.Errorf("Shares inbox: %v %+v", err, in)
 	}
 	if err := c.RevokeShare(ctx, "s1"); err != nil {
@@ -493,8 +524,14 @@ func TestEndpointsSurfaceErrors(t *testing.T) {
 		"Download":    func() error { _, _, err := c.Download(ctx, "me", "files/a", 1); return err },
 		"Versions":    func() error { _, err := c.Versions(ctx, "me", "files/a", "cur", 5); return err },
 		"TrashList":   func() error { _, err := c.TrashList(ctx, "me", "cur", 5); return err },
-		"CreateShare": func() error { _, err := c.CreateShare(ctx, CreateShareRequest{}); return err },
-		"Shares":      func() error { _, err := c.Shares(ctx, false, "cur", 5); return err },
+		"CreateGrant": func() error { _, err := c.CreateGrant(ctx, CreateGrantRequest{}); return err },
+		"CreateLink":  func() error { _, err := c.CreateLink(ctx, CreateLinkRequest{}); return err },
+		"Grants":      func() error { _, err := c.Grants(ctx, "me", "cur", 5); return err },
+		"Links":       func() error { _, err := c.Links(ctx, "me", "cur", 5); return err },
+		"SharedWithMe": func() error {
+			_, err := c.SharedWithMe(ctx, "cur", 5)
+			return err
+		},
 		"RevokeShare": func() error { return c.RevokeShare(ctx, "s1") },
 		"Stat":        func() error { _, err := c.Stat(ctx, "me", "files/a"); return err },
 	}

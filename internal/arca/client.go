@@ -186,48 +186,61 @@ type TrashPage struct {
 	NextCursor string    `json:"next_cursor,omitempty"`
 }
 
-type CreateShareRequest struct {
-	Owner        string `json:"owner"`
-	PathPrefix   string `json:"path_prefix"`
-	GranteeType  string `json:"grantee_type"` // principal | email | org | team | role | link | public
-	Permission   string `json:"permission"`   // read | write | manage
-	GranteeID    string `json:"grantee_id,omitempty"`
-	GranteeEmail string `json:"grantee_email,omitempty"`
-	GranteeRole  string `json:"grantee_role,omitempty"`
-	ExpiresAt    string `json:"expires_at,omitempty"`
+// The kinds a grant can name. A subject is a person, a service, or an
+// organization, all one subject string the authorizer resolves; a link
+// and the public are nobody, and the token is the grantee.
+const (
+	GranteeSubject = "subject"
+	GranteeLink    = "link"
+	GranteePublic  = "public"
+)
+
+// CreateGrantRequest opens a grant to one subject. A link is minted
+// through CreateLinkRequest instead: they are two resources.
+type CreateGrantRequest struct {
+	Owner      string `json:"owner"`
+	PathPrefix string `json:"path_prefix"`
+	Grantee    string `json:"grantee"`
+	Permission string `json:"permission"` // read | write | manage
+	ExpiresAt  string `json:"expires_at,omitempty"`
 }
 
-type ShareCreated struct {
+// CreateLinkRequest mints a token grant. Kind is link or public, and the
+// permission is read: a token grant above read is refused.
+type CreateLinkRequest struct {
+	Owner      string `json:"owner"`
+	PathPrefix string `json:"path_prefix"`
+	Kind       string `json:"kind"`
+	Permission string `json:"permission,omitempty"`
+	ExpiresAt  string `json:"expires_at,omitempty"`
+}
+
+// Grant is one share, however it was minted. Grantee carries the subject
+// on a subject grant and nothing on a token grant; Token is answered once,
+// by the mint that created it, and never by a listing.
+type Grant struct {
 	ID          string `json:"id"`
-	Status      string `json:"status"`
-	Permission  string `json:"permission"`
-	GranteeType string `json:"grantee_type"`
-	PathPrefix  string `json:"path_prefix"`
 	Owner       string `json:"owner"`
-	URL         string `json:"url,omitempty"`
-	Existing    bool   `json:"existing,omitempty"`
+	PathPrefix  string `json:"path_prefix"`
+	GranteeKind string `json:"grantee_kind"`
+	Grantee     string `json:"grantee,omitempty"`
+	Permission  string `json:"permission"`
+	Status      string `json:"status"`
+	Token       string `json:"token,omitempty"`
+	ExpiresAt   string `json:"expires_at,omitempty"`
+	CreatedBy   string `json:"created_by"`
+	CreatedAt   string `json:"created_at"`
 }
 
-type Share struct {
-	ID               string `json:"id"`
-	Owner            string `json:"owner"`
-	PathPrefix       string `json:"path_prefix"`
-	GranteeType      string `json:"grantee_type"`
-	Permission       string `json:"permission"`
-	Status           string `json:"status"`
-	CreatedBy        string `json:"created_by"`
-	CreatedAt        string `json:"created_at"`
-	GranteeID        string `json:"grantee_id,omitempty"`
-	GranteeEmail     string `json:"grantee_email,omitempty"`
-	GranteeRole      string `json:"grantee_role,omitempty"`
-	GranteeDisplay   string `json:"grantee_display,omitempty"`
-	CreatedByDisplay string `json:"created_by_display,omitempty"`
-	ExpiresAt        string `json:"expires_at,omitempty"`
-	Token            string `json:"token,omitempty"`
+// Link is what a mint answers: the grant, and the path the token is
+// redeemed at.
+type Link struct {
+	Grant
+	URL string `json:"url"`
 }
 
-type ShareListPage struct {
-	Entries    []Share `json:"entries"`
+type GrantPage struct {
+	Entries    []Grant `json:"entries"`
 	NextCursor string  `json:"next_cursor,omitempty"`
 }
 
@@ -589,74 +602,129 @@ func (c *Client) TrashPurge(ctx context.Context, owner, path string) (int, error
 
 // ---- shares ----
 
-func (c *Client) CreateShare(ctx context.Context, in CreateShareRequest) (*ShareCreated, error) {
-	var out ShareCreated
+// CreateGrant grants one subject a permission on a subtree.
+func (c *Client) CreateGrant(ctx context.Context, in CreateGrantRequest) (*Grant, error) {
+	var out Grant
 	if err := c.postJSON(ctx, "/v1/shares", in, &out); err != nil {
 		return nil, err
 	}
-	if err := validateShareReceipt(in, out); err != nil {
+	if err := validateGrantReceipt(in, out); err != nil {
 		return nil, fmt.Errorf("the share creation receipt is invalid (share %q): %w; the creation outcome is unknown", out.ID, err)
 	}
 	return &out, nil
 }
 
-func validateShareReceipt(in CreateShareRequest, out ShareCreated) error {
+func validateGrantReceipt(in CreateGrantRequest, out Grant) error {
+	if err := validateShareCommon(out, in.Owner, in.PathPrefix, in.Permission); err != nil {
+		return err
+	}
 	switch {
-	case strings.TrimSpace(out.ID) == "":
-		return errors.New("missing share ID")
-	case out.Status != "active" && out.Status != "pending":
-		return errors.New("expected an active or pending share")
-	case out.Permission == "" || out.Permission != in.Permission:
-		return errors.New("permission does not match the request")
-	case out.GranteeType == "" || out.GranteeType != in.GranteeType:
-		return errors.New("recipient type does not match the request")
-	case out.PathPrefix == "" || out.PathPrefix != in.PathPrefix:
-		return errors.New("path prefix does not match the request")
-	case strings.TrimSpace(out.Owner) == "":
-		return errors.New("missing owner")
-	}
-
-	// The server resolves the one alias and renders the subject in full;
-	// an explicit subject must come back unchanged.
-	if in.Owner != OwnerMe && out.Owner != in.Owner {
-		return errors.New("owner does not match the request")
-	}
-
-	if out.Status == "active" && strings.TrimSpace(out.URL) == "" {
-		switch in.GranteeType {
-		case "link":
-			return errors.New("active link is missing its viewer URL")
-		case "public", "email":
-			// Existing grants can be returned without viewer tokens.
-			if !out.Existing {
-				return errors.New("new active grant is missing its viewer URL")
-			}
-		}
+	case out.GranteeKind != GranteeSubject:
+		return fmt.Errorf("grantee kind is %q, and a subject grant answers %q", out.GranteeKind, GranteeSubject)
+	case out.Grantee == "" || out.Grantee != in.Grantee:
+		return errors.New("grantee does not match the request")
 	}
 	return nil
 }
 
-func (c *Client) Shares(ctx context.Context, inbox bool, cursor string, limit int) (*ShareListPage, error) {
-	path := "/v1/shares"
-	if inbox {
-		path = "/v1/shared-with-me"
+// CreateLink mints a token grant, whose token is answered once.
+func (c *Client) CreateLink(ctx context.Context, in CreateLinkRequest) (*Link, error) {
+	var out Link
+	if err := c.postJSON(ctx, "/v1/shares/links", in, &out); err != nil {
+		return nil, err
 	}
+	if err := validateLinkReceipt(in, out); err != nil {
+		return nil, fmt.Errorf("the share creation receipt is invalid (share %q): %w; the creation outcome is unknown", out.ID, err)
+	}
+	return &out, nil
+}
+
+func validateLinkReceipt(in CreateLinkRequest, out Link) error {
+	// A token grant is read whatever the request left unsaid, so the
+	// permission is checked against the rule rather than against the ask.
+	if err := validateShareCommon(out.Grant, in.Owner, in.PathPrefix, "read"); err != nil {
+		return err
+	}
+	switch {
+	case out.GranteeKind != in.Kind:
+		return errors.New("grantee kind does not match the request")
+	case strings.TrimSpace(out.Token) == "":
+		return errors.New("the token grant carries no token, which is answered once and never again")
+	case strings.TrimSpace(out.URL) == "":
+		return errors.New("the token grant carries no address to redeem it at")
+	}
+	return nil
+}
+
+func validateShareCommon(out Grant, owner, prefix, permission string) error {
+	switch {
+	case strings.TrimSpace(out.ID) == "":
+		return errors.New("missing share ID")
+	case out.Status != "active":
+		return fmt.Errorf("share status is %q, and a share is created active", out.Status)
+	case out.Permission == "" || out.Permission != permission:
+		return errors.New("permission does not match the request")
+	case out.PathPrefix == "" || out.PathPrefix != prefix:
+		return errors.New("path prefix does not match the request")
+	case strings.TrimSpace(out.Owner) == "":
+		return errors.New("missing owner")
+	// The server resolves the one alias and renders the subject in full;
+	// an explicit subject must come back unchanged.
+	case owner != OwnerMe && out.Owner != owner:
+		return errors.New("owner does not match the request")
+	}
+	return nil
+}
+
+// Grants lists the subject grants on a space.
+func (c *Client) Grants(ctx context.Context, owner, cursor string, limit int) (*GrantPage, error) {
+	return c.grantPage(ctx, "/v1/shares", owner, cursor, limit)
+}
+
+// Links lists the token grants on a space. They are a second resource,
+// so a whole picture of who can reach a space reads both.
+func (c *Client) Links(ctx context.Context, owner, cursor string, limit int) (*GrantPage, error) {
+	return c.grantPage(ctx, "/v1/shares/links", owner, cursor, limit)
+}
+
+// SharedWithMe lists the grants whose grantee is the caller. It takes no
+// owner: the caller is the grantee, not the space.
+func (c *Client) SharedWithMe(ctx context.Context, cursor string, limit int) (*GrantPage, error) {
+	return c.grantPage(ctx, "/v1/shares/with-me", "", cursor, limit)
+}
+
+func (c *Client) grantPage(ctx context.Context, path, owner, cursor string, limit int) (*GrantPage, error) {
 	q := url.Values{}
+	if owner != "" {
+		q.Set("owner", owner)
+	}
 	if cursor != "" {
 		q.Set("cursor", cursor)
 	}
 	if limit > 0 {
 		q.Set("limit", strconv.Itoa(limit))
 	}
-	var page ShareListPage
+	var page GrantPage
 	if err := c.getJSON(ctx, path, q, &page); err != nil {
 		return nil, err
 	}
 	return &page, nil
 }
 
+// RevokeShare withdraws one grant. The two kinds live in two id spaces
+// and a response says nothing about which an id belongs to, so a subject
+// grant is tried first and a token grant on its 404.
 func (c *Client) RevokeShare(ctx context.Context, id string) error {
-	req, err := c.req(ctx, http.MethodDelete, "/v1/shares/"+url.PathEscape(id), nil, nil)
+	err := c.revoke(ctx, "/v1/shares/"+url.PathEscape(id))
+	var derr *Error
+	if errors.As(err, &derr) && derr.Status == http.StatusNotFound {
+		return c.revoke(ctx, "/v1/shares/links/"+url.PathEscape(id))
+	}
+	return err
+}
+
+func (c *Client) revoke(ctx context.Context, path string) error {
+	req, err := c.req(ctx, http.MethodDelete, path, nil, nil)
 	if err != nil {
 		return err
 	}
