@@ -149,6 +149,6 @@ land per-surface after a release ships, per the Landscape Impact section.
 ## Non-goals
 
 - Changing the login flow, token storage, or org-switch semantics.
-- Flattening product groups (`cella`, `lux`, `topos`, `drive`) — those are
+- Flattening product groups (`cella`, `lux`, `topos`, `arca`) — those are
   namespaces over distinct backends and stay grouped.
 - Removing the `auth` alias now.

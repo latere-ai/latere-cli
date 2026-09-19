@@ -5,7 +5,7 @@
 //
 // A CLI writes most of what it produces to a stream it cannot recover from.
 // stdout is a pipe as often as a terminal, and a write that fails there fails
-// because the reader is gone -- `latere drive ls | head` closes the pipe
+// because the reader is gone -- `latere arca ls | head` closes the pipe
 // mid-listing. There is nowhere left to report that, and the shell already
 // knows. Checking every call would put a branch nobody can take on every line
 // of output; discarding it at each call site would be indistinguishable from
