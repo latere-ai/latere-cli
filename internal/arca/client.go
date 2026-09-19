@@ -177,12 +177,6 @@ type TrashListPage struct {
 	NextCursor string       `json:"next_cursor,omitempty"`
 }
 
-type QuotaView struct {
-	Owner      string `json:"owner"`
-	UsedBytes  int64  `json:"used_bytes"`
-	LimitBytes int64  `json:"limit_bytes"`
-}
-
 type CreateShareRequest struct {
 	Owner        string `json:"owner"`
 	PathPrefix   string `json:"path_prefix"`
@@ -559,16 +553,6 @@ func (c *Client) TrashPurge(ctx context.Context, owner, path string) (int, error
 		return 0, errors.New("the trash purge receipt carries no nonnegative purged count; the purge outcome is unknown")
 	}
 	return *out.Purged, nil
-}
-
-// ---- quota ----
-
-func (c *Client) Quota(ctx context.Context, owner string) (*QuotaView, error) {
-	var out QuotaView
-	if err := c.getJSON(ctx, "/v1/quotas/"+url.PathEscape(owner), nil, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
 }
 
 // ---- shares ----

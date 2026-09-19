@@ -392,8 +392,6 @@ func TestSimpleEndpointRoundtrips(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(TrashListPage{Entries: []TrashEntry{{Path: "files/t.txt", DeletedAt: "2026-07-12T00:00:00Z"}}})
 		case r.URL.Path == "/v1/trash/restore":
 			_ = json.NewEncoder(w).Encode(map[string]string{"path": "files/t.txt", "status": "restored"})
-		case r.URL.Path == "/v1/quotas/me":
-			_ = json.NewEncoder(w).Encode(QuotaView{Owner: "me", UsedBytes: 10, LimitBytes: 100})
 		case r.URL.Path == "/v1/shares" && r.Method == http.MethodGet:
 			_ = json.NewEncoder(w).Encode(ShareListPage{Entries: []Share{{ID: "s1", Status: "active"}}})
 		case r.URL.Path == "/v1/shared-with-me":
@@ -423,9 +421,6 @@ func TestSimpleEndpointRoundtrips(t *testing.T) {
 	}
 	if err := c.TrashRestore(ctx, "me", "files/t.txt"); err != nil {
 		t.Errorf("TrashRestore: %v", err)
-	}
-	if q, err := c.Quota(ctx, "me"); err != nil || q.LimitBytes != 100 {
-		t.Errorf("Quota: %v %+v", err, q)
 	}
 	if sh, err := c.Shares(ctx, false, "", 0); err != nil || sh.Entries[0].ID != "s1" {
 		t.Errorf("Shares: %v %+v", err, sh)
@@ -462,7 +457,6 @@ func TestEndpointsSurfaceErrors(t *testing.T) {
 		"Download":    func() error { _, _, err := c.Download(ctx, "me", "files/a", 1); return err },
 		"Versions":    func() error { _, err := c.Versions(ctx, "me", "files/a", "cur", 5); return err },
 		"TrashList":   func() error { _, err := c.TrashList(ctx, "me", "cur", 5); return err },
-		"Quota":       func() error { _, err := c.Quota(ctx, "me"); return err },
 		"CreateShare": func() error { _, err := c.CreateShare(ctx, CreateShareRequest{}); return err },
 		"Shares":      func() error { _, err := c.Shares(ctx, false, "cur", 5); return err },
 		"RevokeShare": func() error { return c.RevokeShare(ctx, "s1") },
