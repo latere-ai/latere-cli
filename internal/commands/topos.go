@@ -171,7 +171,8 @@ func newToposAgentsCreateCmd() *cobra.Command {
 		Long: `Create an agent on the Topos control plane.
 
 The agent's owner and org are derived from the bearer token's claims;
-they are never sent by the client. Requires the write:agents scope.`,
+they are never sent by the client. Requires a token addressed to Topos
+(the toposd audience).`,
 		Example: `  latere topos agents create --name "Build Bot" --kind worker
   latere topos agents create --name Helper --kind assistant \
     --instructions "You triage CI failures."`,
@@ -247,7 +248,7 @@ func newToposSessionCreateCmd() *cobra.Command {
 
 POSTs the initial prompt to the agent's session endpoint; the run
 executes on the control plane and the result is printed when it
-completes. Requires the run:agents scope.`,
+completes. Requires a token addressed to Topos (the toposd audience).`,
 		Example: `  latere topos session create agent_01hxy --prompt "Summarise README.md"`,
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -383,10 +384,10 @@ const toposAudience = "toposd"
 // token with a static bearer, so a server running with TOPOS_DEV_AUTH=true +
 // TOPOS_DEV_TOKEN can be reached in one step without `latere login`.
 //
-// Against production, Topos validates a bearer that names toposAudience
-// and carries run:agents. That is a token minted for Topos alone, not the
-// login token: the login token names the issuer, and a credential valid
-// at the identity service must not travel to a product.
+// Against production, Topos validates a bearer that names toposAudience.
+// That is a token minted for Topos alone, not the login token: the login
+// token names the issuer, and a credential valid at the identity service
+// must not travel to a product.
 func toposClient(ctx context.Context, apiURL string) (*api.Client, error) {
 	c := api.NewClient(resolveToposURL(apiURL))
 	if v := os.Getenv("TOPOS_TOKEN"); v != "" {
@@ -407,7 +408,7 @@ func toposClient(ctx context.Context, apiURL string) (*api.Client, error) {
 func toposBearer(ctx context.Context) (string, error) {
 	bearer, _, err := api.ActorToken(ctx, api.ResolveAuthURL("", ""), toposAudience)
 	if err != nil {
-		return "", fmt.Errorf("cannot authenticate to Topos: %w; `latere login` grants the run:agents scope Topos needs", err)
+		return "", fmt.Errorf("cannot authenticate to Topos: %w; run `latere login` to get a token addressed to Topos", err)
 	}
 	return bearer, nil
 }
