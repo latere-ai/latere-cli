@@ -68,21 +68,21 @@ func TestArcaBearerPrecedence(t *testing.T) {
 
 	t.Run("flag wins", func(t *testing.T) {
 		t.Setenv("LATERE_ARCA_TOKEN", "env-tok")
-		got, err := arcaBearer(t.Context(), "flag-tok", "")
+		got, err := arcaBearer(t.Context(), "flag-tok", "", "")
 		if err != nil || got != "flag-tok" {
 			t.Errorf("got %q, %v", got, err)
 		}
 	})
 	t.Run("env", func(t *testing.T) {
 		t.Setenv("LATERE_ARCA_TOKEN", "env-tok")
-		got, err := arcaBearer(t.Context(), "", "")
+		got, err := arcaBearer(t.Context(), "", "", "")
 		if err != nil || got != "env-tok" {
 			t.Errorf("got %q, %v", got, err)
 		}
 	})
 	t.Run("not signed in", func(t *testing.T) {
 		t.Setenv("LATERE_ARCA_TOKEN", "")
-		_, err := arcaBearer(t.Context(), "", "")
+		_, err := arcaBearer(t.Context(), "", "", "")
 		if err == nil || !strings.Contains(err.Error(), "not logged in") || !strings.Contains(err.Error(), "latere login") {
 			t.Errorf("want login hint, got %v", err)
 		}
@@ -99,7 +99,7 @@ func TestArcaBearerMintsArcaActorToken(t *testing.T) {
 
 	t.Run("mints", func(t *testing.T) {
 		auth := newAuthStub(t)
-		got, err := arcaBearer(t.Context(), "", auth.srv.URL)
+		got, err := arcaBearer(t.Context(), "", "", auth.srv.URL)
 		if err != nil || got != mintedActor {
 			t.Fatalf("arcaBearer = (%q, %v), want the minted Arca token", got, err)
 		}
@@ -108,7 +108,7 @@ func TestArcaBearerMintsArcaActorToken(t *testing.T) {
 	t.Run("mint failure is reported", func(t *testing.T) {
 		auth := newAuthStub(t)
 		auth.mintStatus = http.StatusServiceUnavailable
-		_, err := arcaBearer(t.Context(), "", auth.srv.URL)
+		_, err := arcaBearer(t.Context(), "", "", auth.srv.URL)
 		if err == nil || !strings.Contains(err.Error(), "503") || strings.Contains(err.Error(), "not logged in") {
 			t.Errorf("arcaBearer error = %v, want the mint failure, not a missing login", err)
 		}
@@ -123,7 +123,7 @@ func TestArcaBearerRefusesWithoutALogin(t *testing.T) {
 	t.Setenv("LATERE_ARCA_TOKEN", "")
 	auth := newAuthStub(t)
 
-	got, err := arcaBearer(t.Context(), "", auth.srv.URL)
+	got, err := arcaBearer(t.Context(), "", "", auth.srv.URL)
 	if err == nil || !strings.Contains(err.Error(), "not logged in; run `latere login`") {
 		t.Errorf("arcaBearer = (%q, %v), want the not-logged-in sentence", got, err)
 	}
@@ -143,7 +143,7 @@ func TestArcaBearerUnreadableLoginHintsRelogin(t *testing.T) {
 	}
 	t.Setenv("LATERE_AUTH_TOKEN_FILE", p)
 
-	_, err := arcaBearer(t.Context(), "", "")
+	_, err := arcaBearer(t.Context(), "", "", "")
 	if err == nil || !strings.Contains(err.Error(), "parse token file") || !strings.Contains(err.Error(), "latere login") {
 		t.Errorf("arcaBearer error = %v, want the parse failure with a re-login hint", err)
 	}
@@ -686,5 +686,31 @@ func TestArcaPutEmptyFile(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "Uploaded files/empty.txt (0 bytes") {
 		t.Fatalf("missing empty-upload success: %q", stderr)
+	}
+}
+
+// The issuer follows the origin the commands were pointed at, so a
+// development deployment mints against the issuer beside it rather than
+// against the public one. An explicit value still wins.
+func TestArcaIssuerFollowsTheOrigin(t *testing.T) {
+	for _, tc := range []struct {
+		name, origin, authURL, env, want string
+	}{
+		{"default origin", "", "", "", "https://auth.latere.ai"},
+		{"another deployment", "https://api.example.test", "", "", "https://auth.example.test"},
+		{"explicit issuer wins", "https://api.example.test", "https://issuer.example.test", "", "https://issuer.example.test"},
+		{"environment beats the origin", "https://api.example.test", "", "https://env.example.test", "https://env.example.test"},
+		{"an address with no labels to replace", "http://127.0.0.1:9000", "", "", "https://auth.latere.ai"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("AUTH_URL", tc.env)
+			origin := tc.origin
+			if origin == "" {
+				origin = arca.DefaultBaseURL
+			}
+			if got := arcaIssuer(origin, tc.authURL); got != tc.want {
+				t.Errorf("issuer = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }

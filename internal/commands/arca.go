@@ -92,11 +92,12 @@ func (o *arcaOpts) client(ctx context.Context) (*arca.Client, error) {
 	if err := checkOwner(*o.owner); err != nil {
 		return nil, err
 	}
-	bearer, err := arcaBearer(ctx, *o.token, *o.authURL)
+	origin := arca.ResolveURL(*o.apiURL)
+	bearer, err := arcaBearer(ctx, *o.token, origin, *o.authURL)
 	if err != nil {
 		return nil, err
 	}
-	return arca.New(arca.ResolveURL(*o.apiURL), bearer), nil
+	return arca.New(origin, bearer), nil
 }
 
 // checkOwner refuses the three spellings the predecessor addressed a space
@@ -113,11 +114,19 @@ func checkOwner(owner string) error {
 	return nil
 }
 
+// arcaIssuer is where the bearer is minted: an explicit --auth-url, then
+// $AUTH_URL, then the issuer beside whichever origin the commands call.
+// The origin is passed in rather than read again, so pointing --api-url at
+// another deployment mints against the issuer beside it.
+func arcaIssuer(origin, authURL string) string {
+	return api.ResolveAuthURL(origin, authURL)
+}
+
 // arcaCredentialToken is the bearer presented to Arca: a token minted for
 // arcaAudience alone from the saved login, the same path the git credential
 // helper uses for its own product.
-func arcaCredentialToken(ctx context.Context, authURL string) (string, error) {
-	bearer, _, err := api.ActorToken(ctx, api.ResolveAuthURL(arca.ResolveURL(""), authURL), arcaAudience)
+func arcaCredentialToken(ctx context.Context, origin, authURL string) (string, error) {
+	bearer, _, err := api.ActorToken(ctx, arcaIssuer(origin, authURL), arcaAudience)
 	if err != nil {
 		return "", fmt.Errorf("cannot authenticate to the storage service: %w", err)
 	}
@@ -128,14 +137,14 @@ func arcaCredentialToken(ctx context.Context, authURL string) (string, error) {
 // $LATERE_ARCA_TOKEN, then a minted actor token. A missing login reads as
 // "not signed in"; a refresh or mint failure is reported as itself, since
 // signing in again is not always the fix.
-func arcaBearer(ctx context.Context, tokenFlag, authURL string) (string, error) {
+func arcaBearer(ctx context.Context, tokenFlag, origin, authURL string) (string, error) {
 	if t := strings.TrimSpace(tokenFlag); t != "" {
 		return t, nil
 	}
 	if t := strings.TrimSpace(os.Getenv("LATERE_ARCA_TOKEN")); t != "" {
 		return t, nil
 	}
-	return arcaCredentialToken(ctx, authURL)
+	return arcaCredentialToken(ctx, origin, authURL)
 }
 
 // printArcaJSON emits one machine-readable value to stdout.
@@ -311,14 +320,15 @@ func newArcaPutCmd(o *arcaOpts) *cobra.Command {
 		Use:   "put <src> [path]",
 		Short: "Upload one file (default destination files/<basename>).",
 		Long: `Upload a local file. Files up to 16 MiB stream in a single request;
-larger files go through Arca's multipart plane automatically (up to
-16 GiB). '-' reads stdin (single-request; up to 100 MB).
+larger files go through an upload session automatically (up to 16 GiB).
+'-' reads stdin (single-request; up to 100 MB).
 
-Writes under memory/ require a compare-and-swap flag: --if-match with
-the current checksum to overwrite, or --create-only for new files.`,
+No write needs a condition, and either flag adds one: --if-match with
+the checksum you read writes only while the file still has it, and
+--create-only writes only if nothing is there.`,
 		Example: `  latere arca put report.pdf
   latere arca put report.pdf files/reports/q2.pdf
-  latere arca put notes.md memory/notes.md --create-only
+  latere arca put notes.md files/memory/notes.md --create-only
   cat data.csv | latere arca put - files/data.csv`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
