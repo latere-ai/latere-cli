@@ -244,3 +244,22 @@ func TestRevokeShareReportsAnUnknownID(t *testing.T) {
 		t.Errorf("revoke of an unknown id = %v", err)
 	}
 }
+
+// The server stores a subtree without its trailing separator, and a person
+// types one. The receipt is still the subtree that was asked for.
+func TestShareReceiptAcceptsTheServersPrefixForm(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(Grant{
+			ID: "share-1", Status: "active", Permission: "read", GranteeKind: GranteeSubject,
+			Grantee: "https://auth.latere.ai|7c22", PathPrefix: "files/reports", Owner: testSubject,
+		})
+	}))
+	defer server.Close()
+	got, err := New(server.URL, "synthetic-token").CreateGrant(t.Context(), CreateGrantRequest{
+		Owner: testSubject, PathPrefix: "files/reports/", Grantee: "https://auth.latere.ai|7c22", Permission: "read",
+	})
+	if err != nil || got == nil || got.PathPrefix != "files/reports" {
+		t.Errorf("trailing separator: result=%+v error=%v", got, err)
+	}
+}

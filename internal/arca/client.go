@@ -664,7 +664,9 @@ func validateShareCommon(out Grant, owner, prefix, permission string) error {
 		return fmt.Errorf("share status is %q, and a share is created active", out.Status)
 	case out.Permission == "" || out.Permission != permission:
 		return errors.New("permission does not match the request")
-	case out.PathPrefix == "" || out.PathPrefix != prefix:
+	// The server stores a subtree without its trailing separator, so the
+	// comparison ignores one on either side rather than restating the rule.
+	case out.PathPrefix == "" || strings.TrimSuffix(out.PathPrefix, "/") != strings.TrimSuffix(prefix, "/"):
 		return errors.New("path prefix does not match the request")
 	case strings.TrimSpace(out.Owner) == "":
 		return errors.New("missing owner")
