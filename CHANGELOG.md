@@ -12,6 +12,11 @@ committed: the commit log already holds that.
 
 ### Changed
 
+- `latere login` requests only the standard OIDC scopes: `openid`, `email`,
+  `profile` and `offline_access`. Topos access follows from the token's
+  audience, so `latere topos` is unchanged and a token saved by an earlier
+  release keeps working.
+
 - The identity gate reads the frontend for the retired admin flag and
   refuses a second copy of the authorizer envelope (ci-gate v0.42.0).
   Nothing changes for a user of `latere`.
