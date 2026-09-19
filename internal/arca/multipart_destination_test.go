@@ -35,14 +35,14 @@ func TestMultipartDestination(t *testing.T) {
 					if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Path != tc.want {
 						t.Errorf("requested path=%q error=%v", req.Path, err)
 					}
-					_ = json.NewEncoder(w).Encode(uploadSession{UploadID: "upload", Path: tc.returned, PartSize: 4, PartCount: 2, PartURLs: []string{"http://" + r.Host + "/part", "http://" + r.Host + "/part"}})
+					_ = json.NewEncoder(w).Encode(uploadSession{ID: "upload", Path: tc.returned, PartSize: 4, PartCount: 2, PartURLs: []string{"http://" + r.Host + "/part", "http://" + r.Host + "/part"}})
 				case "/part":
 					parts.Add(1)
 					_, _ = io.Copy(io.Discard, r.Body)
 					w.Header().Set("ETag", "part")
 				case "/v1/uploads/upload/complete":
 					completed.Add(1)
-					_ = json.NewEncoder(w).Encode(FileWriteResult{Path: tc.returned, Size: 7})
+					_ = json.NewEncoder(w).Encode(Object{Path: tc.returned, Size: 7})
 				case "/v1/uploads/upload":
 					if r.Method != http.MethodDelete {
 						t.Errorf("cleanup method=%s", r.Method)

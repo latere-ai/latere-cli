@@ -33,13 +33,11 @@ func TestArcaMoveReceiptE2E(t *testing.T) {
 		name, body string
 		valid      bool
 	}{
-		{"valid", `{"path":"files/to","moved_from":"files/from"}`, true},
+		{"valid", `{"path":"files/to","size":7,"checksum":"opaque"}`, true},
 		{"null", "null", false},
 		{"empty", "{}", false},
-		{"missing destination", `{"moved_from":"files/from"}`, false},
-		{"missing source", `{"path":"files/to"}`, false},
-		{"wrong destination", `{"path":"files/other","moved_from":"files/from"}`, false},
-		{"wrong source", `{"path":"files/to","moved_from":"files/other"}`, false},
+		{"missing destination", `{"size":7}`, false},
+		{"wrong destination", `{"path":"files/other","size":7}`, false},
 	} {
 		for _, format := range []string{"text", "json"} {
 			t.Run(tc.name+"/"+format, func(t *testing.T) {
@@ -79,10 +77,10 @@ func TestArcaMoveReceiptE2E(t *testing.T) {
 						}
 					} else {
 						var result struct {
-							Path   string
-							Source string `json:"moved_from"`
+							Path     string
+							Checksum string
 						}
-						if json.Unmarshal(out.Bytes(), &result) != nil || result.Path != "files/to" || result.Source != "files/from" || diagnostic.Len() != 0 {
+						if json.Unmarshal(out.Bytes(), &result) != nil || result.Path != "files/to" || result.Checksum != "opaque" || diagnostic.Len() != 0 {
 							t.Errorf("JSON=%q stderr=%q", out.String(), diagnostic.String())
 						}
 					}

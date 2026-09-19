@@ -116,80 +116,74 @@ func (e *Error) Error() string {
 	return out
 }
 
-// ---- wire types (field names match docs/openapi.yaml in ../arca) ----
+// ---- wire types (field names match api/openapi.yaml in ../arca) ----
 
-type FileEntry struct {
-	Path        string `json:"path"`
-	ContentType string `json:"content_type,omitempty"`
-	Size        int64  `json:"size,omitempty"`
-	Checksum    string `json:"checksum,omitempty"`
-	IsPublic    bool   `json:"is_public,omitempty"`
-	Modified    string `json:"modified,omitempty"`
+// Object is one stored object. Every file route that answers JSON answers
+// this one shape: a write, a move, a version brought forward, a restore
+// from the trash, and every row of a listing.
+type Object struct {
+	Path         string `json:"path"`
+	Size         int64  `json:"size"`
+	Checksum     string `json:"checksum"`
+	ChecksumKind string `json:"checksum_kind,omitempty"`
+	ContentType  string `json:"content_type,omitempty"`
+	IsPublic     bool   `json:"is_public,omitempty"`
+	Modified     string `json:"modified,omitempty"`
+	URL          string `json:"url,omitempty"`
 }
 
-type FileListPage struct {
-	Entries    []FileEntry `json:"entries"`
-	NextCursor string      `json:"next_cursor,omitempty"`
-}
-
-type FileWriteResult struct {
-	Path     string `json:"path"`
-	Size     int64  `json:"size"`
-	Checksum string `json:"checksum"`
-	URL      string `json:"url,omitempty"`
+// Listing is a page of a subtree. Entries are the objects under the path,
+// and Prefixes the directory names one level below it, synthesised for a
+// tree view; a listing of paths reads Entries alone.
+type Listing struct {
+	Entries    []Object `json:"entries"`
+	Prefixes   []string `json:"prefixes,omitempty"`
+	NextCursor string   `json:"next_cursor,omitempty"`
 }
 
 // Keep an absent byte count distinct from a legitimate empty-file receipt.
-type fileWriteReceipt struct {
-	FileWriteResult
+type objectReceipt struct {
+	Object
 	Size *int64 `json:"size"`
 }
 
-func (r fileWriteReceipt) result(path string, size int64) (*FileWriteResult, error) {
+func (r objectReceipt) result(path string, size int64) (*Object, error) {
 	if r.Path == "" || r.Path != path || r.Size == nil || *r.Size != size {
 		return nil, errors.New("the upload receipt does not match the requested path and size; the upload outcome is unknown")
 	}
-	r.FileWriteResult.Size = *r.Size
-	return &r.FileWriteResult, nil
+	r.Object.Size = *r.Size
+	return &r.Object, nil
 }
 
-type MoveFileResult struct {
-	Path      string `json:"path"`
-	MovedFrom string `json:"moved_from,omitempty"`
+// Version is one superseded revision of an object.
+type Version struct {
+	VersionNo    int    `json:"version_no"`
+	Size         int64  `json:"size"`
+	Checksum     string `json:"checksum"`
+	ChecksumKind string `json:"checksum_kind,omitempty"`
+	ContentType  string `json:"content_type,omitempty"`
+	CreatedBy    string `json:"created_by"`
+	SupersededAt string `json:"superseded_at"`
 }
 
-type VersionRestoreResult struct {
-	Path            string `json:"path"`
-	Size            int64  `json:"size"`
-	Checksum        string `json:"checksum"`
-	RestoredVersion int    `json:"restored_version"`
+type VersionPage struct {
+	Entries    []Version `json:"entries"`
+	NextCursor string    `json:"next_cursor,omitempty"`
 }
 
-type FileVersionEntry struct {
-	VersionNo        int    `json:"version_no"`
-	ContentType      string `json:"content_type"`
-	Size             int64  `json:"size"`
-	Checksum         string `json:"checksum"`
-	CreatedBy        string `json:"created_by"`
-	SupersededAt     string `json:"superseded_at"`
-	CreatedByDisplay string `json:"created_by_display,omitempty"`
-}
-
-type FileVersionListPage struct {
-	Entries    []FileVersionEntry `json:"entries"`
-	NextCursor string             `json:"next_cursor,omitempty"`
-}
-
-type TrashEntry struct {
+// Trashed is one object in the trash, with the day it stops being
+// restorable.
+type Trashed struct {
 	Path      string `json:"path"`
 	Size      int64  `json:"size"`
 	CreatedBy string `json:"created_by"`
 	DeletedAt string `json:"deleted_at"`
+	PurgesAt  string `json:"purges_at,omitempty"`
 }
 
-type TrashListPage struct {
-	Entries    []TrashEntry `json:"entries"`
-	NextCursor string       `json:"next_cursor,omitempty"`
+type TrashPage struct {
+	Entries    []Trashed `json:"entries"`
+	NextCursor string    `json:"next_cursor,omitempty"`
 }
 
 type CreateShareRequest struct {
@@ -360,9 +354,9 @@ func (c *Client) postJSON(ctx context.Context, path string, in, out any) error {
 
 // ---- files ----
 
-func (c *Client) List(ctx context.Context, owner, prefix, cursor string, limit int) (*FileListPage, error) {
-	// Arca rejects a trailing slash on the listing path (it appends its
-	// own prefix separator server-side).
+func (c *Client) List(ctx context.Context, owner, prefix, cursor string, limit int) (*Listing, error) {
+	// A prefix is a path, and a path carries no trailing slash; the server
+	// appends the separator itself when it reads the subtree.
 	prefix = strings.TrimRight(prefix, "/")
 	q := url.Values{"list": {""}}
 	if cursor != "" {
@@ -371,7 +365,7 @@ func (c *Client) List(ctx context.Context, owner, prefix, cursor string, limit i
 	if limit > 0 {
 		q.Set("limit", strconv.Itoa(limit))
 	}
-	var page FileListPage
+	var page Listing
 	if err := c.getJSON(ctx, filesPath(owner, prefix), q, &page); err != nil {
 		return nil, err
 	}
@@ -455,7 +449,7 @@ func (o PutOptions) applyCAS(h http.Header) {
 
 // Put streams a single-request upload. Arca requires Content-Length, so
 // size must be known up front.
-func (c *Client) Put(ctx context.Context, owner, path string, r io.Reader, size int64, opts PutOptions) (*FileWriteResult, error) {
+func (c *Client) Put(ctx context.Context, owner, path string, r io.Reader, size int64, opts PutOptions) (*Object, error) {
 	req, err := c.req(ctx, http.MethodPut, filesPath(owner, path), nil, r)
 	if err != nil {
 		return nil, err
@@ -471,33 +465,38 @@ func (c *Client) Put(ctx context.Context, owner, path string, r io.Reader, size 
 		req.GetBody = nil
 	}
 	opts.apply(req.Header)
-	var out fileWriteReceipt
+	var out objectReceipt
 	if err := c.do(req, &out); err != nil {
 		return nil, err
 	}
 	return out.result(strings.TrimPrefix(path, "/"), size)
 }
 
-func (c *Client) Move(ctx context.Context, owner, path, dest string) (*MoveFileResult, error) {
-	var out MoveFileResult
+// Move renames within a plane. The receipt is the object at its new
+// path; the source is not echoed, so the destination is what confirms it.
+func (c *Client) Move(ctx context.Context, owner, path, dest string) (*Object, error) {
+	var out Object
 	err := c.postJSON(ctx, filesPath(owner, path), map[string]string{"move_to": dest}, &out)
 	if err != nil {
 		return nil, err
 	}
-	if out.Path == "" || out.Path != dest || out.MovedFrom == "" || out.MovedFrom != strings.TrimPrefix(path, "/") {
+	if out.Path == "" || out.Path != dest {
 		return nil, errors.New("the move receipt does not name the requested destination; the move outcome is unknown")
 	}
 	return &out, nil
 }
 
-func (c *Client) RestoreVersion(ctx context.Context, owner, path string, version int) (*VersionRestoreResult, error) {
-	var out VersionRestoreResult
+// RestoreVersion brings one revision forward as the current object. The
+// receipt is that object; it does not echo which revision was asked for,
+// so the path and a checksum are what confirm it.
+func (c *Client) RestoreVersion(ctx context.Context, owner, path string, version int) (*Object, error) {
+	var out Object
 	err := c.postJSON(ctx, filesPath(owner, path), map[string]int{"restore_version": version}, &out)
 	if err != nil {
 		return nil, err
 	}
-	if out.Path == "" || out.Path != strings.TrimPrefix(path, "/") || out.RestoredVersion <= 0 || out.RestoredVersion != version {
-		return nil, errors.New("the restore receipt does not match the requested path and version; the restore outcome is unknown")
+	if out.Path == "" || out.Path != strings.TrimPrefix(path, "/") || out.Checksum == "" {
+		return nil, errors.New("the restore receipt does not match the requested path; the restore outcome is unknown")
 	}
 	return &out, nil
 }
@@ -507,7 +506,8 @@ func (c *Client) RestoreVersion(ctx context.Context, owner, path string, version
 func (c *Client) Delete(ctx context.Context, owner, path string, permanent bool, version int) error {
 	q := url.Values{}
 	if permanent {
-		q.Set("permanent", "true")
+		// The flag is read as 0 or 1; any other value is refused.
+		q.Set("permanent", "1")
 	}
 	if version > 0 {
 		q.Set("version", strconv.Itoa(version))
@@ -519,7 +519,7 @@ func (c *Client) Delete(ctx context.Context, owner, path string, permanent bool,
 	return c.do(req, nil)
 }
 
-func (c *Client) Versions(ctx context.Context, owner, path, cursor string, limit int) (*FileVersionListPage, error) {
+func (c *Client) Versions(ctx context.Context, owner, path, cursor string, limit int) (*VersionPage, error) {
 	q := url.Values{"versions": {""}}
 	if cursor != "" {
 		q.Set("cursor", cursor)
@@ -527,7 +527,7 @@ func (c *Client) Versions(ctx context.Context, owner, path, cursor string, limit
 	if limit > 0 {
 		q.Set("limit", strconv.Itoa(limit))
 	}
-	var page FileVersionListPage
+	var page VersionPage
 	if err := c.getJSON(ctx, filesPath(owner, path), q, &page); err != nil {
 		return nil, err
 	}
@@ -536,7 +536,7 @@ func (c *Client) Versions(ctx context.Context, owner, path, cursor string, limit
 
 // ---- trash ----
 
-func (c *Client) TrashList(ctx context.Context, owner, cursor string, limit int) (*TrashListPage, error) {
+func (c *Client) TrashList(ctx context.Context, owner, cursor string, limit int) (*TrashPage, error) {
 	q := url.Values{"owner": {owner}}
 	if cursor != "" {
 		q.Set("cursor", cursor)
@@ -544,23 +544,22 @@ func (c *Client) TrashList(ctx context.Context, owner, cursor string, limit int)
 	if limit > 0 {
 		q.Set("limit", strconv.Itoa(limit))
 	}
-	var page TrashListPage
+	var page TrashPage
 	if err := c.getJSON(ctx, "/v1/trash", q, &page); err != nil {
 		return nil, err
 	}
 	return &page, nil
 }
 
+// TrashRestore returns one trashed object to its path. The receipt is the
+// object now live there, so the path is what confirms the restore.
 func (c *Client) TrashRestore(ctx context.Context, owner, path string) error {
-	var out struct {
-		Path   string `json:"path"`
-		Status string `json:"status"`
-	}
+	var out Object
 	if err := c.postJSON(ctx, "/v1/trash/restore", map[string]string{"owner": owner, "path": path}, &out); err != nil {
 		return err
 	}
-	if out.Path == "" || out.Path != path || out.Status != "restored" {
-		return errors.New("the trash restore receipt does not confirm the requested path was restored; the restore outcome is unknown")
+	if out.Path == "" || out.Path != path {
+		return errors.New("the trash restore receipt does not name the requested path; the restore outcome is unknown")
 	}
 	return nil
 }
@@ -667,23 +666,24 @@ func (c *Client) RevokeShare(ctx context.Context, id string) error {
 // ---- multipart uploads ----
 
 type uploadSession struct {
-	UploadID  string   `json:"upload_id"`
+	ID        string   `json:"id"`
 	Owner     string   `json:"owner"`
 	Path      string   `json:"path"`
-	PartSize  int      `json:"part_size"`
-	PartCount int      `json:"part_count"`
+	PartSize  int64    `json:"part_size"`
+	PartCount int64    `json:"part_count"`
 	PartURLs  []string `json:"part_urls"`
+	ExpiresAt string   `json:"expires_at"`
 }
 
 // partPutConcurrency bounds in-flight part PUTs, matching the SPA.
 const partPutConcurrency = 4
 
-// MultipartUpload uploads a file larger than PartSize through Arca's
-// presigned multipart plane: create session, PUT each 16 MiB part to the
-// object store (4 in flight), then complete with the collected ETags.
-// The session is aborted (best-effort) on any failure so quota is not
-// held by orphaned parts.
-func (c *Client) MultipartUpload(ctx context.Context, owner, path string, r io.ReaderAt, size int64, opts PutOptions) (*FileWriteResult, error) {
+// MultipartUpload uploads a file larger than PartSize through the upload
+// session: open the session, PUT each 16 MiB part to the object store (4
+// in flight), then complete with the collected ETags. The session is
+// aborted (best-effort) on any failure, so no bytes are left counted
+// against the space by parts nothing will assemble.
+func (c *Client) MultipartUpload(ctx context.Context, owner, path string, r io.ReaderAt, size int64, opts PutOptions) (*Object, error) {
 	if size <= 0 {
 		return nil, errors.New("an upload size is a positive number of bytes")
 	}
@@ -695,75 +695,78 @@ func (c *Client) MultipartUpload(ctx context.Context, owner, path string, r io.R
 	if err := c.postJSON(ctx, "/v1/uploads", create, &sess); err != nil {
 		// A decoded session may precede an incomplete or invalid response
 		// tail. Release it even though its response cannot be accepted.
-		if sess.UploadID != "" {
-			c.abortUpload(ctx, sess.UploadID)
+		if sess.ID != "" {
+			c.abortUpload(ctx, sess.ID)
 		}
 		return nil, err
 	}
 	// Validate coverage before creating section readers: a missing part would
 	// otherwise let completion publish only a prefix of the requested file.
 	// Subtract before dividing to avoid overflowing on large declared sizes.
-	if sess.UploadID == "" || sess.PartSize <= 0 || sess.PartCount != len(sess.PartURLs) ||
-		int64(sess.PartCount) != 1+(size-1)/int64(sess.PartSize) {
-		if sess.UploadID != "" {
-			c.abortUpload(ctx, sess.UploadID)
+	if sess.ID == "" || sess.PartSize <= 0 || sess.PartCount != int64(len(sess.PartURLs)) ||
+		sess.PartCount != 1+(size-1)/sess.PartSize {
+		if sess.ID != "" {
+			c.abortUpload(ctx, sess.ID)
 		}
 		return nil, fmt.Errorf("the upload session is malformed (part_size=%d, part_count=%d, urls=%d)",
 			sess.PartSize, sess.PartCount, len(sess.PartURLs))
 	}
 	if sess.Path == "" || sess.Path != path {
-		c.abortUpload(ctx, sess.UploadID)
+		c.abortUpload(ctx, sess.ID)
 		return nil, errors.New("the upload session names a destination other than the requested path")
 	}
 
-	etags := make([]string, sess.PartCount)
+	// The count equals the number of URLs the response carried, so it is
+	// bounded by the response itself and fits an index.
+	count := int(sess.PartCount)
+	etags := make([]string, count)
 	// The group keeps the first part failure and cancels the rest; SetLimit
 	// bounds the parts in flight rather than the goroutines spawned.
 	g, partCtx := errgroup.WithContext(ctx)
 	g.SetLimit(partPutConcurrency)
-	for i := range sess.PartCount {
+	for i := range count {
 		g.Go(func() error {
-			off := int64(i) * int64(sess.PartSize)
-			n := min(size-off, int64(sess.PartSize))
+			off := int64(i) * sess.PartSize
+			n := min(size-off, sess.PartSize)
 			etag, err := putPart(partCtx, c.HTTP, sess.PartURLs[i], io.NewSectionReader(r, off, n), n)
 			if err != nil {
-				return fmt.Errorf("part %d/%d: %w", i+1, sess.PartCount, err)
+				return fmt.Errorf("part %d/%d: %w", i+1, count, err)
 			}
 			etags[i] = etag
 			return nil
 		})
 	}
 	if err := g.Wait(); err != nil {
-		c.abortUpload(ctx, sess.UploadID)
+		c.abortUpload(ctx, sess.ID)
 		return nil, err
 	}
 
-	parts := make([]map[string]any, sess.PartCount)
+	parts := make([]map[string]any, count)
 	for i, etag := range etags {
 		parts[i] = map[string]any{"n": i + 1, "etag": etag}
 	}
 	b, err := json.Marshal(map[string]any{"parts": parts})
 	if err != nil {
-		c.abortUpload(ctx, sess.UploadID)
+		c.abortUpload(ctx, sess.ID)
 		return nil, err
 	}
-	req, err := c.req(ctx, http.MethodPost, "/v1/uploads/"+url.PathEscape(sess.UploadID)+"/complete", nil, bytes.NewReader(b))
+	req, err := c.req(ctx, http.MethodPost, "/v1/uploads/"+url.PathEscape(sess.ID)+"/complete", nil, bytes.NewReader(b))
 	if err != nil {
-		c.abortUpload(ctx, sess.UploadID)
+		c.abortUpload(ctx, sess.ID)
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	opts.applyCAS(req.Header) // CAS rides the complete call, not the parts
-	var out fileWriteReceipt
+	var out objectReceipt
 	if err := c.do(req, &out); err != nil {
 		// 412/413 already discard the session server-side; abort is a
 		// harmless no-op (404) then.
-		c.abortUpload(ctx, sess.UploadID)
+		c.abortUpload(ctx, sess.ID)
 		return nil, err
 	}
 	result, err := out.result(path, size)
 	if err != nil {
-		c.abortUpload(ctx, sess.UploadID)
+		c.abortUpload(ctx, sess.ID)
 		return nil, err
 	}
 	return result, nil

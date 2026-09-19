@@ -34,7 +34,7 @@ func TestArcaDeleteRequiresCompletionE2E(t *testing.T) {
 		args                    []string
 	}{
 		{"trash", "/v1/files/me/files/item", "", "Trashed files/item (restore with `latere arca restore files/item`)\n", []string{"rm", "files/item"}},
-		{"permanent", "/v1/files/me/files/item", "permanent=true", "Permanently deleted files/item\n", []string{"rm", "files/item", "--permanent"}},
+		{"permanent", "/v1/files/me/files/item", "permanent=1", "Permanently deleted files/item\n", []string{"rm", "files/item", "--permanent"}},
 		{"version", "/v1/files/me/files/item", "version=2", "Pruned version 2 of files/item\n", []string{"rm", "files/item", "--version", "2"}},
 		{"revoke", "/v1/shares/share-1", "", "Revoked share share-1\n", []string{"unshare", "share-1"}},
 	} {

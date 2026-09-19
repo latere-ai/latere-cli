@@ -20,8 +20,8 @@ func TestMultipartUploadRejectsMalformedSession(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		id        string
-		partSize  int
-		partCount int
+		partSize  int64
+		partCount int64
 		urlCount  int
 	}{
 		{"no_parts", "upload", 4, 0, 0},
@@ -48,14 +48,14 @@ func TestMultipartUploadRejectsMalformedSession(t *testing.T) {
 					w.Header().Set("ETag", `"part-etag"`)
 				case strings.HasSuffix(r.URL.Path, "/complete"):
 					completes.Add(1)
-					_ = json.NewEncoder(w).Encode(FileWriteResult{Size: 8})
+					_ = json.NewEncoder(w).Encode(Object{Size: 8})
 				default:
 					urls := make([]string, tc.urlCount)
 					for i := range urls {
 						urls[i] = "http://" + r.Host + "/part"
 					}
 					_ = json.NewEncoder(w).Encode(uploadSession{
-						UploadID: tc.id, PartSize: tc.partSize, PartCount: tc.partCount, PartURLs: urls,
+						ID: tc.id, PartSize: tc.partSize, PartCount: tc.partCount, PartURLs: urls,
 					})
 				}
 			}))
@@ -123,7 +123,7 @@ func TestMultipartUploadRejectsIncompleteResponses(t *testing.T) {
 						completes.Add(1)
 						current, payload = "complete", []byte(`{"path":"files/data","size":8}`)
 					default:
-						payload, _ = json.Marshal(uploadSession{UploadID: "test-upload", Path: "files/data", PartSize: 4, PartCount: 2, PartURLs: []string{"http://" + r.Host + "/part1", "http://" + r.Host + "/part2"}})
+						payload, _ = json.Marshal(uploadSession{ID: "test-upload", Path: "files/data", PartSize: 4, PartCount: 2, PartURLs: []string{"http://" + r.Host + "/part1", "http://" + r.Host + "/part2"}})
 					}
 					if current == stage {
 						if state == "truncated" {
@@ -163,7 +163,7 @@ func TestMultipartUploadAbortsOnMethodChangingRedirect(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
 				case "/v1/uploads":
-					_ = json.NewEncoder(w).Encode(uploadSession{UploadID: "test-upload", Path: "files/test", PartSize: 4, PartCount: 1, PartURLs: []string{"http://" + r.Host + "/part"}})
+					_ = json.NewEncoder(w).Encode(uploadSession{ID: "test-upload", Path: "files/test", PartSize: 4, PartCount: 1, PartURLs: []string{"http://" + r.Host + "/part"}})
 				case "/part":
 					_, _ = io.Copy(io.Discard, r.Body)
 					w.Header().Set("Location", "/redirected")
@@ -173,7 +173,7 @@ func TestMultipartUploadAbortsOnMethodChangingRedirect(t *testing.T) {
 					w.Header().Set("ETag", `"not-an-upload"`)
 				case "/v1/uploads/test-upload/complete":
 					completes.Add(1)
-					_ = json.NewEncoder(w).Encode(FileWriteResult{Path: "files/test", Size: 4})
+					_ = json.NewEncoder(w).Encode(Object{Path: "files/test", Size: 4})
 				case "/v1/uploads/test-upload":
 					if r.Method != http.MethodDelete {
 						t.Errorf("unexpected cleanup method: %s", r.Method)

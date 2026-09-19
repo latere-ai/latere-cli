@@ -15,7 +15,7 @@ import (
 )
 
 func TestMoveReceipt(t *testing.T) {
-	const valid = `{"path":"files/to","moved_from":"files/from","extra":true}`
+	const valid = `{"path":"files/to","size":7,"checksum":"opaque","extra":true}`
 	for _, tc := range []struct {
 		name, source, body string
 		status             int
@@ -25,10 +25,8 @@ func TestMoveReceipt(t *testing.T) {
 		{"leading slash", "/files/from", valid, 200, true},
 		{"null", "files/from", "null", 200, false},
 		{"empty", "files/from", "{}", 200, false},
-		{"missing destination", "files/from", `{"moved_from":"files/from"}`, 200, false},
-		{"missing source", "files/from", `{"path":"files/to"}`, 200, false},
-		{"wrong destination", "files/from", `{"path":"files/other","moved_from":"files/from"}`, 200, false},
-		{"wrong source", "files/from", `{"path":"files/to","moved_from":"files/other"}`, 200, false},
+		{"missing destination", "files/from", `{"size":7}`, 200, false},
+		{"wrong destination", "files/from", `{"path":"files/other","size":7}`, 200, false},
 		{"API error", "files/from", `{"error": {"code": "not_found", "message": "Nothing here answers to that path.", "details": {"request_id": "req_01J8R4"}}}`, 404, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -51,7 +49,7 @@ func TestMoveReceipt(t *testing.T) {
 			out, err := New(server.URL, "synthetic-token").Move(t.Context(), "me", tc.source, "files/to")
 			switch {
 			case tc.valid:
-				if err != nil || out == nil || out.Path != "files/to" || out.MovedFrom != "files/from" {
+				if err != nil || out == nil || out.Path != "files/to" || out.Checksum != "opaque" {
 					t.Errorf("valid receipt: %+v %v", out, err)
 				}
 			case tc.status == 404:

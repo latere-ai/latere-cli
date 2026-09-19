@@ -176,7 +176,7 @@ func newArcaLsCmd(o *arcaOpts) *cobra.Command {
 			if trashed {
 				return runLsTrashed(cmd, c, o)
 			}
-			var entries []arca.FileEntry
+			var entries []arca.Object
 			seen := make(map[string]bool)
 			for cursor := ""; ; {
 				page, err := c.List(cmd.Context(), *o.owner, prefix, cursor, 1000)
@@ -216,7 +216,7 @@ func newArcaLsCmd(o *arcaOpts) *cobra.Command {
 }
 
 func runLsTrashed(cmd *cobra.Command, c *arca.Client, o *arcaOpts) error {
-	var entries []arca.TrashEntry
+	var entries []arca.Trashed
 	seen := make(map[string]bool)
 	for cursor := ""; ; {
 		page, err := c.TrashList(cmd.Context(), *o.owner, cursor, 1000)
@@ -354,7 +354,7 @@ the current checksum to overwrite, or --create-only for new files.`,
 
 // arcaPut picks the upload strategy: stdin and small files stream a single
 // PUT; anything past the fixed 16 MiB part size uses multipart.
-func arcaPut(cmd *cobra.Command, c *arca.Client, owner, src, dest string, opts arca.PutOptions) (*arca.FileWriteResult, error) {
+func arcaPut(cmd *cobra.Command, c *arca.Client, owner, src, dest string, opts arca.PutOptions) (*arca.Object, error) {
 	if src == "-" {
 		if dest == "" {
 			return nil, errors.New("uploading from stdin requires an explicit destination path")
@@ -515,7 +515,7 @@ func newArcaRestoreCmd(o *arcaOpts) *cobra.Command {
 				if *o.jsonOut {
 					return printArcaJSON(cmd.OutOrStdout(), res)
 				}
-				fprintf(cmd.ErrOrStderr(), "Restored %s to version %d\n", res.Path, res.RestoredVersion)
+				fprintf(cmd.ErrOrStderr(), "Restored %s to version %d (checksum %s)\n", res.Path, version, res.Checksum)
 				return nil
 			}
 			if err := c.TrashRestore(cmd.Context(), *o.owner, args[0]); err != nil {
@@ -542,7 +542,7 @@ func newArcaHistoryCmd(o *arcaOpts) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			var entries []arca.FileVersionEntry
+			var entries []arca.Version
 			seen := make(map[string]bool)
 			for cursor := ""; ; {
 				page, err := c.Versions(cmd.Context(), *o.owner, args[0], cursor, 1000)
@@ -563,11 +563,7 @@ func newArcaHistoryCmd(o *arcaOpts) *cobra.Command {
 			}
 			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
 			for _, v := range entries {
-				by := v.CreatedByDisplay
-				if by == "" {
-					by = v.CreatedBy
-				}
-				fprintf(w, "v%d\t%d\t%s\t%s\t%s\n", v.VersionNo, v.Size, v.SupersededAt, by, v.Checksum)
+				fprintf(w, "v%d\t%d\t%s\t%s\t%s\n", v.VersionNo, v.Size, v.SupersededAt, v.CreatedBy, v.Checksum)
 			}
 			return w.Flush()
 		},

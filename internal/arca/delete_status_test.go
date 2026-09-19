@@ -20,7 +20,7 @@ func TestDeleteRequiresCompletion(t *testing.T) {
 		run               func(*Client) error
 	}{
 		{"trash", "/v1/files/me/files/item", "", func(c *Client) error { return c.Delete(t.Context(), "me", "files/item", false, 0) }},
-		{"permanent", "/v1/files/me/files/item", "permanent=true", func(c *Client) error { return c.Delete(t.Context(), "me", "files/item", true, 0) }},
+		{"permanent", "/v1/files/me/files/item", "permanent=1", func(c *Client) error { return c.Delete(t.Context(), "me", "files/item", true, 0) }},
 		{"version", "/v1/files/me/files/item", "version=2", func(c *Client) error { return c.Delete(t.Context(), "me", "files/item", false, 2) }},
 		{"revoke", "/v1/shares/share-1", "", func(c *Client) error { return c.RevokeShare(t.Context(), "share-1") }},
 	} {

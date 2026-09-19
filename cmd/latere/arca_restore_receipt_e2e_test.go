@@ -33,13 +33,12 @@ func TestArcaRestoreReceiptE2E(t *testing.T) {
 		name, body string
 		valid      bool
 	}{
-		{"valid", `{"path":"files/item","restored_version":3,"size":7,"checksum":"opaque"}`, true},
+		{"valid", `{"path":"files/item","size":7,"checksum":"opaque"}`, true},
 		{"null", "null", false},
 		{"empty", "{}", false},
-		{"missing path", `{"restored_version":3}`, false},
-		{"wrong path", `{"path":"files/other","restored_version":3}`, false},
-		{"missing version", `{"path":"files/item"}`, false},
-		{"wrong version", `{"path":"files/item","restored_version":2}`, false},
+		{"missing path", `{"size":7,"checksum":"opaque"}`, false},
+		{"wrong path", `{"path":"files/other","size":7,"checksum":"opaque"}`, false},
+		{"missing checksum", `{"path":"files/item","size":7}`, false},
 	} {
 		for _, format := range []string{"text", "json"} {
 			t.Run(tc.name+"/"+format, func(t *testing.T) {
@@ -74,17 +73,16 @@ func TestArcaRestoreReceiptE2E(t *testing.T) {
 						t.Errorf("valid receipt: %v: %s", err, diagnostic.String())
 					}
 					if format == "text" {
-						if out.Len() != 0 || diagnostic.String() != "Restored files/item to version 3\n" {
+						if out.Len() != 0 || diagnostic.String() != "Restored files/item to version 3 (checksum opaque)\n" {
 							t.Errorf("output=%q stderr=%q", out.String(), diagnostic.String())
 						}
 					} else {
 						var result struct {
 							Path     string
-							Version  int `json:"restored_version"`
 							Size     int
 							Checksum string
 						}
-						if json.Unmarshal(out.Bytes(), &result) != nil || result.Path != "files/item" || result.Version != 3 || result.Size != 7 || result.Checksum != "opaque" || diagnostic.Len() != 0 {
+						if json.Unmarshal(out.Bytes(), &result) != nil || result.Path != "files/item" || result.Size != 7 || result.Checksum != "opaque" || diagnostic.Len() != 0 {
 							t.Errorf("JSON=%q stderr=%q", out.String(), diagnostic.String())
 						}
 					}

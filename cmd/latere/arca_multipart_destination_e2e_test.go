@@ -57,7 +57,7 @@ func TestArcaMultipartDestinationE2E(t *testing.T) {
 						if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Path != tc.want {
 							t.Errorf("requested path=%q error=%v", req.Path, err)
 						}
-						_ = json.NewEncoder(w).Encode(map[string]any{"upload_id": "upload", "path": tc.returned, "part_size": 16 << 20, "part_count": 2, "part_urls": []string{"http://" + r.Host + "/part", "http://" + r.Host + "/part"}})
+						_ = json.NewEncoder(w).Encode(map[string]any{"id": "upload", "path": tc.returned, "part_size": 16 << 20, "part_count": 2, "part_urls": []string{"http://" + r.Host + "/part", "http://" + r.Host + "/part"}})
 					case "/part":
 						parts.Add(1)
 						n, err := io.Copy(io.Discard, r.Body)

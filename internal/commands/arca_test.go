@@ -169,14 +169,14 @@ func TestArcaLsListsAndPaginates(t *testing.T) {
 		}
 		calls++
 		if r.URL.Query().Get("cursor") == "" {
-			_ = json.NewEncoder(w).Encode(arca.FileListPage{
-				Entries:    []arca.FileEntry{{Path: "files/a.txt", Size: 1}},
+			_ = json.NewEncoder(w).Encode(arca.Listing{
+				Entries:    []arca.Object{{Path: "files/a.txt", Size: 1}},
 				NextCursor: "c2",
 			})
 			return
 		}
-		_ = json.NewEncoder(w).Encode(arca.FileListPage{
-			Entries: []arca.FileEntry{{Path: "files/b.txt", Size: 2}},
+		_ = json.NewEncoder(w).Encode(arca.Listing{
+			Entries: []arca.Object{{Path: "files/b.txt", Size: 2}},
 		})
 	}))
 	defer srv.Close()
@@ -195,7 +195,7 @@ func TestArcaLsListsAndPaginates(t *testing.T) {
 
 func TestArcaLsJSON(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(arca.FileListPage{Entries: []arca.FileEntry{{Path: "files/a.txt", Size: 7}}})
+		_ = json.NewEncoder(w).Encode(arca.Listing{Entries: []arca.Object{{Path: "files/a.txt", Size: 7}}})
 	}))
 	defer srv.Close()
 
@@ -203,7 +203,7 @@ func TestArcaLsJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var entries []arca.FileEntry
+	var entries []arca.Object
 	if err := json.Unmarshal([]byte(out), &entries); err != nil {
 		t.Fatalf("stdout is not JSON: %v\n%s", err, out)
 	}
@@ -261,7 +261,7 @@ func TestArcaPutSmallFile(t *testing.T) {
 		_, _ = b.ReadFrom(r.Body)
 		gotBody = b.String()
 		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(arca.FileWriteResult{Path: "files/src.txt", Size: int64(b.Len()), Checksum: "c"})
+		_ = json.NewEncoder(w).Encode(arca.Object{Path: "files/src.txt", Size: int64(b.Len()), Checksum: "c"})
 	}))
 	defer srv.Close()
 
@@ -328,7 +328,7 @@ func TestArcaRmVariants(t *testing.T) {
 	if _, stderr, err := execArca(t, srv, "rm", "files/a.txt", "--permanent"); err != nil || !strings.Contains(stderr, "Permanently") {
 		t.Errorf("rm --permanent: %v %q", err, stderr)
 	}
-	if gotQuery != "permanent=true" {
+	if gotQuery != "permanent=1" {
 		t.Errorf("query = %q", gotQuery)
 	}
 	if _, stderr, err := execArca(t, srv, "rm", "files/a.txt", "--version", "2"); err != nil || !strings.Contains(stderr, "Pruned version 2") {
@@ -371,14 +371,14 @@ func TestArcaRestoreVariants(t *testing.T) {
 			if req["owner"] != "me" || req["path"] != "files/a.txt" {
 				t.Errorf("restore req = %v", req)
 			}
-			_ = json.NewEncoder(w).Encode(map[string]string{"path": "files/a.txt", "status": "restored"})
+			_ = json.NewEncoder(w).Encode(arca.Object{Path: "files/a.txt", Size: 1, Checksum: "opaque"})
 		case "/v1/files/me/files/a.txt":
 			var req map[string]int
 			_ = json.NewDecoder(r.Body).Decode(&req)
 			if req["restore_version"] != 3 {
 				t.Errorf("restore_version = %v", req)
 			}
-			_ = json.NewEncoder(w).Encode(arca.VersionRestoreResult{Path: "files/a.txt", RestoredVersion: 3})
+			_ = json.NewEncoder(w).Encode(arca.Object{Path: "files/a.txt", Size: 1, Checksum: "opaque"})
 		default:
 			t.Errorf("unexpected path %s", r.URL.Path)
 		}
@@ -398,8 +398,8 @@ func TestArcaHistory(t *testing.T) {
 		if _, ok := r.URL.Query()["versions"]; !ok {
 			t.Error("missing ?versions flag")
 		}
-		_ = json.NewEncoder(w).Encode(arca.FileVersionListPage{Entries: []arca.FileVersionEntry{
-			{VersionNo: 2, Size: 10, Checksum: "c2", CreatedByDisplay: "Changkun", SupersededAt: "2026-07-12T00:00:00Z"},
+		_ = json.NewEncoder(w).Encode(arca.VersionPage{Entries: []arca.Version{
+			{VersionNo: 2, Size: 10, Checksum: "c2", CreatedBy: "https://auth.latere.ai|9ab3", SupersededAt: "2026-07-12T00:00:00Z"},
 		}})
 	}))
 	defer srv.Close()
@@ -408,7 +408,7 @@ func TestArcaHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "v2") || !strings.Contains(out, "Changkun") {
+	if !strings.Contains(out, "v2") || !strings.Contains(out, "https://auth.latere.ai|9ab3") {
 		t.Errorf("out = %q", out)
 	}
 }
@@ -501,7 +501,7 @@ func TestArcaOwnerFlagRoutesToSpace(t *testing.T) {
 	var escaped, decoded string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		escaped, decoded = r.URL.EscapedPath(), r.URL.Path
-		_ = json.NewEncoder(w).Encode(arca.FileListPage{})
+		_ = json.NewEncoder(w).Encode(arca.Listing{})
 	}))
 	defer srv.Close()
 
@@ -525,7 +525,7 @@ func TestArcaRefusesRetiredOwnerSpellings(t *testing.T) {
 			var requests atomic.Int32
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				requests.Add(1)
-				_ = json.NewEncoder(w).Encode(arca.FileListPage{})
+				_ = json.NewEncoder(w).Encode(arca.Listing{})
 			}))
 			defer srv.Close()
 

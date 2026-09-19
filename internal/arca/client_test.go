@@ -101,8 +101,8 @@ func TestListPaginatesWithCursor(t *testing.T) {
 		}
 		gotCursor = r.URL.Query().Get("cursor")
 		gotAuth = r.Header.Get("Authorization")
-		_ = json.NewEncoder(w).Encode(FileListPage{
-			Entries:    []FileEntry{{Path: "files/a.txt", Size: 3}},
+		_ = json.NewEncoder(w).Encode(Listing{
+			Entries:    []Object{{Path: "files/a.txt", Size: 3}},
 			NextCursor: "next-1",
 		})
 	}))
@@ -187,7 +187,7 @@ func TestPutSetsCASHeaders(t *testing.T) {
 				got = r.Header.Clone()
 				gotLen = r.ContentLength
 				w.WriteHeader(http.StatusCreated)
-				_ = json.NewEncoder(w).Encode(FileWriteResult{Path: "files/a.txt", Size: 2, Checksum: "c"})
+				_ = json.NewEncoder(w).Encode(Object{Path: "files/a.txt", Size: 2, Checksum: "c"})
 			}))
 			defer srv.Close()
 
@@ -222,7 +222,7 @@ func TestDeleteQueryModifiers(t *testing.T) {
 	if err := c.Delete(context.Background(), "me", "files/a.txt", true, 0); err != nil {
 		t.Fatal(err)
 	}
-	if gotQuery != "permanent=true" {
+	if gotQuery != "permanent=1" {
 		t.Errorf("query = %q", gotQuery)
 	}
 	if err := c.Delete(context.Background(), "me", "files/a.txt", false, 3); err != nil {
@@ -273,7 +273,7 @@ func TestMultipartUpload(t *testing.T) {
 		}
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(uploadSession{
-			UploadID: "u1", Owner: "me", Path: "files/big.bin",
+			ID: "u1", Owner: "me", Path: "files/big.bin",
 			PartSize: partSize, PartCount: 3,
 			PartURLs: []string{srv.URL + "/part/1", srv.URL + "/part/2", srv.URL + "/part/3"},
 		})
@@ -299,7 +299,7 @@ func TestMultipartUpload(t *testing.T) {
 			t.Error("CAS header missing on complete")
 		}
 		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(FileWriteResult{Path: "files/big.bin", Size: int64(len(data)), Checksum: "composite"})
+		_ = json.NewEncoder(w).Encode(Object{Path: "files/big.bin", Size: int64(len(data)), Checksum: "composite"})
 	})
 
 	res, err := New(srv.URL, "tok").MultipartUpload(context.Background(), "me", "files/big.bin",
@@ -339,7 +339,7 @@ func TestMultipartUploadAbortsOnPartFailure(t *testing.T) {
 	mux.HandleFunc("/v1/uploads", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(uploadSession{
-			UploadID: "u2", Path: "files/b.bin", PartSize: 4, PartCount: 2,
+			ID: "u2", Path: "files/b.bin", PartSize: 4, PartCount: 2,
 			PartURLs: []string{srv.URL + "/part/1", srv.URL + "/part/2"},
 		})
 	})
@@ -404,16 +404,16 @@ func TestSimpleEndpointRoundtrips(t *testing.T) {
 			var body map[string]any
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			if _, ok := body["move_to"]; ok {
-				_ = json.NewEncoder(w).Encode(MoveFileResult{Path: "files/b.txt", MovedFrom: "files/a.txt"})
+				_ = json.NewEncoder(w).Encode(Object{Path: "files/b.txt", Size: 1, Checksum: "c"})
 			} else {
-				_ = json.NewEncoder(w).Encode(VersionRestoreResult{Path: "files/a.txt", RestoredVersion: 2, Size: 1, Checksum: "c"})
+				_ = json.NewEncoder(w).Encode(Object{Path: "files/a.txt", Size: 1, Checksum: "c"})
 			}
 		case r.URL.Path == "/v1/files/me/files/a.txt": // ?versions
-			_ = json.NewEncoder(w).Encode(FileVersionListPage{Entries: []FileVersionEntry{{VersionNo: 2, Size: 1, Checksum: "c"}}})
+			_ = json.NewEncoder(w).Encode(VersionPage{Entries: []Version{{VersionNo: 2, Size: 1, Checksum: "c"}}})
 		case r.URL.Path == "/v1/trash" && r.Method == http.MethodGet:
-			_ = json.NewEncoder(w).Encode(TrashListPage{Entries: []TrashEntry{{Path: "files/t.txt", DeletedAt: "2026-07-12T00:00:00Z"}}})
+			_ = json.NewEncoder(w).Encode(TrashPage{Entries: []Trashed{{Path: "files/t.txt", DeletedAt: "2026-07-12T00:00:00Z"}}})
 		case r.URL.Path == "/v1/trash/restore":
-			_ = json.NewEncoder(w).Encode(map[string]string{"path": "files/t.txt", "status": "restored"})
+			_ = json.NewEncoder(w).Encode(Object{Path: "files/t.txt", Size: 1, Checksum: "c"})
 		case r.URL.Path == "/v1/shares" && r.Method == http.MethodGet:
 			_ = json.NewEncoder(w).Encode(ShareListPage{Entries: []Share{{ID: "s1", Status: "active"}}})
 		case r.URL.Path == "/v1/shared-with-me":
@@ -432,7 +432,7 @@ func TestSimpleEndpointRoundtrips(t *testing.T) {
 	if mv, err := c.Move(ctx, "me", "files/a.txt", "files/b.txt"); err != nil || mv.Path != "files/b.txt" {
 		t.Errorf("Move: %v %+v", err, mv)
 	}
-	if rv, err := c.RestoreVersion(ctx, "me", "files/a.txt", 2); err != nil || rv.RestoredVersion != 2 {
+	if rv, err := c.RestoreVersion(ctx, "me", "files/a.txt", 2); err != nil || rv.Path != "files/a.txt" || rv.Checksum != "c" {
 		t.Errorf("RestoreVersion: %v %+v", err, rv)
 	}
 	if vs, err := c.Versions(ctx, "me", "files/a.txt", "", 0); err != nil || len(vs.Entries) != 1 || vs.Entries[0].VersionNo != 2 {

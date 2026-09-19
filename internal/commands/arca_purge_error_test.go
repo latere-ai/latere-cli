@@ -39,7 +39,7 @@ func TestArcaRmPurgeError(t *testing.T) {
 				switch r.URL.Path {
 				case "/v1/files/https://auth.latere.ai|9ab3/files/item":
 					live.Add(1)
-					if r.URL.Query().Get("permanent") != "true" {
+					if r.URL.Query().Get("permanent") != "1" {
 						t.Error("missing permanent flag")
 					}
 					w.WriteHeader(http.StatusNotFound)

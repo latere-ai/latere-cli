@@ -33,14 +33,11 @@ func TestArcaTrashRestoreReceiptE2E(t *testing.T) {
 		name, body string
 		valid      bool
 	}{
-		{"valid", `{"path":"files/item","status":"restored","extra":true}`, true},
+		{"valid", `{"path":"files/item","size":7,"checksum":"opaque","extra":true}`, true},
 		{"null", `null`, false},
 		{"empty", `{}`, false},
-		{"missing path", `{"status":"restored"}`, false},
-		{"wrong path", `{"path":"files/other","status":"restored"}`, false},
-		{"missing status", `{"path":"files/item"}`, false},
-		{"pending", `{"path":"files/item","status":"pending"}`, false},
-		{"failed", `{"path":"files/item","status":"failed"}`, false},
+		{"missing path", `{"size":7,"checksum":"opaque"}`, false},
+		{"wrong path", `{"path":"files/other","size":7,"checksum":"opaque"}`, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var requests atomic.Int32

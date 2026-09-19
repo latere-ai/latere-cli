@@ -191,7 +191,7 @@ func (f *fakeArca) handleFile(w http.ResponseWriter, r *http.Request, path strin
 			return
 		}
 		delete(f.files, path)
-		if q.Get("permanent") != "true" {
+		if q.Get("permanent") != "1" {
 			f.trash[path] = b
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -220,7 +220,7 @@ func (f *fakeArca) handleCreateUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"upload_id": id, "owner": "me", "path": req.Path,
+		"id": id, "owner": "me", "path": req.Path,
 		"part_size": partSize, "part_count": count, "part_urls": urls,
 	})
 }

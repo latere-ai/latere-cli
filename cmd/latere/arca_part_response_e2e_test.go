@@ -51,7 +51,7 @@ func TestArcaMultipartRequiresCompletePartResponseE2E(t *testing.T) {
 				}
 				switch r.URL.Path {
 				case "/v1/uploads":
-					_ = json.NewEncoder(w).Encode(map[string]any{"upload_id": "test-upload", "path": "files/test", "part_size": size, "part_count": 1, "part_urls": []string{"http://" + r.Host + "/part"}})
+					_ = json.NewEncoder(w).Encode(map[string]any{"id": "test-upload", "path": "files/test", "part_size": size, "part_count": 1, "part_urls": []string{"http://" + r.Host + "/part"}})
 				case "/part":
 					puts.Add(1)
 					n, err := io.Copy(io.Discard, r.Body)
