@@ -144,7 +144,7 @@ deprecation notice (scripts' stderr stays clean).
 **Follow-ups.** Landscape classes 2-5 (the credential smoke script, the
 Cella remediation string, the product frontends, and the surrounding docs)
 land per-surface after a release ships, per the Landscape Impact section.
-`003-drive-subcommand.md` is now unblocked.
+`003-arca-subcommand.md` is now unblocked.
 
 ## Non-goals
 
