@@ -45,22 +45,44 @@ func TestFilesPathEscaping(t *testing.T) {
 	}
 }
 
+// The envelope carries one code, one sentence for the person, and one
+// detail for whoever has to debug it. All four reach the caller.
 func TestErrorEnvelopeDecoding(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusPreconditionRequired)
-		fmt.Fprint(w, `{"error":"memory writes require If-Match or If-None-Match: *"}`)
+		w.WriteHeader(http.StatusPreconditionFailed)
+		fmt.Fprint(w, `{"error":{"code":"precondition_failed",`+
+			`"message":"The object is not in the state the request required.",`+
+			`"details":{"request_id":"req_01J8R4","detail":"If-Match named 9f2c; the object's checksum is 4d81"}}}`)
 	}))
 	defer srv.Close()
 
 	c := New(srv.URL, "tok")
-	_, err := c.Put(context.Background(), "me", "memory/x", strings.NewReader("hi"), 2, PutOptions{})
+	_, err := c.Put(context.Background(), "me", "files/x", strings.NewReader("hi"), 2, PutOptions{IfMatch: "9f2c"})
 	var derr *Error
 	if !asArcaErr(err, &derr) {
 		t.Fatalf("want *Error, got %T: %v", err, err)
 	}
-	if derr.Status != 428 || !strings.Contains(derr.Message, "If-Match") {
+	if derr.Status != 412 || derr.Code != "precondition_failed" ||
+		derr.Message != "The object is not in the state the request required." ||
+		derr.RequestID != "req_01J8R4" || !strings.Contains(derr.Detail, "9f2c") {
 		t.Errorf("got %+v", derr)
+	}
+}
+
+// A body that is not the envelope is still legible: something other than
+// the service can answer at an origin.
+func TestErrorBodyOutsideTheEnvelope(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		fmt.Fprint(w, "  upstream connect error  ")
+	}))
+	defer srv.Close()
+
+	var derr *Error
+	err := New(srv.URL, "tok").RevokeShare(context.Background(), "s1")
+	if !asArcaErr(err, &derr) || derr.Status != 502 || derr.Code != "" || derr.Message != "upstream connect error" {
+		t.Errorf("got %+v (%v)", derr, err)
 	}
 }
 
@@ -435,19 +457,33 @@ func TestSimpleEndpointRoundtrips(t *testing.T) {
 }
 
 func TestErrorStringFormats(t *testing.T) {
-	if got := (&Error{Status: 404, Message: "not found"}).Error(); got != "not found (HTTP 404)" {
-		t.Errorf("got %q", got)
-	}
-	if got := (&Error{Status: 401}).Error(); got != "HTTP 401" {
-		t.Errorf("got %q", got)
+	for _, tc := range []struct {
+		name string
+		err  Error
+		want string
+	}{
+		{"code and sentence", Error{Status: 404, Code: "not_found", Message: "Nothing here answers to that path."},
+			"not_found: Nothing here answers to that path."},
+		{"with the detail and the request", Error{Status: 412, Code: "precondition_failed",
+			Message: "The object is not in the state the request required.", Detail: "If-Match named 9f2c", RequestID: "req_01J8R4"},
+			"precondition_failed: The object is not in the state the request required.\nIf-Match named 9f2c\nrequest req_01J8R4"},
+		{"sentence alone", Error{Status: 502, Message: "upstream connect error"}, "upstream connect error"},
+		{"neither", Error{Status: 401}, "HTTP 401"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.err.Error(); got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
-// Error paths: every endpoint surfaces the {"error": ...} envelope.
+// Error paths: every endpoint surfaces the envelope.
 func TestEndpointsSurfaceErrors(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
-		fmt.Fprint(w, `{"error":"nope"}`)
+		fmt.Fprint(w, `{"error":{"code":"forbidden","message":"You do not have permission to do that.",`+
+			`"details":{"request_id":"req_01J8R4"}}}`)
 	}))
 	defer srv.Close()
 	c := New(srv.URL, "tok")
@@ -468,8 +504,8 @@ func TestEndpointsSurfaceErrors(t *testing.T) {
 		if !asArcaErr(err, &derr) || derr.Status != 403 {
 			t.Errorf("%s: want 403 *Error, got %v", name, err)
 		}
-		if name != "Stat" && derr.Message != "nope" {
-			t.Errorf("%s: message = %q", name, derr.Message)
+		if name != "Stat" && (derr.Code != "forbidden" || derr.Message != "You do not have permission to do that.") {
+			t.Errorf("%s: code = %q message = %q", name, derr.Code, derr.Message)
 		}
 	}
 }

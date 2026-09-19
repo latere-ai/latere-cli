@@ -51,7 +51,7 @@ func TestArcaDeleteRequiresCompletionE2E(t *testing.T) {
 					case 202:
 						_, _ = io.WriteString(w, `{"status":"pending"}`)
 					case 403:
-						_, _ = io.WriteString(w, `{"error":"denied"}`)
+						_, _ = io.WriteString(w, `{"error":{"code":"forbidden","message":"You do not have permission to do that.","details":{"request_id":"req_01J8R4"}}}`)
 					case 200:
 						_, _ = io.WriteString(w, `{}`)
 					}
@@ -73,7 +73,7 @@ func TestArcaDeleteRequiresCompletionE2E(t *testing.T) {
 					if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 || strings.Contains(diagnostic.String(), operation.want) {
 						t.Errorf("unconfirmed: error=%v stderr=%q", err, diagnostic.String())
 					}
-					want := "denied"
+					want := "You do not have permission to do that."
 					if status == 202 {
 						want = "outcome is unknown"
 					}

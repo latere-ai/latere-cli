@@ -23,12 +23,12 @@ func TestArcaRmPurgeError(t *testing.T) {
 		body, want string
 	}{
 		{"success", 200, `{"purged":1}`, ""},
-		{"not in trash", 404, `{"error":"not in trash"}`, "not in trash"},
-		{"forbidden", 403, `{"error":"purge forbidden"}`, "purge forbidden"},
-		{"server failure", 500, `{"error":"purge failed"}`, "purge failed"},
+		{"not in trash", 404, `{"error": {"code": "not_found", "message": "Nothing here answers to that path.", "details": {"request_id": "req_01J8R4"}}}`, "not_found: Nothing here answers to that path."},
+		{"forbidden", 403, `{"error": {"code": "forbidden", "message": "You do not have permission to do that.", "details": {"request_id": "req_01J8R4"}}}`, "forbidden: You do not have permission to do that."},
+		{"server failure", 500, `{"error": {"code": "internal", "message": "Something went wrong on our side.", "details": {"request_id": "req_01J8R4"}}}`, "internal: Something went wrong on our side."},
 		{"invalid response", 200, `{"purged":`, "unexpected EOF"},
 		{"extra response", 200, `{"purged":1} {}`, "multiple JSON values"},
-		{"nothing purged", 200, `{"purged":0}`, "live lookup missed"},
+		{"nothing purged", 200, `{"purged":0}`, "Nothing here answers to that path."},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var live, trash atomic.Int32
@@ -43,7 +43,7 @@ func TestArcaRmPurgeError(t *testing.T) {
 						t.Error("missing permanent flag")
 					}
 					w.WriteHeader(http.StatusNotFound)
-					_, _ = io.WriteString(w, `{"error":"live lookup missed"}`)
+					_, _ = io.WriteString(w, `{"error": {"code": "not_found", "message": "Nothing here answers to that path.", "details": {"request_id": "req_01J8R4"}}}`)
 				case "/v1/trash":
 					trash.Add(1)
 					if r.URL.Query().Get("owner") != "https://auth.latere.ai|9ab3" || r.URL.Query().Get("path") != "files/item" {

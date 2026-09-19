@@ -31,7 +31,7 @@ func TestArcaCommandRegisteredInRoot(t *testing.T) {
 
 func TestArcaVerbSet(t *testing.T) {
 	// The command space is deliberately small (specs/003-arca-subcommand.md);
-	// growing it should be a conscious spec change, not a arca-by.
+	// growing it should be a conscious spec change, not a drive-by.
 	want := map[string]bool{
 		"ls": false, "get": false, "put": false, "mv": false, "rm": false,
 		"restore": false, "history": false, "share": false, "shares": false, "unshare": false,
@@ -148,7 +148,7 @@ func TestArcaBearerUnreadableLoginHintsRelogin(t *testing.T) {
 	}
 }
 
-// execArca runs a arca subcommand against srv with a passthrough token,
+// execArca runs one arca subcommand against srv with a passthrough token,
 // returning stdout and stderr.
 func execArca(t *testing.T, srv *httptest.Server, args ...string) (string, string, error) {
 	t.Helper()
@@ -290,10 +290,14 @@ func TestArcaPutStdinRequiresDest(t *testing.T) {
 	}
 }
 
-func TestArcaPutMemoryCASGuidance(t *testing.T) {
+// No route demands a precondition, so a refused one is always a condition
+// the caller asked for, and the guidance says how to ask again.
+func TestArcaPutConditionalWriteGuidance(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusPreconditionRequired)
-		fmt.Fprint(w, `{"error":"memory writes require If-Match or If-None-Match: *"}`)
+		w.WriteHeader(http.StatusPreconditionFailed)
+		fmt.Fprint(w, `{"error":{"code":"precondition_failed",`+
+			`"message":"The object is not in the state the request required.",`+
+			`"details":{"request_id":"req_01J8R4"}}}`)
 	}))
 	defer srv.Close()
 
@@ -301,9 +305,9 @@ func TestArcaPutMemoryCASGuidance(t *testing.T) {
 	if err := os.WriteFile(src, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err := execArca(t, srv, "put", src, "memory/m.txt")
-	if err == nil || !strings.Contains(err.Error(), "--if-match") || !strings.Contains(err.Error(), "--create-only") {
-		t.Fatalf("want CAS guidance, got %v", err)
+	_, _, err := execArca(t, srv, "put", src, "files/m.txt", "--if-match", "9f2c")
+	if err == nil || !strings.Contains(err.Error(), "precondition_failed") || !strings.Contains(err.Error(), "--if-match") {
+		t.Fatalf("want the guidance on a refused condition, got %v", err)
 	}
 }
 
@@ -338,7 +342,7 @@ func TestArcaRmPermanentPurgesTrashedFile(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/v1/files/") {
 			w.WriteHeader(http.StatusNotFound)
-			fmt.Fprint(w, `{"error":"not found"}`)
+			fmt.Fprint(w, `{"error": {"code": "not_found", "message": "Nothing here answers to that path.", "details": {"request_id": "req_01J8R4"}}}`)
 			return
 		}
 		if r.URL.Path == "/v1/trash" && r.Method == http.MethodDelete {
@@ -574,7 +578,7 @@ func TestArcaRmVersionNeverPurgesWholeFile(t *testing.T) {
 			t.Errorf("missing version in request: %s", r.URL.String())
 		}
 		w.WriteHeader(http.StatusNotFound)
-		fmt.Fprint(w, `{"error":"version not found"}`)
+		fmt.Fprint(w, `{"error": {"code": "not_found", "message": "Nothing here answers to that path.", "details": {"request_id": "req_01J8R4"}}}`)
 	}))
 	defer srv.Close()
 	_, stderr, err := execArca(t, srv, "rm", "files/a", "--version", "2", "--permanent")
@@ -610,7 +614,7 @@ func TestArcaPutEmptyFile(t *testing.T) {
 		}
 		if r.ContentLength < 0 {
 			w.WriteHeader(http.StatusLengthRequired)
-			_, _ = io.WriteString(w, `{"error":"Content-Length is required"}`)
+			_, _ = io.WriteString(w, `{"error": {"code": "length_required", "message": "The request must state how many bytes it carries.", "details": {"request_id": "req_01J8R4"}}}`)
 			return
 		}
 		if r.ContentLength != 0 || len(r.TransferEncoding) != 0 {

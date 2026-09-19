@@ -148,11 +148,11 @@ func (f *fakeArca) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			_ = json.NewEncoder(w).Encode(map[string]string{"path": req.Path, "status": "restored"})
 			return
 		}
-		f.err(w, 404, "not in trash")
+		f.err(w, 404, "not_found", "Nothing here answers to that path.")
 	case strings.HasPrefix(p, "/v1/files/me/"):
 		f.handleFile(w, r, strings.TrimPrefix(p, "/v1/files/me/"))
 	default:
-		f.err(w, 404, "unexpected route "+r.Method+" "+p)
+		f.err(w, 404, "not_found", "unexpected route "+r.Method+" "+p)
 	}
 }
 
@@ -180,14 +180,14 @@ func (f *fakeArca) handleFile(w http.ResponseWriter, r *http.Request, path strin
 			return
 		}
 		if _, ok := f.files[path]; !ok {
-			f.err(w, 404, "not found")
+			f.err(w, 404, "not_found", "Nothing here answers to that path.")
 			return
 		}
 		http.Redirect(w, r, f.base+"/blob/"+path, http.StatusFound)
 	case http.MethodDelete:
 		b, ok := f.files[path]
 		if !ok {
-			f.err(w, 404, "not found")
+			f.err(w, 404, "not_found", "Nothing here answers to that path.")
 			return
 		}
 		delete(f.files, path)
@@ -196,7 +196,7 @@ func (f *fakeArca) handleFile(w http.ResponseWriter, r *http.Request, path strin
 		}
 		w.WriteHeader(http.StatusNoContent)
 	default:
-		f.err(w, 405, "method")
+		f.err(w, 405, "bad_request", "That method is not allowed here.")
 	}
 }
 
@@ -228,7 +228,7 @@ func (f *fakeArca) handleCreateUpload(w http.ResponseWriter, r *http.Request) {
 func (f *fakeArca) handlePart(w http.ResponseWriter, r *http.Request) {
 	seg := strings.Split(strings.TrimPrefix(r.URL.Path, "/part/"), "/")
 	if len(seg) != 2 {
-		f.err(w, 400, "bad part url")
+		f.err(w, 400, "bad_request", "bad part url")
 		return
 	}
 	id := seg[0]
@@ -252,7 +252,7 @@ func (f *fakeArca) handleCompleteUpload(w http.ResponseWriter, r *http.Request) 
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	if len(req.Parts) != f.partCounts[id] {
-		f.err(w, 400, "wrong part count")
+		f.err(w, 400, "bad_request", "wrong part count")
 		return
 	}
 	var buf bytes.Buffer
@@ -265,7 +265,9 @@ func (f *fakeArca) handleCompleteUpload(w http.ResponseWriter, r *http.Request) 
 	_ = json.NewEncoder(w).Encode(map[string]any{"path": path, "size": buf.Len(), "checksum": "composite"})
 }
 
-func (f *fakeArca) err(w http.ResponseWriter, status int, msg string) {
+func (f *fakeArca) err(w http.ResponseWriter, status int, code, msg string) {
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
+	_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{
+		"code": code, "message": msg, "details": map[string]any{"request_id": "req_01J8R4"},
+	}})
 }

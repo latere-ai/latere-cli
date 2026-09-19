@@ -87,18 +87,33 @@ func New(baseURL, token string) *Client {
 	}
 }
 
-// Error is a non-2xx response. The service name is not in the sentence:
+// Error is a non-2xx response, carrying the family error envelope whole:
+// one code, one sentence written for the person, and one developer detail
+// beside the request id. The service name is not in the sentence, because
 // the person reading it typed the command that made the request.
 type Error struct {
-	Status  int
-	Message string
+	Status    int
+	Code      string
+	Message   string
+	Detail    string
+	RequestID string
 }
 
 func (e *Error) Error() string {
-	if e.Message != "" {
-		return fmt.Sprintf("%s (HTTP %d)", e.Message, e.Status)
+	out := e.Message
+	if out == "" {
+		out = fmt.Sprintf("HTTP %d", e.Status)
 	}
-	return fmt.Sprintf("HTTP %d", e.Status)
+	if e.Code != "" {
+		out = e.Code + ": " + out
+	}
+	if e.Detail != "" {
+		out += "\n" + e.Detail
+	}
+	if e.RequestID != "" {
+		out += "\nrequest " + e.RequestID
+	}
+	return out
 }
 
 // ---- wire types (field names match docs/openapi.yaml in ../arca) ----
@@ -258,8 +273,8 @@ func (c *Client) req(ctx context.Context, method, path string, query url.Values,
 	return req, nil
 }
 
-// do requires a complete response and one JSON value in out (nil out = drain).
-// Non-2xx becomes *Error with Arca's {"error": "..."} message.
+// do requires a complete response and one JSON value in out (nil out =
+// drain). Non-2xx becomes *Error with the envelope decoded.
 func (c *Client) do(req *http.Request, out any) error {
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
@@ -292,16 +307,34 @@ func (c *Client) do(req *http.Request, out any) error {
 	return nil
 }
 
+// decodeErr reads the family envelope, {"error": {"code", "message",
+// "details": {"request_id", "detail"}}}. A body that is not that envelope
+// is carried as the sentence, so a failure from something other than the
+// service is still legible.
 func decodeErr(resp *http.Response) error {
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<14))
 	var env struct {
-		Error string `json:"error"`
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+			Details struct {
+				RequestID string `json:"request_id"`
+				Detail    string `json:"detail"`
+			} `json:"details"`
+		} `json:"error"`
 	}
 	_ = json.Unmarshal(b, &env)
-	if env.Error == "" {
-		env.Error = strings.TrimSpace(string(b))
+	e := &Error{
+		Status:    resp.StatusCode,
+		Code:      env.Error.Code,
+		Message:   env.Error.Message,
+		Detail:    env.Error.Details.Detail,
+		RequestID: env.Error.Details.RequestID,
 	}
-	return &Error{Status: resp.StatusCode, Message: env.Error}
+	if e.Code == "" && e.Message == "" {
+		e.Message = strings.TrimSpace(string(b))
+	}
+	return e
 }
 
 func (c *Client) getJSON(ctx context.Context, path string, query url.Values, out any) error {

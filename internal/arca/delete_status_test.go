@@ -37,7 +37,7 @@ func TestDeleteRequiresCompletion(t *testing.T) {
 					case 202:
 						_, _ = io.WriteString(w, `{"status":"pending"}`)
 					case 403:
-						_, _ = io.WriteString(w, `{"error":"denied"}`)
+						_, _ = io.WriteString(w, `{"error":{"code":"forbidden","message":"You do not have permission to do that.","details":{"request_id":"req_01J8R4"}}}`)
 					case 200:
 						_, _ = io.WriteString(w, `{}`)
 					}
@@ -51,7 +51,7 @@ func TestDeleteRequiresCompletion(t *testing.T) {
 					}
 				case 403:
 					var apiErr *Error
-					if !errors.As(err, &apiErr) || apiErr.Status != 403 || apiErr.Message != "denied" {
+					if !errors.As(err, &apiErr) || apiErr.Status != 403 || apiErr.Code != "forbidden" {
 						t.Errorf("lost API error: %v", err)
 					}
 				default:

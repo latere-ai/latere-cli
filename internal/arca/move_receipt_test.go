@@ -29,7 +29,7 @@ func TestMoveReceipt(t *testing.T) {
 		{"missing source", "files/from", `{"path":"files/to"}`, 200, false},
 		{"wrong destination", "files/from", `{"path":"files/other","moved_from":"files/from"}`, 200, false},
 		{"wrong source", "files/from", `{"path":"files/to","moved_from":"files/other"}`, 200, false},
-		{"API error", "files/from", `{"error":"missing file"}`, 404, false},
+		{"API error", "files/from", `{"error": {"code": "not_found", "message": "Nothing here answers to that path.", "details": {"request_id": "req_01J8R4"}}}`, 404, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var requests atomic.Int32
@@ -56,7 +56,7 @@ func TestMoveReceipt(t *testing.T) {
 				}
 			case tc.status == 404:
 				var apiErr *Error
-				if !errors.As(err, &apiErr) || apiErr.Status != 404 || apiErr.Message != "missing file" {
+				if !errors.As(err, &apiErr) || apiErr.Status != 404 || apiErr.Code != "not_found" || apiErr.Message != "Nothing here answers to that path." {
 					t.Errorf("API error changed: %v", err)
 				}
 			default:

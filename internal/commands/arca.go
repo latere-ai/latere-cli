@@ -401,17 +401,17 @@ func arcaPut(cmd *cobra.Command, c *arca.Client, owner, src, dest string, opts a
 	return c.Put(cmd.Context(), owner, dest, f, st.Size(), opts)
 }
 
-// decorateCASError turns Arca's CAS statuses into actionable guidance.
+// decorateCASError adds what to do next to a refused conditional write.
+// No route demands a precondition, so this can only follow one the caller
+// asked for: --if-match names a checksum the object no longer has, or
+// --create-only found something already there.
 func decorateCASError(err error) error {
 	var derr *arca.Error
 	if !errors.As(err, &derr) {
 		return err
 	}
-	switch derr.Status {
-	case 412:
-		return fmt.Errorf("%w\nThe file changed since you read it (or already exists). Get the current checksum with `latere arca ls --long`, then retry with --if-match", err)
-	case 428:
-		return fmt.Errorf("%w\nmemory/ writes need CAS: pass --if-match <checksum> to overwrite or --create-only for a new file", err)
+	if derr.Code == "precondition_failed" {
+		return fmt.Errorf("%w\nThe file changed since you read it, or it already exists. Read the current checksum with `latere arca ls --long`, then retry with --if-match", err)
 	}
 	return err
 }
