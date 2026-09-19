@@ -24,10 +24,11 @@ import (
 // paths identical: a refresh that silently narrowed scopes would strand
 // commands until the next full login.
 //
-// The scopes are the person's, not a product's. Every product call
-// presents an actor token minted from this login, and the actor token
-// inherits these scopes with one product's audience stamped on it.
-const LoginScopes = "openid email profile offline_access run:agents read:agents write:agents"
+// The CLI requests only the standard OIDC scopes. The products it reaches
+// decide what a bearer may do from the token's audience and the roles its
+// claims carry, so a product scope requested here would be vocabulary the
+// issuer had to mint and nothing read.
+const LoginScopes = "openid email profile offline_access"
 
 // DefaultAuthURL is the issuer of the public deployment.
 const DefaultAuthURL = "https://auth.latere.ai"

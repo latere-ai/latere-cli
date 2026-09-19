@@ -17,10 +17,7 @@ import (
 // an unrelated reason, and an exact assertion makes that visible in the diff.
 func TestLoginScopesRequestsNoSandboxScopes(t *testing.T) {
 	got := strings.Fields(LoginScopes)
-	want := []string{
-		"openid", "email", "profile", "offline_access",
-		"run:agents", "read:agents", "write:agents",
-	}
+	want := []string{"openid", "email", "profile", "offline_access"}
 	if len(got) != len(want) {
 		t.Fatalf("LoginScopes = %v, want %v", got, want)
 	}
