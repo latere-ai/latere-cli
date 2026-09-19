@@ -58,7 +58,7 @@ func TestArcaRejectsMethodChangingRedirectsE2E(t *testing.T) {
 							t.Error("invalid redirected download")
 						}
 						w.Header().Set("Content-Type", "application/json")
-						_, _ = w.Write([]byte(`{"path":"files/test","moved_from":"files/old","size":11}`))
+						_, _ = w.Write([]byte(`{"path":"files/test","size":11,"checksum":"opaque"}`))
 						return
 					}
 					initial.Add(1)
