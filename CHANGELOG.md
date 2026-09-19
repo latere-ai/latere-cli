@@ -12,6 +12,34 @@ committed: the commit log already holds that.
 
 ### Changed
 
+- **`latere drive` is now `latere arca`.** Every verb, flag and output is
+  the same; the group's name is not. The service behind it is the family's
+  open storage core, and the CLI reaches it at the platform's API origin
+  (`https://api.latere.ai`) rather than at a host of its own.
+- `--drive-url` is `--api-url`, `DRIVE_API_URL` is `ARCA_API_URL`, and
+  `LATERE_DRIVE_TOKEN` is `LATERE_ARCA_TOKEN`. `--api-url` now also decides
+  which issuer the command mints its token at, so pointing the CLI at a
+  development deployment no longer mints against the public issuer.
+- **A space is named by its subject.** `--owner me` is unchanged and is
+  still the default. `--owner org`, `--owner u-<uuid>` and `--owner o-<uuid>`
+  are refused with a sentence naming what to pass instead: the subject, which
+  every listing prints in full so you can copy it out and send it back.
+- **Sharing.** `--to` takes the recipient as you write it, a subject or an
+  address your organization resolves, rather than guessing a kind from an
+  "@". `--link` and `--public` mint a token grant, which is read-only:
+  passing `--permission` with either is refused before anything is sent.
+  Nothing waits for approval any more, so a share is created active. `shares`
+  lists grants and links together and `unshare` takes either kind of id.
+  The address `share --link` prints is the path the token is redeemed at
+  under the origin.
+- **Paths.** The planes are `files/` and `workspaces/`. `repos/` is gone;
+  repositories live on Latere Code. `memory/` is a folder under `files/`
+  like any other, and writing to it no longer demands `--if-match` or
+  `--create-only`: those flags are yours to use on any write, or not.
+- Failures now read as `code: sentence`, followed by the detail and the
+  request id, so you can quote the id when you report one.
+- There is no quota to read. A limit is a property of your plan, and a
+  space's usage is shown in the console.
 - The identity gate reads the frontend for the retired admin flag and
   refuses a second copy of the authorizer envelope (ci-gate v0.42.0).
   Nothing changes for a user of `latere`.
