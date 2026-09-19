@@ -17,8 +17,6 @@ import (
 	"strings"
 	"testing"
 
-	"latere.ai/x/pkg/scopes"
-
 	"github.com/latere-ai/latere-cli/internal/api"
 )
 
@@ -149,7 +147,7 @@ func TestAuthWhoamiFallsBackToTheSavedTokensClaims(t *testing.T) {
 		"principal_type": "user",
 		"org_id":         "org-456",
 		"client_id":      "latere-cli",
-		"scp":            []string{scopes.AgentsRun.Name, scopes.AgentsRead.Name, scopes.AgentsWrite.Name},
+		"scp":            []string{"openid", "email", "profile", "offline_access"},
 	})
 	t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(t.TempDir(), "auth-token.json"))
 	if err := api.SaveAuthToken(api.Token{AccessToken: token, TokenType: "Bearer"}); err != nil {
@@ -183,7 +181,7 @@ func TestAuthWhoamiFallsBackToTheSavedTokensClaims(t *testing.T) {
 		"context:       org",
 		"org_id:        org-456",
 		"client_id:     latere-cli",
-		"scopes:        run:agents read:agents write:agents",
+		"scopes:        openid email profile offline_access",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("output missing %q:\n%s", want, out)
