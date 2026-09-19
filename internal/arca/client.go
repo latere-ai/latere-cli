@@ -39,6 +39,10 @@ const DefaultBaseURL = "https://api.latere.ai"
 // this use the upload session; smaller ones stream through a single PUT.
 const PartSize = 16 << 20
 
+// OwnerMe is the one alias a space has. Every other space is named by its
+// subject, which a response renders in full so a client can send it back.
+const OwnerMe = "me"
+
 // ResolveURL returns the origin to call: flag > ARCA_API_URL > default.
 func ResolveURL(flagURL string) string {
 	if flagURL != "" {
@@ -596,8 +600,9 @@ func validateShareReceipt(in CreateShareRequest, out ShareCreated) error {
 		return errors.New("missing owner")
 	}
 
-	// The server resolves aliases; explicit owner IDs must match exactly.
-	if in.Owner != "me" && in.Owner != "org" && out.Owner != in.Owner {
+	// The server resolves the one alias and renders the subject in full;
+	// an explicit subject must come back unchanged.
+	if in.Owner != OwnerMe && out.Owner != in.Owner {
 		return errors.New("owner does not match the request")
 	}
 

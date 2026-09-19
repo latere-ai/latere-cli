@@ -33,7 +33,7 @@ func TestTrashRestoreReceipt(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				requests.Add(1)
 				var body struct{ Owner, Path string }
-				if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Owner != "org:example" || body.Path != "files/item" {
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Owner != "https://auth.latere.ai|9ab3" || body.Path != "files/item" {
 					t.Errorf("request body=%+v error=%v", body, err)
 				}
 				if r.Method != http.MethodPost || r.URL.Path != "/v1/trash/restore" || r.Header.Get("Authorization") != "Bearer synthetic-token" {
@@ -42,7 +42,7 @@ func TestTrashRestoreReceipt(t *testing.T) {
 				_, _ = io.WriteString(w, tc.body)
 			}))
 			defer server.Close()
-			err := New(server.URL, "synthetic-token").TrashRestore(t.Context(), "org:example", "files/item")
+			err := New(server.URL, "synthetic-token").TrashRestore(t.Context(), "https://auth.latere.ai|9ab3", "files/item")
 			if tc.valid {
 				if err != nil {
 					t.Errorf("valid receipt: %v", err)

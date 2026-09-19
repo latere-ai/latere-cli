@@ -47,7 +47,7 @@ func TestArcaTrashRestoreReceiptE2E(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				requests.Add(1)
 				var body struct{ Owner, Path string }
-				if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Owner != "org:example" || body.Path != "files/item" {
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Owner != "https://auth.latere.ai|9ab3" || body.Path != "files/item" {
 					t.Errorf("request body=%+v error=%v", body, err)
 				}
 				if r.Method != http.MethodPost || r.URL.Path != "/v1/trash/restore" || r.Header.Get("Authorization") != "Bearer synthetic-token" {
@@ -58,7 +58,7 @@ func TestArcaTrashRestoreReceiptE2E(t *testing.T) {
 			defer server.Close()
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
-			command := exec.CommandContext(ctx, binary, "arca", "restore", "files/item", "--owner", "org:example", "--api-url", server.URL, "--token", "synthetic-token")
+			command := exec.CommandContext(ctx, binary, "arca", "restore", "files/item", "--owner", "https://auth.latere.ai|9ab3", "--api-url", server.URL, "--token", "synthetic-token")
 			command.Env = append(os.Environ(), "LATERE_AUTH_TOKEN_FILE="+filepath.Join(root, "absent-auth.json"), "XDG_CONFIG_HOME="+root, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
 			var out, diagnostic bytes.Buffer
 			command.Stdout, command.Stderr = &out, &diagnostic

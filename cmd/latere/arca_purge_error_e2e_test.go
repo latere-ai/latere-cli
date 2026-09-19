@@ -50,7 +50,7 @@ func TestArcaRmPurgeErrorE2E(t *testing.T) {
 					t.Errorf("request=%s %s", r.Method, r.URL)
 				}
 				switch r.URL.Path {
-				case "/v1/files/org/files/item":
+				case "/v1/files/https://auth.latere.ai|9ab3/files/item":
 					live.Add(1)
 					if r.URL.Query().Get("permanent") != "true" {
 						t.Error("missing permanent flag")
@@ -59,7 +59,7 @@ func TestArcaRmPurgeErrorE2E(t *testing.T) {
 					_, _ = io.WriteString(w, `{"error":"live lookup missed"}`)
 				case "/v1/trash":
 					trash.Add(1)
-					if r.URL.Query().Get("owner") != "org" || r.URL.Query().Get("path") != "files/item" {
+					if r.URL.Query().Get("owner") != "https://auth.latere.ai|9ab3" || r.URL.Query().Get("path") != "files/item" {
 						t.Errorf("purge query=%s", r.URL.RawQuery)
 					}
 					w.WriteHeader(tc.status)
@@ -72,7 +72,7 @@ func TestArcaRmPurgeErrorE2E(t *testing.T) {
 			defer server.Close()
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
-			command := exec.CommandContext(ctx, binary, "arca", "rm", "files/item", "--permanent", "--owner", "org", "--api-url", server.URL, "--token", "synthetic-token")
+			command := exec.CommandContext(ctx, binary, "arca", "rm", "files/item", "--permanent", "--owner", "https://auth.latere.ai|9ab3", "--api-url", server.URL, "--token", "synthetic-token")
 			command.Env = append(os.Environ(), "LATERE_AUTH_TOKEN_FILE="+filepath.Join(root, "absent-auth.json"), "XDG_CONFIG_HOME="+root, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
 			var out, diagnostic bytes.Buffer
 			command.Stdout, command.Stderr = &out, &diagnostic

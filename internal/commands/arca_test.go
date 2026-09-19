@@ -490,19 +490,49 @@ func TestArcaUnshare(t *testing.T) {
 	}
 }
 
+// A space is a subject, and a subject holds characters a URL escapes. The
+// path carries it as one segment, so the separators inside it reach the
+// server encoded and the router hands the subject itself back.
 func TestArcaOwnerFlagRoutesToSpace(t *testing.T) {
-	var gotPath string
+	var escaped, decoded string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
+		escaped, decoded = r.URL.EscapedPath(), r.URL.Path
 		_ = json.NewEncoder(w).Encode(arca.FileListPage{})
 	}))
 	defer srv.Close()
 
-	if _, _, err := execArca(t, srv, "ls", "--owner", "org"); err != nil {
+	if _, _, err := execArca(t, srv, "ls", "--owner", "https://auth.latere.ai|9ab3"); err != nil {
 		t.Fatal(err)
 	}
-	if gotPath != "/v1/files/org/files" {
-		t.Errorf("path = %q", gotPath)
+	if want := "/v1/files/https:%2F%2Fauth.latere.ai%7C9ab3/files"; escaped != want {
+		t.Errorf("escaped path = %q, want %q", escaped, want)
+	}
+	if want := "/v1/files/https://auth.latere.ai|9ab3/files"; decoded != want {
+		t.Errorf("decoded path = %q, want %q", decoded, want)
+	}
+}
+
+// The three spellings the predecessor addressed a space with are all valid
+// subject strings that name nothing, so the command refuses them rather
+// than listing an empty space.
+func TestArcaRefusesRetiredOwnerSpellings(t *testing.T) {
+	for _, owner := range []string{"org", "u-4f1d", "o-4f1d"} {
+		t.Run(owner, func(t *testing.T) {
+			var requests atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				_ = json.NewEncoder(w).Encode(arca.FileListPage{})
+			}))
+			defer srv.Close()
+
+			_, _, err := execArca(t, srv, "ls", "--owner", owner)
+			if err == nil || !strings.Contains(err.Error(), "no longer a space") {
+				t.Errorf("error = %v, want a refusal naming the retired spelling", err)
+			}
+			if requests.Load() != 0 {
+				t.Errorf("%d request(s) sent for a space that names nothing", requests.Load())
+			}
+		})
 	}
 }
 

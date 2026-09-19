@@ -48,7 +48,9 @@ func newArcaCmd() *cobra.Command {
 		Long: "Work with your files on Latere's storage service, at " + arca.DefaultBaseURL + `.
 
 Paths are plane-rooted as in the API: files/…, workspaces/…. Commands
-operate in your personal space by default; --owner selects another.
+operate in your personal space by default; --owner takes the subject of
+another space, which every listing prints in full so you can send it
+back.
 
 Uses the login saved by 'latere login'.`,
 		Example: `  latere arca ls
@@ -62,7 +64,7 @@ Uses the login saved by 'latere login'.`,
 	pf.StringVar(&apiURL, "api-url", "", "API origin (default $ARCA_API_URL or "+arca.DefaultBaseURL+")")
 	pf.StringVar(&authURL, "auth-url", "", "auth base URL for token refresh (default https://auth.latere.ai)")
 	pf.StringVar(&token, "token", "", "present this bearer instead of the saved login (default $LATERE_ARCA_TOKEN)")
-	pf.StringVar(&owner, "owner", "me", "space to operate in: me, org, u-<uuid>, o-<uuid>")
+	pf.StringVar(&owner, "owner", "me", "space to operate in: me, or a subject a listing showed you")
 	pf.BoolVar(&jsonOut, "json", false, "machine-readable JSON output on stdout")
 
 	opts := &arcaOpts{apiURL: &apiURL, authURL: &authURL, token: &token, owner: &owner, jsonOut: &jsonOut}
@@ -87,11 +89,28 @@ type arcaOpts struct {
 
 // client resolves the origin and bearer for one command run.
 func (o *arcaOpts) client(ctx context.Context) (*arca.Client, error) {
+	if err := checkOwner(*o.owner); err != nil {
+		return nil, err
+	}
 	bearer, err := arcaBearer(ctx, *o.token, *o.authURL)
 	if err != nil {
 		return nil, err
 	}
 	return arca.New(arca.ResolveURL(*o.apiURL), bearer), nil
+}
+
+// checkOwner refuses the three spellings the predecessor addressed a space
+// with. A space is a subject now, and `org`, `u-<uuid>` and `o-<uuid>` are
+// all valid subject strings that name nothing, so without this they would
+// list an empty space rather than say what is wrong.
+func checkOwner(owner string) error {
+	switch {
+	case owner == "org":
+		return errors.New("`org` is no longer a space; pass the organization's subject, which every listing prints in full")
+	case strings.HasPrefix(owner, "u-"), strings.HasPrefix(owner, "o-"):
+		return fmt.Errorf("%q is no longer a space; pass the subject, which every listing prints in full", owner)
+	}
+	return nil
 }
 
 // arcaCredentialToken is the bearer presented to Arca: a token minted for

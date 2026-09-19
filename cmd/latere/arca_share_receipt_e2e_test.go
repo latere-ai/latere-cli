@@ -44,11 +44,11 @@ func TestArcaShareReceiptE2E(t *testing.T) {
 			{"wrong permission", "permission", "manage", false},
 			{"wrong prefix", "path_prefix", "files/other", false},
 			{"wrong grantee", "grantee_type", "public", false},
-			{"wrong owner", "owner", "o-other", false},
+			{"wrong owner", "owner", "https://auth.latere.ai|7c22", false},
 			{"missing url", "url", nil, false},
 		} {
 			t.Run(format+"/"+tc.name, func(t *testing.T) {
-				body := map[string]any{"id": "share-1", "status": "active", "permission": "read", "grantee_type": "link", "path_prefix": "files/item", "owner": "o-example", "url": "/s/synthetic-link"}
+				body := map[string]any{"id": "share-1", "status": "active", "permission": "read", "grantee_type": "link", "path_prefix": "files/item", "owner": "https://auth.latere.ai|9ab3", "url": "/s/synthetic-link"}
 				body[tc.field] = tc.value
 				if tc.name == "pending" {
 					delete(body, "url")
@@ -61,7 +61,7 @@ func TestArcaShareReceiptE2E(t *testing.T) {
 						t.Error(err)
 						return
 					}
-					if r.Method != http.MethodPost || r.URL.Path != "/v1/shares" || r.Header.Get("Authorization") != "Bearer synthetic-token" || fields["owner"] != "o-example" || fields["path_prefix"] != "files/item" || fields["grantee_type"] != "link" || fields["permission"] != "read" {
+					if r.Method != http.MethodPost || r.URL.Path != "/v1/shares" || r.Header.Get("Authorization") != "Bearer synthetic-token" || fields["owner"] != "https://auth.latere.ai|9ab3" || fields["path_prefix"] != "files/item" || fields["grantee_type"] != "link" || fields["permission"] != "read" {
 						t.Errorf("request=%s %s body=%+v", r.Method, r.URL, fields)
 					}
 					w.WriteHeader(http.StatusCreated)
@@ -74,7 +74,7 @@ func TestArcaShareReceiptE2E(t *testing.T) {
 				defer server.Close()
 				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 				defer cancel()
-				args := []string{"arca", "share", "files/item", "--link", "--owner", "o-example", "--api-url", server.URL, "--token", "synthetic-token"}
+				args := []string{"arca", "share", "files/item", "--link", "--owner", "https://auth.latere.ai|9ab3", "--api-url", server.URL, "--token", "synthetic-token"}
 				if format == "json" {
 					args = append(args, "--json")
 				}

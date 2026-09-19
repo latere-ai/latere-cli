@@ -38,7 +38,7 @@ func TestCreateShareReceipt(t *testing.T) {
 		{"blank url", "url", " \t", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			body := map[string]any{"id": "share-1", "status": "active", "permission": "read", "grantee_type": "link", "path_prefix": "files/item", "owner": "o-example", "url": "/s/synthetic-link"}
+			body := map[string]any{"id": "share-1", "status": "active", "permission": "read", "grantee_type": "link", "path_prefix": "files/item", "owner": "https://auth.latere.ai|9ab3", "url": "/s/synthetic-link"}
 			if tc.value == nil {
 				delete(body, tc.field)
 			} else {
@@ -51,7 +51,7 @@ func TestCreateShareReceipt(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				requests.Add(1)
 				var in CreateShareRequest
-				if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.Owner != "o-example" || in.PathPrefix != "files/item" || in.GranteeType != "link" || in.Permission != "read" {
+				if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.Owner != "https://auth.latere.ai|9ab3" || in.PathPrefix != "files/item" || in.GranteeType != "link" || in.Permission != "read" {
 					t.Errorf("request=%+v error=%v", in, err)
 				}
 				if r.Method != http.MethodPost || r.URL.Path != "/v1/shares" || r.Header.Get("Authorization") != "Bearer synthetic-token" {
@@ -61,7 +61,7 @@ func TestCreateShareReceipt(t *testing.T) {
 				_ = json.NewEncoder(w).Encode(body)
 			}))
 			defer server.Close()
-			got, err := New(server.URL, "synthetic-token").CreateShare(t.Context(), CreateShareRequest{Owner: "o-example", PathPrefix: "files/item", GranteeType: "link", Permission: "read"})
+			got, err := New(server.URL, "synthetic-token").CreateShare(t.Context(), CreateShareRequest{Owner: "https://auth.latere.ai|9ab3", PathPrefix: "files/item", GranteeType: "link", Permission: "read"})
 			if tc.valid {
 				if err != nil || got == nil || got.ID != "share-1" {
 					t.Errorf("valid receipt: result=%+v error=%v", got, err)
@@ -97,17 +97,17 @@ func TestCreateShareReceiptGrantModes(t *testing.T) {
 		existing, valid                             bool
 	}{
 		{"person", "principal", "me", "u-example", "active", "", false, true},
-		{"org", "org", "org", "o-example", "active", "", false, true},
+		{"org", "org", "me", "u-example", "active", "", false, true},
 		{"team", "team", "u-example", "u-example", "active", "", false, true},
-		{"role", "role", "org", "o-example", "active", "", false, true},
+		{"role", "role", "me", "u-example", "active", "", false, true},
 		{"email", "email", "me", "u-example", "active", "/s/token", false, true},
 		{"email missing token", "email", "me", "u-example", "active", "", false, false},
 		{"email existing", "email", "me", "u-example", "active", "", true, true},
-		{"email pending", "email", "org", "o-example", "pending", "", false, true},
+		{"email pending", "email", "me", "u-example", "pending", "", false, true},
 		{"public", "public", "me", "u-example", "active", "/s/token", false, true},
 		{"public missing token", "public", "me", "u-example", "active", "", false, false},
 		{"public existing", "public", "me", "u-example", "active", "", true, true},
-		{"public pending", "public", "org", "o-example", "pending", "", false, true},
+		{"public pending", "public", "me", "u-example", "pending", "", false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

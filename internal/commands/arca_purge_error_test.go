@@ -37,7 +37,7 @@ func TestArcaRmPurgeError(t *testing.T) {
 					t.Errorf("request=%s %s", r.Method, r.URL)
 				}
 				switch r.URL.Path {
-				case "/v1/files/org/files/item":
+				case "/v1/files/https://auth.latere.ai|9ab3/files/item":
 					live.Add(1)
 					if r.URL.Query().Get("permanent") != "true" {
 						t.Error("missing permanent flag")
@@ -46,7 +46,7 @@ func TestArcaRmPurgeError(t *testing.T) {
 					_, _ = io.WriteString(w, `{"error":"live lookup missed"}`)
 				case "/v1/trash":
 					trash.Add(1)
-					if r.URL.Query().Get("owner") != "org" || r.URL.Query().Get("path") != "files/item" {
+					if r.URL.Query().Get("owner") != "https://auth.latere.ai|9ab3" || r.URL.Query().Get("path") != "files/item" {
 						t.Errorf("purge query=%s", r.URL.RawQuery)
 					}
 					w.WriteHeader(tc.status)
@@ -62,7 +62,7 @@ func TestArcaRmPurgeError(t *testing.T) {
 			var out, diagnostic bytes.Buffer
 			cmd.SetOut(&out)
 			cmd.SetErr(&diagnostic)
-			cmd.SetArgs([]string{"rm", "files/item", "--permanent", "--owner", "org", "--api-url", server.URL, "--token", "synthetic-token"})
+			cmd.SetArgs([]string{"rm", "files/item", "--permanent", "--owner", "https://auth.latere.ai|9ab3", "--api-url", server.URL, "--token", "synthetic-token"})
 			err := cmd.Execute()
 			if tc.want == "" {
 				if err != nil || diagnostic.String() != "Permanently deleted files/item\n" {
