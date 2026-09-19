@@ -10,43 +10,19 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Removed
+
+- **The storage commands are gone.** `latere drive` and everything under it
+  (`ls`, `get`, `put`, `mv`, `rm`, `restore`, `history`, `share`, `shares`,
+  `unshare`) no longer exist, and neither does `DRIVE_API_URL` or
+  `LATERE_DRIVE_TOKEN`. Latere Drive is retired, and storage from the
+  terminal returns with the redesigned CLI that speaks to the platform's
+  API origin. Until then, use the Storage section of the console. Nothing
+  else in `latere` changes: sign-in, `cella`, `lux`, `topos`, `review`,
+  `eval` and the git credential helper are untouched.
+
 ### Changed
 
-- **`latere drive` is now `latere arca`.** The ten verbs and what each one
-  does are unchanged. The service behind them is the family's open storage
-  core, and the CLI reaches it at the platform's API origin
-  (`https://api.latere.ai`) rather than at a host of its own.
-- `--drive-url` is `--api-url`, `DRIVE_API_URL` is `ARCA_API_URL`, and
-  `LATERE_DRIVE_TOKEN` is `LATERE_ARCA_TOKEN`. `--api-url` now also decides
-  which issuer the command mints its token at, so pointing the CLI at a
-  development deployment no longer mints against the public issuer.
-- **A space is named by its subject.** `--owner me` is unchanged and is
-  still the default. `--owner org`, `--owner u-<uuid>` and `--owner o-<uuid>`
-  are refused with a sentence naming what to pass instead: the subject, which
-  every listing prints in full so you can copy it out and send it back.
-- **Sharing.** `--to` takes the recipient as you write it, a subject or an
-  address your organization resolves, rather than guessing a kind from an
-  "@". `--link` and `--public` mint a token grant, which is read-only:
-  passing `--permission` with either is refused before anything is sent.
-  Nothing waits for approval any more, so a share is created active. `shares`
-  lists grants and links together and `unshare` takes either kind of id.
-  The address `share --link` prints is the path the token is redeemed at
-  under the origin.
-- **Paths.** The planes are `files/` and `workspaces/`. `repos/` is gone;
-  repositories live on Latere Code. `memory/` is a folder under `files/`
-  like any other, and writing to it no longer demands `--if-match` or
-  `--create-only`: those flags are yours to use on any write, or not.
-- **If you parse `--json`, read this one.** The shapes follow the new API.
-  A share carries `grantee_kind` (`subject`, `link` or `public`) and one
-  `grantee` field, in place of `grantee_type` with `grantee_id`,
-  `grantee_email` and `grantee_role`; `existing`, `grantee_display` and
-  `created_by_display` are gone. `history` therefore prints the subject who
-  wrote a version where it printed a display name, and `mv` and
-  `restore --version` answer the file itself, without `moved_from` or
-  `restored_version`. A file gains `checksum_kind`, and a trashed file gains
-  `purges_at`, the day it stops being restorable.
-- Failures now read as `code: sentence`, followed by the detail and the
-  request id, so you can quote the id when you report one.
 - The identity gate reads the frontend for the retired admin flag and
   refuses a second copy of the authorizer envelope (ci-gate v0.42.0).
   Nothing changes for a user of `latere`.

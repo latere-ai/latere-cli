@@ -1,6 +1,6 @@
 ---
 title: latere arca subcommand
-status: implemented
+status: archived
 depends_on:
   - 004-flatten-auth-commands.md
 affects:
@@ -13,12 +13,20 @@ affects:
 effort: medium
 created: 2026-07-12
 updated: 2026-09-19
+archived: 2026-09-19
 implemented: 2026-07-12
 author: changkun
 dispatched_task_id: null
 ---
 
 # latere arca subcommand
+
+> **Archived 2026-09-19.** The command group and its client are deleted.
+> The CLI is redesigned against the platform's API origin in the next
+> epic, and storage returns as part of that surface; repointing this
+> group at Arca first would have been thrown away. This file is the
+> record of what the group was and what the cutover found, not a
+> description of the tree.
 
 ## Overview
 

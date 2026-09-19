@@ -7,17 +7,17 @@ package main
 // one `latere` CLI identity and asserts each identity-fabric edge end to
 // end against live production. It is the reproducible companion to
 // specs/products/identity-fabric/release-and-verification.md: one login,
-// then every edge a CLI user can reach (cella, lux, arca, topos, auth),
+// then every edge a CLI user can reach (cella, lux, topos, auth),
 // plus the two invariants (owner-rooted subject, trust-root rule).
 //
 // Opt-in and tiered, because the higher tiers spend real money and mutate
 // real state:
 //
 //	LATERE_FAMILY_E2E=1        read-only edges: whoami, /api/me,
-//	                           cella list, lux models+access, arca ls,
+//	                           cella list, lux models+access,
 //	                           topos reachability, garbage-token 401.
 //	                           No cost, no resource creation.
-//	LATERE_FAMILY_E2E_WRITE=1  also: lux invoke (a token), arca put/get/rm
+//	LATERE_FAMILY_E2E_WRITE=1  also: lux invoke (a token)
 //	                           round-trip, cross-product 401. Spends money;
 //	                           cleans up after itself.
 //	LATERE_FAMILY_E2E_LOGOUT=1 also: logout then reuse the old bearer ->
@@ -29,12 +29,11 @@ package main
 //	LATERE_FAMILY_E2E=1 go test ./cmd/latere/ -run TestFamilyE2E -v
 //
 // Service URLs default to production and are overridable:
-// CELLA_API_URL, AUTH_URL, LUX_API_URL, ARCA_API_URL, TOPOS_API_URL.
+// CELLA_API_URL, AUTH_URL, LUX_API_URL, TOPOS_API_URL.
 
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -51,7 +50,6 @@ type familyEnv struct {
 	cellaURL string
 	authURL  string
 	luxURL   string
-	arcaURL  string
 	toposURL string
 	sub      string // owner subject, read from whoami
 	httpc    *http.Client
@@ -79,7 +77,6 @@ func setupFamily(t *testing.T) *familyEnv {
 		cellaURL: urlOr("CELLA_API_URL", "https://cella.latere.ai"),
 		authURL:  urlOr("AUTH_URL", "https://auth.latere.ai"),
 		luxURL:   urlOr("LUX_API_URL", "https://lux.latere.ai"),
-		arcaURL:  urlOr("ARCA_API_URL", "https://api.latere.ai"),
 		toposURL: urlOr("TOPOS_API_URL", "https://topos.latere.ai"),
 		httpc:    &http.Client{Timeout: 30 * time.Second},
 	}
@@ -253,13 +250,6 @@ func TestFamilyE2E(t *testing.T) {
 		}
 	})
 
-	// Edge: CLI -> arca (per-request auth).
-	t.Run("cli->arca-ls", func(t *testing.T) {
-		if _, errOut, err := fe.run(t, 30*time.Second, "arca", "ls"); err != nil {
-			t.Fatalf("arca ls: %v\n%s", err, errOut)
-		}
-	})
-
 	// Edge: CLI/topos control plane reachability (the site authorizes).
 	t.Run("cli->topos-reachable", func(t *testing.T) {
 		status, _ := fe.get(t, fe.toposURL+"/", fe.token)
@@ -304,8 +294,8 @@ func TestFamilyE2E(t *testing.T) {
 	}
 }
 
-// runWriteTier exercises the cost/mutation edges: a live lux completion and a
-// arca round-trip. Each cleans up after itself.
+// runWriteTier exercises the cost/mutation edges: a live lux completion.
+// It cleans up after itself.
 func (fe *familyEnv) runWriteTier(t *testing.T) {
 	// Edge: CLI -> lux invoke (a real one-shot completion) using whatever
 	// model the identity has bound.
@@ -322,28 +312,6 @@ func (fe *familyEnv) runWriteTier(t *testing.T) {
 		}
 		if strings.TrimSpace(out) == "" {
 			t.Error("lux invoke returned empty completion")
-		}
-	})
-
-	// Edge: CLI -> arca round-trip (put, ls sees it, get matches, rm).
-	t.Run("cli->arca-roundtrip", func(t *testing.T) {
-		dir := t.TempDir()
-		src := filepath.Join(dir, "e2e-probe.txt")
-		want := fmt.Sprintf("family-e2e %d", time.Now().UnixNano())
-		if err := os.WriteFile(src, []byte(want), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		dest := "files/family-e2e-probe.txt"
-		if _, errOut, err := fe.run(t, 40*time.Second, "arca", "put", src, dest); err != nil {
-			t.Fatalf("arca put: %v\n%s", err, errOut)
-		}
-		t.Cleanup(func() { _, _, _ = fe.run(t, 30*time.Second, "arca", "rm", "--permanent", dest) })
-		got, errOut, err := fe.run(t, 40*time.Second, "arca", "get", dest, "-o", "-")
-		if err != nil {
-			t.Fatalf("arca get: %v\n%s", err, errOut)
-		}
-		if !strings.Contains(got, want) {
-			t.Errorf("arca get mismatch: got %q, want to contain %q", got, want)
 		}
 	})
 }

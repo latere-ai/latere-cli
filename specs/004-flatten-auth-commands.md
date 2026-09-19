@@ -144,11 +144,11 @@ deprecation notice (scripts' stderr stays clean).
 **Follow-ups.** Landscape classes 2-5 (the credential smoke script, the
 Cella remediation string, the product frontends, and the surrounding docs)
 land per-surface after a release ships, per the Landscape Impact section.
-`003-arca-subcommand.md` is now unblocked.
+`003-arca-subcommand.md` is now unblocked (archived 2026-09-19).
 
 ## Non-goals
 
 - Changing the login flow, token storage, or org-switch semantics.
-- Flattening product groups (`cella`, `lux`, `topos`, `arca`) — those are
+- Flattening product groups (`cella`, `lux`, `topos`) — those are
   namespaces over distinct backends and stay grouped.
 - Removing the `auth` alias now.

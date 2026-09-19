@@ -28,7 +28,7 @@ func TestProductsRejectExpiredAuthWithoutRefreshE2E(t *testing.T) {
 	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
-	for _, product := range []string{"lux export", "git helper", "arca", "topos", "cella"} {
+	for _, product := range []string{"lux export", "git helper", "topos", "cella"} {
 		for _, state := range []string{"expired", "near expiry", "unknown expiry"} {
 			t.Run(product+"/"+state, func(t *testing.T) {
 				root := t.TempDir()
@@ -77,8 +77,6 @@ func TestProductsRejectExpiredAuthWithoutRefreshE2E(t *testing.T) {
 				switch product {
 				case "git helper":
 					args = []string{"git-credential", "get"}
-				case "arca":
-					args = []string{"arca", "ls"}
 				case "topos":
 					args = []string{"topos", "agents", "list"}
 				case "cella":
@@ -90,7 +88,7 @@ func TestProductsRejectExpiredAuthWithoutRefreshE2E(t *testing.T) {
 				defer cancel()
 				command := exec.CommandContext(ctx, binary, args...)
 				command.Stdin = strings.NewReader("protocol=https\nhost=code.latere.ai\n\n")
-				command.Env = append(os.Environ(), "LATERE_CELLA_TOKEN=", "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_URL="+server.URL, "ARCA_API_URL="+server.URL, "TOPOS_API_URL="+server.URL, "LUX_API_URL="+server.URL, "LATERE_ARCA_TOKEN=", "LATERE_LUX_TOKEN=", "TOPOS_TOKEN=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
+				command.Env = append(os.Environ(), "LATERE_CELLA_TOKEN=", "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_URL="+server.URL, "TOPOS_API_URL="+server.URL, "LUX_API_URL="+server.URL, "LATERE_LUX_TOKEN=", "TOPOS_TOKEN=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
 				var stdout, stderr bytes.Buffer
 				command.Stdout, command.Stderr = &stdout, &stderr
 				err = command.Run()

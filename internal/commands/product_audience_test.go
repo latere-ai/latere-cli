@@ -118,16 +118,6 @@ func TestProductCredentialsCarryOnlyTheirOwnAudience(t *testing.T) {
 				t.Fatalf("cella ls: %v", err)
 			}
 		}},
-		{"arca ls", arcaAudience, func(t *testing.T, s *productStub) {
-			t.Setenv("LATERE_ARCA_TOKEN", "")
-			cmd := newArcaCmd()
-			cmd.SetOut(io.Discard)
-			cmd.SetErr(io.Discard)
-			cmd.SetArgs([]string{"--api-url", s.srv.URL, "--auth-url", s.srv.URL, "ls"})
-			if err := cmd.Execute(); err != nil {
-				t.Fatalf("arca ls: %v", err)
-			}
-		}},
 		{"lux models", luxAudience, func(t *testing.T, s *productStub) {
 			cmd := newLuxCmd()
 			cmd.SetOut(io.Discard)

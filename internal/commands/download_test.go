@@ -17,102 +17,85 @@ import (
 
 func TestDownloadsPreserveOutputOnTruncatedResponse(t *testing.T) {
 	t.Setenv("LATERE_CELLA_TOKEN", "test-tok")
-	for _, command := range []string{"arca", "cella"} {
-		for _, existing := range []bool{false, true} {
-			t.Run(command+map[bool]string{false: "/new", true: "/existing"}[existing], func(t *testing.T) {
-				dir := t.TempDir()
-				dest := filepath.Join(dir, "download")
-				if existing {
-					if err := os.WriteFile(dest, []byte("original"), 0o600); err != nil {
-						t.Fatal(err)
-					}
-				}
-				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					w.Header().Set("Content-Length", "100")
-					_, _ = io.WriteString(w, "partial")
-				}))
-				defer srv.Close()
-				var err error
-				if command == "arca" {
-					_, _, err = execArca(t, srv, "get", "files/download", "-o", dest)
-				} else {
-					cmd := newCeExportCmd()
-					cmd.SetOut(new(bytes.Buffer))
-					cmd.SetErr(new(bytes.Buffer))
-					cmd.SetArgs([]string{"dev", "--api-url", srv.URL, "-o", dest})
-					err = cmd.Execute()
-				}
-				if !errors.Is(err, io.ErrUnexpectedEOF) {
-					t.Fatalf("error = %v, want truncated-response error", err)
-				}
-				data, err := os.ReadFile(dest)
-				if existing {
-					if err != nil || string(data) != "original" {
-						t.Errorf("existing output changed: %q, %v", data, err)
-					}
-				} else if !errors.Is(err, os.ErrNotExist) {
-					t.Errorf("failed download left output: %q, %v", data, err)
-				}
-				entries, err := os.ReadDir(dir)
-				if err != nil {
+	for _, existing := range []bool{false, true} {
+		t.Run(map[bool]string{false: "new", true: "existing"}[existing], func(t *testing.T) {
+			dir := t.TempDir()
+			dest := filepath.Join(dir, "download")
+			if existing {
+				if err := os.WriteFile(dest, []byte("original"), 0o600); err != nil {
 					t.Fatal(err)
 				}
-				want := 0
-				if existing {
-					want = 1
+			}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Length", "100")
+				_, _ = io.WriteString(w, "partial")
+			}))
+			defer srv.Close()
+			cmd := newCeExportCmd()
+			cmd.SetOut(new(bytes.Buffer))
+			cmd.SetErr(new(bytes.Buffer))
+			cmd.SetArgs([]string{"dev", "--api-url", srv.URL, "-o", dest})
+			err := cmd.Execute()
+			if !errors.Is(err, io.ErrUnexpectedEOF) {
+				t.Fatalf("error = %v, want truncated-response error", err)
+			}
+			data, err := os.ReadFile(dest)
+			if existing {
+				if err != nil || string(data) != "original" {
+					t.Errorf("existing output changed: %q, %v", data, err)
 				}
-				if len(entries) != want {
-					t.Errorf("download left files: %v", entries)
-				}
-			})
-		}
+			} else if !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("failed download left output: %q, %v", data, err)
+			}
+			entries, err := os.ReadDir(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := 0
+			if existing {
+				want = 1
+			}
+			if len(entries) != want {
+				t.Errorf("download left files: %v", entries)
+			}
+		})
 	}
 }
 
 func TestDownloadsReplaceOutputAfterCompleteResponse(t *testing.T) {
 	t.Setenv("LATERE_CELLA_TOKEN", "test-tok")
-	for _, command := range []string{"arca", "cella"} {
-		t.Run(command, func(t *testing.T) {
-			dir := t.TempDir()
-			dest := filepath.Join(dir, "download")
-			if err := os.WriteFile(dest, []byte("old"), 0o640); err != nil {
-				t.Fatal(err)
-			}
-			link := filepath.Join(dir, "link")
-			if err := os.Symlink("download", link); err != nil {
-				t.Fatal(err)
-			}
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				_, _ = io.WriteString(w, "complete")
-			}))
-			defer srv.Close()
-			var err error
-			if command == "arca" {
-				_, _, err = execArca(t, srv, "get", "files/download", "-o", link)
-			} else {
-				cmd := newCeExportCmd()
-				cmd.SetArgs([]string{"dev", "--api-url", srv.URL, "-o", link})
-				err = cmd.Execute()
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			data, err := os.ReadFile(dest)
-			if err != nil || string(data) != "complete" {
-				t.Fatalf("output = %q, %v", data, err)
-			}
-			info, err := os.Stat(dest)
-			if err != nil || info.Mode().Perm() != 0o640 {
-				t.Fatalf("permissions changed: %v, %v", info, err)
-			}
-			if _, err := os.Readlink(link); err != nil {
-				t.Fatalf("output symlink replaced: %v", err)
-			}
-			entries, err := os.ReadDir(dir)
-			if err != nil || len(entries) != 2 {
-				t.Fatalf("scratch files remain: %v, %v", entries, err)
-			}
-		})
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "download")
+	if err := os.WriteFile(dest, []byte("old"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink("download", link); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "complete")
+	}))
+	defer srv.Close()
+	cmd := newCeExportCmd()
+	cmd.SetArgs([]string{"dev", "--api-url", srv.URL, "-o", link})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(dest)
+	if err != nil || string(data) != "complete" {
+		t.Fatalf("output = %q, %v", data, err)
+	}
+	info, err := os.Stat(dest)
+	if err != nil || info.Mode().Perm() != 0o640 {
+		t.Fatalf("permissions changed: %v, %v", info, err)
+	}
+	if _, err := os.Readlink(link); err != nil {
+		t.Fatalf("output symlink replaced: %v", err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) != 2 {
+		t.Fatalf("scratch files remain: %v, %v", entries, err)
 	}
 }
 
