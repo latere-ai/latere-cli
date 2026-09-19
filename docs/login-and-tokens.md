@@ -78,7 +78,7 @@ follows the same rule.
 | Command | What is sent | Where it comes from |
 |---|---|---|
 | `latere cella ...` | a token with audience `sandboxd`, 5 minutes | minted per command at auth |
-| `latere drive ...` | a token with audience `drive.latere.ai`, 5 minutes | minted per command at auth |
+| `latere arca ...` | a token with audience `arca`, 5 minutes | minted per command at auth |
 | `latere lux invoke`, `models`, `usage`, `access` | a token with audience `lux.latere.ai`, 5 minutes | minted per command at auth |
 | `latere lux env`, `lux token` | a token with audience `lux.latere.ai`, 5 minutes | minted when the command runs; re-run for a new one |
 | `latere lux serve`, `latere review`, the local model route | a token with audience `lux.latere.ai`, re-minted a minute before it expires | minted for the session, so a tunnel that runs for hours never sends the login token |
@@ -110,7 +110,7 @@ request. A streaming response is the exception: it holds the token it
 opened with.
 
 Set `LATERE_CELLA_TOKEN` to present a bearer of your own instead, for a
-development deployment or a test. `LATERE_DRIVE_TOKEN`, `LATERE_LUX_TOKEN`
+development deployment or a test. `LATERE_ARCA_TOKEN`, `LATERE_LUX_TOKEN`
 and `TOPOS_TOKEN` do the same for their products.
 
 ### Lux
@@ -146,8 +146,8 @@ If the login cannot be read or refreshed, or auth cannot mint the token,
 the git helper returns no credential so git can prompt. Nothing else is
 ever substituted for the token it could not mint.
 
-Without a saved login there is nothing to mint from. Drive and the git
-helper then refuse with `not logged in; run `latere login``, and nothing
+Without a saved login there is nothing to mint from. `latere arca` and
+the git helper then refuse with `not logged in; run `latere login``, and nothing
 is sent. Run `latere login` to sign in again.
 
 ```sh
@@ -219,7 +219,7 @@ The CLI holds one rule, which is the platform's:
 
 In CLI terms: you log in once to auth, and every product call mints its
 credential from that login. A `lux.latere.ai` token is only ever
-presented to Lux, a `drive.latere.ai` one only to Drive, a `sandboxd` one
+presented to Lux, an `arca` one only to storage, a `sandboxd` one
 only to Cella, an `origo` one only to git. Whichever token is on the
 wire, the person it acts for is you.
 
@@ -261,8 +261,8 @@ product URL when no override is set.
 - Cella: **"Authentication"** and **"Sandbox identity, egress, and agent
   grants"** cover the audience Cella requires and what a token grants
   inside a sandbox.
-- Drive: **"Authentication"** covers the audience Drive requires and what
-  an actor token is authorized to reach.
+- Storage: **"Authentication"** covers the audience the storage service
+  requires and what an actor token is authorized to reach.
 - This repo: `latere lux` details in "Models (Lux)", and git access in
   the [main README](../README.md#git-with-latere-code). Start any of
   these with `latere login` (see [Sign in](../README.md#sign-in)).
