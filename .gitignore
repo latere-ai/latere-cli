@@ -31,9 +31,6 @@ go.work.sum
 # .idea/
 # .vscode/
 
-# Agent instructions live in AGENTS.md; CLAUDE.md is a local symlink to it.
-CLAUDE.md
-
 # Local agent settings and worktrees; never committed.
 .claude/
 
