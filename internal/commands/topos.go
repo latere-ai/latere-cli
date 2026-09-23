@@ -249,7 +249,7 @@ func newToposSessionCreateCmd() *cobra.Command {
 POSTs the initial prompt to the agent's session endpoint; the run
 executes on the control plane and the result is printed when it
 completes. Requires a token addressed to Topos (the toposd audience).`,
-		Example: `  latere topos session create agent_01hxy --prompt "Summarise README.md"`,
+		Example: `  latere topos session create agent_01hxy --prompt "Summarize README.md"`,
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if prompt == "" {

@@ -78,7 +78,7 @@ func Newer(current, candidate string) bool {
 	}
 }
 
-// display normalises a version for user-facing output, adding the leading
+// display normalizes a version for user-facing output, adding the leading
 // "v" release tags carry. Non-release strings (e.g. "dev") pass through.
 func display(v string) string {
 	s := strings.TrimSpace(v)

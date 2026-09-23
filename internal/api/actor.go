@@ -165,7 +165,7 @@ func AuthClientID(clientID string) string {
 // RefreshAuthToken refreshes the saved login token with the full
 // LoginScopes set and persists the result, preserving the previous
 // refresh token when the response omits a new one (a common OAuth
-// behaviour).
+// behavior).
 func RefreshAuthToken(ctx context.Context, authBase string, previous Token) (Token, error) {
 	clientID := AuthClientID(previous.ClientID)
 	client := oidc.New(oidc.Config{

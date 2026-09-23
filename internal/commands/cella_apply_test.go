@@ -18,7 +18,7 @@ import (
 
 // TestCeApplyFlag locks the contract that `latere cella apply` only
 // accepts -f. The old flag-soup `cella create --image --tier ...`
-// surface was retired in favour of one declarative path so users
+// surface was retired in favor of one declarative path so users
 // can author Manifests once and reuse them across every surface
 // (dashboard YAML tab, public API, CLI).
 func TestCeApplyFlag(t *testing.T) {

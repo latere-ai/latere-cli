@@ -38,7 +38,7 @@ func (rt *countingRoundTripper) RoundTrip(r *http.Request) (*http.Response, erro
 	}, nil
 }
 
-// TestForwarderDoesNotSilentlyTruncateOversizedBody pins the cap behaviour: a
+// TestForwarderDoesNotSilentlyTruncateOversizedBody pins the cap behavior: a
 // request body past maxRequestBytes is refused, not cut down to the cap and
 // forwarded. A truncated body carrying a matching Content-Length is
 // self-consistent, so neither the caller nor the upstream can detect the loss,

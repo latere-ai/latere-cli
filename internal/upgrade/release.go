@@ -229,7 +229,7 @@ func checksumFor(sums, asset string) string {
 
 // extractBinary returns the "latere" binary from a .tar.gz release archive.
 // It matches on the entry's base name and writes to a caller-controlled
-// buffer, never honouring the archive's own path (no tar-slip).
+// buffer, never honoring the archive's own path (no tar-slip).
 func extractBinary(archive []byte) ([]byte, error) {
 	return extractBinaryWithLimits(archive, maxArchiveBytes, maxExpandedArchiveBytes)
 }

@@ -20,7 +20,7 @@ import (
 type sessionState struct {
 	// lines is the rendered transcript (completed messages, tool lines, errors).
 	lines []string
-	// status summarises what the session is doing: "ready", "working",
+	// status summarizes what the session is doing: "ready", "working",
 	// "awaiting approval", "closed", or "disconnected".
 	status string
 	// pending is the outstanding approval request, if any.

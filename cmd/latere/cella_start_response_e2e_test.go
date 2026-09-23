@@ -84,7 +84,7 @@ func TestCellaStartResponseE2E(t *testing.T) {
 						t.Errorf("incomplete response returned %v: %s", err, stderr.String())
 					}
 					if stdout.Len() != 0 || !strings.Contains(stderr.String(), "may have started") {
-						t.Errorf("invalid acknowledgement: stdout=%q, stderr=%q", stdout.String(), stderr.String())
+						t.Errorf("invalid acknowledgment: stdout=%q, stderr=%q", stdout.String(), stderr.String())
 					}
 				}
 				if starts.Load() != 1 || logs.Load() != wantLogs {
