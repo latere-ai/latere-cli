@@ -572,7 +572,7 @@ func newAuthWhoamiCmd() *cobra.Command {
 
 'latere whoami' reads ~/.config/latere/auth-token.json, refreshes it if
 it is due, and prints the identity claims the token carries: who, in
-which organisation, as which kind of principal. The token is the
+which organization, as which kind of principal. The token is the
 issuer's signed statement, so nothing is asked of the issuer to read it.`,
 		Example: `  latere whoami
   latere whoami --auth-url https://auth.latere.ai`,

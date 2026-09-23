@@ -53,7 +53,7 @@ later with 'latere topos session attach <id>'.
 With --print/-p, it runs one prompt non-interactively and streams the result to
 stdout (for scripts and pipelines), then exits — like 'claude -p'.`,
 		Example: `  latere topos session start agent_01hxy
-  latere topos session start agent_01hxy -p "summarise README.md"`,
+  latere topos session start agent_01hxy -p "summarize README.md"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := toposClient(cmd.Context(), apiURL)

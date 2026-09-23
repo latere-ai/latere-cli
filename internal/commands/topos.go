@@ -223,7 +223,7 @@ result once it completes. 'start' opens an interactive session (a coding
 assistant TUI, or --print for a one-shot prompt); 'attach' reconnects to a
 running session; 'ls' lists interactive sessions.`,
 		Example: `  latere topos session start agent_01hxy
-  latere topos session start agent_01hxy -p "summarise README.md"
+  latere topos session start agent_01hxy -p "summarize README.md"
   latere topos session attach sess_01hxy
   latere topos session create agent_01hxy --prompt "List the repo files."`,
 	}
