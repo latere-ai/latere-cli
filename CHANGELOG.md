@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.11.0 - 2026-09-24
+
 ### Added
 
 - A model key for the Latere API. When `LUX_API_URL` points at
