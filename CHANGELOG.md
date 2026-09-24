@@ -13,8 +13,8 @@ committed: the commit log already holds that.
 ### Added
 
 - A model key for the Latere API. When `LUX_API_URL` points at
-  `https://api.latere.ai/v1/models`, `lux env`, `lux token` and
-  `lux invoke` present a key instead of your login: the CLI creates it at
+  `https://api.latere.ai/v1/models`, `lux env` and `lux invoke` present a
+  key instead of your login: the CLI creates it at
   auth on first use, in your current context, allowed to use models and
   nothing else, and keeps it in the system keychain (or in
   `~/.config/latere/model-keys.json` with no keychain). `latere lux key`
