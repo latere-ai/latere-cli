@@ -10,6 +10,15 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Fixed
+
+- v0.9.0, v0.10.0 and v0.11.0 were tagged but never published, so
+  `install.sh` and `latere upgrade` kept installing v0.8.1. This release is
+  published and carries their changes too: coming from v0.8.1, read their
+  sections in
+  [CHANGELOG.md](https://github.com/latere-ai/latere-cli/blob/main/CHANGELOG.md),
+  and run `latere login` once, as v0.9.0 asks.
+
 ## v0.11.0 - 2026-09-24
 
 ### Added
@@ -37,10 +46,8 @@ committed: the commit log already holds that.
 ### Fixed
 
 - v0.9.0 and v0.10.0 were tagged but never published, so `install.sh` and
-  `latere upgrade` kept installing v0.8.1. This release is published and
-  carries their changes too: coming from v0.8.1, read their sections in
-  [CHANGELOG.md](https://github.com/latere-ai/latere-cli/blob/main/CHANGELOG.md),
-  and run `latere login` once, as v0.9.0 asks.
+  `latere upgrade` kept installing v0.8.1. v0.11.0 was tagged but not
+  published either; v0.11.1 is the release that carries these changes.
 
 ## v0.10.0 - 2026-09-13
 
