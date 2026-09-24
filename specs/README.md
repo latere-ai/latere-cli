@@ -15,6 +15,7 @@ specs/
   004-flatten-auth-commands.md       (implemented: latere login/logout/whoami/print-token/org as top-level verbs)
   005-lux-env-redesign.md            (implemented: lux env keyed by dialect and provider, with token provenance and TTL)
   006-model-key.md                   (implemented: a model key on first use, created at auth and kept in the keychain)
+  007-models-at-the-origin.md        (implemented: latere models over the platform origin; latere lux retired)
 ```
 
 ## Status
@@ -35,7 +36,13 @@ Every spec in the tree has shipped:
   issuer's maximum.
 - `006-model-key.md`: `latere lux` creates a model key at auth on first use
   against the Latere API, keeps it in the system keychain or a file beside
-  the login, and `latere lux key` shows and revokes it.
+  the login, and `latere lux key` shows and revokes it. Since 007 these
+  commands are `latere models`.
+- `007-models-at-the-origin.md`: `latere models` lists, exports and calls
+  the models at `https://api.latere.ai/v1/models` with the model key, and
+  `latere review` and `latere topos --local` call them the same way. The
+  `latere lux` namespace, the hosted plane it reached, and `lux serve` are
+  gone.
 
 Two surfaces shipped without a dedicated design record: the token-lifecycle
 work, which [docs/login-and-tokens.md](../docs/login-and-tokens.md) documents,
@@ -45,8 +52,10 @@ That is a recorded decision, not an open action item.
 ## Conventions
 
 - The CLI talks to the auth service (login, org switch) with the saved login
-  token, and reaches every product backend (Cella, Drive, Lux, Topos, Origo)
-  with a token minted at auth for that one product. It does not host an HTTP
-  server, does not own a cookie session, and has no frontend.
+  token, and reaches every product backend (Cella, Drive, Topos, Origo)
+  with a token minted at auth for that one product. The model endpoints
+  take the model key instead (006, 007). It does not host an HTTP server,
+  does not own a cookie session, and has no frontend.
 - Token storage is `~/.config/latere/auth-token.json`: the login token, and
-  nothing else. A product token lives in memory for one command.
+  nothing else. A product token lives in memory for one command. The model
+  key is kept in the system keychain, or a 0600 file beside the login.
