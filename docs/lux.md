@@ -70,6 +70,31 @@ latere lux invoke --provider anthropic --model claude-sonnet-4-6 "Say hi"
 Interrupted responses and responses larger than 8 MiB return an error without
 printing partial output. This applies to both text output and `--json`.
 
+## Your model key on the Latere API
+
+The model endpoints at `https://api.latere.ai/v1/models` take a key, not
+your login. The first time `lux env`, `lux token` or `lux invoke` calls
+them, the CLI creates a key for you in your current context (your personal
+account, or the organization `latere org` selected), allowed to use models
+and nothing else. It keeps the key in your system keychain, or in
+`~/.config/latere/model-keys.json` (readable by you alone) on a machine with
+no keychain, and uses it from then on.
+
+```sh
+export LUX_API_URL=https://api.latere.ai/v1/models
+eval "$(latere lux env --compat openai)"   # creates the key on first use
+latere lux key                             # the key: prefix, context, status, expiry
+latere lux key revoke                      # revoke it; the next call creates a new one
+```
+
+A new key works within a minute; `lux invoke` waits for it. What the key
+may call and spend follows its context: your models and wallet, or the
+organization's. In an organization that asks its admins to approve member
+keys, the key works once an org admin approves it. Each key lasts 90 days
+and is replaced before it ends. `latere logout` revokes the keys this login
+created on this machine. A CI job can hand the CLI a key with
+`LATERE_MODEL_KEY`.
+
 ## Usage and access
 
 ```sh
@@ -100,3 +125,5 @@ latere lux serve --share org        # share with your whole org (default for org
 |---------|---------|
 | `--lux-url` / `LUX_API_URL` | Override the Lux base URL for `latere lux`. |
 | `LATERE_LUX_TOKEN` | Present this bearer to Lux instead of your login (e.g. a service token). |
+| `LATERE_MODEL_KEY` | Present this key to the model endpoints instead of the one the CLI keeps. |
+| `LATERE_MODEL_KEYS_FILE` | Where the model key is kept on a machine with no keychain. |
