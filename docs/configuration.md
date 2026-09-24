@@ -21,9 +21,8 @@ setting, and each command's `--help` names the flags it takes.
 |----------|---------|--------------|
 | `SANDBOX_API_URL` | `https://cella.latere.ai` | The Cella API. `--api-url` overrides it. |
 | `LATERE_CELLA_TOKEN` | none | A bearer to present to Cella instead of minting one. |
-| `LUX_API_URL` | `https://lux.latere.ai` | The Lux API. Set to `https://api.latere.ai/v1/models` to use the model endpoints of the Latere API, which take a model key. `--lux-url` overrides it. |
-| `LATERE_LUX_TOKEN` | none | A bearer to present to Lux instead of minting one, such as a service token. `--token` overrides it. |
-| `LATERE_MODEL_KEY` | none | A model key to present to the Latere API instead of the one the CLI keeps. |
+| `LATERE_MODELS_URL` | `https://api.latere.ai/v1/models` | The model endpoints of the Latere API, which `latere models`, `latere review` and `latere topos --local` call. `--models-url` overrides it. |
+| `LATERE_MODEL_KEY` | none | A model key to present to the Latere API instead of the one the CLI keeps. With it, the model commands need no login. |
 | `LATERE_MODEL_KEYS_FILE` | `~/.config/latere/model-keys.json` | Where model keys are kept on a machine with no system keychain. |
 | `TOPOS_API_URL` | `https://topos.latere.ai` | The hosted Topos platform. `--api-url` overrides it. |
 | `TOPOS_TOKEN` | none | A bearer to present to Topos instead of minting one, including the connection `latere topos serve-sandbox` opens. |
@@ -59,7 +58,7 @@ In `$XDG_CONFIG_HOME/latere`, or `~/.config/latere`:
 | `model-keys.json` | Model keys for the Latere API, only on a machine with no system keychain. Elsewhere they are in the keychain under `latere-cli model key`. |
 | `config.json` | Your auto-upgrade choice. |
 | `update-check.json` | When the CLI last checked for a release, and what it found. |
-| `tunnel-node-id` | A random identifier for this machine. `latere lux serve` presents it, so a reconnect replaces this machine's earlier tunnel instead of adding a second one. |
+| `tunnel-node-id` | A random identifier for this machine, which `latere topos serve-sandbox` advertises when the machine has no usable hostname, so a reconnect replaces this machine's earlier registration instead of adding a second one. |
 
 In your user configuration directory, under `latere/`:
 

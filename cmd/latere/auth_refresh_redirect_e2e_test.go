@@ -33,16 +33,19 @@ func TestAuthRefreshPreservesRequestOnRedirectE2E(t *testing.T) {
 			if err := os.WriteFile(authPath, before, 0600); err != nil {
 				t.Fatal(err)
 			}
-			var calls, redirects atomic.Int32
+			var calls, redirects, products atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				// The export mints an actor token once the refresh has landed;
-				// the mint is neither a refresh call nor a redirect.
+				// Once the refresh has landed the command mints a Drive token
+				// and lists Drive; neither is a refresh call nor a redirect.
 				if r.Method == http.MethodPost && r.URL.Path == "/actor-tokens" {
 					if r.Header.Get("Authorization") != "Bearer new-root" {
 						t.Errorf("mint presented %q, want the refreshed root", r.Header.Get("Authorization"))
 					}
 					w.Header().Set("Content-Type", "application/json")
-					_, _ = w.Write([]byte(`{"actor_token":"lux-actor","expires_in":300}`))
+					_, _ = w.Write([]byte(`{"actor_token":"drive-actor","expires_in":300}`))
+					return
+				}
+				if serveDriveList(t, w, r, &products) {
 					return
 				}
 				calls.Add(1)
@@ -66,17 +69,17 @@ func TestAuthRefreshPreservesRequestOnRedirectE2E(t *testing.T) {
 			defer server.Close()
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
-			cmd := exec.CommandContext(ctx, binary, "lux", "env", "--raw", "--auth-url", server.URL)
-			cmd.Env = append(os.Environ(), "LATERE_LUX_TOKEN=", "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_CLIENT_ID=unrelated-client", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
+			cmd := exec.CommandContext(ctx, binary, driveLs(server.URL)...)
+			cmd.Env = append(os.Environ(), "LATERE_AUTH_TOKEN_FILE="+authPath, "LATERE_DRIVE_TOKEN=", "AUTH_CLIENT_ID=unrelated-client", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
 			var stdout, stderr bytes.Buffer
 			cmd.Stdout, cmd.Stderr = &stdout, &stderr
 			err := cmd.Run()
 			denied := status == 301 || status == 302 || status == 303
 			if denied {
-				if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 || !strings.Contains(stderr.String(), "redirect") || stdout.Len() != 0 {
+				if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 || !strings.Contains(stderr.String(), "redirect") || stdout.Len() != 0 || products.Load() != 0 {
 					t.Errorf("method-changing redirect accepted: err=%v stdout=%q stderr=%q", err, stdout.String(), stderr.String())
 				}
-			} else if err != nil || stdout.String() != "lux-actor\n" {
+			} else if err != nil || products.Load() != 1 {
 				t.Errorf("valid refresh failed: %v stdout=%q stderr=%q", err, stdout.String(), stderr.String())
 			}
 			after, err := os.ReadFile(authPath)

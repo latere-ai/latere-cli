@@ -130,29 +130,6 @@ func TestProductCredentialsCarryOnlyTheirOwnAudience(t *testing.T) {
 				t.Fatalf("drive ls: %v", err)
 			}
 		}},
-		{"lux models", luxAudience, func(t *testing.T, s *productStub) {
-			cmd := newLuxCmd()
-			cmd.SetOut(io.Discard)
-			cmd.SetErr(io.Discard)
-			cmd.SetArgs([]string{"models", "--lux-url", s.srv.URL, "--auth-url", s.srv.URL})
-			if err := cmd.Execute(); err != nil {
-				t.Fatalf("lux models: %v", err)
-			}
-		}},
-		{"lux env", luxAudience, func(t *testing.T, s *productStub) {
-			bearer, _, err := luxEnvBearer(t.Context(), "", s.srv.URL, s.srv.URL)
-			if err != nil {
-				t.Fatalf("lux env: %v", err)
-			}
-			s.record(bearer)
-		}},
-		{"lux session", luxAudience, func(t *testing.T, s *productStub) {
-			bearer, err := luxSessionBearer("", s.srv.URL, s.srv.URL)(t.Context())
-			if err != nil {
-				t.Fatalf("lux serve: %v", err)
-			}
-			s.record(bearer)
-		}},
 		{"topos", toposAudience, func(t *testing.T, s *productStub) {
 			t.Setenv("TOPOS_TOKEN", "")
 			t.Setenv("AUTH_URL", s.srv.URL)
@@ -181,7 +158,6 @@ func TestProductCredentialsCarryOnlyTheirOwnAudience(t *testing.T) {
 	} {
 		t.Run(p.name, func(t *testing.T) {
 			isolateTokens(t)
-			isolateBearer(t)
 			t.Setenv("AUTH_URL", "")
 			writeAuthTokenFile(t, "root-access", "root-refresh", time.Now().Add(time.Hour))
 			s := newProductStub(t)

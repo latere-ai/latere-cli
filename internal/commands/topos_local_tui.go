@@ -265,13 +265,17 @@ func (m *localTUI) onSlash(line string) (tea.Model, tea.Cmd) {
 }
 
 // switchModel changes the model in place. With a name it switches directly; with
-// none it lists the Anthropic models Lux exposes (an overlay picker is a
-// follow-up — /model <name> is the reliable path in the full-screen app).
+// none it lists the models the model key reaches, since the full-screen app has
+// no overlay picker and /model <name> is how it switches.
 func (m *localTUI) switchModel(name string) {
 	if name == "" {
-		list, err := fetchLuxModels(m.ctx)
-		if err != nil || len(list) == 0 {
-			m.appendNotice(styleDim.Render("could not list Lux models; use /model <name>"), false)
+		list, err := fetchKeyModels(m.ctx)
+		if err != nil {
+			m.appendNotice(styleDim.Render("could not list your models ("+err.Error()+"); use /model <name>"), false)
+			return
+		}
+		if len(list) == 0 {
+			m.appendNotice(styleDim.Render("your key reaches no models; use /model <name>"), false)
 			return
 		}
 		m.appendNotice(styleDim.Render("Models (use /model <name>):\n  "+strings.Join(list, "\n  ")), false)
@@ -592,7 +596,7 @@ func homeAbbrev(p string) string {
 func localTUIHelp() string {
 	return strings.TrimSpace(`
 Commands:
-  /model [name]   switch model (name switches directly; none lists your Lux models)
+  /model [name]   switch model (name switches directly; none lists the models your key reaches)
   /help           show this help
   /quit, /exit    leave (or Ctrl+D)
 Ctrl+O expands/folds tool output · ↑↓ or PgUp/PgDn scroll.`)

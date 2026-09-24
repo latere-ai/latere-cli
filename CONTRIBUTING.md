@@ -45,7 +45,6 @@ environment variables**, so a green `go test ./...` does not mean they ran:
 | Test | Enabled by | What it exercises |
 |------|------------|-------------------|
 | `TestFamilyE2E` | `LATERE_FAMILY_E2E=1` | Every product against production with your signed-in identity. `LATERE_FAMILY_E2E_WRITE=1` adds the write paths, which spend money on real model calls and clean up after themselves; `LATERE_FAMILY_E2E_LOGOUT=1` ends by revoking your session. |
-| `TestProdE2EServeAndCall` | `LATERE_LUX_E2E=1` and `LATERE_LUX_TOKEN` | `latere lux serve` end to end, exposing a local Ollama model through Lux. |
 
 ## How the code is organized
 
@@ -58,12 +57,12 @@ environment variables**, so a green `go test ./...` does not mean they ran:
 | `internal/drive` | the Drive client |
 | `internal/modelkey` | the model key for the Latere API: creation at auth, and storage in the keychain or a file |
 | `internal/reviews` | where `latere review` writes its logs, and their retention |
-| `internal/tunnel` | the outbound tunnel behind `latere lux serve` |
 | `internal/upgrade` | release discovery, verification, self-replacement, and the daily check |
 
 A product command never presents the login token. It asks auth for a token
 addressed to that one product, through one function in `internal/api`, so a
-new command inherits the rule instead of restating it.
+new command inherits the rule instead of restating it. A model call presents
+the model key of `internal/modelkey` instead.
 [`docs/login-and-tokens.md`](docs/login-and-tokens.md) states the rule as
 a user sees it.
 

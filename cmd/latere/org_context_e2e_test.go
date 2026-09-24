@@ -103,7 +103,7 @@ func TestOrgSwitchUpdatesTheSavedLoginE2E(t *testing.T) {
 				}
 			}))
 			defer server.Close()
-			env := append(os.Environ(), "LATERE_CELLA_TOKEN=", "LATERE_AUTH_TOKEN_FILE="+authPath, "SANDBOX_API_URL="+server.URL, "AUTH_URL="+server.URL+tc.authSuffix, "XDG_CONFIG_HOME="+root, "LATERE_LUX_TOKEN=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
+			env := append(os.Environ(), "LATERE_CELLA_TOKEN=", "LATERE_AUTH_TOKEN_FILE="+authPath, "SANDBOX_API_URL="+server.URL, "AUTH_URL="+server.URL+tc.authSuffix, "XDG_CONFIG_HOME="+root, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
 			run := func(args ...string) ([]byte, error) {
 				ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 				defer cancel()
@@ -175,10 +175,15 @@ func TestOrgSwitchUpdatesTheSavedLoginE2E(t *testing.T) {
 			if err != nil || strings.TrimSpace(string(out)) != want {
 				t.Errorf("shown context = %s (%v), want %s", out, err, want)
 			}
-			// The export mints with the new root, which the stub above
+			// The git helper mints with the new root, which the stub above
 			// asserts, and prints the actor token it got back.
-			out, err = run("lux", "env", "--raw", "--auth-url", server.URL)
-			if err != nil || !strings.HasPrefix(string(out), "new-actor\n") {
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			helper := exec.CommandContext(ctx, binary, "git-credential", "get", "--auth-url", server.URL)
+			helper.Env = env
+			helper.Stdin = strings.NewReader(gitCredentialRequest)
+			out, err = helper.CombinedOutput()
+			if err != nil || string(out) != "username=x-access-token\npassword=new-actor\n\n" {
 				t.Errorf("next command could not use the new auth credential: %v: %s", err, out)
 			}
 			if refreshes.Load() != 1 {

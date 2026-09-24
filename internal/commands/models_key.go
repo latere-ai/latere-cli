@@ -8,9 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"os"
-	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -21,9 +20,8 @@ import (
 
 // The model key (specs/006-model-key.md). The Lux core behind the origin
 // matches the bearer of a model call by the SHA-256 of a key it was told
-// about, and does not take the actor token the hosted plane takes. So a
-// call to the core presents a key: created at auth on first use, one per
-// login and context, kept in the system keychain.
+// about. So every model call presents a key: created at auth on first use,
+// one per login and context, kept in the system keychain.
 
 // newModelKeys is the key source; tests replace it.
 var newModelKeys = modelkey.New
@@ -35,21 +33,10 @@ var retryWindow = 30 * time.Second
 // retryFirstWait is the first wait of that retry; each next one doubles.
 var retryFirstWait = time.Second
 
-// isCoreURL reports whether the resolved Lux base URL is the Lux core behind
-// the origin: its path ends in /v1/models, the capability prefix the origin
-// routes to the core. The hosted plane is served at a host root.
-func isCoreURL(luxURL string) bool {
-	u, err := url.Parse(resolveLuxURL(luxURL))
-	if err != nil {
-		return false
-	}
-	return strings.HasSuffix(strings.TrimRight(u.Path, "/"), "/v1/models")
-}
-
 // modelKeyLogin is the saved login as the key source needs it: the issuer,
 // the access token auth's /me/keys takes, the subject and the context.
-func modelKeyLogin(ctx context.Context, luxURL, authURL string) (modelkey.Login, error) {
-	access, authBase, err := api.LoginToken(ctx, api.ResolveAuthURL(resolveLuxURL(luxURL), authURL))
+func modelKeyLogin(ctx context.Context, modelsURL, authURL string) (modelkey.Login, error) {
+	access, authBase, err := api.LoginToken(ctx, api.ResolveAuthURL(resolveModelsURL(modelsURL), authURL))
 	if err != nil {
 		return modelkey.Login{}, err
 	}
@@ -60,14 +47,18 @@ func modelKeyLogin(ctx context.Context, luxURL, authURL string) (modelkey.Login,
 	return modelkey.Login{AuthBase: authBase, Access: access, Sub: info.Sub, OrgID: info.OrgID}, nil
 }
 
-// modelKey answers the key for the current login and context, creating it
-// on first use.
-func modelKey(ctx context.Context, luxURL, authURL string) (*modelkey.Keys, modelkey.Login, modelkey.Result, error) {
-	l, err := modelKeyLogin(ctx, luxURL, authURL)
+// modelKey answers the key the next model call presents: the one handed in
+// through LATERE_MODEL_KEY, which needs no login, or the current login's
+// key for its context, created on first use.
+func modelKey(ctx context.Context, modelsURL, authURL string) (*modelkey.Keys, modelkey.Login, modelkey.Result, error) {
+	keys := newModelKeys()
+	if res, ok := modelkey.FromEnv(); ok {
+		return keys, modelkey.Login{}, res, nil
+	}
+	l, err := modelKeyLogin(ctx, modelsURL, authURL)
 	if err != nil {
 		return nil, modelkey.Login{}, modelkey.Result{}, err
 	}
-	keys := newModelKeys()
 	res, err := keys.Ensure(ctx, l)
 	if err != nil {
 		return nil, modelkey.Login{}, modelkey.Result{}, err
@@ -75,8 +66,7 @@ func modelKey(ctx context.Context, luxURL, authURL string) (*modelkey.Keys, mode
 	return keys, l, res, nil
 }
 
-// modelKeyProvenance is what `lux env` and `lux token` say about the key
-// they print.
+// modelKeyProvenance is what `models env` says about the key it prints.
 func modelKeyProvenance(res modelkey.Result, store string) string {
 	if res.FromEnv {
 		return "model key from $" + modelkey.EnvKey
@@ -91,11 +81,11 @@ func modelKeyProvenance(res modelkey.Result, store string) string {
 	return s
 }
 
-// postWithModelKey sends one model call with the key, retrying while the
+// callWithModelKey makes one model call with the key, retrying while the
 // core may not know it yet: a fresh key's 401 is retried with a growing wait
 // for up to retryWindow; an older key's 401 means it was revoked or lost, so
 // it is replaced once and the new key gets the same retry.
-func postWithModelKey(ctx context.Context, keys *modelkey.Keys, l modelkey.Login, res modelkey.Result,
+func callWithModelKey(ctx context.Context, keys *modelkey.Keys, l modelkey.Login, res modelkey.Result,
 	call func(bearer string) ([]byte, error)) ([]byte, error) {
 	replaced := false
 	for {
@@ -138,22 +128,48 @@ func callWhileFresh(ctx context.Context, keys *modelkey.Keys, res modelkey.Resul
 	}
 }
 
-// newLuxKeyCmd is `latere lux key`: the current context's model key, and
-// its revocation.
-func newLuxKeyCmd(luxURL, authURL *string) *cobra.Command {
+// modelKeySource is the bearer source of a session whose model calls a
+// library makes: review's critics and the local Topos agent. The library
+// presents the bearer and has no part in the key's first-use wait or its
+// replacement, so the first call here lists the models with the key, which
+// applies both (callWithModelKey), and the session starts with a key the
+// core accepted. Later calls answer that key.
+func modelKeySource(modelsURL, authURL string) func(context.Context) (string, error) {
+	var (
+		mu       sync.Mutex
+		accepted string
+	)
+	return func(ctx context.Context) (string, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if accepted != "" {
+			return accepted, nil
+		}
+		_, key, err := listModels(ctx, modelsURL, authURL)
+		if err != nil {
+			return "", err
+		}
+		accepted = key
+		return accepted, nil
+	}
+}
+
+// newModelsKeyCmd is `latere models key`: the current context's model key,
+// and its revocation.
+func newModelsKeyCmd(modelsURL, authURL *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "key",
-		Short: "Show the model key this machine presents to Lux in the current context.",
-		Long: `Show the key the CLI presents to the Lux model endpoints for the current
+		Short: "Show the model key this machine presents in the current context.",
+		Long: `Show the key the CLI presents to the model endpoints for the current
 login and context: its prefix, context, status, expiry and where it is kept.
 The CLI creates it on first use and keeps it in the system keychain, or in
 a 0600 file beside the login when the machine has none.
 
-'latere lux key revoke' revokes it at auth and forgets it; the next model
-call creates a new one.`,
+'latere models key revoke' revokes it at auth and forgets it; the next
+model call creates a new one.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			l, err := modelKeyLogin(cmd.Context(), *luxURL, *authURL)
+			l, err := modelKeyLogin(cmd.Context(), *modelsURL, *authURL)
 			if err != nil {
 				return err
 			}
@@ -177,7 +193,7 @@ call creates a new one.`,
 		Short: "Revoke the current context's model key at auth and forget it.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			l, err := modelKeyLogin(cmd.Context(), *luxURL, *authURL)
+			l, err := modelKeyLogin(cmd.Context(), *modelsURL, *authURL)
 			if err != nil {
 				return err
 			}

@@ -54,7 +54,7 @@ type Store interface {
 	Delete(slot string) error
 	// Slots lists every slot held, for logout.
 	Slots() ([]string, error)
-	// Name says where records are kept, for `lux key`.
+	// Name says where records are kept, for `models key`.
 	Name() string
 }
 

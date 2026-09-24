@@ -11,10 +11,12 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,6 +25,8 @@ import (
 
 	"latere.ai/x/topos/sandbox"
 	"latere.ai/x/topos/sandbox/rpc"
+
+	"github.com/latere-ai/latere-cli/internal/config"
 )
 
 func TestToWSURL(t *testing.T) {
@@ -206,7 +210,38 @@ func TestSandboxNodeIDFromHostname(t *testing.T) {
 	if err != nil || sanitizeNodeID(h) == "" {
 		t.Skip("no usable hostname on this host")
 	}
-	if got := sandboxNodeID(); got != sanitizeNodeID(h) {
+	if got := sandboxNodeID(io.Discard); got != sanitizeNodeID(h) {
 		t.Errorf("sandboxNodeID() = %q, want hostname-derived %q", got, sanitizeNodeID(h))
+	}
+}
+
+// TestPersistedNodeIDIsStable proves the fallback id is kept in the config dir,
+// so a reconnect advertises the same name.
+func TestPersistedNodeIDIsStable(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	first, err := persistedNodeID()
+	if err != nil || !strings.HasPrefix(first, "node-") {
+		t.Fatalf("persistedNodeID() = %q, %v; want a node- id", first, err)
+	}
+	if second, err := persistedNodeID(); err != nil || second != first {
+		t.Fatalf("persistedNodeID() again = %q, %v; want %q", second, err, first)
+	}
+	if b, err := os.ReadFile(config.Path("tunnel-node-id")); err != nil || string(b) != first {
+		t.Fatalf("kept id = %q, %v; want %q", b, err, first)
+	}
+}
+
+// TestPersistedNodeIDReportsAnUnkeptID proves a config dir that cannot hold
+// the id is reported, and the id is still answered for this connect.
+func TestPersistedNodeIDReportsAnUnkeptID(t *testing.T) {
+	dir := t.TempDir()
+	// A file where the latere config directory should be.
+	if err := os.WriteFile(filepath.Join(dir, "latere"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	id, err := persistedNodeID()
+	if err == nil || !strings.HasPrefix(id, "node-") {
+		t.Fatalf("persistedNodeID() = %q, %v; want an id and an error", id, err)
 	}
 }

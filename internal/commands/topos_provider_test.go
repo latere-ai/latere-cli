@@ -10,10 +10,13 @@ package commands
 import (
 	"context"
 	"errors"
+	"io"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"latere.ai/x/topos/models"
 	toposlux "latere.ai/x/topos/models/lux"
 
 	"github.com/latere-ai/latere-cli/internal/api"
@@ -50,12 +53,13 @@ func TestBuildLocalModelFromProviderConfig(t *testing.T) {
 	}
 }
 
-// TestBuildLocalModelDefaultsToLux is the real 429 fix: once signed in to
-// latere, --local routes through Lux (keyless, billed to the login) instead of
-// the shared, rate-limited CLAUDE_CODE_OAUTH_TOKEN. Lux must win over that
-// ambient token; we tell them apart by the requested model id (the Lux path
-// pins luxDefaultModel, the ambient path uses the adapter's own default).
-func TestBuildLocalModelDefaultsToLux(t *testing.T) {
+// TestBuildLocalModelDefaultsToTheOrigin is the real 429 fix: once signed in
+// to latere, --local calls the Latere models at the origin (billed to the
+// model key's context) instead of the shared, rate-limited
+// CLAUDE_CODE_OAUTH_TOKEN. The origin must win over that ambient token; we
+// tell them apart by the requested model id (the origin path pins
+// defaultCatalogModel, the ambient path uses the adapter's own default).
+func TestBuildLocalModelDefaultsToTheOrigin(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat-ambient-shared")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN_AUTO", "")
@@ -63,20 +67,64 @@ func TestBuildLocalModelDefaultsToLux(t *testing.T) {
 	t.Setenv("LATERE_TOPOS_PROVIDER_FILE", filepath.Join(t.TempDir(), "provider.json"))
 	t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(t.TempDir(), "auth.json"))
 
-	// Signed in to latere → Lux is the default, overriding the ambient token.
+	// Signed in to latere → the origin is the default, overriding the ambient token.
 	if err := api.SaveAuthToken(api.Token{AccessToken: "latere-access-token"}); err != nil {
 		t.Fatal(err)
 	}
 	m, err := buildLocalModel(context.Background(), "")
 	if err != nil || m == nil {
-		t.Fatalf("signed in → Lux model, got (%v, %v)", m, err)
+		t.Fatalf("signed in → origin model, got (%v, %v)", m, err)
 	}
-	if got := m.(*toposlux.Adapter).Model(); got != luxDefaultModel {
-		t.Fatalf("model = %q, want Lux default %q (Lux did not win over the ambient token)", got, luxDefaultModel)
+	if got := m.(*toposlux.Adapter).Model(); got != defaultCatalogModel {
+		t.Fatalf("model = %q, want the origin default %q (the origin did not win over the ambient token)", got, defaultCatalogModel)
 	}
-	// An explicit --model is honored on the Lux path.
-	if m, _ := buildLocalModel(context.Background(), "claude-haiku-4-5-20251001"); m.(*toposlux.Adapter).Model() != "claude-haiku-4-5-20251001" {
-		t.Fatalf("--model override not applied on the Lux path")
+	// An explicit --model is honored on the origin path.
+	if m, _ := buildLocalModel(context.Background(), "anthropic/claude-haiku-4.5"); m.(*toposlux.Adapter).Model() != "anthropic/claude-haiku-4.5" {
+		t.Fatalf("--model override not applied on the origin path")
+	}
+}
+
+// TestLocalModelCallsTheDoor is criterion 4 for the local Topos model path:
+// the agent's model call reaches the core's OpenAI door with the model key
+// and the catalog name of the default model.
+func TestLocalModelCallsTheDoor(t *testing.T) {
+	w := newKeyWorld(t, "")
+	t.Setenv("LATERE_MODELS_URL", w.modelsURL())
+	t.Setenv("AUTH_URL", w.srv.URL)
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("LATERE_TOPOS_PROVIDER_FILE", filepath.Join(t.TempDir(), "provider.json"))
+	m, err := buildLocalModel(t.Context(), "")
+	if err != nil {
+		t.Fatalf("buildLocalModel: %v", err)
+	}
+	st, err := m.Stream(t.Context(), models.Request{Messages: []models.Message{{Role: models.RoleUser, Content: "hi"}}})
+	if err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+	var text strings.Builder
+	for {
+		ev, err := st.Recv()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("recv: %v", err)
+		}
+		text.WriteString(ev.TextDelta)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if text.String() != "no findings" {
+		t.Fatalf("reply = %q", text.String())
+	}
+	calls := w.coreCalls()
+	if len(calls) != 2 || calls[0].path != "/v1/models/openai/v1/models" ||
+		calls[1].path != "/v1/models/openai/v1/chat/completions" {
+		t.Fatalf("core calls = %+v, want the key's list then the chat", calls)
+	}
+	if calls[1].bearer != "pat_k1.value" || calls[1].model != defaultCatalogModel {
+		t.Fatalf("chat = %+v, want the model key and %s", calls[1], defaultCatalogModel)
 	}
 }
 

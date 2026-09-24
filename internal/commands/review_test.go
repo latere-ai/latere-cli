@@ -4,23 +4,16 @@
 package commands
 
 import (
-	"encoding/base64"
-	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	adversarial "latere.ai/x/topos/adversarial"
+	"latere.ai/x/topos/adversarial/critic"
 	"latere.ai/x/topos/adversarial/input"
 )
-
-// jwtWithExp builds a minimal three-segment JWT whose payload carries the
-// given exp claim, so decodeJWTClaims parses it. The signature segment is a
-// placeholder (decodeJWTClaims never verifies it).
-func jwtWithExp(exp int64) string {
-	payload, _ := json.Marshal(map[string]any{"exp": exp})
-	return "h." + base64.RawURLEncoding.EncodeToString(payload) + ".s"
-}
 
 // TestReviewFlagDefaults pins the documented defaults so a careless flag
 // edit can't silently change the command's behavior.
@@ -34,10 +27,12 @@ func TestReviewFlagDefaults(t *testing.T) {
 		{"forks", "1"},
 		{"max-rounds", "4"},
 		{"cost-cap", "50000"},
-		{"model", "claude-sonnet-4-6"},
+		{"model", "anthropic/claude-sonnet-4.6"},
 		{"proposer-timeout", "5m0s"},
 		{"session", ""},
 		{"state-dir", ""},
+		{"models-url", ""},
+		{"auth-url", ""},
 	}
 	for _, tc := range cases {
 		f := cmd.Flags().Lookup(tc.flag)
@@ -49,26 +44,51 @@ func TestReviewFlagDefaults(t *testing.T) {
 			t.Errorf("--%s default = %q, want %q", tc.flag, f.DefValue, tc.want)
 		}
 	}
+	for _, gone := range []string{"lux-url", "token"} {
+		if cmd.Flags().Lookup(gone) != nil {
+			t.Errorf("--%s is still a flag", gone)
+		}
+	}
 }
 
-// TestEnsureBearerFresh covers the expiry preflight: an expired JWT errors,
-// a future one passes, and non-JWT / no-exp tokens are skipped (Lux stays the
-// authority).
-func TestEnsureBearerFresh(t *testing.T) {
-	now := time.Now().Unix()
-	if err := ensureBearerFresh(jwtWithExp(now - 60)); err == nil {
-		t.Error("expired token: want error, got nil")
+// TestReviewCriticCallsTheDoor is criterion 4 for review: a critic round
+// sends its model call to the core's OpenAI door with the model key and the
+// catalog name of the default critic model, once the core accepted the key.
+func TestReviewCriticCallsTheDoor(t *testing.T) {
+	w := newKeyWorld(t, "")
+	t.Setenv("AUTH_URL", w.srv.URL)
+	key := modelKeySource(w.modelsURL(), "")
+	if _, err := key(t.Context()); err != nil {
+		t.Fatalf("key source: %v", err)
 	}
-	if err := ensureBearerFresh(jwtWithExp(now + 3600)); err != nil {
-		t.Errorf("fresh token: want nil, got %v", err)
+	critics := critic.NewCriticFactory(critic.Config{
+		Model: reviewCriticModel(defaultCatalogModel, w.modelsURL(), key),
+	})
+	res, err := critics(1).Round(t.Context(), adversarial.CriticInput{
+		AspectName: "correctness", SystemPrompt: "you are a critic", CriticIndex: 1, Round: 1,
+		TaskContext: "a task", DiffPatch: "--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n",
+		Cwd: t.TempDir(), Deadline: 10 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("critic round: %v", err)
 	}
-	if err := ensureBearerFresh("opaque-not-a-jwt"); err != nil {
-		t.Errorf("opaque token: want nil (skip), got %v", err)
+	if !strings.Contains(res.Markdown, "no findings") {
+		t.Fatalf("critic answered %q, want the stub's reply", res.Markdown)
 	}
-	// JWT-shaped but no exp claim -> skip.
-	noExp := "h." + base64.RawURLEncoding.EncodeToString([]byte(`{"sub":"x"}`)) + ".s"
-	if err := ensureBearerFresh(noExp); err != nil {
-		t.Errorf("no-exp token: want nil (skip), got %v", err)
+	var chats int
+	for _, c := range w.coreCalls() {
+		if c.bearer != "pat_k1.value" {
+			t.Errorf("%s presented %q, want the model key", c.path, c.bearer)
+		}
+		if c.path == "/v1/models/openai/v1/chat/completions" {
+			chats++
+			if c.model != "anthropic/claude-sonnet-4.6" || !c.stream {
+				t.Errorf("chat call = %+v, want a stream of anthropic/claude-sonnet-4.6", c)
+			}
+		}
+	}
+	if chats != 1 {
+		t.Fatalf("chat calls = %d, want 1: %+v", chats, w.coreCalls())
 	}
 }
 

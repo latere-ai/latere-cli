@@ -7,6 +7,8 @@ import (
 	"bytes"
 	"errors"
 	"testing"
+
+	"github.com/latere-ai/latere-cli/internal/modelkey"
 )
 
 type failingEnvWriter struct {
@@ -23,29 +25,27 @@ func (w *failingEnvWriter) Write(p []byte) (int, error) {
 	return w.Buffer.Write(p)
 }
 
-func TestLuxEnvPropagatesOutputErrors(t *testing.T) {
+// TestModelsEnvPropagatesOutputErrors: a write that fails stops the command
+// with that error, and nothing is reported after it.
+func TestModelsEnvPropagatesOutputErrors(t *testing.T) {
+	t.Setenv(modelkey.EnvKey, "pat_ci.value")
 	for _, tc := range []struct {
-		name               string
-		raw, alias, stderr bool
-		failAt             int
+		name        string
+		raw, stderr bool
+		failAt      int
 	}{
 		{name: "first export", failAt: 1},
 		{name: "second export", failAt: 2},
 		{name: "export provenance", stderr: true, failAt: 1},
-		{name: "raw token", raw: true, failAt: 1},
+		{name: "raw key", raw: true, failAt: 1},
 		{name: "raw provenance", raw: true, stderr: true, failAt: 1},
-		{name: "legacy token", alias: true, failAt: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			url, auth, token := "https://lux.example", "", "synthetic-token"
-			cmd := newLuxEnvCmd(&url, &auth, &token)
-			args := []string{"--compat", "openai"}
+			url, auth := "https://models.example/v1/models", ""
+			cmd := newModelsEnvCmd(&url, &auth)
+			var args []string
 			if tc.raw {
 				args = []string{"--raw"}
-			}
-			if tc.alias {
-				cmd = newLuxTokenCmd(&url, &auth, &token)
-				args = nil
 			}
 			writeErr := errors.New("output unavailable")
 			out, diagnostic := &failingEnvWriter{}, &failingEnvWriter{}

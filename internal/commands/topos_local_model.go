@@ -38,21 +38,25 @@ func handleLocalCommand(ctx context.Context, line string, curModel *string, rebu
 func printLocalHelp() {
 	fmt.Println(strings.TrimSpace(`
 Commands:
-  /model [name]   switch model — no name opens a picker of your Lux models
+  /model [name]   switch model — no name opens a picker of the models your key reaches
   /help           show this help
   /quit, /exit    leave (or press Ctrl+D)
 `))
 }
 
 // switchLocalModel changes the active model. With no name it opens a picker over
-// the Anthropic models Lux exposes to this identity; with a name it switches
-// directly (works for any provider, e.g. an Ollama tag).
+// the models the model key reaches; with a name it switches directly (works for
+// any provider, e.g. an Ollama tag).
 func switchLocalModel(ctx context.Context, name string, curModel *string, rebuild func(models.Model) error) {
 	target := name
 	if target == "" {
-		list, err := fetchLuxModels(ctx)
-		if err != nil || len(list) == 0 {
-			fmt.Println(styleDim.Render("could not list Lux models; use /model <name>"))
+		list, err := fetchKeyModels(ctx)
+		if err != nil {
+			fmt.Println(styleDim.Render("could not list your models (" + err.Error() + "); use /model <name>"))
+			return
+		}
+		if len(list) == 0 {
+			fmt.Println(styleDim.Render("your key reaches no models; use /model <name>"))
 			return
 		}
 		chosen, perr := runModelPicker(ctx, list, *curModel)
@@ -73,29 +77,17 @@ func switchLocalModel(ctx context.Context, name string, curModel *string, rebuil
 	fmt.Printf("switched to %s\n", *curModel)
 }
 
-// fetchLuxModels returns the Anthropic model ids Lux exposes to this identity
-// and marks enabled — the models usable through --local's Anthropic-via-Lux
-// path (see `latere lux models`).
-func fetchLuxModels(ctx context.Context) ([]string, error) {
-	c, _, err := luxClient(ctx, "", "", "")
+// fetchKeyModels returns the names of the models the model key reaches, the
+// list `latere models` prints. The local agent calls them through the OpenAI
+// door, which reaches a Model of any provider.
+func fetchKeyModels(ctx context.Context) ([]string, error) {
+	entries, _, err := listModels(ctx, "", "")
 	if err != nil {
 		return nil, err
 	}
-	var resp luxCatalogResponse
-	if err := c.GetJSON(ctx, "/lux/v1/models", &resp); err != nil {
-		return nil, err
-	}
-	var out []string
-	for _, it := range resp.Items {
-		if s, _ := it["status"].(string); s != "enabled" {
-			continue
-		}
-		if p, _ := it["provider"].(string); p != "anthropic" {
-			continue
-		}
-		if m, _ := it["model"].(string); m != "" {
-			out = append(out, m)
-		}
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, e.ID)
 	}
 	return out, nil
 }

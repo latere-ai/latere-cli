@@ -25,7 +25,7 @@ func TestProductsRejectExpiredAuthWithoutRefreshE2E(t *testing.T) {
 		t.Skip("binary e2e skipped with -short")
 	}
 	binary := latereBinary(t)
-	for _, product := range []string{"lux export", "git helper", "drive", "topos", "cella"} {
+	for _, product := range []string{"git helper", "drive", "topos", "cella"} {
 		for _, state := range []string{"expired", "near expiry", "unknown expiry"} {
 			t.Run(product+"/"+state, func(t *testing.T) {
 				root := t.TempDir()
@@ -70,10 +70,8 @@ func TestProductsRejectExpiredAuthWithoutRefreshE2E(t *testing.T) {
 					_, _ = w.Write([]byte(`{"entries":[],"agents":[]}`))
 				}))
 				defer server.Close()
-				args := []string{"lux", "env", "--raw"}
+				args := []string{"git-credential", "get"}
 				switch product {
-				case "git helper":
-					args = []string{"git-credential", "get"}
 				case "drive":
 					args = []string{"drive", "ls"}
 				case "topos":
@@ -87,7 +85,7 @@ func TestProductsRejectExpiredAuthWithoutRefreshE2E(t *testing.T) {
 				defer cancel()
 				command := exec.CommandContext(ctx, binary, args...)
 				command.Stdin = strings.NewReader("protocol=https\nhost=code.latere.ai\n\n")
-				command.Env = append(os.Environ(), "LATERE_CELLA_TOKEN=", "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_URL="+server.URL, "DRIVE_API_URL="+server.URL, "TOPOS_API_URL="+server.URL, "LUX_API_URL="+server.URL, "LATERE_DRIVE_TOKEN=", "LATERE_LUX_TOKEN=", "TOPOS_TOKEN=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
+				command.Env = append(os.Environ(), "LATERE_CELLA_TOKEN=", "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_URL="+server.URL, "DRIVE_API_URL="+server.URL, "TOPOS_API_URL="+server.URL, "LATERE_DRIVE_TOKEN=", "TOPOS_TOKEN=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
 				var stdout, stderr bytes.Buffer
 				command.Stdout, command.Stderr = &stdout, &stderr
 				err = command.Run()
@@ -108,12 +106,12 @@ func TestProductsRejectExpiredAuthWithoutRefreshE2E(t *testing.T) {
 					if err != nil {
 						t.Errorf("usable credential rejected: %v; stderr: %s", err, stderr.String())
 					}
-					// One mint per product, then one product call; the two
-					// export commands hand their mint's result to the caller
-					// and make no product call.
+					// One mint per product, then one product call; the git
+					// helper hands its mint's result to git and makes no
+					// product call.
 					wantRequests := int32(2)
 					switch product {
-					case "lux export", "git helper":
+					case "git helper":
 						wantRequests = 1
 						if !strings.Contains(stdout.String(), "product-actor") || strings.Contains(stdout.String(), "saved-auth") {
 							t.Errorf("%s credential = %q, want the minted actor token and never the root", product, stdout.String())

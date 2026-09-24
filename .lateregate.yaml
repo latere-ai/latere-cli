@@ -49,5 +49,5 @@ waive:
 # The identity shape of the family: specs/infrastructure/identity.md in latere-ai/specs
 identity:
   role: client
-  audiences: [sandboxd, toposd, lux.latere.ai, drive.latere.ai, origo]
+  audiences: [sandboxd, toposd, drive.latere.ai, origo]
   roles_only: true

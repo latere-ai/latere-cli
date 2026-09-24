@@ -7,17 +7,17 @@ package main
 // one `latere` CLI identity and asserts each identity-fabric edge end to
 // end against live production. It is the reproducible companion to
 // specs/products/identity-fabric/release-and-verification.md: one login,
-// then every edge a CLI user can reach (cella, lux, drive, topos, auth),
+// then every edge a CLI user can reach (cella, models, drive, topos, auth),
 // plus the two invariants (owner-rooted subject, trust-root rule).
 //
 // Opt-in and tiered, because the higher tiers spend real money and mutate
 // real state:
 //
 //	LATERE_FAMILY_E2E=1        read-only edges: whoami, /api/me,
-//	                           cella list, lux models+access, drive ls,
+//	                           cella list, models list, drive ls,
 //	                           topos reachability, garbage-token 401.
 //	                           No cost, no resource creation.
-//	LATERE_FAMILY_E2E_WRITE=1  also: lux invoke (a token), drive put/get/rm
+//	LATERE_FAMILY_E2E_WRITE=1  also: models invoke (a token), drive put/get/rm
 //	                           round-trip, cross-product 401. Spends money;
 //	                           cleans up after itself.
 //	LATERE_FAMILY_E2E_LOGOUT=1 also: logout then reuse the old bearer ->
@@ -29,7 +29,9 @@ package main
 //	LATERE_FAMILY_E2E=1 go test ./cmd/latere/ -run TestFamilyE2E -v
 //
 // Service URLs default to production and are overridable:
-// CELLA_API_URL, AUTH_URL, LUX_API_URL, DRIVE_API_URL, TOPOS_API_URL.
+// CELLA_API_URL, AUTH_URL, LATERE_MODELS_URL, DRIVE_API_URL, TOPOS_API_URL.
+// The models edges create this machine's model key on first use, as any
+// signed-in `latere models` does.
 
 import (
 	"context"
@@ -50,7 +52,6 @@ type familyEnv struct {
 	token    string // cella-issued bearer (token.json), valid at cella
 	cellaURL string
 	authURL  string
-	luxURL   string
 	driveURL string
 	toposURL string
 	sub      string // owner subject, read from whoami
@@ -78,7 +79,6 @@ func setupFamily(t *testing.T) *familyEnv {
 	fe := &familyEnv{
 		cellaURL: urlOr("CELLA_API_URL", "https://cella.latere.ai"),
 		authURL:  urlOr("AUTH_URL", "https://auth.latere.ai"),
-		luxURL:   urlOr("LUX_API_URL", "https://lux.latere.ai"),
 		driveURL: urlOr("DRIVE_API_URL", "https://drive.latere.ai"),
 		toposURL: urlOr("TOPOS_API_URL", "https://topos.latere.ai"),
 		httpc:    &http.Client{Timeout: 30 * time.Second},
@@ -136,45 +136,31 @@ func (fe *familyEnv) get(t *testing.T, url, bearer string) (int, string) {
 	return resp.StatusCode, string(body)
 }
 
-// freshBearer mints a short-lived auth-issued identity token via `lux env`.
-// Unlike the on-disk auth-token.json (which goes stale between runs), this is
-// freshly minted, so a direct /api/me check stays green. Returns "" if lux
-// access is unavailable.
+// freshBearer is the saved login token after `whoami` refreshed it when due,
+// the token auth's /api/me takes. Unlike LATERE_E2E_TOKEN or a login left
+// from an earlier run, it is current. Returns "" if either command fails.
 func (fe *familyEnv) freshBearer(t *testing.T) string {
 	t.Helper()
-	out, _, err := fe.run(t, 30*time.Second, "lux", "env", "anthropic")
+	if _, _, err := fe.run(t, 30*time.Second, "whoami"); err != nil {
+		return ""
+	}
+	out, _, err := fe.run(t, 20*time.Second, "print-token")
 	if err != nil {
 		return ""
 	}
-	for line := range strings.SplitSeq(out, "\n") {
-		if _, v, ok := strings.Cut(strings.TrimSpace(line), "ANTHROPIC_AUTH_TOKEN="); ok {
-			return strings.TrimSpace(v)
-		}
-	}
-	return ""
+	return strings.TrimSpace(out)
 }
 
-// firstModel reads the first enabled model + its provider from `lux models`,
-// so a live invoke uses whatever the identity actually has bound.
-func (fe *familyEnv) firstModel(t *testing.T) (model, provider string) {
+// firstModel reads the first model `latere models` lists, so a live invoke
+// uses a model the key reaches.
+func (fe *familyEnv) firstModel(t *testing.T) string {
 	t.Helper()
-	out, _, err := fe.run(t, 30*time.Second, "lux", "models")
+	out, _, err := fe.run(t, 30*time.Second, "models")
 	if err != nil {
-		return "", ""
+		return ""
 	}
-	for line := range strings.SplitSeq(out, "\n") {
-		f := strings.Fields(line)
-		if len(f) >= 2 && f[0] == "model:" && model == "" {
-			model = f[1]
-		}
-		if len(f) >= 2 && f[0] == "provider:" && provider == "" {
-			provider = f[1]
-		}
-		if model != "" && provider != "" {
-			break
-		}
-	}
-	return model, provider
+	first, _, _ := strings.Cut(strings.TrimSpace(out), "\n")
+	return strings.TrimSpace(first)
 }
 
 func TestFamilyE2E(t *testing.T) {
@@ -203,14 +189,12 @@ func TestFamilyE2E(t *testing.T) {
 		}
 	})
 
-	// A fresh auth-issued bearer is accepted at auth /api/me and resolves to
-	// the same owner (invariant 1). token.json is cella-issued and would 401
-	// here by design (asserted separately below), so this mints a fresh
-	// identity token via lux env rather than reusing the stale disk token.
+	// A current auth-issued bearer is accepted at auth /api/me and resolves
+	// to the same owner (invariant 1).
 	t.Run("auth/api-me-accepts", func(t *testing.T) {
 		bearer := fe.freshBearer(t)
 		if bearer == "" {
-			t.Skip("could not mint a fresh auth bearer via lux env")
+			t.Skip("could not read a current login token with whoami and print-token")
 		}
 		status, body := fe.get(t, fe.authURL+"/api/me", bearer)
 		if status != http.StatusOK {
@@ -235,21 +219,14 @@ func TestFamilyE2E(t *testing.T) {
 		}
 	})
 
-	// Edge: CLI -> lux (per-call actor token, no key allocation).
-	t.Run("cli->lux-models", func(t *testing.T) {
-		out, errOut, err := fe.run(t, 30*time.Second, "lux", "models")
+	// Edge: CLI -> the models at the origin, with the model key.
+	t.Run("cli->models-list", func(t *testing.T) {
+		out, errOut, err := fe.run(t, 60*time.Second, "models")
 		if err != nil {
-			t.Fatalf("lux models: %v\n%s", err, errOut)
+			t.Fatalf("models: %v\n%s", err, errOut)
 		}
 		if strings.TrimSpace(out) == "" {
-			t.Error("lux models returned nothing; expected models visible to the identity")
-		}
-	})
-
-	// The owner's lux access profile: the CLI reads it as the logged-in identity.
-	t.Run("cli->lux-access", func(t *testing.T) {
-		if _, errOut, err := fe.run(t, 30*time.Second, "lux", "access"); err != nil {
-			t.Fatalf("lux access: %v\n%s", err, errOut)
+			t.Error("models returned nothing; expected the models the key reaches")
 		}
 	})
 
@@ -304,24 +281,24 @@ func TestFamilyE2E(t *testing.T) {
 	}
 }
 
-// runWriteTier exercises the cost/mutation edges: a live lux completion and a
-// drive round-trip. Each cleans up after itself.
+// runWriteTier exercises the cost/mutation edges: a live model completion and
+// a drive round-trip. Each cleans up after itself.
 func (fe *familyEnv) runWriteTier(t *testing.T) {
-	// Edge: CLI -> lux invoke (a real one-shot completion) using whatever
-	// model the identity has bound.
-	t.Run("cli->lux-invoke", func(t *testing.T) {
-		model, provider := fe.firstModel(t)
+	// Edge: CLI -> models invoke (a real one-shot completion) with the first
+	// model the key reaches.
+	t.Run("cli->models-invoke", func(t *testing.T) {
+		model := fe.firstModel(t)
 		if model == "" {
-			t.Skip("no lux model bound to this identity; run `latere lux access set`")
+			t.Skip("the model key reaches no model")
 		}
-		out, errOut, err := fe.run(t, 60*time.Second, "lux", "invoke",
-			"--provider", provider, "--model", model, "--max-tokens", "16",
+		out, errOut, err := fe.run(t, 60*time.Second, "models", "invoke",
+			"--model", model, "--max-tokens", "16",
 			"reply with the single word: ok")
 		if err != nil {
-			t.Fatalf("lux invoke (%s/%s): %v\n%s", provider, model, err, errOut)
+			t.Fatalf("models invoke (%s): %v\n%s", model, err, errOut)
 		}
 		if strings.TrimSpace(out) == "" {
-			t.Error("lux invoke returned empty completion")
+			t.Error("models invoke returned empty completion")
 		}
 	})
 

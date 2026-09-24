@@ -29,7 +29,7 @@ func TestCommandsPreserveHTTPErrorStatusE2E(t *testing.T) {
 		status, bodyStatus int
 		want               string
 	}{
-		{"rates", 503, 200, "status 503: try later"},
+		{"list", 503, 200, "status 503: try later"},
 		{"invoke", 503, 200, "status 503: try later"},
 		{"logout unavailable", 503, 404, "warning: refresh-token revocation returned 503"},
 	} {
@@ -40,7 +40,7 @@ func TestCommandsPreserveHTTPErrorStatusE2E(t *testing.T) {
 				t.Fatal(err)
 			}
 			logout := strings.HasPrefix(tc.name, "logout")
-			path, method := "/lux/v1/rates", http.MethodGet
+			path, method := "/openai/v1/models", http.MethodGet
 			if tc.name == "invoke" {
 				path, method = "/openai/v1/chat/completions", http.MethodPost
 			} else if logout {
@@ -48,10 +48,6 @@ func TestCommandsPreserveHTTPErrorStatusE2E(t *testing.T) {
 			}
 			var calls atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path == "/lux/v1/providers" {
-					_, _ = w.Write([]byte(`{"items":[]}`))
-					return
-				}
 				calls.Add(1)
 				if r.URL.Path != path || r.Method != method {
 					t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
@@ -61,16 +57,16 @@ func TestCommandsPreserveHTTPErrorStatusE2E(t *testing.T) {
 				_, _ = fmt.Fprintf(w, `{"status":%d,"message":"try later"}`, tc.bodyStatus)
 			}))
 			defer server.Close()
-			args := []string{"lux", "rates", "--json", "--token", "test-lux", "--lux-url", server.URL}
+			args := []string{"models", "list", "--json", "--models-url", server.URL}
 			if tc.name == "invoke" {
-				args = []string{"lux", "invoke", "--token", "test-lux", "--lux-url", server.URL, "--provider", "openai", "--model", "test-model", "Hello"}
+				args = []string{"models", "invoke", "--models-url", server.URL, "--model", "test-model", "Hello"}
 			} else if logout {
 				args = []string{"logout", "--auth-url", server.URL}
 			}
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()
 			command := exec.CommandContext(ctx, binary, args...)
-			command.Env = append(os.Environ(), "LATERE_CELLA_TOKEN=", "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_URL="+server.URL, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
+			command.Env = append(os.Environ(), "LATERE_CELLA_TOKEN=", "LATERE_MODEL_KEY=test-key", "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_URL="+server.URL, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
 			var stdout, stderr bytes.Buffer
 			command.Stdout, command.Stderr = &stdout, &stderr
 			err := command.Run()

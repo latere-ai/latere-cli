@@ -38,7 +38,7 @@ func TestSharedJSONConfiguredOutputE2E(t *testing.T) {
 		{"policy", []string{"cella", "policy", "--json"}, "/v1/policies", `[{"name":"restricted"}]`, "name", "restricted", 1},
 		{"policy list", []string{"cella", "policy", "list", "--json"}, "/v1/policies", `[{"name":"restricted"}]`, "name", "restricted", 1},
 		{"topos", []string{"topos", "agents", "list", "--json"}, "/v1/agents", `{"agents":[{"id":"agent-1"}]}`, "id", "agent-1", 1},
-		{"lux", []string{"lux", "models", "--json"}, "/lux/v1/models", `{"items":[{"provider":"test","model":"model-1"}]}`, "model", "model-1", 2},
+		{"models", []string{"models", "list", "--json"}, "/openai/v1/models", `{"object":"list","data":[{"id":"model-1","object":"model"}]}`, "id", "model-1", 1},
 	} {
 		for _, writable := range []string{"1", "0"} {
 			t.Run(tc.name+"/writable="+writable, func(t *testing.T) {
@@ -51,8 +51,6 @@ func TestSharedJSONConfiguredOutputE2E(t *testing.T) {
 					switch r.URL.Path {
 					case tc.path:
 						_, _ = io.WriteString(w, tc.body)
-					case "/lux/v1/rates":
-						_, _ = io.WriteString(w, `{"items":[]}`)
 					default:
 						t.Errorf("unexpected path=%s", r.URL.Path)
 						w.WriteHeader(404)
@@ -65,15 +63,15 @@ func TestSharedJSONConfiguredOutputE2E(t *testing.T) {
 				}
 				// Reuse the helper that installs an inherited writer on the full command tree.
 				args := append([]string{"-test.run=^TestCellaDownloadOutputHelperProcess$", "--"}, tc.args...)
-				if tc.name == "lux" {
-					args = append(args, "--lux-url", server.URL, "--token", "synthetic-token")
+				if tc.name == "models" {
+					args = append(args, "--models-url", server.URL)
 				} else {
 					args = append(args, "--api-url", server.URL)
 				}
 				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 				defer cancel()
 				command := exec.CommandContext(ctx, binary, args...)
-				command.Env = append(os.Environ(), "LATERE_CELLA_TOKEN=synthetic-token", "LATERE_AUTH_TOKEN_FILE="+filepath.Join(dir, "absent-auth.json"), "XDG_CONFIG_HOME="+dir, "TOPOS_TOKEN=synthetic-token", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "LATERE_TEST_DOWNLOAD_OUTPUT="+output, "LATERE_TEST_DOWNLOAD_WRITABLE="+writable)
+				command.Env = append(os.Environ(), "LATERE_CELLA_TOKEN=synthetic-token", "LATERE_AUTH_TOKEN_FILE="+filepath.Join(dir, "absent-auth.json"), "XDG_CONFIG_HOME="+dir, "TOPOS_TOKEN=synthetic-token", "LATERE_MODEL_KEY=synthetic-token", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "LATERE_TEST_DOWNLOAD_OUTPUT="+output, "LATERE_TEST_DOWNLOAD_WRITABLE="+writable)
 				var out, diagnostic bytes.Buffer
 				command.Stdout, command.Stderr = &out, &diagnostic
 				err := command.Run()

@@ -62,7 +62,7 @@ Every sign-in also configures git for Latere Code unless you pass
 | Where | What it is | Used for |
 |-------|------------|----------|
 | `~/.config/latere/auth-token.json` | The **login token**: an access token issued by `auth.latere.ai`, and its refresh token. | Presented to auth alone: to refresh itself, and to mint every product token. |
-| The system keychain, or `~/.config/latere/model-keys.json` | **Model keys** for the Latere API, one per context, created on first use. | Presented to the model endpoints of the Latere API. See [Lux](lux.md#your-model-key-on-the-latere-api). |
+| The system keychain, or `~/.config/latere/model-keys.json` | **Model keys** for the Latere API, one per context, created on first use. | Presented to the model endpoints of the Latere API. See [Models](models.md#your-model-key). |
 
 Product tokens are never written to disk. Each lives in memory for one
 command and lapses within five minutes, so saving it beside the login
@@ -81,15 +81,13 @@ lists every file the CLI keeps.
 
 ## How each product gets its credential
 
-Every product call asks auth for a token addressed to that product.
+Every product call asks auth for a token addressed to that product, except a
+model call, which presents the model key.
 
 | Command | What is sent | Where it comes from |
 |---|---|---|
 | `latere cella ...` | a token with audience `sandboxd`, valid 5 minutes | minted per command at auth |
-| `latere lux invoke`, `models`, `usage`, `access` | a token with audience `lux.latere.ai`, valid 5 minutes | minted per command at auth |
-| `latere lux env` | a token with audience `lux.latere.ai`, valid 5 minutes | minted when the command runs; run it again for a new one |
-| `latere lux serve`, `latere review`, `latere topos --local` through Lux | a token with audience `lux.latere.ai`, minted again a minute before it expires | minted for the session, so a tunnel that runs for hours never sends the login token |
-| `latere lux` against the Latere API | a model key | created at auth on first use and kept, as above |
+| `latere models ...`, `latere review`, `latere topos --local` through the Latere API | the model key | created at auth on first use and kept, as above |
 | `git` against `code.latere.ai` | a token with audience `origo`, valid 5 minutes | minted per git operation at auth |
 | `latere topos ...` | a token with audience `toposd`, valid 5 minutes | minted per command at auth |
 | `latere drive ...` | a token with audience `drive.latere.ai`, valid 5 minutes | minted per command at auth |
@@ -115,25 +113,27 @@ client. A command that outlives it mints again before the next request,
 and a `401` from Cella mints once more and retries that request.
 
 Set `LATERE_CELLA_TOKEN` to present a bearer of your own instead, for a
-development deployment or a test. `LATERE_LUX_TOKEN`, `TOPOS_TOKEN`, and
-`LATERE_DRIVE_TOKEN` do the same for their products.
+development deployment or a test. `TOPOS_TOKEN` and `LATERE_DRIVE_TOKEN` do
+the same for their products, and `LATERE_MODEL_KEY` hands the model
+commands a key.
 
-### Lux
+### Models
 
-For a model call the CLI makes itself (`latere lux invoke`, `models`,
-`usage`, `access`), it mints a `lux.latere.ai` token and presents it for
-that one call.
+The model endpoints of the Latere API take a model key rather than a token
+minted per call. The CLI creates the key at auth with your login token the
+first time a model command runs in your current context, keeps it, and
+presents it on every model call. The login token itself is only ever
+sent to auth.
 
-`latere lux env` exports a credential for a stock SDK. The value is always
-a token minted for Lux, never your login token, and stderr says when it
-expires:
+`latere models env` exports the key for a stock SDK, and stderr says which
+key it is:
 
 ```sh
-eval "$(latere lux env --compat openai)"   # a Lux token, valid five minutes
+eval "$(latere models env)"   # OPENAI_BASE_URL and your model key
 ```
 
-`lux env` needs a surface: `--compat <dialect>` or a provider argument.
-[lux.md](lux.md) covers both, and the model key the Latere API takes.
+[models.md](models.md) covers the doors, the key's lifetime, and its
+revocation.
 
 ### Git: Latere Code
 
@@ -214,10 +214,11 @@ The CLI keeps one rule, which is the platform's:
 > carries a token auth minted for the far product's audience.
 
 In CLI terms: you sign in once, and every product call mints its
-credential from that login. A `lux.latere.ai` token is only ever
-presented to Lux, a `sandboxd` token only to Cella, an `origo` token only
-to Latere Code, and a `toposd` token only to Topos. Whichever token is on
-the wire, the person it acts for is you.
+credential from that login. A `sandboxd` token is only ever presented to
+Cella, an `origo` token only to Latere Code, a `toposd` token only to
+Topos, a `drive.latere.ai` token only to Drive, and the model key only to
+the model endpoints. Whichever credential is on the wire, the person it
+acts for is you.
 
 ## Scripting
 
@@ -230,7 +231,7 @@ latere login --token <token>      # save a token issued elsewhere, with no refre
 ```
 
 To hand a credential to a product, ask for that product's own, for example
-`latere lux env --raw` for Lux.
+`latere models env --raw` for the model key.
 
 ## Settings
 

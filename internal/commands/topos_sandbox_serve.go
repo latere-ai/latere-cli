@@ -9,11 +9,14 @@ package commands
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -23,19 +26,19 @@ import (
 	"latere.ai/x/topos/sandbox"
 	"latere.ai/x/topos/sandbox/rpc"
 
-	"github.com/latere-ai/latere-cli/internal/tunnel"
+	"github.com/latere-ai/latere-cli/internal/config"
 )
 
 // SandboxDescriptor is the handshake the edge writes on the control stream when
 // it connects a mode-2 sandbox tunnel — it advertises the workspace root it will
-// serve. It mirrors the Lux tunnel's Descriptor handshake, on the sandbox tunnel.
+// serve.
 type SandboxDescriptor struct {
 	NodeID string `json:"node_id"`
 	Root   string `json:"root"`
 }
 
-// sandboxYamuxConfig mirrors the Lux tunnel's config: keepalive on so a dead peer
-// is detected, logs discarded.
+// sandboxYamuxConfig is the tunnel's session config: keepalive on so a dead
+// peer is detected, logs discarded.
 func sandboxYamuxConfig() *yamux.Config {
 	c := yamux.DefaultConfig()
 	c.EnableKeepAlive = true
@@ -79,13 +82,13 @@ func serveSandboxTunnel(parent context.Context, conn net.Conn, root string, cons
 		return fmt.Errorf("sandbox tunnel: yamux: %w", err)
 	}
 
-	// The edge opens the control stream (the control plane opens the work
-	// streams), matching the Lux tunnel's directionality.
+	// The edge opens the control stream and the control plane opens the work
+	// streams.
 	ctrl, err := sess.OpenStream()
 	if err != nil {
 		return fmt.Errorf("sandbox tunnel: control stream: %w", err)
 	}
-	node := sandboxNodeID()
+	node := sandboxNodeID(out)
 	line, err := json.Marshal(SandboxDescriptor{NodeID: node, Root: root})
 	if err != nil {
 		return fmt.Errorf("sandbox tunnel: encode descriptor: %w", err)
@@ -111,14 +114,47 @@ func serveSandboxTunnel(parent context.Context, conn net.Conn, root string, cons
 // with more than one machine connected picks between meaningful names like
 // "changkun-mbp" rather than a random id — while a caller with a single machine
 // never needs a name at all (sandbox_node ""). It falls back to the stable random
-// tunnel.NodeID() when the hostname is unavailable.
-func sandboxNodeID() string {
+// id of persistedNodeID when the hostname is unavailable, and says on out when
+// that id cannot be kept.
+func sandboxNodeID(out io.Writer) string {
 	if h, err := os.Hostname(); err == nil {
 		if id := sanitizeNodeID(h); id != "" {
 			return id
 		}
 	}
-	return tunnel.NodeID()
+	id, err := persistedNodeID()
+	if err != nil {
+		fprintf(out, "note: %v; this machine advertises a new name on each connect\n", err)
+	}
+	return id
+}
+
+// persistedNodeID is a random per-machine id kept in the config dir as
+// tunnel-node-id, so a reconnect advertises the same name and replaces this
+// machine's earlier registration instead of adding a second one. It answers
+// the id even when it cannot be kept, with the error saying why.
+func persistedNodeID() (string, error) {
+	p := config.Path("tunnel-node-id")
+	if p != "" {
+		if b, err := os.ReadFile(p); err == nil && len(b) > 0 {
+			return string(b), nil
+		}
+	}
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err != nil {
+		return "node-unknown", fmt.Errorf("generate a machine id: %w", err)
+	}
+	id := "node-" + hex.EncodeToString(buf)
+	if p == "" {
+		return id, fmt.Errorf("no config dir to keep the machine id in")
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		return id, fmt.Errorf("keep the machine id: %w", err)
+	}
+	if err := os.WriteFile(p, []byte(id), 0o600); err != nil {
+		return id, fmt.Errorf("keep the machine id: %w", err)
+	}
+	return id, nil
 }
 
 func sanitizeNodeID(h string) string {

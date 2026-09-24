@@ -18,6 +18,7 @@ import (
 func TestSharedJSONConfiguredOutput(t *testing.T) {
 	t.Setenv("LATERE_CELLA_TOKEN", "synthetic-token")
 	t.Setenv("TOPOS_TOKEN", "synthetic-token")
+	t.Setenv("LATERE_MODEL_KEY", "synthetic-token")
 	t.Setenv("LATERE_NO_UPDATE_CHECK", "1")
 	for _, tc := range []struct {
 		name                   string
@@ -29,7 +30,7 @@ func TestSharedJSONConfiguredOutput(t *testing.T) {
 		{"policy", []string{"cella", "policy", "--json"}, "/v1/policies", `[{"name":"restricted"}]`, "name", "restricted", 1},
 		{"policy list", []string{"cella", "policy", "list", "--json"}, "/v1/policies", `[{"name":"restricted"}]`, "name", "restricted", 1},
 		{"topos", []string{"topos", "agents", "list", "--json"}, "/v1/agents", `{"agents":[{"id":"agent-1"}]}`, "id", "agent-1", 1},
-		{"lux", []string{"lux", "models", "--json"}, "/lux/v1/models", `{"items":[{"provider":"test","model":"model-1"}]}`, "model", "model-1", 2},
+		{"models", []string{"models", "list", "--json"}, "/openai/v1/models", `{"object":"list","data":[{"id":"model-1","object":"model"}]}`, "id", "model-1", 1},
 	} {
 		for _, failAfter := range []int{-1, 0, 3} {
 			t.Run(fmt.Sprintf("%s/failAfter=%d", tc.name, failAfter), func(t *testing.T) {
@@ -42,8 +43,6 @@ func TestSharedJSONConfiguredOutput(t *testing.T) {
 					switch r.URL.Path {
 					case tc.path:
 						_, _ = io.WriteString(w, tc.body)
-					case "/lux/v1/rates":
-						_, _ = io.WriteString(w, `{"items":[]}`)
 					default:
 						t.Errorf("unexpected path=%s", r.URL.Path)
 						w.WriteHeader(404)
@@ -59,8 +58,8 @@ func TestSharedJSONConfiguredOutput(t *testing.T) {
 				root.SetOut(out)
 				root.SetErr(io.Discard)
 				args := append([]string(nil), tc.args...)
-				if tc.name == "lux" {
-					args = append(args, "--lux-url", server.URL, "--token", "synthetic-token")
+				if tc.name == "models" {
+					args = append(args, "--models-url", server.URL)
 				} else {
 					args = append(args, "--api-url", server.URL)
 				}

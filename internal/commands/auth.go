@@ -252,8 +252,8 @@ func newAuthPrintTokenCmd() *cobra.Command {
 		Long: `Print the access token from ~/.config/latere/auth-token.json.
 
 The token is addressed to auth.latere.ai and opens nothing else: a
-product refuses it. To reach a product, ask for a token minted for that
-product, e.g. 'latere lux env --raw' for Lux.
+product refuses it. To reach a product, use that product's command; the
+model endpoints take a model key, which 'latere models env --raw' prints.
 
     TOKEN=$(latere print-token)
     curl -H "Authorization: Bearer $TOKEN" https://auth.latere.ai/api/me`,

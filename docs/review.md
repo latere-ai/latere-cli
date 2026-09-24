@@ -2,11 +2,11 @@
 
 `latere review` runs an adversarial review of your most recent Claude Code session: it forks the session as a *proposer* that defends the change, runs *critics* against the working-tree diff, and surfaces the attacks that survive. Run `latere login` first (see the [main README](../README.md#sign-in)).
 
-The proposer runs locally through your own `claude` CLI for full fidelity (it forks your real session with `claude --resume <id> --fork-session`), while the critics run through [Lux](https://lux.latere.ai), so critic model cost is tracked on your Latere identity and no provider key is needed locally.
+The proposer runs locally through your own `claude` CLI for full fidelity (it forks your real session with `claude --resume <id> --fork-session`), while the critics call their model through the Latere API with your [model key](models.md#your-model-key), so critic model cost is drawn from your current context and no provider key is needed locally.
 
 ## Prerequisites
 
-- `latere login` (the critics call models with your identity; no scope to grant).
+- `latere login` (the critics call models with your model key, which the CLI creates on first use).
 - The [`claude`](https://code.claude.com/docs) CLI installed and authenticated (the proposer forks your real Claude Code session).
 - A git repository with a recent Claude Code session in it.
 
@@ -38,7 +38,7 @@ latere review && git push     # push only if the review is clean
 |------|---------|
 | `0` | Debate completed with no unresolved attacks |
 | `2` | Debate completed but left unresolved attacks |
-| `1` | Command error (not signed in, no session, Lux unreachable, expired token) |
+| `1` | Command error (not signed in, no session, the Latere API unreachable or refusing the key) |
 
 ## Flags
 
@@ -50,11 +50,10 @@ latere review && git push     # push only if the review is clean
 | `--forks` | `1` | Number of independent critic forks |
 | `--max-rounds` | `4` | Per-fork debate-round cap |
 | `--cost-cap` | `50000` | Soft token budget (proposer tokens; topos critics report no usage yet) |
-| `--model` | `claude-sonnet-4-6` | Critic model, routed through Lux |
+| `--model` | `anthropic/claude-sonnet-4.6` | Critic model, named as `latere models` lists it |
 | `--proposer-timeout` | `5m` | Per-round deadline for the proposer's claude call (large sessions may need more) |
-| `--lux-url` | `LUX_API_URL` or `https://lux.latere.ai` | Override the Lux base URL |
-| `--auth-url` | derived from the Lux URL | Override the auth base URL |
-| `--token` | minted from your login | Present this bearer to Lux instead (e.g. a sandbox token) |
+| `--models-url` | `LATERE_MODELS_URL` or `https://api.latere.ai/v1/models` | Override the models base URL |
+| `--auth-url` | derived from the models URL | Override the auth base URL |
 
 ## Review-log location
 
@@ -75,7 +74,7 @@ The global state directory is not cleaned when a repo is cleaned, so `latere rev
 
 1. Resolves the Claude Code session to fork (newest transcript under `--dir`, or `--session`).
 2. Computes the working-tree diff and skips if trivial.
-3. Forks the session as a proposer (local `claude`), and runs read-only critics through [topos](https://github.com/latere-ai/topos) with model calls routed via Lux on your identity.
+3. Forks the session as a proposer (local `claude`), and runs read-only critics through [topos](https://github.com/latere-ai/topos), whose model calls go to the Latere API with your model key.
 4. Runs the debate to a steady state and prints a summary, writing per-fork artifacts under the review-log location above.
 
-The critic model bills against your Latere account; run `latere lux usage` to see spend.
+The critic model is billed to your current context; the console's Billing section shows the spend.

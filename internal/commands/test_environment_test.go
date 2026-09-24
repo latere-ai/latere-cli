@@ -42,6 +42,10 @@ func runIsolatedCommandTests(m *testing.M) int {
 		"XDG_CONFIG_HOME":        root,
 		"LATERE_AUTH_TOKEN_FILE": filepath.Join(root, "latere", "auth-token.json"),
 		"LATERE_CELLA_TOKEN":     "",
+		// A handed model key or models URL would route every model test
+		// away from its stub.
+		"LATERE_MODEL_KEY":  "",
+		"LATERE_MODELS_URL": "",
 		// os.TempDir reads TMPDIR on unix, and TMP then TEMP on Windows.
 		"TMPDIR": root,
 		"TMP":    root,

@@ -64,7 +64,7 @@ load it from your shell startup files.`,
 	root.AddCommand(newCellaCmd())
 	root.AddCommand(newEvalCmd())
 	root.AddCommand(newToposCmd())
-	root.AddCommand(newLuxCmd())
+	root.AddCommand(newModelsCmd())
 	root.AddCommand(newReviewCmd())
 	root.AddCommand(newUpgradeCmd(version))
 	root.AddCommand(newCompletionCmd(root))

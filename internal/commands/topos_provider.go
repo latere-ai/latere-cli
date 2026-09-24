@@ -19,12 +19,8 @@ import (
 	toposlux "latere.ai/x/topos/models/lux"
 
 	"github.com/latere-ai/latere-cli/internal/api"
+	"github.com/latere-ai/latere-cli/internal/modelkey"
 )
-
-// luxDefaultModel is the Anthropic model `latere topos --local` requests through
-// Lux when --model is not given. It is a current, enabled model on the Lux
-// catalog (see `latere lux models`); override with --model.
-const luxDefaultModel = "claude-opus-4-8"
 
 // errNeedAuth signals that the local agent has no usable model credential, so
 // the caller should run the auth picker.
@@ -76,9 +72,10 @@ func saveProviderConfig(c providerConfig) error {
 
 // buildLocalModel resolves the model for `latere topos --local`. Resolution
 // order: an explicit ANTHROPIC_API_KEY; a saved provider choice (the picker);
-// Latere Lux when signed in to latere (the default — keyless, billed to the
-// login); an ambient CLAUDE_CODE_OAUTH_TOKEN; a legacy stored Claude login.
-// If nothing is available it returns errNeedAuth so the caller runs the picker.
+// the Latere models at the origin when signed in to latere or handed a model
+// key (the default, billed to the key's context); an ambient
+// CLAUDE_CODE_OAUTH_TOKEN; a legacy stored Claude login. If nothing is
+// available it returns errNeedAuth so the caller runs the picker.
 func buildLocalModel(ctx context.Context, modelName string) (models.Model, error) {
 	// 1. An explicit API key always wins.
 	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
@@ -91,13 +88,15 @@ func buildLocalModel(ctx context.Context, modelName string) (models.Model, error
 		return modelFromProviderConfig(ctx, cfg, modelName)
 	}
 
-	// 3. Latere Lux (the default once signed in to latere). Inference is routed
-	// through the gateway with the user's identity, and Lux injects its own
-	// upstream provider credential — so this does not share (or get rate-limited
-	// alongside) a Claude Code subscription token. This is the "it just works
-	// after login" path: no BYO credential, cost tracked on the login.
-	if _, err := api.LoadAuthToken(); err == nil {
-		return luxLocalModel(modelName), nil
+	// 3. The Latere models at the origin (the default once signed in to
+	// latere). The call presents the model key and the core holds the
+	// upstream provider credentials, so this does not share (or get
+	// rate-limited alongside) a Claude Code subscription token. This is the
+	// "it just works after login" path: no provider credential, cost drawn
+	// from the key's context.
+	_, handedKey := modelkey.FromEnv()
+	if _, err := api.LoadAuthToken(); err == nil || handedKey {
+		return originLocalModel(modelName)
 	}
 
 	// 4. The ambient Claude Code OAuth token (shared with Claude Code; this is the
@@ -135,19 +134,29 @@ func anthropicDirect(credential string, oauth bool, modelName string) (models.Mo
 	return toposlux.NewFromCaller(d, lopts...), nil
 }
 
-// luxLocalModel routes inference through Latere Lux's first-party dialect
-// (POST <lux>/lux/v1/generate), authenticated per request with an actor
-// token bound to luxAudience, re-minted as it expires.
-func luxLocalModel(modelName string) models.Model {
+// originLocalModel calls models through the core's OpenAI door at the
+// origin: luxsdk's direct mode translates the agent's requests to Chat
+// Completions on this machine, and the door translates again for a Model
+// whose provider speaks another dialect. The bearer is the model key, which
+// modelKeySource has the core accept before the first call.
+func originLocalModel(modelName string) (models.Model, error) {
 	model := modelName
 	if model == "" {
-		model = luxDefaultModel
+		model = defaultCatalogModel
 	}
-	return toposlux.New("", resolveLuxURL(""),
-		toposlux.WithModel(model),
-		toposlux.WithBearerSource(luxSessionBearer("", "", "")),
-	)
+	d, err := luxsdk.NewDirect(luxsdk.ProviderOpenAI, "", resolveModelsURL("")+openAIDoor,
+		luxsdk.WithTokenSource(bearerSource(modelKeySource("", ""))))
+	if err != nil {
+		return nil, err
+	}
+	return toposlux.NewFromCaller(d, toposlux.WithModel(model)), nil
 }
+
+// bearerSource adapts a bearer function to luxsdk.TokenSource.
+type bearerSource func(ctx context.Context) (string, error)
+
+// Token answers the bearer of one call.
+func (f bearerSource) Token(ctx context.Context) (string, error) { return f(ctx) }
 
 // modelFromProviderConfig builds the model for an explicit provider choice.
 func modelFromProviderConfig(ctx context.Context, cfg providerConfig, modelName string) (models.Model, error) {
@@ -157,7 +166,7 @@ func modelFromProviderConfig(ctx context.Context, cfg providerConfig, modelName 
 	}
 	switch cfg.Provider {
 	case "lux":
-		return luxLocalModel(model), nil
+		return originLocalModel(model)
 	case "anthropic":
 		if cfg.Method == "apikey" && cfg.APIKey != "" {
 			return anthropicDirect(cfg.APIKey, false, model)

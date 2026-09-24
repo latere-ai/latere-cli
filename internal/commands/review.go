@@ -14,6 +14,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"latere.ai/x/pkg/luxsdk"
 	xtopos "latere.ai/x/topos"
 	adversarial "latere.ai/x/topos/adversarial"
 	"latere.ai/x/topos/adversarial/claude"
@@ -26,11 +27,12 @@ import (
 // review runs adversarial review locally on the developer machine. The
 // proposer forks the developer's real Claude Code session
 // (claude --resume <id> --fork-session, full fidelity), while the critics
-// run through topos with their model calls routed via Lux using the
-// retained Latere identity bearer, so critic cost is tracked on the
-// Latere account and no provider key is needed locally.
+// run through topos with their model calls sent to the core's OpenAI door
+// at the origin with the model key, so critic cost is drawn from the key's
+// context and no provider key is needed locally.
 //
-// See specs/002-review-local-subcommand.md.
+// See specs/002-review-local-subcommand.md and
+// specs/007-models-at-the-origin.md.
 
 // reviewOpts holds the resolved flags for one `latere review` invocation.
 type reviewOpts struct {
@@ -42,9 +44,8 @@ type reviewOpts struct {
 	costCap   int
 	model     string
 	propTO    time.Duration
-	luxURL    string
+	modelsURL string
 	authURL   string
-	token     string
 }
 
 func newReviewCmd() *cobra.Command {
@@ -58,9 +59,9 @@ recent Claude Code session.
 The proposer forks your real Claude Code session
 (claude --resume <id> --fork-session) so it argues with the full
 transcript, harness context, and working tree. The critics run through
-topos with model calls routed via Lux, authenticated by a token minted
-for Lux from your saved login, so critic cost is tracked on your Latere
-account with no provider key needed locally.
+topos and call their model through the Latere API with your model key
+(see 'latere models key'), so critic cost is drawn from your current
+context with no provider key needed locally.
 
 Run 'latere login' first to sign in. The proposer additionally needs
 the 'claude' CLI installed and authenticated.
@@ -85,12 +86,24 @@ repo. Old sessions are pruned automatically; --state-dir overrides.`,
 	cmd.Flags().IntVar(&o.forks, "forks", 1, "number of independent critic forks")
 	cmd.Flags().IntVar(&o.maxRounds, "max-rounds", 4, "per-fork internal-round cap")
 	cmd.Flags().IntVar(&o.costCap, "cost-cap", 50000, "soft token budget (proposer tokens; topos critics report no usage yet)")
-	cmd.Flags().StringVar(&o.model, "model", "claude-sonnet-4-6", "critic model, routed through Lux")
+	cmd.Flags().StringVar(&o.model, "model", defaultCatalogModel, "critic model, as 'latere models' lists it")
 	cmd.Flags().DurationVar(&o.propTO, "proposer-timeout", 5*time.Minute, "per-round deadline for the proposer's claude call (large sessions may need more)")
-	cmd.Flags().StringVar(&o.luxURL, "lux-url", "", "override Lux base URL (overrides LUX_API_URL)")
-	cmd.Flags().StringVar(&o.authURL, "auth-url", "", "override auth base URL (default derived from the Lux URL)")
-	cmd.Flags().StringVar(&o.token, "token", "", "present this bearer to Lux instead of minting one (e.g. a sandbox token)")
+	cmd.Flags().StringVar(&o.modelsURL, "models-url", "", "override the models base URL (overrides LATERE_MODELS_URL)")
+	cmd.Flags().StringVar(&o.authURL, "auth-url", "", "override the auth base URL (default derived from the models URL)")
 	return cmd
+}
+
+// reviewCriticModel is the critics' model connection: the core's OpenAI door
+// in luxsdk's direct mode, which translates the critic's requests to Chat
+// Completions on this machine, with the model key as the bearer.
+func reviewCriticModel(model, modelsURL string, key func(context.Context) (string, error)) xtopos.ModelOptions {
+	return xtopos.ModelOptions{
+		Kind:         xtopos.ModelDirect,
+		Provider:     string(luxsdk.ProviderOpenAI),
+		Model:        model,
+		BaseURL:      resolveModelsURL(modelsURL) + openAIDoor,
+		BearerSource: key,
+	}
 }
 
 func runReview(ctx context.Context, cmd *cobra.Command, o *reviewOpts) error {
@@ -111,16 +124,12 @@ func runReview(ctx context.Context, cmd *cobra.Command, o *reviewOpts) error {
 		reviews.Prune(stateDir)
 	}
 
-	// Resolve the Lux bearer up front: validates that the user is signed in
-	// for Lux before spending a proposer round. The same closure is handed to
-	// topos so it re-fetches the bearer on each model call, since a debate
-	// outlives the actor token any one call presents.
-	bearerFn := luxSessionBearer(o.token, o.luxURL, o.authURL)
-	bearer, err := bearerFn(ctx)
-	if err != nil {
-		return err
-	}
-	if err := ensureBearerFresh(bearer); err != nil {
+	// Have the core accept the model key up front: this checks that the user
+	// is signed in, and waits out a key created now, before a proposer round
+	// is spent. The same source is handed to topos, which presents the
+	// accepted key on every critic call.
+	keySource := modelKeySource(o.modelsURL, o.authURL)
+	if _, err := keySource(ctx); err != nil {
 		return err
 	}
 
@@ -172,12 +181,7 @@ func runReview(ctx context.Context, cmd *cobra.Command, o *reviewOpts) error {
 
 	proposer := claude.NewProposer(sessionID, cwd, claude.WithProposerDeadline(o.propTO))
 	critics := critic.NewCriticFactory(critic.Config{
-		Model: xtopos.ModelOptions{
-			Kind:         xtopos.ModelLux,
-			Model:        o.model,
-			BaseURL:      resolveLuxURL(o.luxURL),
-			BearerSource: bearerFn,
-		},
+		Model: reviewCriticModel(o.model, o.modelsURL, keySource),
 	})
 
 	summary, err := (&adversarial.Engine{
@@ -218,27 +222,6 @@ func gitToplevel(ctx context.Context, cwd string) string {
 		return cwd
 	}
 	return top
-}
-
-// ensureBearerFresh fails fast with an actionable message when the Lux
-// identity bearer is an expired JWT. The auth identity token can be
-// short-lived with no refresh token; without this check an expired token
-// surfaces later as a raw 401 from deep inside the topos critic. Opaque
-// (non-JWT) tokens and tokens without an exp claim are skipped: Lux stays
-// the authority.
-func ensureBearerFresh(bearer string) error {
-	claims := decodeJWTClaims(bearer)
-	if claims == nil {
-		return nil
-	}
-	exp, ok := claims["exp"].(float64)
-	if !ok {
-		return nil
-	}
-	if time.Now().Unix() >= int64(exp) {
-		return fmt.Errorf("your Lux identity token has expired; run `latere login` and retry")
-	}
-	return nil
 }
 
 // mostRecentSession finds the newest Claude Code transcript under the
