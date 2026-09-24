@@ -1,55 +1,110 @@
 # Topos
 
-[Topos](https://topos.latere.ai) is the Latere agent platform. With `latere topos`
-you run coding-assistant sessions whose work happens on the Topos control plane,
-not your laptop — so you can start a session, close your terminal, and pick it
-back up later, on the same machine or another one, right where it left off.
+[Topos](https://topos.latere.ai) is the Latere agent platform. `latere topos`
+runs a coding agent in one of two places:
 
-Run `latere login` first (see the [main README](../README.md#sign-in)). For
-local development against a Topos server started with `TOPOS_DEV_AUTH=true` and
-`TOPOS_DEV_TOKEN=<secret>`, set `TOPOS_API_URL` and `TOPOS_TOKEN` to talk to it
-directly:
+- **On this machine**, with `latere topos --local`. The agent works in your
+  directory on your real files, like Claude Code. No control plane and no
+  Latere sign-in are required.
+- **On the hosted platform**, with `latere topos`. The agent's reasoning,
+  tools, and workspace live on the control plane, so you can start a
+  session, close your terminal, and pick it up later, on this machine or
+  another one, where it left off.
+
+## On this machine
 
 ```sh
-export TOPOS_API_URL=http://localhost:8080
-export TOPOS_TOKEN=<secret>
+latere topos --local                               # an interactive session in the current directory
+latere topos --local --dir ~/code/project          # in another directory
+latere topos --local -p "add a test for foo()"     # run one prompt, stream the result, and exit
+latere topos --local --model claude-sonnet-4-6     # pick the model
 ```
 
-## An interactive session
+The agent reads, edits, and runs commands directly in the working
+directory, as you, with no isolation and no approval prompt. Run it where
+you would run a coding assistant of your own, not in a directory you do
+not want changed.
 
-Start a session on an agent and you drop into a terminal UI — type a message,
-watch the agent think and run tools, and steer it as it goes:
+Inside the interactive session, `/model <name>` switches the model,
+`/model` alone lists the Anthropic models Lux offers you, `/help` lists the
+commands, and `/quit` leaves.
+
+### Choosing the model
+
+`--local` uses the first of these that is available:
+
+1. `ANTHROPIC_API_KEY`, calling Anthropic directly.
+2. The provider you chose with `latere topos login`.
+3. Lux, when you are signed in with `latere login`: the call goes through
+   the gateway on your identity and is billed to it, with no provider key
+   on your machine. This is the default once you are signed in.
+4. `CLAUDE_CODE_OAUTH_TOKEN`, the token Claude Code uses, which shares
+   Claude Code's rate limit.
+
+With none of them, an interactive session opens the provider picker, and
+`-p` or a run without a terminal stops with an error that names what to
+set.
+
+```sh
+latere topos login
+```
+
+opens the same picker: sign in with Claude in your browser, paste an
+Anthropic API key, or use Ollama for models running on this machine. The
+choice is saved in your user configuration directory and wins over
+`CLAUDE_CODE_OAUTH_TOKEN`, so an API key or Ollama keeps the local agent
+off Claude Code's shared rate limit.
+
+## On the hosted platform
+
+```sh
+latere topos
+```
+
+opens the home screen: start a new session, or resume one that is running.
+It signs you in on first use. A session started here belongs to you and
+needs no agent set up first. Without a terminal, the command prints your
+sessions and exits.
+
+### An interactive session
+
+Sessions can also run a named agent:
 
 ```sh
 latere topos session start agent_01hxy
+latere topos session start agent_01hxy --from-repo https://code.latere.ai/<owner>/<repo>.git
 ```
 
-Inside the session:
+`--from-repo` starts the session from a server-side clone of that
+repository. Inside the session:
 
-- **Type and press Enter** to send a message. The reply streams in token by token.
-- **Esc** interrupts the current turn (the agent stops what it is doing; nothing
-  you have said is lost).
-- When the agent wants to run a tool that policy flags for review, you get an
-  inline **`approve tool …? [y/n]`** prompt — press `y` to allow it or `n` to deny.
-  Your draft is preserved while this prompt is visible; Enter and editing keys
-  do nothing until you approve or deny. If a paste arrives while the prompt is
-  visible, it is ignored; paste again after making your decision.
-- **Ctrl+C** detaches. The session keeps running on the server; the screen shows
-  you the command to reattach.
+- **Type and press Enter** to send a message. The reply streams in as it
+  is written.
+- **Esc** interrupts the current turn. The agent stops what it is doing,
+  and nothing you have said is lost.
+- When the agent wants to run a tool that policy flags for review, you get
+  an inline **`approve tool …? [y/n]`** prompt: press `y` to allow it or
+  `n` to deny it. Your draft is kept while the prompt is visible; Enter and
+  editing keys do nothing until you decide, and a paste that arrives then
+  is ignored, so paste again afterwards.
+- **Ctrl+C** detaches. The session keeps running on the server, and the
+  screen shows the command to reattach.
 
-If a turn fails or is interrupted while text is streaming, the UI keeps the text
-already received, marked `(incomplete)`. The next response starts separately.
+If a turn fails or is interrupted while text is streaming, the text already
+received stays on screen, marked `(incomplete)`, and the next response
+starts separately.
 
-## Detach and reattach
+### Detach and reattach
 
-Detaching never stops the work. Reattach any time — from anywhere — and you get
-the full history followed by whatever has happened since:
+Detaching never stops the work. Reattach at any time, from anywhere, and
+you get the full history followed by whatever has happened since:
 
 ```sh
 latere topos session attach sess_01hxy
+latere topos session attach sess_01hxy --readonly   # watch without typing
 ```
 
-List the sessions you can attach to, with their current state:
+List the sessions you can attach to, with their state:
 
 ```sh
 latere topos session ls
@@ -57,69 +112,56 @@ latere topos session ls
 # sess_02abc  running           agent_07def
 ```
 
-Attach as a read-only viewer (watch without being able to type):
+If your connection drops, the client waits one second, reconnects, and
+resumes where you were. If sending a message, an approval, or an interrupt
+fails, the interface shows the error and keeps your message or pending
+approval; once reconnected, press Enter, `y`/`n`, or Esc again to retry.
+When the retries run out, the command exits with the last connection
+error.
+
+After a server restart, a notice shows the saved turn and says that
+interrupted work was rolled back, and any old approval prompt is cleared.
+
+### Print mode, for scripts and pipelines
+
+`--print`/`-p` runs one prompt without the interface. The answer streams to
+stdout, tool activity goes to stderr, and the command exits when the turn
+finishes, so it composes in shells and CI like `claude -p`:
 
 ```sh
-latere topos session attach sess_01hxy --readonly
-```
-
-If your connection drops, the client waits one second before reconnecting and
-resumes from where you were. If sending a message, approval, or interrupt fails,
-the UI shows the error and preserves your typed message or pending approval.
-Once reconnected, press Enter, `y`/`n`, or Esc again to retry the action.
-If connection retries are exhausted, the UI exits with an error that includes
-the final connection failure.
-
-After a server restart, a restoration notice shows the saved turn and warns
-that interrupted work was rolled back. Any old approval prompt is cleared.
-
-## Print mode (scripts and pipelines)
-
-For automation, run one prompt non-interactively with `--print`/`-p`. The agent's
-answer streams to stdout (tool activity goes to stderr), and the command exits
-when the turn finishes — so it composes in shells and CI, like `claude -p`:
-
-```sh
-latere topos session start agent_01hxy -p "summarise README.md" > summary.md
-```
-
-Send a follow-up turn to an existing session the same way:
-
-```sh
+latere topos session start agent_01hxy -p "summarize README.md" > summary.md
 latere topos session attach sess_01hxy -p "now write the tests"
 ```
 
-Print mode waits through session replay and reports the response to your new prompt.
+Print mode waits through the session's replay and reports the answer to
+your new prompt. `--readonly` cannot be combined with `-p`, which sends a
+prompt.
 
-`--readonly` cannot be combined with `--print`/`-p`, which sends a new prompt.
+Print mode exits non-zero, with any text already streamed left on stdout,
+when:
 
-If a tool needs your approval, print mode exits with an error. Attach to the
-session without `--print` to review the pending request and approve or deny it.
+- a tool needs your approval: attach without `-p` to approve or deny it;
+- the session reaches its spending limit: the client reports
+  `budget limit reached` with the spend and the limit when it has them,
+  after reading to the end of the turn to keep the final partial answer;
+- the model's output reaches its token limit, or the run ends while still
+  asking for tools, and the result may be incomplete;
+- the agent reports an error, the server refuses the request, a stream
+  frame cannot be decoded, the connection ends before the turn is
+  confirmed complete, or the output cannot be written.
 
-When a session reaches its spending limit, the client reports
-`budget limit reached`, including the spend and limit when available. Print mode
-reads through the turn's end to preserve the final partial answer, then exits
-non-zero.
+Check the exit status before a later CI step uses the output.
 
-Print mode also exits non-zero when model output reaches its token limit or the
-run ends while still requesting tools. The diagnostic explains that the result
-may be incomplete; partial output remains available on stdout.
+### Autonomous runs
 
-Print mode exits non-zero if the agent reports an error, the server rejects the
-request, a stream frame cannot be decoded, the connection ends before completion
-is confirmed, or streamed output cannot be written. Any text already streamed
-stays on stdout; check the exit status before using it in later CI steps.
-
-## Autonomous runs
-
-If you just want to fire one self-contained run and read the result (no back and
-forth), use `session create`:
+To fire one self-contained run and read its result, with no back and
+forth:
 
 ```sh
 latere topos session create agent_01hxy --prompt "List the repo files."
 ```
 
-## Managing agents
+### Agents
 
 ```sh
 latere topos agents list
@@ -128,10 +170,46 @@ latere topos agents create --name "Build Bot" --kind worker \
   --instructions "You triage CI failures."
 ```
 
-## Where things run
+An agent's owner and organization come from your token; the client never
+sends them.
 
-Your laptop is just the screen and keyboard. The agent's reasoning, its tools,
-and its workspace all live on the control plane, which is why a session survives a
-disconnect and why a teammate can watch the same session you are driving. The
-base URL defaults to `https://topos.latere.ai`; override it with `TOPOS_API_URL`
-or `--api-url` on any command.
+## Lend this machine to a hosted session
+
+```sh
+latere topos serve-sandbox
+latere topos serve-sandbox --root ~/work/project
+```
+
+connects this machine to the control plane as a sandbox, so a hosted
+session runs its tools here, on your files. The connection is outbound; no
+port is opened. Every command a remote session wants to run is shown and
+waits for your `y` before it runs, one at a time, unless you pass `--yes`.
+File access is confined to the root: a relative symlink that stays inside
+it is followed, and an absolute symlink or one that leads outside is
+refused. A built-in deny list, including `.env`, `.ssh`, and `*.pem`, is
+never served. A request that disconnects while it waits for your answer is
+discarded before the next one is shown.
+
+## Settings
+
+| Setting | Purpose |
+|---------|---------|
+| `--api-url` / `TOPOS_API_URL` | The hosted platform, `https://topos.latere.ai` by default. `serve-sandbox` takes `--topos-url`. |
+| `TOPOS_TOKEN` | Present this bearer to Topos instead of minting one from your login. |
+| `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN` | Model credentials for `--local`, in the order above. |
+
+[configuration.md](configuration.md) lists the files `latere topos login`
+keeps.
+
+### A development server
+
+To work against a Topos server you run yourself with development
+authentication (`TOPOS_DEV_AUTH=true` and `TOPOS_DEV_TOKEN=<secret>`),
+point the CLI at it and present that secret:
+
+```sh
+export TOPOS_API_URL=http://localhost:8080
+export TOPOS_TOKEN=<secret>
+latere topos session ls
+TOPOS_TOKEN=<secret> latere topos serve-sandbox --topos-url http://localhost:8080
+```
