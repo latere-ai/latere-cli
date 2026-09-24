@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.12.0 - 2026-09-25
+
 ### Changed
 
 - `latere models` replaces `latere lux`, and calls models through the
