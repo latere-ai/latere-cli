@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.11.1 - 2026-09-24
+
 ### Fixed
 
 - v0.9.0, v0.10.0 and v0.11.0 were tagged but never published, so
