@@ -14,6 +14,7 @@ specs/
   003-drive-subcommand.md            (implemented — latere drive: eight orthogonal file-plane verbs over Drive /v1)
   004-flatten-auth-commands.md       (implemented — latere login/logout/whoami/print-token/org as top-level verbs)
   005-lux-env-redesign.md            (implemented — lux env keyed by dialect and provider, with token provenance and TTL)
+  006-model-key.md                   (implemented: a model key on first use, created at auth and kept in the keychain)
 ```
 
 ## Status
