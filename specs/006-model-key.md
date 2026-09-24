@@ -160,3 +160,7 @@ Where the build differs from the design above: a keychain index entry,
 keychain cannot be enumerated portably and logout needs every slot of the
 login.
 
+The maintainer confirmed decision D1 and the storage choice on 2026-09-24:
+a key of 90 days renewed within 7 days of its end, kept in the system
+keychain with the 0600 file where no keychain exists.
+
