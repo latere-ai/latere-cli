@@ -10,6 +10,38 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Changed
+
+- `latere models` replaces `latere lux`, and calls models through the
+  Latere API at `https://api.latere.ai/v1/models` with your model key:
+  `latere models` (or `models list`) lists the models your key reaches,
+  `models env [--provider openai|anthropic|gemini]` prints the exports a
+  stock SDK reads, `models invoke --model <name> "<prompt>"` makes one call,
+  and `models key` and `models key revoke` show and revoke the key. Models
+  are named as the catalog names them, such as
+  `anthropic/claude-sonnet-4.6`. Prices are in the console's Models section,
+  spend in its Billing section. `LATERE_MODELS_URL` or `--models-url`
+  overrides the base URL, and a key handed in through `LATERE_MODEL_KEY`
+  now needs no login.
+
+- `latere review` runs its critics, and `latere topos --local` its model
+  calls, through the Latere API with the model key. Both default to
+  `anthropic/claude-sonnet-4.6` and take a model named as `latere models`
+  lists it. `review --lux-url` is now `--models-url`.
+
+### Removed
+
+- `latere lux` and every command under it, with no alias:
+  `lux access show/set/clear` (provider keys and bindings are over),
+  `lux rates` and `lux providers` (a model's price is in the console),
+  `lux usage` (spend is in the console's Billing section), `lux token` (use
+  `latere models env --raw`), and `lux serve`, the tunnel that exposed a
+  model running on this machine.
+
+- `LUX_API_URL`, `--lux-url`, `LATERE_LUX_TOKEN`, and the `--token` flag of
+  `latere review`: the model key is the only credential for a model call.
+  A CI job hands the CLI a key with `LATERE_MODEL_KEY`.
+
 ## v0.11.1 - 2026-09-24
 
 ### Fixed
