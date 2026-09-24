@@ -92,9 +92,10 @@ type evalCellDTO struct {
 
 // ---- client ----
 
-// evalClient talks to evald (eval.latere.ai) with the platform's
-// static admin bearer token. Eval auth does not go through the latere
-// session client, so this is plain net/http.
+// evalClient talks to evald (eval.latere.ai) with a bearer the caller
+// supplies: an issuer token for the eval audience, which evald admits for
+// a platform administrator or a service account. Eval auth does not go
+// through the latere session client, so this is plain net/http.
 type evalClient struct {
 	baseURL string
 	token   string
@@ -191,7 +192,7 @@ func (c *evalClient) doYAML(ctx context.Context, method, path string, body []byt
 
 // newEvalCmd is the `latere eval …` command tree for the Eval
 // platform (evald). Unlike the other product groups it authenticates
-// with a static admin bearer token, not the latere session.
+// with a caller-supplied eval-audience bearer, not the latere session.
 func newEvalCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "eval",
@@ -201,8 +202,9 @@ eval.latere.ai.
 
 A suite.yaml manifest declares tasks, a model × harness matrix, and
 comparisons; 'latere eval apply' reconciles it against the platform.
-Authentication uses the static admin token (EVAL_ADMIN_TOKEN or
---token), not the latere session.`,
+Authentication uses the bearer in EVAL_ADMIN_TOKEN or --token, not the
+latere session: a token the issuer minted for the eval audience, held by
+a platform administrator or a service account.`,
 		Example: `  latere eval apply -f suite.yaml
   latere eval apply -f suite.yaml --dry-run
   latere eval suites

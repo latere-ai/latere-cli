@@ -127,7 +127,7 @@ latere lux invoke --model openai/gpt-4o-mini "Say hi"
 latere review
 ```
 
-`latere eval` manages declarative model-evaluation suites (tasks crossed with a model/harness matrix) on `eval.latere.ai`: `latere eval apply -f suite.yaml`, `latere eval suites`, `latere eval cells --suite <id>`. It is an admin tool and authenticates with a static admin token (`EVAL_ADMIN_TOKEN` or `--token`), not your `latere login` session, so it sits outside the products above.
+`latere eval` manages declarative model-evaluation suites (tasks crossed with a model/harness matrix) on `eval.latere.ai`: `latere eval apply -f suite.yaml`, `latere eval suites`, `latere eval cells --suite <id>`. It is an administration tool and does not use your `latere login` session: it presents the token in `EVAL_ADMIN_TOKEN` or `--token`, which is a token the issuer minted for the `eval` audience, held by a platform administrator or a service account, so it sits outside the products above.
 
 Use `latere eval apply -f suite.yaml --dry-run` to preview changes. Apply rejects redirects that change the request method or dry-run mode.
 
