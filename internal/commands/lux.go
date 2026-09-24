@@ -330,6 +330,7 @@ models'.`,
 	cmd.AddCommand(newLuxUsageCmd(&luxURL, &authURL, &token))
 	cmd.AddCommand(newLuxAccessCmd(&luxURL, &authURL, &token))
 	cmd.AddCommand(newLuxServeCmd(&luxURL, &authURL, &token))
+	cmd.AddCommand(newLuxKeyCmd(&luxURL, &authURL))
 	return cmd
 }
 
@@ -617,6 +618,14 @@ func luxEnvBearer(ctx context.Context, tokenFlag, luxURL, authURLFlag string) (b
 	if t, ok := passthroughToken(tokenFlag); ok {
 		return t, "passthrough token (--token or $LATERE_LUX_TOKEN)", nil
 	}
+	// The Lux core takes a key, not an actor token (specs/006-model-key.md).
+	if isCoreURL(luxURL) {
+		keys, _, res, err := modelKey(ctx, luxURL, authURLFlag)
+		if err != nil {
+			return "", "", err
+		}
+		return res.Record.Value, modelKeyProvenance(res, keys.Store.Name()), nil
+	}
 	actor, expiry, err := mintLuxActorToken(ctx, luxURL, authURLFlag)
 	if err != nil {
 		return "", "", err
@@ -852,8 +861,10 @@ model listed as local/<model> can be called either way.`,
 			}
 			// Without an explicit --provider, resolve it from the caller's
 			// catalog: `--model claude-sonnet-5` must reach anthropic, not
-			// 404 on the openai default.
-			if !cmd.Flags().Changed("provider") {
+			// 404 on the openai default. The core's OpenAI door serves
+			// every Model, so against the core the default stands.
+			core := isCoreURL(*luxURL)
+			if !cmd.Flags().Changed("provider") && !core {
 				if p, err := inferInvokeProvider(cmd.Context(), *luxURL, *authURL, *token, model); err != nil {
 					return err
 				} else if p != "" {
@@ -868,10 +879,6 @@ model listed as local/<model> can be called either way.`,
 				return fmt.Errorf("`lux invoke` does not support %q; use openai, openrouter, or anthropic", provider)
 			}
 			prompt := strings.Join(args, " ")
-			bearer, err := luxBearer(cmd.Context(), *token, *luxURL, *authURL)
-			if err != nil {
-				return err
-			}
 			base := strings.TrimRight(resolveLuxURL(*luxURL), "/")
 			model = localWireModel(spec.name, model)
 
@@ -890,9 +897,27 @@ model listed as local/<model> can be called either way.`,
 					"messages": []map[string]any{{"role": "user", "content": prompt}},
 				}
 			}
-			raw, err := luxPostJSON(cmd.Context(), base+spec.chatPath, bearer, headers, body)
-			if err != nil {
-				return wrapLuxErr(err)
+			post := func(bearer string) ([]byte, error) {
+				return luxPostJSON(cmd.Context(), base+spec.chatPath, bearer, headers, body)
+			}
+			var raw []byte
+			if _, passthrough := passthroughToken(*token); core && !passthrough {
+				keys, l, res, err := modelKey(cmd.Context(), *luxURL, *authURL)
+				if err != nil {
+					return err
+				}
+				raw, err = postWithModelKey(cmd.Context(), keys, l, res, post)
+				if err != nil {
+					return wrapLuxErr(err)
+				}
+			} else {
+				bearer, err := luxBearer(cmd.Context(), *token, *luxURL, *authURL)
+				if err != nil {
+					return err
+				}
+				if raw, err = post(bearer); err != nil {
+					return wrapLuxErr(err)
+				}
 			}
 			if jsonF {
 				_, err := fmt.Fprintln(cmd.OutOrStdout(), strings.TrimSpace(string(raw)))

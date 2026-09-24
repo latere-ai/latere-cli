@@ -697,14 +697,16 @@ func newAuthLogoutCmd() *cobra.Command {
 		Short: "Sign out: revoke the session server-side and clear the saved login.",
 		Long: `Sign out of Latere.
 
-Revokes the saved refresh token at auth (RFC 7009 /revoke), then
-deletes ~/.config/latere/auth-token.json. Revocation is best-effort: an
+Revokes the model keys this login created on this machine and the saved
+refresh token at auth (RFC 7009 /revoke), then deletes the keys' local
+copies and ~/.config/latere/auth-token.json. Revocation is best-effort: an
 unreachable or older server prints a warning and the local sign-out
 still completes. Tokens already minted for a product are not recalled;
 each lapses within five minutes.`,
 		Example: `  latere logout
   latere login`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			forgetModelKeys(cmd.Context(), authURL, cmd.ErrOrStderr())
 			revokeAuthRefreshToken(cmd.Context(), authURL, cmd.ErrOrStderr())
 			if err := api.ClearAuthToken(); err != nil {
 				return err
@@ -715,6 +717,29 @@ each lapses within five minutes.`,
 	}
 	cmd.Flags().StringVar(&authURL, "auth-url", "", "override auth base URL (default $AUTH_URL or https://auth.latere.ai)")
 	return cmd
+}
+
+// forgetModelKeys revokes and forgets every model key the saved login
+// created on this machine, in every context (specs/006-model-key.md). It is
+// best effort: a key auth does not answer for is still forgotten here, and
+// each failure is a warning.
+func forgetModelKeys(ctx context.Context, authURL string, errw io.Writer) {
+	authBase := api.ResolveAuthURL("", authURL)
+	access, _, err := api.LoginToken(ctx, authBase)
+	if err != nil {
+		access = ""
+	}
+	tok, err := api.LoadAuthToken()
+	if err != nil {
+		return
+	}
+	info, err := principalFromJWT(tok.AccessToken)
+	if err != nil || info.Sub == "" {
+		return
+	}
+	for _, e := range newModelKeys().ForgetAll(ctx, authBase, info.Sub, access) {
+		fprintf(errw, "  warning: %v\n", e)
+	}
 }
 
 // revokeAuthRefreshToken best-effort revokes the saved refresh token via

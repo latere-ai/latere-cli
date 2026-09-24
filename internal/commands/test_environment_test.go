@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zalando/go-keyring"
+
 	"github.com/latere-ai/latere-cli/internal/api"
 )
 
@@ -50,6 +52,10 @@ func runIsolatedCommandTests(m *testing.M) int {
 			return 1
 		}
 	}
+	// The model key's keychain (specs/006-model-key.md) is an in-memory
+	// one here, so no test reads or writes the developer's system
+	// keychain; the file fallback already lands under root.
+	keyring.MockInit()
 	return m.Run()
 }
 
