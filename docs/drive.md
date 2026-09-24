@@ -1,8 +1,21 @@
 # latere drive
 
-`latere drive` works with files on [Latere Drive](https://drive.latere.ai): upload, download, list, trash, version history, and sharing — from the terminal, with the login you already have. Run `latere login` first (see the [main README](../README.md#sign-in)).
+`latere drive` works with files on Latere Drive: upload, download, list,
+trash, version history, and sharing, from the terminal, with the login you
+already have.
 
-Repo workspaces (`repos/…`) are mountable folders for code checkouts; Drive does not serve git. Repository history lives on Latere Code (`code.latere.ai`), which `latere login` wires git for (see [Git with Latere Code](../README.md#git-with-latere-code)).
+> **Drive has been retired.** Its service at `drive.latere.ai` no longer
+> answers, and Latere's storage now runs behind
+> `https://api.latere.ai/v1/storage`
+> ([storage guide](https://platform.latere.ai/docs/storage/getting-started)).
+> This release of `latere drive` still talks to Drive, so every command
+> fails to connect. The rest of this page describes the command surface as
+> it was, for scripts that still call it.
+
+Repository workspaces (`repos/…`) were folders for code checkouts; Drive
+never served git. Repository history lives on Latere Code
+(`code.latere.ai`), which `latere login` configures git for (see
+[Git with Latere Code](../README.md#git-with-latere-code)).
 
 ## Paths and spaces
 
@@ -19,7 +32,7 @@ latere drive rm <path>                # trash; --permanent to hard-delete; --ver
 latere drive restore <path>           # undo: from trash, or --version N to roll back in place
 latere drive history <path>           # version history
 latere drive share <prefix> --link    # sharing: also --to <email|principal-id>, --public;
-latere drive shares [--inbox]         #   list what you shared (or what's shared with you)
+latere drive shares [--inbox]         #   list what you shared (or what is shared with you)
 latere drive unshare <share-id>       #   revoke
 ```
 
@@ -43,7 +56,7 @@ Uploads verify that the server acknowledges the requested path and byte count, i
 
 Multipart uploads also verify the session's destination before sending file data. A missing or mismatched destination aborts the session without uploading any parts.
 
-Concurrent-write safety rides standard HTTP conditions: `--create-only` fails if the file already exists, and `--if-match <checksum>` overwrites only if the file hasn't changed since you read it (get the current checksum from `latere drive ls --long`). Writes under `memory/` require one of the two.
+Concurrent writes are guarded by standard HTTP conditions: `--create-only` fails if the file already exists, and `--if-match <checksum>` overwrites only if the file has not changed since you read it (get the current checksum from `latere drive ls --long`). Writes under `memory/` require one of the two.
 
 ## Sharing
 
