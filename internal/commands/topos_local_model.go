@@ -38,7 +38,7 @@ func handleLocalCommand(ctx context.Context, line string, curModel *string, rebu
 func printLocalHelp() {
 	fmt.Println(strings.TrimSpace(`
 Commands:
-  /model [name]   switch model — no name opens a picker of the models your key reaches
+  /model [name]   switch model; no name opens a picker of the models your key reaches
   /help           show this help
   /quit, /exit    leave (or press Ctrl+D)
 `))
