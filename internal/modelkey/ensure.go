@@ -92,12 +92,24 @@ func (k *Keys) Fresh(r Record) bool {
 	return !r.CreatedAt.IsZero() && k.Now().Sub(r.CreatedAt) < FreshFor
 }
 
+// FromEnv answers the key handed in through EnvKey, and false when there is
+// none. It needs no login: a CI job that is handed a key has no saved login
+// to create one with.
+func FromEnv() (Result, bool) {
+	v := strings.TrimSpace(os.Getenv(EnvKey))
+	if v == "" {
+		return Result{}, false
+	}
+	return Result{Record: Record{Value: v}, FromEnv: true}, true
+}
+
 // Ensure answers the login's key for its context: the one handed in through
 // EnvKey, the stored one while it is far from its end, or a new one. A key
 // near its end is revoked at auth and replaced.
 func (k *Keys) Ensure(ctx context.Context, l Login) (Result, error) {
-	if v := strings.TrimSpace(os.Getenv(EnvKey)); v != "" {
-		return Result{Record: Record{Value: v, Context: l.Context()}, FromEnv: true}, nil
+	if res, ok := FromEnv(); ok {
+		res.Record.Context = l.Context()
+		return res, nil
 	}
 	r, ok, err := k.Store.Get(l.Slot())
 	if err != nil {

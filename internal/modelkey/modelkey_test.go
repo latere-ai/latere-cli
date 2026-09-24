@@ -138,6 +138,20 @@ func TestEnvKeyWins(t *testing.T) {
 	}
 }
 
+// TestFromEnvNeedsNoLogin: the handed key is answered without a login, and
+// its absence is reported as such.
+func TestFromEnvNeedsNoLogin(t *testing.T) {
+	t.Setenv(EnvKey, "")
+	if _, ok := FromEnv(); ok {
+		t.Fatal("FromEnv answered a key with none handed in")
+	}
+	t.Setenv(EnvKey, " pat_ci.value\n")
+	r, ok := FromEnv()
+	if !ok || !r.FromEnv || r.Record.Value != "pat_ci.value" {
+		t.Fatalf("FromEnv = %+v, %v", r, ok)
+	}
+}
+
 // TestKeychainIsUsedWhenAvailable is criterion 5: with a keychain, the key
 // is kept there and not in the file.
 func TestKeychainIsUsedWhenAvailable(t *testing.T) {
