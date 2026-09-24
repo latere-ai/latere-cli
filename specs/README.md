@@ -9,11 +9,11 @@ read the [README](../README.md) and [docs/](../docs/).
 
 ```
 specs/
-  001-auth-unification-migration.md  (complete    — adopts the shared device-code client and file token store)
-  002-review-local-subcommand.md     (implemented — latere review; critics run through Lux and Topos)
-  003-drive-subcommand.md            (implemented — latere drive: eight orthogonal file-plane verbs over Drive /v1)
-  004-flatten-auth-commands.md       (implemented — latere login/logout/whoami/print-token/org as top-level verbs)
-  005-lux-env-redesign.md            (implemented — lux env keyed by dialect and provider, with token provenance and TTL)
+  001-auth-unification-migration.md  (complete: adopts the shared device-code client and file token store)
+  002-review-local-subcommand.md     (implemented: latere review; critics run through Lux and Topos)
+  003-drive-subcommand.md            (implemented: latere drive: eight orthogonal file-plane verbs over Drive /v1)
+  004-flatten-auth-commands.md       (implemented: latere login/logout/whoami/print-token/org as top-level verbs)
+  005-lux-env-redesign.md            (implemented: lux env keyed by dialect and provider, with token provenance and TTL)
   006-model-key.md                   (implemented: a model key on first use, created at auth and kept in the keychain)
 ```
 
@@ -33,6 +33,9 @@ Every spec in the tree has shipped:
   per-command lifetime knob it designed is gone; leaf id-03 of
   `latere-ai/specs/infrastructure/identity` fixed every token at the
   issuer's maximum.
+- `006-model-key.md`: `latere lux` creates a model key at auth on first use
+  against the Latere API, keeps it in the system keychain or a file beside
+  the login, and `latere lux key` shows and revokes it.
 
 Two surfaces shipped without a dedicated design record: the token-lifecycle
 work, which [docs/login-and-tokens.md](../docs/login-and-tokens.md) documents,
