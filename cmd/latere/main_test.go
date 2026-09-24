@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -27,6 +28,18 @@ var e2eBinary struct {
 }
 
 func TestMain(m *testing.M) {
+	// The helper-process tests run this test binary again as the CLI. Under
+	// -race, each child that exits 0 first sleeps for the detector's
+	// atexit_sleep_ms, 1000 by default, a second per subtest. The sleep gives
+	// goroutines still running at exit a last chance to race; a helper runs
+	// one command to completion and exits, so its children skip it. A GORACE
+	// that already sets the option is kept.
+	if gorace := os.Getenv("GORACE"); !strings.Contains(gorace, "atexit_sleep_ms") {
+		if err := os.Setenv("GORACE", strings.TrimSpace(gorace+" atexit_sleep_ms=0")); err != nil {
+			fmt.Fprintf(os.Stderr, "set GORACE: %v\n", err)
+			os.Exit(1)
+		}
+	}
 	code := m.Run()
 	if e2eBinary.dir != "" {
 		if err := os.RemoveAll(e2eBinary.dir); err != nil {
