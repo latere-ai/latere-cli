@@ -25,10 +25,7 @@ func TestDriveRestoreReceiptE2E(t *testing.T) {
 		t.Skip("binary e2e skipped with -short")
 	}
 	root := t.TempDir()
-	binary := filepath.Join(root, "latere")
-	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
-		t.Fatalf("build: %v\n%s", err, out)
-	}
+	binary := latereBinary(t)
 	for _, tc := range []struct {
 		name, body string
 		valid      bool

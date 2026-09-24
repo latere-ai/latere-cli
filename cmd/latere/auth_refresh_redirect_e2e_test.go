@@ -24,10 +24,7 @@ func TestAuthRefreshPreservesRequestOnRedirectE2E(t *testing.T) {
 	if testing.Short() {
 		t.Skip("binary e2e skipped with -short")
 	}
-	binary := filepath.Join(t.TempDir(), "latere")
-	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
-		t.Fatalf("build: %v\n%s", err, out)
-	}
+	binary := latereBinary(t)
 	for _, status := range []int{200, 301, 302, 303, 307, 308} {
 		t.Run(strconv.Itoa(status), func(t *testing.T) {
 			root := t.TempDir()

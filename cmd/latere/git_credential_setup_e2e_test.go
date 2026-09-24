@@ -24,10 +24,7 @@ func TestGitCredentialSetupMatchesSupportedSchemesE2E(t *testing.T) {
 	if err != nil {
 		t.Skip("git unavailable")
 	}
-	binary := filepath.Join(t.TempDir(), "latere")
-	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
-		t.Fatalf("build: %v\n%s", err, out)
-	}
+	binary := latereBinary(t)
 	for _, tc := range []struct {
 		name, override, host string
 		http                 bool

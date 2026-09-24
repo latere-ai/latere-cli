@@ -24,10 +24,7 @@ func TestToposAgentsOutputFailureE2E(t *testing.T) {
 		t.Skip("binary e2e skipped with -short")
 	}
 	dir := t.TempDir()
-	binary := filepath.Join(dir, "latere")
-	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
-		t.Fatalf("build: %v\n%s", err, out)
-	}
+	binary := latereBinary(t)
 	const detail = `{"id":"agent-1","display_name":"Bot","kind":"worker"}`
 	const record = "id:         agent-1\ndisplay_name:Bot\nkind:       worker\norg_id:     -\nowner:      -\n"
 	for _, tc := range []struct {

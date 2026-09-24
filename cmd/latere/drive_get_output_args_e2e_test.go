@@ -24,10 +24,7 @@ func TestDriveGetOutputArgumentsE2E(t *testing.T) {
 	if testing.Short() {
 		t.Skip("binary e2e skipped with -short")
 	}
-	binary := filepath.Join(t.TempDir(), "latere")
-	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
-		t.Fatalf("build: %v\n%s", err, out)
-	}
+	binary := latereBinary(t)
 	for _, tc := range []struct {
 		name, destination string
 		args              []string

@@ -25,10 +25,7 @@ func TestLuxCatalogOutputFailureE2E(t *testing.T) {
 		t.Skip("binary e2e skipped with -short")
 	}
 	dir := t.TempDir()
-	binary := filepath.Join(dir, "latere")
-	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
-		t.Fatalf("build: %v\n%s", err, out)
-	}
+	binary := latereBinary(t)
 	const item = `{"model":"test-model","provider":"test","status":"active"}`
 	const rate = `{"model":"test-model","provider":"test","input_usd_per_m":2,"output_usd_per_m":3}`
 	const record = "model:      test-model\nprovider:   test\nstatus:     active\n"

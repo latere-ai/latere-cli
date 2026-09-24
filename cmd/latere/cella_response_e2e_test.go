@@ -23,10 +23,7 @@ func TestCellaCommandsRequireCompleteResponsesE2E(t *testing.T) {
 	if testing.Short() {
 		t.Skip("binary e2e skipped with -short")
 	}
-	binary := filepath.Join(t.TempDir(), "latere")
-	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
-		t.Fatalf("build: %v\n%s", err, out)
-	}
+	binary := latereBinary(t)
 	for _, operation := range []string{"get", "delete"} {
 		for _, state := range []string{"complete", "whitespace", "short content length", "interrupted chunks", "extra JSON", "trailing garbage", "no content"} {
 			if operation == "get" && state == "no content" {

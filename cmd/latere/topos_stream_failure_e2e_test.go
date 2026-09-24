@@ -24,10 +24,7 @@ func TestToposPrintReportsFailedStreamsE2E(t *testing.T) {
 	if testing.Short() {
 		t.Skip("binary e2e skipped with -short")
 	}
-	binary := filepath.Join(t.TempDir(), "latere")
-	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
-		t.Fatalf("build: %v\n%s", err, out)
-	}
+	binary := latereBinary(t)
 	for _, operation := range []string{"start", "attach"} {
 		for _, state := range []string{"completed", "closed session", "graceful disconnect", "abrupt disconnect", "protocol error", "error then stop", "empty error", "run error", "malformed answer", "malformed tool", "malformed tool failure", "malformed run error", "empty run error", "approval required", "invalid frame JSON", "invalid frame type", "invalid frame sequence", "null frame", "missing frame type", "trailing frame JSON", "malformed replay frame", "budget reached", "budget then stop", "malformed budget", "budget already exhausted", "token limit", "unfinished tools", "natural stop", "stop sequence", "budget before answer", "budget before answer idle"} {
 			t.Run(operation+"/"+state, func(t *testing.T) {

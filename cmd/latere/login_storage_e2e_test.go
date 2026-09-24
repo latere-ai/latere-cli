@@ -22,10 +22,7 @@ func TestLoginReplacesPermissiveTokenE2E(t *testing.T) {
 		t.Skip("binary e2e skipped with -short")
 	}
 	root := t.TempDir()
-	binary := filepath.Join(root, "latere")
-	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
-		t.Fatalf("build: %v\n%s", err, out)
-	}
+	binary := latereBinary(t)
 	path := filepath.Join(root, "auth-token.json")
 	if err := os.WriteFile(path, []byte(`{"access_token":"old-test-token"}`), 0600); err != nil {
 		t.Fatal(err)

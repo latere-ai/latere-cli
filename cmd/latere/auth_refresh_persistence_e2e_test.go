@@ -23,10 +23,7 @@ func TestAuthRefreshRequiresPersistenceE2E(t *testing.T) {
 	if testing.Short() {
 		t.Skip("binary e2e skipped with -short")
 	}
-	binary := filepath.Join(t.TempDir(), "latere")
-	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
-		t.Fatalf("build: %v\n%s", err, out)
-	}
+	binary := latereBinary(t)
 	for _, rotation := range []string{"rotated", "retained"} {
 		for _, mode := range []string{"writable", "blocked parent", "directory target"} {
 			t.Run(rotation+"/"+mode, func(t *testing.T) {

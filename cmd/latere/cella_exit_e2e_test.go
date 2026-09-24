@@ -11,7 +11,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -21,11 +20,7 @@ func TestCellaCompletionExitStatusE2E(t *testing.T) {
 	if testing.Short() {
 		t.Skip("binary e2e skipped with -short")
 	}
-	root := t.TempDir()
-	binary := filepath.Join(root, "latere")
-	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
-		t.Fatalf("build CLI: %v\n%s", err, out)
-	}
+	binary := latereBinary(t)
 	methods := map[string][]string{
 		"exec":          {"cella", "exec", "dev", "--", "true"},
 		"follow":        {"cella", "run", "dev", "--follow", "--", "true"},

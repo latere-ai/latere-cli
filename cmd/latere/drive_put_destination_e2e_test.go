@@ -25,10 +25,7 @@ func TestDrivePutDestinationArgumentsE2E(t *testing.T) {
 		t.Skip("binary e2e skipped with -short")
 	}
 	dir := t.TempDir()
-	binary, source := filepath.Join(dir, "latere"), filepath.Join(dir, "report.txt")
-	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
-		t.Fatalf("build: %v\n%s", err, out)
-	}
+	binary, source := latereBinary(t), filepath.Join(dir, "report.txt")
 	if err := os.WriteFile(source, []byte("report"), 0600); err != nil {
 		t.Fatal(err)
 	}

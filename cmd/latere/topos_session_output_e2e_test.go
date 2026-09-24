@@ -24,10 +24,7 @@ func TestToposSessionOutputFailureE2E(t *testing.T) {
 		t.Skip("binary e2e skipped with -short")
 	}
 	dir := t.TempDir()
-	binary := filepath.Join(dir, "latere")
-	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
-		t.Fatalf("build: %v\n%s", err, out)
-	}
+	binary := latereBinary(t)
 	const detail = `{"session_id":"sess-1","output":"First line\nSecond line\n"}`
 	const record = "session:    sess-1\nsandbox:    -\nstop_reason:-\ntool_calls: 0\ntokens:     0 in / 0 out\n"
 	const row = "sess-1  awaiting_input    agent-1\n"

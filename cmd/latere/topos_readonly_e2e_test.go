@@ -23,10 +23,7 @@ func TestToposReadOnlyRejectsPromptBeforeAttachE2E(t *testing.T) {
 	if testing.Short() {
 		t.Skip("binary e2e skipped with -short")
 	}
-	binary := filepath.Join(t.TempDir(), "latere")
-	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
-		t.Fatalf("build: %v\n%s", err, out)
-	}
+	binary := latereBinary(t)
 	for _, auth := range []string{"signed in", "missing"} {
 		for _, flag := range []string{"--print", "-p"} {
 			for _, mode := range []string{"default", "--readonly", "--readonly=true", "--readonly=false"} {

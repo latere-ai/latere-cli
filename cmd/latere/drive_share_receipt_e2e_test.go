@@ -25,10 +25,7 @@ func TestDriveShareReceiptE2E(t *testing.T) {
 		t.Skip("binary e2e skipped with -short")
 	}
 	dir := t.TempDir()
-	binary := filepath.Join(dir, "latere")
-	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
-		t.Fatalf("build: %v\n%s", err, out)
-	}
+	binary := latereBinary(t)
 	for _, format := range []string{"text", "json"} {
 		for _, tc := range []struct {
 			name, field string

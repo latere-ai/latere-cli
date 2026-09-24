@@ -24,10 +24,7 @@ func TestDriveDoesNotSubstituteCellaAfterAuthFailureE2E(t *testing.T) {
 	if testing.Short() {
 		t.Skip("binary e2e skipped with -short")
 	}
-	binary := filepath.Join(t.TempDir(), "latere")
-	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
-		t.Fatalf("build: %v\n%s", err, out)
-	}
+	binary := latereBinary(t)
 	for _, kind := range []string{"git helper", "file command"} {
 		// wantRoot is the root token auth must see on the Drive mint; wantBearer
 		// is what Drive must then receive. A usable root always yields the

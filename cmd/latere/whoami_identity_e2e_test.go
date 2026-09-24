@@ -24,10 +24,7 @@ func TestWhoamiRequiresIdentifiedPrincipalE2E(t *testing.T) {
 	if testing.Short() {
 		t.Skip("binary e2e skipped with -short")
 	}
-	binary := filepath.Join(t.TempDir(), "latere")
-	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
-		t.Fatalf("build: %v\n%s", err, out)
-	}
+	binary := latereBinary(t)
 	// whoami reads the saved token and asks the issuer nothing: a token that
 	// names its subject is printed, one that names nobody is an error, and
 	// in neither case does a request reach the issuer.
