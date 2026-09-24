@@ -41,7 +41,9 @@ eval "$(latere lux env anthropic)"    # -> /anthropic
 eval "$(latere lux env local)"        # -> /local/v1, your 'lux serve' tunnels
 ```
 
-Run `latere lux providers` for the current list. The two cannot be combined: env vars carry a base URL, not a model, so a provider on a compat surface has nowhere to go.
+The built-in passthroughs are `openai`, `openrouter`, `anthropic`, `moonshot`, `xai`, `zhipu`, and `local`, and a provider Lux lists in your catalog works by name as well, because the CLI reads its route from Lux. Gemini's SDK has no bearer path, so reach Gemini models through a compat surface or the OpenRouter route.
+
+A provider and `--compat` cannot be combined: the exported variables carry a base URL, not a model, so a provider on a compat surface has nowhere to go.
 
 Export values are shell-quoted when needed so spaces and shell metacharacters stay literal. `--raw` prints the token without shell quoting.
 
@@ -73,7 +75,7 @@ printing partial output. This applies to both text output and `--json`.
 ## Your model key on the Latere API
 
 The model endpoints at `https://api.latere.ai/v1/models` take a key, not
-your login. The first time `lux env`, `lux token` or `lux invoke` calls
+your login. The first time `lux env` or `lux invoke` calls
 them, the CLI creates a key for you in your current context (your personal
 account, or the organization `latere org` selected), allowed to use models
 and nothing else. It keeps the key in your system keychain, or in
