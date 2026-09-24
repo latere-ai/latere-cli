@@ -32,6 +32,14 @@ committed: the commit log already holds that.
   refuses a second copy of the authorizer envelope (ci-gate v0.42.0).
   Nothing changes for a user of `latere`.
 
+### Fixed
+
+- v0.9.0 and v0.10.0 were tagged but never published, so `install.sh` and
+  `latere upgrade` kept installing v0.8.1. This release is published and
+  carries their changes too: coming from v0.8.1, read their sections in
+  [CHANGELOG.md](https://github.com/latere-ai/latere-cli/blob/main/CHANGELOG.md),
+  and run `latere login` once, as v0.9.0 asks.
+
 ## v0.10.0 - 2026-09-13
 
 ### Changed
