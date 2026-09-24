@@ -661,11 +661,6 @@ func principalFromJWT(raw string) (principalInfo, error) {
 	return info, nil
 }
 
-func stringClaim(claims map[string]any, key string) string {
-	v, _ := claims[key].(string)
-	return v
-}
-
 func scopesClaim(claims map[string]any) []string {
 	if scope, _ := claims["scope"].(string); scope != "" {
 		return strings.Fields(scope)
