@@ -5,7 +5,21 @@
 [![go](https://img.shields.io/badge/go-1.27-00ADD8?logo=go&logoColor=white)](go.mod)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-Command-line interface for the Latere product family: one binary for [Cella](https://cella.latere.ai) sandboxes, [Lux](https://lux.latere.ai) model access, and adversarial code review.
+`latere` is the command-line interface for the Latere product family. You
+sign in once, and one binary reaches every product with your identity:
+[Cella](https://cella.latere.ai) sandboxes, [Lux](https://lux.latere.ai)
+model access, [Topos](https://topos.latere.ai) agent sessions, git on
+Latere Code (`code.latere.ai`), and adversarial review of a Claude Code
+session. There is no API key to allocate and no second credential to
+manage.
+
+```sh
+latere login
+latere cella apply -f sandbox.yaml
+latere lux invoke --model openai/gpt-4o-mini "Say hi"
+latere topos --local
+git clone https://code.latere.ai/<owner>/<repo>.git
+```
 
 ## Install
 
@@ -13,42 +27,59 @@ Command-line interface for the Latere product family: one binary for [Cella](htt
 curl -fsSL https://latere.ai/install.sh | sh
 ```
 
-The installer writes to `$HOME/.local/bin` by default, so normal installs do not require `sudo`. If that directory is not on your `PATH`, the installer prints the line to add to your shell profile.
-
-Other install paths:
+The installer supports Linux and macOS on amd64 and arm64. It writes to
+`$HOME/.local/bin`, so it needs no `sudo`, and prints the line to add to
+your shell profile when that directory is not on your `PATH`.
 
 ```sh
 # Pin a version
-curl -fsSL https://latere.ai/install.sh | sh -s -- v0.2.5
+curl -fsSL https://latere.ai/install.sh | sh -s -- vX.Y.Z
 
-# System-wide install
+# Install system-wide
 curl -fsSL https://latere.ai/install.sh | PREFIX=/usr/local sh
 
 # Build from source
 go install github.com/latere-ai/latere-cli/cmd/latere@latest
 ```
 
-Release binaries are attached to GitHub releases for Linux, macOS, and Windows on amd64 and arm64.
+The installer finds the newest release through the GitHub releases
+redirect rather than the rate-limited GitHub API, so it also works behind
+shared NAT. If it still cannot resolve a version, for example behind a
+restrictive proxy, pin one with the `sh -s -- vX.Y.Z` form. It checks the
+archive against the release's `checksums.txt` when `shasum` is available.
 
-The installer resolves the latest version from the GitHub releases redirect rather than the rate-limited GitHub API, so it works from networks behind shared NAT. If version resolution still fails (restricted network or proxy), pin a version explicitly with the `sh -s -- vX.Y.Z` form above.
+Every [release](https://github.com/latere-ai/latere-cli/releases) carries
+archives for Linux, macOS, and Windows on amd64 and arm64, and a
+`checksums.txt`. On Windows, download the `.zip` from the releases page.
 
 ## Stay up to date
 
-`latere` keeps itself current. **Auto-upgrade is on by default**: it checks for new releases at most once a day, and the next time you run a command after a new release appears, it updates itself in place before running your command. You can also drive it manually:
+Auto-upgrade is on by default. `latere` checks for a new release at most
+once a day, and the next time you run a command after one appears, it
+replaces itself and then runs your command.
 
 ```sh
 latere upgrade            # install the latest release now
-latere upgrade v0.2.29    # install a specific release — this is how you roll back
+latere upgrade v0.2.29    # install a specific release; this is how you roll back
 latere upgrade --check    # report whether a newer release exists, without installing
 latere upgrade --auto off # turn auto-upgrade off
 latere upgrade --auto on  # turn it back on
 ```
 
-If an auto-upgraded release turns out to be broken, roll back with `latere upgrade <previous-version>` and optionally `latere upgrade --auto off` to stay put. Every install verifies the release archive's checksum and gzip integrity before replacing the binary. Empty binaries and binaries larger than 200 MiB are rejected, leaving your installed executable intact. Archives that expand beyond 400 MiB are also rejected, including files other than the executable.
+If a release is broken, roll back with `latere upgrade <previous-version>`
+and add `latere upgrade --auto off` to stay there. Every upgrade verifies
+the archive against the release's checksum and its gzip integrity before it
+replaces the binary. An empty binary, an archive or a binary over 200 MiB,
+and an archive that expands past 400 MiB are refused, and the installed
+executable is left as it was.
 
-Auto-upgrade and the daily notice are skipped for `go install`/dev builds, in CI, when output is not a terminal, and when `latere` lives somewhere you cannot write (for example a system-wide `PREFIX=/usr/local` install) — there `latere upgrade` tells you to re-run the installer instead. Set `LATERE_NO_UPDATE_CHECK=1` to silence the check entirely.
-
-> Self-update is unavailable on Windows (the running binary is locked); download the archive you want from the [releases page](https://github.com/latere-ai/latere-cli/releases) instead.
+The daily check and auto-upgrade are skipped for `go install` and
+development builds, when `CI` is set, when stderr is not a terminal, and
+when `latere` lives in a directory you cannot write, such as a
+`PREFIX=/usr/local` install; there `latere upgrade` tells you to run the
+installer again. `LATERE_NO_UPDATE_CHECK=1` turns the check off entirely.
+Self-upgrade is not available on Windows, where a running binary is
+locked; download the release you want from the releases page instead.
 
 ## Sign in
 
@@ -56,123 +87,101 @@ Auto-upgrade and the daily notice are skipped for `go install`/dev builds, in CI
 latere login
 ```
 
-`latere login` starts the OAuth2 device-code flow against `auth.latere.ai`. It prints a URL and user code, waits for browser approval, then writes one file under `~/.config/latere/`: `auth-token.json`, the login token every product credential is minted from. One sign-in unlocks every product below. See [docs/login-and-tokens.md](docs/login-and-tokens.md) for what the file is and how each product gets its credential.
+`latere login` runs the OAuth 2.0 device-code flow against
+`auth.latere.ai`: it prints a URL and a code, you approve in a browser and
+choose your personal account or an organization, and the CLI saves one
+login token to `~/.config/latere/auth-token.json`. Every product command
+mints a short-lived token for that one product from it.
+[`docs/login-and-tokens.md`](docs/login-and-tokens.md) explains what is
+stored and how each product gets its credential.
 
 ```sh
-latere whoami
-latere print-token
-latere logout
+latere whoami                 # the principal the saved login names
+latere org                    # the active context
+latere org <org-uuid>         # switch to an organization, without signing in again
+latere org --personal         # switch to your personal account
+latere logout                 # revoke the session and the model keys it created, then clear the login
 
-# CI or dashboard-minted tokens
-latere login --token <token>
+latere login --token <token>  # save a token issued elsewhere, for CI
+latere print-token            # print the login token, for scripts that call auth
 ```
-
-### Switching the active organization
-
-```sh
-latere org                        # show the active context
-latere org <org-uuid>             # scope the saved token to <org-uuid>
-latere org --personal             # scope the saved token to the personal context
-```
-
-Switching uses the auth service's refresh-token grant: no device-code re-prompt, the saved refresh token is exchanged for a new access token scoped to the chosen org. Every later product token is minted from it, so every command follows the new context. The token file is replaced atomically.
-
-| Setting | Purpose |
-|---------|---------|
-| `--auth-url` | Override the auth URL for `latere login`, `logout`, `whoami` and `org`. |
-| `AUTH_URL` | The same override, from the environment. |
-| `LATERE_AUTH_TOKEN_FILE` | Login token file path, default `~/.config/latere/auth-token.json`. |
-| `LATERE_CELLA_TOKEN` | Present this bearer to Cella instead of minting one. |
 
 ## Git with Latere Code
 
-Latere Code (`code.latere.ai`) hosts repositories. Signing in is all it takes — `latere login` also wires git's credential helper for that host, so plain `git clone` authenticates with your saved login, no token in the URL:
+Latere Code (`code.latere.ai`) hosts git repositories. `latere login` also
+configures git's credential helper for that host, so a plain clone
+authenticates with your saved login and no token goes in the URL:
 
 ```sh
 latere login
-
 git clone https://code.latere.ai/<owner>/<repo>.git
 ```
 
-The helper is scoped to that host only; credentials for every other host keep flowing through your existing helpers. Fetch and clone need read access, push needs write access. A public Latere Code repository clones with no credential at all.
-
-If you'd rather manage the git config yourself, these are the escape hatches:
+The helper answers for that host only; every other host keeps the helpers
+you already have. Fetch and clone need read access, push needs write
+access, and a public repository clones with no credential at all.
 
 ```sh
-latere login --no-git             # sign in without touching git config
-latere git-credential setup            # wire the helper explicitly
-latere git-credential setup --remove   # undo the wiring
+latere login --no-git                  # sign in without touching git config
+latere git-credential setup            # configure the helper yourself
+latere git-credential setup --remove   # remove it
 ```
 
-In CI, skip the helper and embed a token in the URL instead:
+In CI, sign the job in with a token and let the same helper answer:
 
 ```sh
-git clone https://x-access-token:${LATERE_TOKEN}@code.latere.ai/<owner>/<repo>.git
+latere login --token "$LATERE_TOKEN"
+git clone https://code.latere.ai/<owner>/<repo>.git
 ```
 
 ## Products
 
-| Product | What it does | Guide |
+| Command | What it does | Guide |
 |---------|--------------|-------|
-| **Cella** | Named sandboxes (ephemeral or persistent): create, exec, shell, logs, file transfer. | [docs/cella.md](docs/cella.md) |
-| **Drive** | Files on Latere Drive: upload/download (multipart for big files), trash and restore, version history, sharing by link or person. Repos clone over plain git (above). | [docs/drive.md](docs/drive.md) |
-| **Lux** | Call language models on your identity, no key to allocate: model discovery with rates, SDK enablement, usage, and serving your own local models (Ollama/vLLM/LM Studio/llama.cpp/MLX) through Lux. | [docs/lux.md](docs/lux.md) |
-| **Review** | Adversarial review of your latest Claude Code session: a proposer defends the diff, critics attack it through Lux, unresolved attacks surface. | [docs/review.md](docs/review.md) |
-| **Topos** | Coding-assistant sessions, local or hosted. `latere topos --local` runs an agent on this machine against your own files with no control plane and no login; `latere topos` runs it on the Latere agent platform, where you can detach and reattach with state intact, approve tool calls inline, or run one prompt headless with `-p`. | [docs/topos.md](docs/topos.md) |
+| `latere cella` | Sandboxes, ephemeral or persistent: create from a manifest, run commands, open a shell, read logs, and move files in and out. | [docs/cella.md](docs/cella.md) |
+| `latere lux` | Call language models with your identity: discover models and rates, point a stock SDK at Lux, check usage, and serve a model running on your own machine through Lux. | [docs/lux.md](docs/lux.md) |
+| `latere topos` | Coding-agent sessions. `--local` runs an agent on this machine against your files; without it, sessions run on the hosted platform, where you can detach and reattach, approve tool calls, or run one prompt headless. | [docs/topos.md](docs/topos.md) |
+| `latere review` | Adversarial review of your latest Claude Code session: a proposer defends the diff, critics attack it through Lux, and unresolved attacks set the exit code. | [docs/review.md](docs/review.md) |
+| `latere drive` | Files on Latere Drive. Drive has been retired and its address no longer answers, so these commands fail to connect. | [docs/drive.md](docs/drive.md) |
 
-```sh
-latere cella apply -f sandbox.yaml
-latere drive put report.pdf
-latere lux invoke --model openai/gpt-4o-mini "Say hi"
-latere review
-```
+[`docs/configuration.md`](docs/configuration.md) lists every environment
+variable the CLI reads and every file it keeps.
 
-`latere eval` manages declarative model-evaluation suites (tasks crossed with a model/harness matrix) on `eval.latere.ai`: `latere eval apply -f suite.yaml`, `latere eval suites`, `latere eval cells --suite <id>`. It is an administration tool and does not use your `latere login` session: it presents the token in `EVAL_ADMIN_TOKEN` or `--token`, which is a token the issuer minted for the `eval` audience, held by a platform administrator or a service account, so it sits outside the products above.
+Shell completion comes from the binary: `latere completion <shell>` prints
+the script for bash, zsh, fish, or PowerShell.
 
-Use `latere eval apply -f suite.yaml --dry-run` to preview changes. Apply rejects redirects that change the request method or dry-run mode.
+### For operators
 
-Nonempty `prompt_text` takes precedence over `prompt`, so resolved manifests can be reapplied without their original prompt files. Otherwise, `file://` prompts are loaded relative to the manifest directory (the current directory for stdin). Resolving a prompt file preserves other YAML values, including the spelling of scalar text such as `001` or `1e3`.
+`latere eval` manages model-evaluation suites on `eval.latere.ai`: a
+manifest declares tasks crossed with a model and harness matrix, and
+`latere eval apply -f suite.yaml` reconciles it, with `--dry-run` to see
+the change first. `latere eval suites` and `latere eval cells --suite <id>`
+list what exists. It is an administration tool and does not use your
+login: it presents the token in `EVAL_ADMIN_TOKEN` or `--token`, which is
+a token the issuer minted for the `eval` audience, held by a platform
+administrator or a service account. A manifest is one YAML document of at
+most 256 KiB after prompt files are inlined; a `file://` prompt is read
+relative to the manifest, and a nonempty `prompt_text` takes precedence
+over `prompt`. Apply never
+deletes a cell and does not retry: when the response does not confirm the
+suite, its status, and the dry-run mode, the command reports that the
+outcome is unknown. `latere eval --help` has the rest.
 
-Eval manifests may be up to 256 KiB, including the YAML produced after inlining prompt files. Oversized input or resolved manifests are rejected before upload.
+## Compatibility
 
-Each apply accepts one YAML document. Extra documents and invalid trailing content are rejected before prompt files are read or any changes are submitted.
+`latere` is released from git tags and is before 1.0. A command that moves
+keeps its old spelling as a hidden alias, so `latere auth login` still
+works after the session commands moved to the top level. Output formats
+are not frozen: if a script parses the output, pin a version with
+`latere upgrade vX.Y.Z` and `latere upgrade --auto off`, and prefer
+`--json` where a command offers it.
 
-Eval commands exit with an error if their results cannot be written to stdout. An output failure after apply does not undo the completed API request.
+## Contributing
 
-Apply also rejects responses missing the suite identity, status, or dry-run mode, and responses whose dry-run mode differs from the request. These errors leave the apply outcome unknown; the CLI does not retry automatically.
-
-## Development
-
-```sh
-make build          # tidy, vet, compile, govulncheck, test
-go test ./...       # unit and package tests only
-go run ./cmd/latere --help
-```
-
-The `internal/commands` test suite uses a temporary config directory and token
-file, overriding an inherited `LATERE_AUTH_TOKEN_FILE`. Tests that need a saved
-login must create synthetic credentials with `t.Setenv` and `t.TempDir`; they
-must not depend on the developer's signed-in session.
-
-`go test ./...` runs the unit and package tests. The live end-to-end tests are
-opt-in and **skip silently without their environment variables**, so a green
-`go test ./...` does not mean they ran:
-
-| Test | Gate | What it exercises |
-|------|------|-------------------|
-| `TestFamilyE2E` | `LATERE_FAMILY_E2E=1` | Every product against production with your signed-in identity. Add `LATERE_FAMILY_E2E_WRITE=1` for the write paths (this one spends money on real model calls; it cleans up after itself) and `LATERE_FAMILY_E2E_LOGOUT=1` to end by revoking your session. |
-| `TestProdE2EServeAndCall` | `LATERE_LUX_E2E=1` plus `LATERE_LUX_TOKEN` | `latere lux serve` end to end, exposing a local Ollama model through Lux. |
-
-Run `make hooks` once per clone to install the pre-commit gofmt and
-standard-library guard.
-
-## Status
-
-Pre-1.0, released from git tags. Commands and flags are not removed outright:
-when a command moves, the old spelling stays as a hidden alias (`latere auth
-login` still resolves after the session verbs moved to the top level). Output
-formats are not frozen, so pin a version with `latere upgrade vX.Y.Z` and
-`latere upgrade --auto off` if you parse the output in a script.
+[`CONTRIBUTING.md`](CONTRIBUTING.md) covers building, the test suites, the
+quality gate, and how the code is organized. The design records behind
+each command group are in [`specs/`](specs/README.md), and
+[`CHANGELOG.md`](CHANGELOG.md) says what each release changed.
 
 ## License
 
