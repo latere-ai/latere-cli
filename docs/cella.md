@@ -1,11 +1,12 @@
 # Cella
 
-[Cella](https://cella.latere.ai) runs named sandboxes: ephemeral enough to
-throw away, or persistent enough to keep. Each one is a workspace disk
-plus the compute that runs your commands. Run `latere login` first (see
-[Sign in](../README.md#sign-in)).
+Cella runs named sandboxes on the Latere platform. Each one is a
+workspace at `/workspace` plus the compute that runs your commands, and it
+reaches only the hosts its egress boundary admits. `latere cella` talks to
+the Cella API at `https://api.latere.ai/v1/environments`. Run
+`latere login` first (see [Sign in](../README.md#sign-in)).
 
-`latere sandbox` is an alias for `latere cella`, kept for older scripts.
+`latere sandbox` is an alias for `latere cella`.
 
 ## Quick start
 
@@ -13,199 +14,177 @@ Describe a sandbox in a manifest and apply it:
 
 ```sh
 cat > sandbox.yaml <<'YAML'
-apiVersion: cella.latere.ai/v1            # Schema version.
+apiVersion: cella.latere.ai/v1beta1
 kind: Sandbox
 metadata:
-  name: demo                              # Optional; the server picks one if omitted.
+  name: demo                    # Optional; the server picks one if omitted.
 spec:
-  image: ghcr.io/latere-ai/sandbox-base:latest
-  tier: ephemeral                         # Or "persistent" to keep it.
+  image: base                   # base, or gui for a desktop.
+  resources: {cpu: "2", memory: 4Gi, disk: 20Gi}
   lifecycle:
-    autoStop: 15m                         # Stop the compute after this much idle time.
+    autoStop: 15m               # Stop the compute after this much idle time.
 YAML
 
-latere cella apply -f sandbox.yaml
+latere cella apply -f sandbox.yaml --wait
 latere cella exec demo -- sh -lc 'echo hello && pwd'
 latere cella shell demo
 ```
 
-The same manifest works in the web console's YAML tab and over the API
-with `Content-Type: application/yaml`. The
-[manifest reference](https://platform.latere.ai/docs/cella/manifest) lists
-every field. `apply` also reads the manifest from stdin with `-f -`, and
-`--idempotency-key` makes a retried create return the original result
-instead of creating a second sandbox.
+The [manifest reference](https://platform.latere.ai/docs/cella/manifest)
+lists every field. `apply` sends the manifest as written, YAML or JSON,
+and reads it from stdin with `-f -`. A manifest that names its sandbox is
+applied under that name, so applying it again updates the same sandbox
+rather than creating a second one.
 
-Run a one-off command in a disposable sandbox that is removed afterwards:
+Run one command in a disposable sandbox that is deleted afterwards:
 
 ```sh
 latere cella run --ephemeral --rm -- sh -lc 'echo hello && pwd'
 ```
 
-Run a background job and follow its logs:
+## Creating and waiting
+
+A create answers as soon as the sandbox is recorded, usually in phase
+`Pending`, and the sandbox starts after. `apply` prints it and says how to
+wait. With `--wait` the server holds the answer until the sandbox runs or
+fails, for at most ten minutes, or for `--wait=DURATION` (up to 1h):
 
 ```sh
-CMD=$(latere cella run demo -- sh -lc 'sleep 5 && echo done')
-latere cella logs demo "$CMD" --follow
+latere cella apply -f sandbox.yaml            # answers Pending
+latere cella apply -f sandbox.yaml --wait     # answers Running, or Failed
+latere cella apply -f sandbox.yaml --wait=2m
 ```
+
+A sandbox that fails to start exits 1 with its reason, such as an image
+that cannot be pulled or resources no node can place. A hold that ends
+while the sandbox is still starting is not a failure: the CLI prints its
+phase, and `latere cella get` reads it later.
+
+A sandbox's phase is one of `Pending`, `Queued`, `Starting`, `Running`,
+`Stopped`, `Failed`, `Lost`, `Recovering` and `Deleting`, shown with its
+reason when it has one.
+
+## Images and egress
+
+A sandbox runs an image from the platform's catalog: `base`, the default,
+or `gui` for a desktop. The hosted platform enforces each sandbox's egress
+boundary, and holds an organization's sandboxes to its allowlist. A
+manifest sets the boundary under `spec.network.egress`:
+
+```yaml
+spec:
+  network:
+    egress:
+      allowedHosts: [api.latere.ai, github.com, proxy.golang.org]
+```
+
+A disposable sandbox from `run --ephemeral` sets no boundary and takes the
+platform's default for your account.
 
 ## Lifecycle
 
 ```sh
-latere cella list                           # your sandboxes; --json for scripts
-latere cella get <name|id>                  # the full record, as JSON
-latere cella rename <name|id> <new-name>    # same workspace and id, new name
+latere cella list                  # your sandboxes; --json for the API's objects
+latere cella get <name|id>         # the full object, as JSON
 latere cella start <name|id>
-latere cella stop <name|id>
-latere cella delete <name|id>               # removes the workspace; export first
-latere cella policy list                    # policy profiles you can choose in spec.policy
+latere cella stop <name|id>        # the workspace is kept across a stop
+latere cella delete <name|id>      # removes the workspace; export first
 ```
 
-An ephemeral sandbox stops when idle and is deleted after a deadline; a
-persistent one stays until you delete it.
+A sandbox's name and resources are fixed when it is created. Its
+lifetime comes from `spec.lifecycle` in the manifest: `autoStop` stops it
+after that much idle time, `ttl` deletes it that long after its creation,
+and `autoDelete` deletes it once stopped.
 
-```sh
-# Push an ephemeral sandbox's delete deadline forward
-latere cella extend <name|id> --hours 24
-latere cella extend <name|id> --deadline 2026-12-01T12:00:00Z
+## Commands
 
-# Keep the workspace until you delete it
-latere cella convert <name|id> --to persistent
-
-# Return to a disposable lifetime; --hours is required
-latere cella convert <name|id> --to ephemeral --hours 12
-
-# Grow a persistent sandbox's workspace disk; it never shrinks
-latere cella resize <name|id> --disk-gb 50
-```
-
-`extend` defaults to 24 hours. `--hours` must be positive; `--deadline`
-overrides it and must be an RFC 3339 time in the future. An invalid value
-is refused before any request is sent.
-
-A policy decides what a sandbox may do at run time, such as its network
-shape and whether it needs Cella's credential sidecar. A manifest with no
-`spec.policy` gets the default. If a create fails because the chosen policy
-requires the sidecar, pick a policy whose sidecar column says `no`, or ask
-an administrator to set up the sidecar for your account.
-
-## Commands and logs
-
-An interactive shell (`attach` is an alias):
-
-```sh
-latere cella shell <name|id>
-```
-
-A command in the foreground streams its output and exits with the
-command's status:
+`exec` runs a command in an existing sandbox, waits for it, writes its
+standard output and standard error to yours, and exits with its code:
 
 ```sh
 latere cella exec <name|id> -- sh -lc 'go test ./...'
+latere cella exec <name|id> --cwd app --env DEBUG=1 -- npm test
+latere cella exec <name|id> --timeout 30m -- make build
 ```
 
-A command in the background prints a command id:
+The output arrives when the command ends, each stream cut at one mebibyte,
+and the CLI notes a cut. The command's standard input is empty. `--cwd`
+takes a path under `/workspace`, `--env KEY=VALUE` repeats, and
+`--timeout` (default 10 minutes, at most 1h) ends the command with exit
+code 124.
+
+An interactive terminal, with the image's shell or the command after `--`
+(`attach` is an alias):
 
 ```sh
-latere cella run <name|id> -- sh -lc 'sleep 30 && echo done'
-latere cella run <name|id> --env DEBUG=1 --cwd /workspace/app -- npm test
+latere cella shell <name|id>
+latere cella shell <name|id> -- python3
 ```
 
-`run --follow` starts the command, streams its logs, and exits with its
-status:
+The terminal follows your window's size, and the CLI exits with the
+shell's exit code.
+
+`logs` reads the output of the sandbox's main process, the command its
+manifest runs:
 
 ```sh
-latere cella run <name|id> --follow -- sh -lc 'go test ./...'
-```
-
-Read, follow, or wait for a background command:
-
-```sh
-latere cella logs <name|id> <command_id>
-latere cella logs <name|id> <command_id> --cursor 1024
-latere cella logs <name|id> <command_id> --follow
-latere cella wait <name|id> <command_id> --timeout 600
-```
-
-`wait --timeout` takes a positive number of seconds. `--env KEY=VALUE` is
-for configuration that is not secret. For a credential, `run` takes a
-repeatable `--credential <catalog-key>`, which attaches a credential from
-the trust plane's catalog by its key:
-
-```sh
-latere cella run demo --credential llm-primary -- \
-  sh -lc 'curl http://127.0.0.1:8888/upstreams/llm-primary/v1/models'
+latere cella logs <name|id>
+latere cella logs <name|id> --tail 100
+latere cella logs <name|id> --follow --since 2026-09-26T10:00:00Z
 ```
 
 ### One-off runs
 
-`--ephemeral --rm` creates a disposable sandbox for one command, runs it,
-returns its output and timing, and deletes the sandbox:
+`run --ephemeral --rm` creates a disposable sandbox, waits for it to run,
+runs one command, and deletes the sandbox when the command ends, fails, or
+is interrupted:
 
 ```sh
 latere cella run --ephemeral --rm -- sh -lc 'go test ./...'
-latere cella run --ephemeral --rm --timeout 900 --cpu 2 --memory 4Gi -- sh -lc 'npm test'
+latere cella run --ephemeral --rm --timeout 900 --cpu 2 --memory 4Gi -- npm test
+latere cella run --ephemeral --rm --json -- uname -a
 ```
 
-A one-off run also takes `--image`, `--disk` (GB, default 1), `--cpu` and
-`--memory` as Kubernetes quantities, `--timeout` in seconds (default 600),
-and `--json`. `--timeout` bounds the command; the CLI allows extra time for
-creating and cleaning up the sandbox.
+A one-off run also takes `--image`, `--disk` in GiB, `--cpu` and `--memory`
+as Kubernetes quantities, `--env`, `--cwd`, `--timeout` in seconds (default
+600, at most 3600), and `--json`. The sandbox stops after 15 minutes idle
+and is deleted two hours after its creation, so one the CLI could not
+delete does not linger. When the delete fails, the CLI prints the command
+that finishes it.
 
-`--detach` returns at once with a run id. The service keeps the result and
-the tail of the log for later:
+### Exit codes
 
-```sh
-RUN=$(latere cella run --ephemeral --rm --detach -- sh -lc 'sleep 30 && echo done')
-latere cella run status "$RUN"
-latere cella run logs "$RUN" --follow
-latere cella run cancel "$RUN"
-```
-
-### Exit codes and failures
-
-Foreground `exec`, `wait`, followed logs, and a synchronous one-off run
-(with or without `--json`) exit with the remote command's code, 0 to 255.
-When no valid code is available, or the run failed or was canceled even
-though the command returned 0, the CLI exits 1 and prints the reason to
-stderr. That includes a cleanup failure after a successful command: the
-output and the JSON result are still printed, and the exit code is the
-command's own nonzero code, or 1.
-
-The CLI does not report success it cannot confirm:
-
-- If a background command id or a detached run id cannot be printed, the
-  error includes the id and says the job has already started.
-- A start response with no command or run id is an error. The job may
-  already be running, so the CLI does not retry the start.
-- `run status` and `run cancel` must name the requested run and its state;
-  a missing or mismatched answer is an error.
-- Reading or following logs stops with an error when stdout cannot be
-  written, and a synchronous one-off run does the same when its stdout or
-  stderr cannot be written.
+`exec`, `shell` and a one-off run exit with the remote command's code, 0 to
+255. A sandbox that failed to start, a refusal from the API, or a code
+outside that range exits 1 with the reason on stderr. When a one-off run's
+command failed and its sandbox could not be deleted, the exit code is the
+command's and the failed delete is printed to stderr.
 
 ## Files
 
-Read and change files inside a sandbox:
+Read and change one file or directory inside a sandbox. A relative path is
+resolved under `/workspace`:
 
 ```sh
 latere cella ls <name|id> /workspace
-latere cella cat <name|id> /workspace/out.log
-latere cella mkdir <name|id> /workspace/build
-latere cella mv <name|id> /workspace/a.txt /workspace/b.txt
-latere cella rm <name|id> /workspace/old            # recursive
-echo hi | latere cella write <name|id> /workspace/note.txt
-latere cella write <name|id> /workspace/app.tar -f app.tar
+latere cella cat <name|id> out.log
+latere cella mkdir <name|id> build
+latere cella mv <name|id> a.txt b.txt
+latere cella rm <name|id> old                   # recursive
+echo hi | latere cella write <name|id> note.txt
+latere cella write <name|id> app.tar -f app.tar
 ```
 
-`write` takes a file or stdin of at most 10 MiB and stops reading as soon
-as the input passes the limit. Use `upload` for larger files.
+`ls` prints one entry per line: the mode in octal, the size in bytes, and
+the name, with a trailing slash on a directory. `write` creates missing
+parent directories, and a write that ends early leaves the previous file
+whole.
 
 Move trees in and out as tar streams:
 
 ```sh
 # Export paths under /workspace to a file (stdout without -o)
-latere cella export <name|id> ./dist -o dist.tar
+latere cella export <name|id> dist -o dist.tar
 
 # Export from another directory
 latere cella export <name|id> --src-dir /workspace/results logs -o results.tar
@@ -222,44 +201,49 @@ latere cella import <name|id> --input data.jsonl --dest /workspace
 latere cella upload <name|id> ./dist config.json --dest /workspace
 ```
 
+`export` writes a file named by `-o` only once the whole archive has
+arrived, so a transfer that fails part way leaves no archive that looks
+complete.
+
 `import` extracts plain tar and gzip (`.tar.gz`, `.tgz`), bzip2
 (`.tar.bz2`, `.tbz`, `.tbz2`), and XZ (`.tar.xz`, `.txz`) compressed tar,
 recognized by content, so a file without an extension or a compressed
-stream on stdin works too; old V7 tar archives are recognized as well.
-Decompression streams to the service and no extracted copy is kept
-locally. A zip archive keeps its paths and directory entries, including
-empty directories. A compressed file that is not a tar archive, and any
-other regular file, is copied as one file.
-
-`--input` takes a regular file, or a symlink to one; use `--input -` or
-stdin for a pipe. An empty `--input`, a named pipe, a device, or a
-directory is refused before anything is sent.
+stream on stdin works too. Decompression streams to the service and no
+extracted copy is kept locally. A zip archive is converted to tar with its
+paths and directory entries. A compressed file that is not a tar archive,
+and any other regular file, is copied as one file. `--input` takes a
+regular file; use `--input -` or stdin for a pipe.
 
 `upload` checks every source before it sends anything. It takes regular
-files, empty files, and symlinks to regular files, and refuses devices,
-named pipes, and symlinks to directories, including inside a tree.
-Uploading `.` puts the current directory's contents directly in the
-destination; uploading `..` keeps the parent directory's name. A path
-through a symlink follows the local file system's meaning of `..`. Quotes,
-Unicode, percent signs, and line breaks in paths and archive names are
-kept.
+files and symlinks to regular files, and refuses devices, named pipes, and
+symlinks to directories. Uploading `.` puts the current directory's
+contents directly in the destination.
 
-`upload` and `import` report success only after every byte was sent and
-the service's receipt matches: `upload` checks the file and byte counts,
-and `import` checks the archive name and the tar byte count after any
-decompression or zip conversion. A missing or mismatched receipt, or a
-service that answers before the transfer finished, is an error.
-`--timeout` sets the transfer's HTTP timeout (default 5 minutes for
-`upload`, 30 minutes for `import`); `0` removes it, and a negative value
-is refused.
+`--timeout` bounds the transfer (default 5 minutes for `upload`, 30
+minutes for `import`); `0` removes the bound.
 
-`cat` and `export` refuse a partial or unexpected success response before
-they write anything, so an existing export file is left intact and stdout
-stays empty. An empty file is a valid answer.
+## Removed commands
+
+The Cella API has no counterpart for these commands of the earlier hosted
+sandbox service. Each one now exits 1 and says why:
+
+| Command | Instead |
+|---|---|
+| `policy`, `policy list` | Set the egress boundary in the manifest's `spec.network.egress`. |
+| `rename` | A sandbox's name is fixed at creation. |
+| `extend`, `convert` | Set `spec.lifecycle` (`autoStop`, `ttl`, `autoDelete`) in the manifest. |
+| `resize` | Apply a new sandbox with the resources it needs. |
+| `run <name> -- CMD`, `run --follow`, `run --detach`, `run status`, `run logs`, `run cancel`, `wait` | `exec` runs a command in an existing sandbox and waits for it. |
+
+`--credential`, `--idempotency-key` and `shell --session` are gone as
+well: a manifest mounts secrets through `spec.secrets`, and an apply by
+name is already idempotent. `logs` now reads the sandbox's main process,
+not a background command.
 
 ## Settings
 
 | Setting | Purpose |
 |---------|---------|
-| `--api-url` / `SANDBOX_API_URL` | The Cella API, `https://cella.latere.ai` by default. |
+| `--api-url` / `LATERE_CELLA_URL` | The Cella API base URL, including its `/v1/environments` path. `https://api.latere.ai/v1/environments` by default. |
 | `LATERE_CELLA_TOKEN` | Present this bearer to Cella instead of minting one from your login. |
+| `AUTH_URL` | The issuer that mints the Cella token. By default it is inferred from the API's host: `api.latere.ai` gives `auth.latere.ai`. |

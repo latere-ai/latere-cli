@@ -19,7 +19,7 @@ setting, and each command's `--help` names the flags it takes.
 
 | Variable | Default | What it does |
 |----------|---------|--------------|
-| `SANDBOX_API_URL` | `https://cella.latere.ai` | The Cella API. `--api-url` overrides it. |
+| `LATERE_CELLA_URL` | `https://api.latere.ai/v1/environments` | The Cella API base URL, including its `/v1/environments` path. `--api-url` overrides it. |
 | `LATERE_CELLA_TOKEN` | none | A bearer to present to Cella instead of minting one. |
 | `LATERE_MODELS_URL` | `https://api.latere.ai/v1/models` | The model endpoints of the Latere API, which `latere models`, `latere review` and `latere topos --local` call. `--models-url` overrides it. |
 | `LATERE_MODEL_KEY` | none | A model key to present to the Latere API instead of the one the CLI keeps. With it, the model commands need no login. |
