@@ -62,15 +62,20 @@ func TestApplyConfiguredManifestInputE2E(t *testing.T) {
 						}
 						_, _ = io.WriteString(w, `{"dry_run":false,"suite":{"id":"st-1","name":"intended","status":"exists"}}`)
 					} else {
-						if r.URL.Path != "/v1/sandboxes" {
+						if r.URL.Path != "/v1/environments/sandboxes" {
 							t.Errorf("path=%s", r.URL.Path)
 						}
-						_, _ = io.WriteString(w, `{"id":"sb-1","name":"intended"}`)
+						w.WriteHeader(http.StatusCreated)
+						_, _ = io.WriteString(w, `{"kind":"Sandbox","metadata":{"name":"intended"},"status":{"id":"sbx-1","phase":"Running"}}`)
 					}
 				}))
 				defer server.Close()
 				// The existing helper configures the full command tree's inherited input.
-				args := []string{"-test.run=^TestCellaConfiguredInputHelperProcess$", "--", product, "apply", "-f", "-", "--api-url", server.URL}
+				apiURL := server.URL
+				if product != "eval" {
+					apiURL += "/v1/environments"
+				}
+				args := []string{"-test.run=^TestConfiguredInputHelperProcess$", "--", product, "apply", "-f", "-", "--api-url", apiURL}
 				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 				defer cancel()
 				command := exec.CommandContext(ctx, binary, args...)

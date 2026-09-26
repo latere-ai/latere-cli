@@ -4,147 +4,123 @@
 package commands
 
 import (
-	"archive/tar"
-	"archive/zip"
-	"bufio"
 	"bytes"
-	"compress/bzip2"
-	"compress/gzip"
 	"context"
-	"encoding/base64"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"math"
-	"mime/multipart"
 	"net/http"
-	"net/url"
 	"os"
-	"path/filepath"
-	"strconv"
+	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/ulikunitz/xz"
+	"gopkg.in/yaml.v3"
+
+	cellaclient "latere.ai/x/cella/client"
+	v1 "latere.ai/x/cella/manifest/v1"
+	"latere.ai/x/pkg/otel"
 
 	"github.com/latere-ai/latere-cli/internal/api"
-
-	"latere.ai/x/pkg/relpath"
 )
 
-// ---- DTOs (subset of sandboxd's OpenAPI; keep loose so additive
-//      backend changes don't break the CLI). ----
+// defaultCellaURL is the hosted Cella control plane: its address under the
+// platform origin, including the base path the exported client maps every
+// /v1 route onto.
+const defaultCellaURL = "https://api.latere.ai/v1/environments"
 
-type sandboxDTO struct {
-	ID              string            `json:"id"`
-	Name            string            `json:"name,omitempty"`
-	State           string            `json:"state"`
-	Tier            string            `json:"tier,omitempty"`
-	CreatedAt       time.Time         `json:"created_at"`
-	LastActivityAt  time.Time         `json:"last_activity_at,omitzero"`
-	AutoStopMinutes int               `json:"auto_stop_minutes,omitempty"`
-	DiskGB          int               `json:"disk_gb,omitempty"`
-	CPUMilli        int               `json:"cpu_milli,omitempty"`
-	MemoryMB        int               `json:"memory_mb,omitempty"`
-	Deadline        time.Time         `json:"deadline,omitzero"`
-	Annotations     map[string]string `json:"annotations,omitempty"`
-	Workdir         string            `json:"workdir,omitempty"`
-}
+// cellaURLUsage is the --api-url help every Cella command shares. The base
+// carries the path the routes sit under, so a bare host is not enough.
+const cellaURLUsage = "Cella API base URL, including its /v1/environments path (default " + defaultCellaURL + ", or $LATERE_CELLA_URL)"
 
-type policyDTO struct {
-	Name               string    `json:"name"`
-	Label              string    `json:"label"`
-	Description        string    `json:"description"`
-	CapabilityProfile  string    `json:"capability_profile"`
-	SidecarRequired    bool      `json:"sidecar_required"`
-	IsDefault          bool      `json:"is_default"`
-	Selectable         bool      `json:"selectable"`
-	AssignmentSource   string    `json:"assignment_source"`
-	NetworkEgressFQDNs []string  `json:"network_egress_fqdns,omitempty"`
-	CreatedAt          time.Time `json:"created_at,omitzero"`
-	UpdatedAt          time.Time `json:"updated_at,omitzero"`
-}
+// cellaAudience is the aud claim of the bearer every Cella command presents:
+// the control plane's own audience, which auth mints actor tokens for on the
+// latere-cli client. It is the production audience whatever --api-url names:
+// the URL selects the deployment, the audience is what the issuer stamps.
+const cellaAudience = "cella"
 
-type commandDTO struct {
-	CommandID string    `json:"command_id"`
-	Phase     string    `json:"phase"`
-	ExitCode  *int      `json:"exit_code,omitempty"`
-	StartedAt time.Time `json:"started_at"`
-	ExitedAt  time.Time `json:"exited_at,omitzero"`
-}
+// cellaWorkspace is where a sandbox's workspace is mounted unless its
+// manifest moves it. A relative path given to a file command is resolved
+// under it, because the control plane takes absolute paths alone.
+const cellaWorkspace = "/workspace"
 
-type logsCursorDTO struct {
-	Bytes      string `json:"bytes"`
-	NextCursor int64  `json:"next_cursor"`
-	Phase      string `json:"phase"`
-	ExitCode   *int   `json:"exit_code,omitempty"`
-}
+// cellaCreateHold is how long a create is held for the sandbox to start: the
+// control plane's own default and the bound of `apply --wait` with no value.
+const cellaCreateHold = 10 * time.Minute
 
-type oneShotRunDTO struct {
-	RunID       string            `json:"run_id"`
-	SandboxID   string            `json:"sandbox_id"`
-	SandboxName string            `json:"sandbox_name"`
-	State       string            `json:"state"`
-	ExitCode    *int              `json:"exit_code,omitempty"`
-	Links       map[string]string `json:"links,omitempty"`
-	Timing      struct {
-		CreateMS  int64 `json:"create_ms"`
-		ExecMS    int64 `json:"exec_ms"`
-		CleanupMS int64 `json:"cleanup_ms"`
-		TotalMS   int64 `json:"total_ms"`
-	} `json:"timing"`
-	Stdout       string `json:"stdout"`
-	Stderr       string `json:"stderr"`
-	Truncated    bool   `json:"truncated"`
-	Error        string `json:"error,omitempty"`
-	CleanupError string `json:"cleanup_error,omitempty"`
-}
+// cellaTokenMargin is how long before its expiry a held bearer is replaced,
+// enough for the request it is attached to to reach the control plane first.
+const cellaTokenMargin = 60 * time.Second
 
-// ---- top-level ----
+// cellaUnknownExpiry is how long a bearer whose expiry the issuer did not
+// state is reused before another is minted.
+const cellaUnknownExpiry = time.Minute
 
-// newCellaCmd is the canonical `latere cella …` command tree. The
-// underlying API resource is "sandbox", but the product brand — and
-// the matching surface on https://latere.ai/cella — is Cella, so the
-// CLI follows the brand. `latere sandbox …` stays as a hidden alias
-// for v0.1.0 compatibility.
+// The phases of a Cella sandbox the commands decide on.
+const (
+	cellaPending  = "Pending"
+	cellaQueued   = "Queued"
+	cellaStarting = "Starting"
+	cellaRunning  = "Running"
+	cellaFailed   = "Failed"
+	cellaLost     = "Lost"
+)
+
+// newCellaCmd is the canonical `latere cella …` command tree. The API's
+// resource is the sandbox, and the product is Cella, so the CLI follows the
+// product. `latere sandbox …` is kept as an alias.
 func newCellaCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "cella",
 		Aliases: []string{"sandbox"},
-		Short:   "Manage cellas (create, list, policy, start, stop, delete, run).",
-		Long: `Manage Cella sandboxes — per-user compute environments at cella.latere.ai.
+		Short:   "Manage cellas: create, list, run commands in, and move files in or out.",
+		Long: `Manage Cella sandboxes on the Latere platform.
 
-Each cella is a PVC-backed workspace plus a Pod for compute. Tier
-'ephemeral' auto-stops on idle and auto-deletes after a wall-clock
-window; tier 'persistent' stays until you delete it.`,
-		Example: `  latere cella list
-  latere cella policy list
-  latere cella apply -f sandbox.yaml
+A cella is a sandbox with a persistent workspace at /workspace. It runs on
+the Cella control plane at https://api.latere.ai/v1/environments, reaches
+only the hosts its egress boundary admits, and runs an image from the
+platform's catalog: base, or gui for a desktop.
+
+A create answers as soon as the sandbox is recorded, usually Pending.
+'latere cella apply --wait' holds the answer until it runs or fails.`,
+		Example: `  latere cella apply -f sandbox.yaml --wait
+  latere cella list
+  latere cella exec dev -- uname -a
   latere cella shell dev
-  latere cella run dev -- python train.py
+  latere cella run --ephemeral --rm -- python -c 'print(1)'
   latere cella export dev src -o workspace.tar`,
+		// The group runs only for a word that names none of its commands,
+		// to say why a command of the retired API is gone. Its flags are
+		// not the group's to refuse first.
+		Args:               cobra.ArbitraryArgs,
+		FParseErrWhitelist: cobra.FParseErrWhitelist{UnknownFlags: true},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return cmd.Help()
+			}
+			if reason, ok := removedCellaCommands[args[0]]; ok {
+				return fmt.Errorf("'latere cella %s' is no longer available: %s", args[0], reason)
+			}
+			return fmt.Errorf("unknown command %q for %q; 'latere cella --help' lists the commands", args[0], cmd.CommandPath())
+		},
 	}
 	cmd.AddCommand(
 		newCeApplyCmd(),
 		newCeListCmd(),
 		newCeGetCmd(),
-		newCeRenameCmd(),
 		newCeStartCmd(),
 		newCeStopCmd(),
 		newCeDeleteCmd(),
-		newCePolicyCmd(),
 		newCeExecCmd(),
 		newCeShellCmd(),
 		newCeRunCmd(),
 		newCeLogsCmd(),
-		newCeWaitCmd(),
 		newCeImportCmd(),
 		newCeExportCmd(),
-		newCeExtendCmd(),
-		newCeConvertCmd(),
-		newCeResizeCmd(),
 		newCeCatCmd(),
 		newCeWriteCmd(),
 		newCeLsCmd(),
@@ -156,99 +132,240 @@ window; tier 'persistent' stays until you delete it.`,
 	return cmd
 }
 
-// newCeExecCmd registers `latere cella exec`, the synchronous
-// streaming variant of `cella run`.
-func newCeExecCmd() *cobra.Command {
-	var apiURL string
-	cmd := &cobra.Command{
-		Use:   "exec <name|id> -- <cmd>...",
-		Short: "Run a command synchronously inside a cella (streams logs to stdout).",
-		Long: `Run a command synchronously inside an existing cella.
-
-Stdout and stderr are streamed to your terminal. The CLI exits with
-the remote command's exit code when the command finishes.`,
-		Example: `  latere cella exec dev -- uname -a
-  latere cella exec dev -- python -m pytest
-  latere cella exec sb-019dc976-2b28-7c55-8778-bf7d5ae6c58d -- env`,
-		Args: cobra.MinimumNArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := authedClient(cmd.Context(), apiURL)
-			if err != nil {
-				return err
-			}
-			sandbox := args[0]
-			argv := args[1:]
-			return runAndStream(cmd.Context(), c, sandbox, argv, nil, "", nil, cmd.OutOrStdout())
-		},
-	}
-	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
-	return cmd
+// removedCellaCommands are the commands of the retired hosted sandbox API
+// that the Cella core has no counterpart for, each with the reason a user
+// reads when they run it.
+var removedCellaCommands = map[string]string{
+	"policy":  "the Cella core has no named policy profiles; a sandbox's egress boundary is spec.network.egress in its manifest",
+	"rename":  "a sandbox's name is fixed when it is created",
+	"extend":  "the Cella core has no tiers or deadlines; set spec.lifecycle (autoStop, ttl, autoDelete) in the manifest you create the sandbox from",
+	"convert": "the Cella core has no tiers or deadlines; set spec.lifecycle (autoStop, ttl, autoDelete) in the manifest you create the sandbox from",
+	"resize":  "a sandbox's resources are fixed when it is created; apply a new sandbox with the resources it needs",
+	"wait":    "the Cella core runs a command to completion and keeps no command records; 'latere cella exec' runs one and waits for it",
 }
 
-// ---- apply / list / get / rename / start / stop / delete ----
+// ---- the client ----
 
-// newCeApplyCmd registers `latere cella apply -f <file>`. Reads the
-// SandboxManifest from disk and POSTs the raw bytes to
-// /v1/sandboxes with Content-Type: application/yaml. The server is
-// the authoritative validator, so the CLI does no schema work.
-// "-" reads the manifest from stdin.
+// resolveCellaURL returns the control plane's address: the flag, then
+// $LATERE_CELLA_URL, then the hosted control plane.
+func resolveCellaURL(flagURL string) string {
+	u := flagURL
+	if u == "" {
+		u = os.Getenv("LATERE_CELLA_URL")
+	}
+	if u == "" {
+		u = defaultCellaURL
+	}
+	return strings.TrimRight(u, "/")
+}
+
+// cellaHTTPClient carries every Cella request, the attach socket included.
+// It has no Timeout: the exported client's own transport allows ten seconds
+// to the first response byte, and a create held until the sandbox runs, like
+// a synchronous command, answers only when it is done. Deadlines come from
+// the command's context instead.
+func cellaHTTPClient() *http.Client {
+	return &http.Client{Transport: otel.Transport(nil), CheckRedirect: api.PreserveMethodOnRedirect}
+}
+
+// cellaClient builds the Cella client for one command run. The bearer is an
+// actor token minted for cellaAudience alone from the saved login, so the
+// login token never reaches Cella. The client asks for it once per request,
+// and the token is re-minted when the held one is within cellaTokenMargin of
+// its expiry, which a transfer, an attach or a log follow outlives.
+//
+// LATERE_CELLA_TOKEN presents a bearer as given, for a development
+// deployment or a test, the same escape every other product has.
+func cellaClient(apiURL string) (*cellaclient.Client, error) {
+	base := resolveCellaURL(apiURL)
+	var token cellaclient.TokenSource
+	if t := strings.TrimSpace(os.Getenv("LATERE_CELLA_TOKEN")); t != "" {
+		token = cellaclient.StaticToken(t)
+	} else {
+		token = mintedCellaToken(api.ResolveAuthURL(base, ""))
+	}
+	return cellaclient.New(cellaclient.Config{
+		URL:        base,
+		Token:      token,
+		HTTPClient: cellaHTTPClient(),
+		UserAgent:  "latere-cli",
+	})
+}
+
+// mintedCellaToken is a token source that mints an actor token at authBase on
+// first use and again whenever the held one is due.
+func mintedCellaToken(authBase string) cellaclient.TokenSource {
+	var (
+		mu     sync.Mutex
+		held   string
+		expiry time.Time
+	)
+	return cellaclient.TokenFunc(func(ctx context.Context) (string, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if held != "" && time.Now().Before(expiry.Add(-cellaTokenMargin)) {
+			return held, nil
+		}
+		token, exp, err := api.ActorToken(ctx, authBase, cellaAudience)
+		if err != nil {
+			return "", fmt.Errorf("cannot authenticate to Cella: %w", err)
+		}
+		if exp.IsZero() {
+			exp = time.Now().Add(cellaUnknownExpiry + cellaTokenMargin)
+		}
+		held, expiry = token, exp
+		return held, nil
+	})
+}
+
+// resolveCellaPath maps a path argument onto the control plane's rule,
+// which takes only absolute paths at or below the workspace. A relative path
+// is resolved under the workspace; an absolute one is sent as given.
+func resolveCellaPath(p string) string {
+	if path.IsAbs(p) {
+		return path.Clean(p)
+	}
+	return path.Join(cellaWorkspace, p)
+}
+
+// ---- apply / list / get / start / stop / delete ----
+
+// newCeApplyCmd registers `latere cella apply -f <file>`. The manifest is
+// sent as written: the control plane decodes JSON and YAML alike, strictly,
+// and is the authoritative validator. A manifest that names its sandbox is
+// applied under that name, so applying it again updates the sandbox rather
+// than creating a second one.
 func newCeApplyCmd() *cobra.Command {
 	var (
-		file    string
-		apiURL  string
-		idemKey string
+		file   string
+		apiURL string
+		wait   time.Duration
 	)
 	cmd := &cobra.Command{
 		Use:   "apply",
-		Short: "Create a cella from a Sandbox Manifest file.",
-		Long: `Create a Cella from a declarative Sandbox Manifest.
+		Short: "Create or update a cella from a Sandbox manifest.",
+		Long: `Create a cella from a declarative Sandbox manifest, or update the one
+it names.
 
-The same YAML accepted by the dashboard's YAML tab and the
-public API. Defaults hit the warm pool, so a Manifest like the
-one below starts in around 300 ms:
+A manifest in YAML or JSON:
 
-  apiVersion: cella.latere.ai/v1        # Schema version.
+  apiVersion: cella.latere.ai/v1beta1
   kind: Sandbox
   metadata:
-    name: dev                           # Optional. Server picks one if omitted.
+    name: dev                       # Optional. The server names it if omitted.
   spec:
-    image: ghcr.io/latere-ai/sandbox-base:latest
-    tier: ephemeral                     # Or "persistent" to keep the workspace.
+    image: base                     # base, or gui for a desktop.
+    resources: {cpu: "2", memory: 4Gi, disk: 20Gi}
+    network:
+      egress:
+        allowedHosts: [api.latere.ai, github.com]
     lifecycle:
-      autoStop: 15m                     # Stop the compute after this much idle.
+      autoStop: 15m                 # Stop after this much idle time.
 
-Full field reference: https://cella.latere.ai/docs/cella/manifest`,
+The answer is the sandbox as soon as it is recorded, usually Pending.
+--wait holds it until the sandbox runs or fails, ten minutes unless
+--wait=DURATION says otherwise, and a sandbox that fails exits 1 with
+its reason.
+
+Field reference: https://platform.latere.ai/docs/cella/manifest`,
 		Example: `  latere cella apply -f sandbox.yaml
-  cat sandbox.yaml | latere cella apply -f -`,
+  latere cella apply -f sandbox.yaml --wait
+  cat sandbox.json | latere cella apply -f - --wait=2m`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if strings.TrimSpace(file) == "" {
-				return fmt.Errorf("-f is required (path to a Sandbox Manifest, or - for stdin)")
+				return fmt.Errorf("-f is required (path to a Sandbox manifest, or - for stdin)")
+			}
+			held := cmd.Flags().Changed("wait")
+			if held && (wait <= 0 || wait > time.Hour) {
+				return fmt.Errorf("--wait must be positive and at most 1h")
 			}
 			body, err := readManifestBody(file, cmd.InOrStdin())
 			if err != nil {
 				return err
 			}
-			c, err := authedClient(cmd.Context(), apiURL)
+			c, err := cellaClient(apiURL)
 			if err != nil {
 				return err
 			}
-			var sb sandboxDTO
-			var headers map[string]string
-			if idemKey != "" {
-				headers = map[string]string{"Idempotency-Key": idemKey}
+			var opts []cellaclient.CreateOption
+			if held {
+				opts = append(opts, cellaclient.Wait(wait))
 			}
-			if err := c.DoWithHeaders(cmd.Context(), http.MethodPost, "/v1/sandboxes",
-				bytes.NewReader(body), "application/yaml", headers, &sb); err != nil {
+			m := manifestOf(body)
+			var sb v1.Sandbox
+			if name := manifestName(body); name != "" {
+				sb, _, err = c.ApplySandbox(cmd.Context(), name, m, opts...)
+			} else {
+				sb, _, err = c.CreateSandbox(cmd.Context(), m, opts...)
+			}
+			if err != nil {
 				return err
 			}
-			return printSandbox(cmd.OutOrStdout(), sb)
+			if err := printSandbox(cmd.OutOrStdout(), sb); err != nil {
+				return err
+			}
+			if err := startFailure(sb); err != nil && held {
+				return err
+			}
+			name, phase := sb.Metadata.Name, sb.Status.Phase
+			switch {
+			case !starting(phase):
+			case held:
+				fprintf(cmd.ErrOrStderr(), "%s is still %s after the hold; 'latere cella get %s' reads its phase\n", name, phase, name)
+			default:
+				fprintf(cmd.ErrOrStderr(), "%s is %s; 'latere cella get %s' reads its phase, and 'apply --wait' holds the create until it runs\n", name, phase, name)
+			}
+			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&file, "file", "f", "", "path to a Sandbox Manifest YAML file, or - for stdin")
+	f := cmd.Flags()
+	f.StringVarP(&file, "file", "f", "", "path to a Sandbox manifest in YAML or JSON, or - for stdin")
 	_ = cmd.MarkFlagRequired("file")
-	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
-	cmd.Flags().StringVar(&idemKey, "idempotency-key", "", "dedup retried creates; same key + body replays the original result")
+	f.StringVar(&apiURL, "api-url", "", cellaURLUsage)
+	f.DurationVarP(&wait, "wait", "w", 0, "hold the create until the sandbox runs or fails, at most this long (default 10m)")
+	f.Lookup("wait").NoOptDefVal = cellaCreateHold.String()
 	return cmd
+}
+
+// manifestOf is the manifest in the syntax it was written in. A body whose
+// first character is a brace is JSON; anything else is YAML, of which JSON is
+// also a subset, so the control plane reads either way.
+func manifestOf(body []byte) cellaclient.Manifest {
+	if bytes.HasPrefix(bytes.TrimSpace(body), []byte("{")) {
+		return cellaclient.JSON(body)
+	}
+	return cellaclient.YAML(body)
+}
+
+// manifestName is the sandbox name the manifest declares, or empty when it
+// declares none or cannot be read here. An unreadable manifest is sent as a
+// create, so the refusal the user reads is the control plane's.
+func manifestName(body []byte) string {
+	var m struct {
+		Metadata struct {
+			Name string `yaml:"name"`
+		} `yaml:"metadata"`
+	}
+	if err := yaml.Unmarshal(body, &m); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(m.Metadata.Name)
+}
+
+// starting reports whether a sandbox is still on its way to running.
+func starting(phase string) bool {
+	return phase == cellaPending || phase == cellaQueued || phase == cellaStarting
+}
+
+// startFailure is the error of a held create whose sandbox did not start: a
+// Failed or Lost sandbox names its reason. A sandbox still starting when the
+// hold ended is not a failure; its phase is already printed.
+func startFailure(sb v1.Sandbox) error {
+	switch sb.Status.Phase {
+	case cellaFailed, cellaLost:
+		return fmt.Errorf("cella %s did not start: phase %s, reason %s", sb.Metadata.Name, sb.Status.Phase, defaultStr(sb.Status.Reason, "not given"))
+	}
+	return nil
 }
 
 // readManifestBody reads the manifest from path or, if path is "-",
@@ -290,129 +407,30 @@ func newCeListCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List your cellas.",
-		Long: `List cellas available to the current token.
-
-Regular users see their own cellas. Superadmin tokens can see all
-cellas returned by the backend, including warm-pool cellas.`,
+		Long:  "List the cellas the current login may read, with each one's phase.",
 		Example: `  latere cella list
   latere cella list --json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := authedClient(cmd.Context(), apiURL)
+			c, err := cellaClient(apiURL)
 			if err != nil {
 				return err
 			}
-			var sbs []sandboxDTO
-			if err := c.GetJSON(cmd.Context(), "/v1/sandboxes", &sbs); err != nil {
+			sbs, raws, err := c.ListSandboxes(cmd.Context(), cellaclient.ListOptions{})
+			if err != nil {
 				return err
 			}
 			if jsonF {
-				return printJSON(cmd.OutOrStdout(), sbs)
+				if raws == nil {
+					raws = []json.RawMessage{}
+				}
+				return printJSON(cmd.OutOrStdout(), raws)
 			}
 			return printSandboxList(cmd.OutOrStdout(), sbs)
 		},
 	}
-	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
+	cmd.Flags().StringVar(&apiURL, "api-url", "", cellaURLUsage)
 	cmd.Flags().BoolVar(&jsonF, "json", false, "JSON output")
 	return cmd
-}
-
-func newCePolicyCmd() *cobra.Command {
-	var (
-		apiURL string
-		jsonF  bool
-	)
-	cmd := &cobra.Command{
-		Use:     "policy",
-		Aliases: []string{"policies"},
-		Short:   "List policy profiles available for new cellas.",
-		Long: `List Cella policy profiles visible to the current token.
-
-Policies control runtime capabilities such as network shape, workspace
-layout, and whether Cella's credential sidecar is required. The default
-policy is used when a Manifest's spec.policy is left empty.
-
-Use a selectable policy by setting it in your Manifest:
-
-  spec:
-    policy: restricted-network
-
-If create fails because the selected policy requires the sidecar, list
-policies and choose a selectable policy where sidecar is "no", or ask
-an admin to configure the sidecar client for your token.`,
-		Example: `  latere cella policy
-  latere cella policy list
-  latere cella policies --json`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runPolicyList(cmd.Context(), cmd.OutOrStdout(), apiURL, jsonF)
-		},
-	}
-	f := cmd.Flags()
-	f.StringVar(&apiURL, "api-url", "", "override Cella API base URL")
-	f.BoolVar(&jsonF, "json", false, "JSON output")
-
-	list := &cobra.Command{
-		Use:   "list",
-		Short: "List policy profiles available for new cellas.",
-		Long:  cmd.Long,
-		Example: `  latere cella policy list
-  latere cella policy list --json`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runPolicyList(cmd.Context(), cmd.OutOrStdout(), apiURL, jsonF)
-		},
-	}
-	list.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
-	list.Flags().BoolVar(&jsonF, "json", false, "JSON output")
-	cmd.AddCommand(list)
-	return cmd
-}
-
-func runPolicyList(ctx context.Context, out io.Writer, apiURL string, jsonF bool) error {
-	c, err := authedClient(ctx, apiURL)
-	if err != nil {
-		return err
-	}
-	var policies []policyDTO
-	if err := c.GetJSON(ctx, "/v1/policies", &policies); err != nil {
-		return err
-	}
-	if jsonF {
-		return printJSON(out, policies)
-	}
-	return printPolicies(out, policies)
-}
-
-func printPolicies(out io.Writer, policies []policyDTO) error {
-	if len(policies) == 0 {
-		const message = "No policy profiles are visible to this token.\n" +
-			"Ask your Latere admin to assign a selectable policy, then re-run `latere cella apply` with `spec.policy` set in your Manifest.\n"
-		if _, err := fmt.Fprint(out, message); err != nil {
-			return fmt.Errorf("write policy guidance: %w", err)
-		}
-		return nil
-	}
-	for i, p := range policies {
-		if i > 0 {
-			if _, err := fmt.Fprintln(out); err != nil {
-				return fmt.Errorf("write policy separator: %w", err)
-			}
-		}
-		var record strings.Builder
-		field := func(label, value string) {
-			record.WriteString(formatWrappedField(label, value))
-		}
-		field("policy", p.Name)
-		field("label", p.Label)
-		field("default", yesNo(p.IsDefault))
-		field("selectable", yesNo(p.Selectable))
-		field("sidecar", yesNo(p.SidecarRequired))
-		field("capability", defaultStr(p.CapabilityProfile, "-"))
-		field("source", defaultStr(p.AssignmentSource, "-"))
-		field("description", defaultStr(p.Description, "-"))
-		if _, err := fmt.Fprint(out, record.String()); err != nil {
-			return fmt.Errorf("write policy %q: %w", p.Name, err)
-		}
-	}
-	return nil
 }
 
 func newCeGetCmd() *cobra.Command {
@@ -420,54 +438,35 @@ func newCeGetCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "get <name|id>",
 		Short: "Get a cella by name or id.",
-		Long:  "Fetch one cella by slug or id and print the full JSON response.",
+		Long:  "Fetch one cella by name or id and print it as the control plane answered, in JSON.",
 		Example: `  latere cella get dev
-  latere cella get sb-019dc976-2b28-7c55-8778-bf7d5ae6c58d`,
+  latere cella get sbx_01k5x6j9c2`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := authedClient(cmd.Context(), apiURL)
+			c, err := cellaClient(apiURL)
 			if err != nil {
 				return err
 			}
-			var sb sandboxDTO
-			if err := c.GetJSON(cmd.Context(), sbPath(args[0]), &sb); err != nil {
+			_, raw, err := c.GetSandbox(cmd.Context(), args[0])
+			if err != nil {
 				return err
 			}
-			return printJSON(cmd.OutOrStdout(), sb)
+			return printRawJSON(cmd.OutOrStdout(), raw)
 		},
 	}
-	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
+	cmd.Flags().StringVar(&apiURL, "api-url", "", cellaURLUsage)
 	return cmd
 }
 
-func newCeRenameCmd() *cobra.Command {
-	var apiURL string
-	cmd := &cobra.Command{
-		Use:   "rename <name|id> <new-name>",
-		Short: "Rename a cella.",
-		Long:  "Rename a cella slug while keeping the same underlying workspace and id.",
-		Example: `  latere cella rename workspace-1 dev
-  latere cella rename sb-019dc976-2b28-7c55-8778-bf7d5ae6c58d dev`,
-		Args: cobra.ExactArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := authedClient(cmd.Context(), apiURL)
-			if err != nil {
-				return err
-			}
-			var sb sandboxDTO
-			body, err := jsonReader(map[string]any{"name": args[1]})
-			if err != nil {
-				return err
-			}
-			if err := c.Do(cmd.Context(), http.MethodPatch, sbPath(args[0]),
-				body, "application/json", &sb); err != nil {
-				return err
-			}
-			return printSandbox(cmd.OutOrStdout(), sb)
-		},
+// printRawJSON writes the control plane's own bytes, indented.
+func printRawJSON(out io.Writer, raw []byte) error {
+	var buf bytes.Buffer
+	if err := json.Indent(&buf, raw, "", "  "); err != nil {
+		return fmt.Errorf("the answer is not JSON: %w", err)
 	}
-	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
-	return cmd
+	buf.WriteByte('\n')
+	_, err := out.Write(buf.Bytes())
+	return err
 }
 
 func newCeStartCmd() *cobra.Command { return simpleAction("start", "Start a stopped cella.") }
@@ -478,24 +477,28 @@ func simpleAction(verb, short string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   verb + " <name|id>",
 		Short: short,
-		Long:  fmt.Sprintf("%s a cella by slug or id.", strings.ToUpper(verb[:1])+verb[1:]),
+		Long: fmt.Sprintf("%s a cella by name or id. The workspace is kept across a stop and a start.",
+			strings.ToUpper(verb[:1])+verb[1:]),
 		Example: fmt.Sprintf(`  latere cella %s dev
-  latere cella %s sb-019dc976-2b28-7c55-8778-bf7d5ae6c58d`, verb, verb),
+  latere cella %s sbx_01k5x6j9c2`, verb, verb),
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := authedClient(cmd.Context(), apiURL)
+			c, err := cellaClient(apiURL)
 			if err != nil {
 				return err
 			}
-			var sb sandboxDTO
-			path := sbPath(args[0]) + "/" + verb
-			if err := c.Do(cmd.Context(), http.MethodPost, path, nil, "", &sb); err != nil {
+			act := c.StartSandbox
+			if verb == "stop" {
+				act = c.StopSandbox
+			}
+			sb, _, err := act(cmd.Context(), args[0])
+			if err != nil {
 				return err
 			}
 			return printSandbox(cmd.OutOrStdout(), sb)
 		},
 	}
-	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
+	cmd.Flags().StringVar(&apiURL, "api-url", "", cellaURLUsage)
 	return cmd
 }
 
@@ -504,1593 +507,369 @@ func newCeDeleteCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "delete <name|id>",
 		Short: "Delete a cella (workspace contents are lost).",
-		Long: `Delete a cella and its workspace data.
+		Long: `Delete a cella and its workspace.
 
-This removes the backing workspace. Export files first if you need to
-keep them.`,
+This removes the workspace. Export files first if you need to keep them.`,
 		Example: `  latere cella export dev -o dev.tar
   latere cella delete dev`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := authedClient(cmd.Context(), apiURL)
+			c, err := cellaClient(apiURL)
 			if err != nil {
 				return err
 			}
-			if err := c.Do(cmd.Context(), http.MethodDelete, sbPath(args[0]), nil, "", nil); err != nil {
+			if _, err := c.Delete(cmd.Context(), cellaclient.KindSandbox, args[0]); err != nil {
 				return err
 			}
-			fmt.Fprintf(os.Stderr, "deleted %s\n", args[0])
+			fprintf(cmd.ErrOrStderr(), "deleted %s\n", args[0])
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
+	cmd.Flags().StringVar(&apiURL, "api-url", "", cellaURLUsage)
 	return cmd
 }
 
-// ---- run / logs / wait ----
+// ---- exec / run / logs ----
 
+// newCeExecCmd registers `latere cella exec`: one command in an existing
+// cella, run to completion on the control plane's synchronous route.
+func newCeExecCmd() *cobra.Command {
+	var (
+		apiURL  string
+		envFlag []string
+		cwd     string
+		timeout time.Duration
+	)
+	cmd := &cobra.Command{
+		Use:   "exec <name|id> -- <cmd>...",
+		Short: "Run a command in a cella and wait for it.",
+		Long: `Run a command in an existing cella and wait for it to end.
+
+The command's standard output and standard error are written to yours
+when it ends, each cut at one mebibyte, and the CLI exits with the
+command's exit code. Its standard input is empty. For an interactive
+program, open a terminal with 'latere cella shell'.`,
+		Example: `  latere cella exec dev -- uname -a
+  latere cella exec dev --cwd app --env DEBUG=1 -- python -m pytest
+  latere cella exec dev --timeout 30m -- make build`,
+		Args: cobra.MinimumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			req, err := cellaExecRequest(args[1:], envFlag, cwd, timeout)
+			if err != nil {
+				return err
+			}
+			c, err := cellaClient(apiURL)
+			if err != nil {
+				return err
+			}
+			res, _, err := c.Exec(cmd.Context(), args[0], req)
+			if err != nil {
+				return err
+			}
+			return writeExecResult(cmd.OutOrStdout(), cmd.ErrOrStderr(), res)
+		},
+	}
+	f := cmd.Flags()
+	f.StringVar(&apiURL, "api-url", "", cellaURLUsage)
+	f.StringArrayVar(&envFlag, "env", nil, "environment variable KEY=VALUE for this command; repeatable")
+	f.StringVar(&cwd, "cwd", "", "working directory; a relative path is under /workspace")
+	f.DurationVar(&timeout, "timeout", 0, "end the command after this long, at most 1h (default 10m)")
+	return cmd
+}
+
+// cellaExecRequest is the body of one exec. The timeout is the control
+// plane's to enforce, which refuses one above an hour.
+func cellaExecRequest(argv, envFlag []string, cwd string, timeout time.Duration) (cellaclient.ExecRequest, error) {
+	if timeout < 0 || timeout > time.Hour {
+		return cellaclient.ExecRequest{}, fmt.Errorf("--timeout must be positive and at most 1h")
+	}
+	env, err := parseKV(envFlag)
+	if err != nil {
+		return cellaclient.ExecRequest{}, err
+	}
+	req := cellaclient.ExecRequest{Command: argv, Env: env}
+	if cwd != "" {
+		req.Workdir = resolveCellaPath(cwd)
+	}
+	if timeout > 0 {
+		req.Timeout = timeout.String()
+	}
+	return req, nil
+}
+
+// writeExecResult writes a finished command's two outputs to the CLI's own
+// and returns its exit code as the command's result.
+func writeExecResult(stdout, stderr io.Writer, res cellaclient.ExecResult) error {
+	if _, err := io.WriteString(stdout, res.Stdout); err != nil {
+		return fmt.Errorf("write command stdout: %w", err)
+	}
+	if _, err := io.WriteString(stderr, res.Stderr); err != nil {
+		return fmt.Errorf("write command stderr: %w", err)
+	}
+	if res.Truncated {
+		fprintln(stderr, "cella: the output was cut at the control plane's one mebibyte cap")
+	}
+	return remoteExit(res.ExitCode)
+}
+
+// newCeRunCmd registers `latere cella run --ephemeral --rm`: a disposable
+// cella created for one command and deleted after it.
 func newCeRunCmd() *cobra.Command {
 	var (
-		apiURL         string
-		envFlag        []string
-		credentialFlag []string
-		cwd            string
-		follow         bool
-		detach         bool
-		ephemeral      bool
-		rm             bool
-		image          string
-		diskGB         int
-		cpu            string
-		memory         string
-		timeout        int
-		printJSONOut   bool
+		apiURL    string
+		envFlag   []string
+		cwd       string
+		ephemeral bool
+		rm        bool
+		image     string
+		diskGB    int
+		cpu       string
+		memory    string
+		timeout   int
+		jsonOut   bool
 	)
 	cmd := &cobra.Command{
-		Use:   "run [name|id] -- <argv>...",
-		Short: "Run a command in a cella, or one-shot in a disposable ephemeral cella.",
-		Long: `Run commands in Cella.
+		Use:   "run --ephemeral --rm -- <argv>...",
+		Short: "Run one command in a disposable cella that is deleted after it.",
+		Long: `Run one command in a disposable cella.
 
-With a cella name or id, the command runs in that existing workspace.
-By default the command starts in the background and prints a command id;
-use --follow to stream logs and exit with the remote exit code.
+Cella creates a sandbox for this command, waits for it to run, runs the
+command, and deletes the sandbox when the command ends, fails, or is
+interrupted. Both --ephemeral and --rm are required, so the deletion is
+never implied. To run a command in a cella you keep, use
+'latere cella exec'.
 
-With --ephemeral --rm, Cella creates a disposable workspace for this
-single command and removes it when the command finishes. Add --detach
-to start that one-shot run and return immediately with a run id.`,
-		Example: `  latere cella run dev -- python train.py
-  latere cella run dev --follow -- make test
-  latere cella run dev --env DEBUG=1 --cwd /workspace/app -- npm test
-  latere cella run --ephemeral --rm -- python -c 'print("hello")'
-  latere cella run --ephemeral --rm --detach -- make benchmark`,
+The sandbox takes the platform's default egress boundary. It also stops
+after 15 minutes idle and is deleted two hours after its creation, so
+one the CLI could not delete does not linger.`,
+		Example: `  latere cella run --ephemeral --rm -- python -c 'print("hello")'
+  latere cella run --ephemeral --rm --cpu 2 --memory 4Gi -- make test
+  latere cella run --ephemeral --rm --json -- uname -a`,
 		Args: func(cmd *cobra.Command, args []string) error {
-			if ephemeral || rm {
-				if !ephemeral || !rm {
-					return fmt.Errorf("--ephemeral and --rm must be used together for one-shot runs")
-				}
-				if len(args) == 0 {
-					return fmt.Errorf("missing argv after --")
-				}
-				return nil
+			if !ephemeral || !rm {
+				return fmt.Errorf("run needs --ephemeral --rm; to run a command in an existing cella, use 'latere cella exec'")
 			}
-			if detach {
-				return fmt.Errorf("--detach requires --ephemeral --rm")
-			}
-			if len(args) < 2 {
-				return fmt.Errorf("requires <name|id> -- <argv>... unless --ephemeral --rm is set")
+			if len(args) == 0 {
+				return fmt.Errorf("missing argv after --")
 			}
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := authedClient(cmd.Context(), apiURL)
+			if timeout <= 0 || timeout > 3600 {
+				return fmt.Errorf("--timeout must be between 1 and 3600 seconds")
+			}
+			if diskGB < 0 {
+				return fmt.Errorf("--disk must not be negative")
+			}
+			req, err := cellaExecRequest(args, envFlag, cwd, time.Duration(timeout)*time.Second)
 			if err != nil {
 				return err
 			}
-			env, err := parseKV(envFlag)
+			c, err := cellaClient(apiURL)
 			if err != nil {
 				return err
 			}
-			if ephemeral && rm {
-				if detach {
-					out, err := oneShotRunDetached(cmd.Context(), c, args, env, cwd, image, diskGB, cpu, memory, timeout, credentialFlag)
-					if err != nil {
-						return err
-					}
-					if printJSONOut {
-						return printJSON(cmd.OutOrStdout(), out)
-					}
-					return printStartedDetachedOneShotRun(cmd.OutOrStdout(), out)
-				}
-				out, err := oneShotRun(cmd.Context(), c, args, env, cwd, image, diskGB, cpu, memory, timeout, credentialFlag)
-				if err != nil {
-					return err
-				}
-				if printJSONOut {
-					if err := printJSON(cmd.OutOrStdout(), out); err != nil {
-						return err
-					}
-				} else if err := printOneShotRun(cmd.OutOrStdout(), cmd.ErrOrStderr(), out); err != nil {
-					return err
-				}
-				return commandExitError(out.State, out.ExitCode)
-			}
-			if follow {
-				return runAndStream(cmd.Context(), c, args[0], args[1:], env, cwd, credentialFlag, cmd.OutOrStdout())
-			}
-			cd, err := startCommand(cmd.Context(), c, args[0], args[1:], env, cwd, credentialFlag)
-			if err != nil {
-				return err
-			}
-			if _, err := fmt.Fprintln(cmd.OutOrStdout(), cd.CommandID); err != nil {
-				return fmt.Errorf("command %q started, but writing its ID failed: %w", cd.CommandID, err)
-			}
-			return nil
+			spec := oneShotSpec(image, cpu, memory, diskGB)
+			return runOneShot(cmd.Context(), c, spec, req, jsonOut, cmd.OutOrStdout(), cmd.ErrOrStderr())
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&apiURL, "api-url", "", "override Cella API base URL")
-	f.StringArrayVar(&envFlag, "env", nil, "non-secret KEY=VALUE; repeatable")
-	f.StringArrayVar(&credentialFlag, "credential", nil, "trust-plane catalog key to use for this command; repeatable")
-	f.StringVar(&cwd, "cwd", "", "working dir inside the cella")
-	f.BoolVarP(&follow, "follow", "f", false, "stream logs and exit with the command's exit code")
-	f.BoolVar(&detach, "detach", false, "start a disposable one-shot run and return its run id immediately")
-	f.BoolVar(&ephemeral, "ephemeral", false, "create a disposable one-shot ephemeral cella for this command")
-	f.BoolVar(&rm, "rm", false, "delete the one-shot cella after the command; required with --ephemeral")
-	f.StringVar(&image, "image", "", "one-shot image ref (default Cella base image)")
-	f.IntVar(&diskGB, "disk", 0, "one-shot PVC size in GB (default 1)")
-	f.StringVar(&cpu, "cpu", "", "one-shot CPU limit as a Kubernetes quantity, e.g. 1.5 or 1500m")
-	f.StringVar(&memory, "memory", "", "one-shot memory limit as a Kubernetes quantity, e.g. 4Gi or 2048Mi")
-	f.IntVar(&timeout, "timeout", 600, "one-shot command timeout in seconds")
-	f.BoolVar(&printJSONOut, "json", false, "print one-shot response as JSON")
-	cmd.AddCommand(
-		newCeRunStatusCmd(),
-		newCeRunLogsCmd(),
-		newCeRunCancelCmd(),
-	)
+	f.StringVar(&apiURL, "api-url", "", cellaURLUsage)
+	f.StringArrayVar(&envFlag, "env", nil, "environment variable KEY=VALUE for the command; repeatable")
+	f.StringVar(&cwd, "cwd", "", "working directory; a relative path is under /workspace")
+	f.BoolVar(&ephemeral, "ephemeral", false, "create a disposable cella for this command; required")
+	f.BoolVar(&rm, "rm", false, "delete the cella after the command; required")
+	f.StringVar(&image, "image", "", "catalog image: base (the default) or gui")
+	f.IntVar(&diskGB, "disk", 0, "workspace size in GiB (default: the platform's)")
+	f.StringVar(&cpu, "cpu", "", "CPU limit as a Kubernetes quantity, e.g. 1.5 or 1500m")
+	f.StringVar(&memory, "memory", "", "memory limit as a Kubernetes quantity, e.g. 4Gi or 2048Mi")
+	f.IntVar(&timeout, "timeout", 600, "command timeout in seconds, at most 3600")
+	f.BoolVar(&jsonOut, "json", false, "print the result as JSON")
 	return cmd
 }
 
-func newCeRunStatusCmd() *cobra.Command {
-	var (
-		apiURL       string
-		printJSONOut bool
-	)
-	cmd := &cobra.Command{
-		Use:   "status <run_id>",
-		Short: "Get a detached one-shot run status.",
-		Long:  "Show the current phase, output summary, and exit code for a detached one-shot run.",
-		Example: `  latere cella run status run_123
-  latere cella run status run_123 --json`,
-		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := authedClient(cmd.Context(), apiURL)
-			if err != nil {
-				return err
-			}
-			out, err := oneShotRunStatus(cmd.Context(), c, args[0])
-			if err != nil {
-				return err
-			}
-			if printJSONOut {
-				return printJSON(cmd.OutOrStdout(), out)
-			}
-			printDetachedOneShotRun(out)
-			if out.ExitCode != nil {
-				fmt.Fprintf(os.Stderr, "exit_code=%d\n", *out.ExitCode)
-			}
-			return nil
+// oneShotSpec is the manifest of a disposable cella. The lifecycle rules are
+// the backstop for a sandbox the CLI could not delete, a process killed
+// between the create and the delete among them.
+func oneShotSpec(image, cpu, memory string, diskGB int) v1.Sandbox {
+	sb := v1.Sandbox{
+		APIVersion: v1.APIVersion,
+		Kind:       v1.KindSandbox,
+		Spec: v1.SandboxSpec{
+			Image:     image,
+			Resources: v1.Resources{CPU: v1.Quantity(cpu), Memory: v1.Quantity(memory)},
+			Lifecycle: v1.Lifecycle{AutoStop: "15m", TTL: "2h"},
 		},
 	}
-	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
-	cmd.Flags().BoolVar(&printJSONOut, "json", false, "print response as JSON")
-	return cmd
+	if diskGB > 0 {
+		sb.Spec.Resources.Disk = v1.Quantity(fmt.Sprintf("%dGi", diskGB))
+	}
+	return sb
 }
 
-func newCeRunLogsCmd() *cobra.Command {
-	var (
-		apiURL string
-		cursor int64
-		follow bool
-	)
-	cmd := &cobra.Command{
-		Use:   "logs <run_id>",
-		Short: "Read or follow detached one-shot run logs.",
-		Long: `Read logs from a detached one-shot run.
-
-Use --cursor to resume from a byte offset printed by a previous logs
-call. Use --follow to keep streaming until the run exits.`,
-		Example: `  latere cella run logs run_123
-  latere cella run logs run_123 --cursor 2048
-  latere cella run logs run_123 --follow`,
-		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := authedClient(cmd.Context(), apiURL)
-			if err != nil {
-				return err
-			}
-			if follow {
-				return streamOneShotRunLogs(cmd.Context(), c, args[0], cursor, cmd.OutOrStdout())
-			}
-			out, err := fetchOneShotRunLogs(cmd.Context(), c, args[0], cursor)
-			if err != nil {
-				return err
-			}
-			if _, err := fmt.Fprint(cmd.OutOrStdout(), out.Bytes); err != nil {
-				return fmt.Errorf("write logs: %w", err)
-			}
-			fmt.Fprintf(os.Stderr, "[cursor=%d state=%s]\n", out.NextCursor, out.Phase)
-			return nil
-		},
-	}
-	f := cmd.Flags()
-	f.StringVar(&apiURL, "api-url", "", "override Cella API base URL")
-	f.Int64Var(&cursor, "cursor", 0, "byte offset to start from")
-	f.BoolVarP(&follow, "follow", "f", false, "stream until the run exits")
-	return cmd
+// oneShotName is the name a disposable cella is created under. The CLI picks
+// it, rather than the control plane, so a create whose answer never arrives,
+// because the hold was interrupted or the connection dropped, still leaves a
+// name to delete. Twelve base32 characters make a collision with another of
+// the caller's sandboxes, which the apply would update, negligible.
+func oneShotName() string {
+	return "run-" + strings.ToLower(rand.Text()[:12])
 }
 
-func newCeRunCancelCmd() *cobra.Command {
-	var (
-		apiURL       string
-		printJSONOut bool
-	)
-	cmd := &cobra.Command{
-		Use:   "cancel <run_id>",
-		Short: "Cancel a detached one-shot run.",
-		Long:  "Request cancellation for a detached one-shot run and print the updated run status.",
-		Example: `  latere cella run cancel run_123
-  latere cella run cancel run_123 --json`,
-		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := authedClient(cmd.Context(), apiURL)
-			if err != nil {
-				return err
-			}
-			out, err := oneShotRunCancel(cmd.Context(), c, args[0])
-			if err != nil {
-				return err
-			}
-			if printJSONOut {
-				return printJSON(cmd.OutOrStdout(), out)
-			}
-			printDetachedOneShotRun(out)
-			return nil
-		},
+// oneShotResult is what `run --json` prints.
+type oneShotResult struct {
+	Sandbox    string `json:"sandbox"`
+	ID         string `json:"id"`
+	ExitCode   int    `json:"exitCode"`
+	Stdout     string `json:"stdout"`
+	Stderr     string `json:"stderr"`
+	Truncated  bool   `json:"truncated"`
+	CreateMS   int64  `json:"createMs"`
+	DurationMS int64  `json:"durationMs"`
+}
+
+// runOneShot is the create-then-use flow: the create is held until the
+// sandbox runs, the command runs to completion, and the sandbox is deleted on
+// every path after the create, a failed start and an interrupt included. The
+// delete runs on a context detached from the command's, which an interrupt
+// has already ended.
+func runOneShot(ctx context.Context, c *cellaclient.Client, spec v1.Sandbox, req cellaclient.ExecRequest, jsonOut bool, stdout, stderr io.Writer) (err error) {
+	name := oneShotName()
+	spec.Metadata.Name = name
+	m, err := cellaclient.Encode(spec)
+	if err != nil {
+		return err
 	}
-	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
-	cmd.Flags().BoolVar(&printJSONOut, "json", false, "print response as JSON")
-	return cmd
+	began := time.Now()
+	sb, _, err := c.ApplySandbox(ctx, name, m, cellaclient.Wait(cellaCreateHold))
+	if err != nil {
+		// A refusal created nothing. Any other failure may have lost the
+		// answer to a create the control plane recorded, so the name is
+		// deleted, and a sandbox that was never made reads as not found.
+		if cellaclient.CodeOf(err) == "" {
+			if delErr := deleteOneShot(ctx, c, name, jsonOut, stderr); delErr != nil {
+				err = errors.Join(err, delErr)
+			}
+		}
+		return err
+	}
+	created := time.Since(began)
+	defer func() {
+		delErr := deleteOneShot(ctx, c, name, jsonOut, stderr)
+		if delErr == nil {
+			return
+		}
+		// A command's own exit code stays the process's, which leaves the
+		// error unprinted, so a cella left behind is reported here instead.
+		if _, remote := errors.AsType[*remoteExitError](err); remote {
+			fprintln(stderr, delErr)
+			return
+		}
+		err = errors.Join(err, delErr)
+	}()
+	if sb.Status.Phase != cellaRunning {
+		if failure := startFailure(sb); failure != nil {
+			return failure
+		}
+		return fmt.Errorf("cella %s is still %s after %s", name, sb.Status.Phase, cellaCreateHold)
+	}
+	if !jsonOut {
+		fprintf(stderr, "created cella %s in %s\n", name, created.Round(time.Millisecond))
+	}
+	res, _, err := c.Exec(ctx, name, req)
+	if err != nil {
+		return err
+	}
+	if jsonOut {
+		if err := printJSON(stdout, oneShotResult{
+			Sandbox: name, ID: sb.Status.ID, ExitCode: res.ExitCode,
+			Stdout: res.Stdout, Stderr: res.Stderr, Truncated: res.Truncated,
+			CreateMS: created.Milliseconds(), DurationMS: res.DurationMS,
+		}); err != nil {
+			return err
+		}
+		return remoteExit(res.ExitCode)
+	}
+	return writeExecResult(stdout, stderr, res)
+}
+
+// deleteOneShot deletes a disposable cella by name on a context of its own,
+// bounded to a minute, so an interrupt that ended the command's context does
+// not also cancel the cleanup. A cella already gone is no failure. quiet
+// leaves out the confirmation line, which a --json output keeps off stderr.
+func deleteOneShot(ctx context.Context, c *cellaclient.Client, name string, quiet bool, stderr io.Writer) error {
+	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
+	defer cancel()
+	if _, err := c.Delete(cleanup, cellaclient.KindSandbox, name); err != nil {
+		if cellaclient.CodeOf(err) == "not_found" {
+			return nil
+		}
+		return fmt.Errorf("delete cella %s: %w; delete it with 'latere cella delete %s'", name, err, name)
+	}
+	if !quiet {
+		fprintf(stderr, "deleted cella %s\n", name)
+	}
+	return nil
 }
 
 func newCeLogsCmd() *cobra.Command {
 	var (
 		apiURL string
-		cursor int64
 		follow bool
+		tail   int
+		since  string
 	)
 	cmd := &cobra.Command{
-		Use:   "logs <name|id> <command_id>",
-		Short: "Read or follow command logs.",
-		Long: `Read logs from a command previously started in an existing cella.
-
-Use the command id printed by 'latere cella run <name|id> -- <argv>...'.
-Use --cursor to resume from a byte offset, or --follow to stream until
-the command exits.`,
-		Example: `  latere cella run dev -- make test
-  latere cella logs dev cmd_123
-  latere cella logs dev cmd_123 --cursor 4096
-  latere cella logs dev cmd_123 --follow`,
-		Args: cobra.ExactArgs(2),
+		Use:   "logs <name|id>",
+		Short: "Read or follow a cella's main process output.",
+		Long: `Read the output of a cella's main process, the command its manifest
+runs. --follow keeps writing it as it arrives.`,
+		Example: `  latere cella logs dev
+  latere cella logs dev --tail 100
+  latere cella logs dev --follow --since 2026-09-26T10:00:00Z`,
+		Args: func(cmd *cobra.Command, args []string) error {
+			// A second argument was a command id on the retired API.
+			if len(args) == 2 {
+				return errors.New("logs reads a cella's main process output and takes no command id: the Cella core keeps no command records")
+			}
+			return cobra.ExactArgs(1)(cmd, args)
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := authedClient(cmd.Context(), apiURL)
+			if tail < 0 {
+				return fmt.Errorf("--tail must not be negative")
+			}
+			opts := cellaclient.LogOptions{Follow: follow, Tail: tail}
+			if since != "" {
+				t, err := time.Parse(time.RFC3339, since)
+				if err != nil {
+					return fmt.Errorf("--since must be RFC3339: %w", err)
+				}
+				opts.Since = t
+			}
+			c, err := cellaClient(apiURL)
 			if err != nil {
 				return err
 			}
-			if follow {
-				return streamLogs(cmd.Context(), c, args[0], args[1], cursor, cmd.OutOrStdout())
-			}
-			out, err := fetchLogsCursor(cmd.Context(), c, args[0], args[1], cursor)
+			body, err := c.Logs(cmd.Context(), args[0], opts)
 			if err != nil {
 				return err
 			}
-			if _, err := fmt.Fprint(cmd.OutOrStdout(), out.Bytes); err != nil {
+			defer func() { _ = body.Close() }()
+			if _, err := io.Copy(cmd.OutOrStdout(), body); err != nil {
 				return fmt.Errorf("write logs: %w", err)
-			}
-			if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "[cursor=%d phase=%s]\n", out.NextCursor, out.Phase); err != nil {
-				return fmt.Errorf("write command status: %w", err)
 			}
 			return nil
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&apiURL, "api-url", "", "override Cella API base URL")
-	f.Int64Var(&cursor, "cursor", 0, "byte offset to start from")
-	f.BoolVarP(&follow, "follow", "f", false, "stream until command exits")
+	f.StringVar(&apiURL, "api-url", "", cellaURLUsage)
+	f.BoolVarP(&follow, "follow", "f", false, "keep writing output as it arrives")
+	f.IntVar(&tail, "tail", 0, "start this many lines from the end")
+	f.StringVar(&since, "since", "", "only output after this RFC3339 instant")
 	return cmd
 }
 
-func newCeWaitCmd() *cobra.Command {
-	var (
-		apiURL string
-		secs   int
-	)
-	cmd := &cobra.Command{
-		Use:   "wait <name|id> <command_id>",
-		Short: "Poll a command until it terminates or --timeout passes.",
-		Long:  "Wait for a background command in an existing cella and exit with the remote exit code when available.",
-		Example: `  latere cella run dev -- make test
-  latere cella wait dev cmd_123
-  latere cella wait dev cmd_123 --timeout 1200`,
-		Args: cobra.ExactArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			const maxTimeoutSeconds = int64(math.MaxInt64) / int64(time.Second)
-			if secs <= 0 || int64(secs) > maxTimeoutSeconds {
-				return fmt.Errorf("--timeout must be between 1 and %d seconds", maxTimeoutSeconds)
-			}
-			c, err := authedClient(cmd.Context(), apiURL)
-			if err != nil {
-				return err
-			}
-			cd, err := waitCommand(cmd.Context(), c, args[0], args[1], time.Duration(secs)*time.Second)
-			if err != nil {
-				return err
-			}
-			status := fmt.Sprintf("phase=%s", cd.Phase)
-			if cd.ExitCode != nil {
-				status += fmt.Sprintf(" exit_code=%d", *cd.ExitCode)
-			}
-			exitErr := commandExitError(cd.Phase, cd.ExitCode)
-			if _, err := fmt.Fprintln(cmd.ErrOrStderr(), status); err != nil {
-				return errors.Join(exitErr, fmt.Errorf("write command status: %w", err))
-			}
-			return exitErr
-		},
-	}
-	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
-	cmd.Flags().IntVar(&secs, "timeout", 600, "max poll seconds (must be positive)")
-	return cmd
-}
-
-// ---- import / export ----
-
-func newCeExportCmd() *cobra.Command {
-	var (
-		apiURL string
-		srcDir string
-		out    string
-	)
-	cmd := &cobra.Command{
-		Use:   "export <name|id> [paths...]",
-		Short: "Stream a tar of files from the cella workspace.",
-		Long: `Export files from a Cella workspace as a tar stream.
-
-By default paths are resolved under /workspace and the tar is written
-to stdout. Pass --output to write the archive to a local file.`,
-		Example: `  latere cella export dev -o workspace.tar
-  latere cella export dev src package.json -o app.tar
-  latere cella export dev --src-dir /workspace/results logs -o results.tar`,
-		Args: cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if out == "" {
-				return errors.New("--output cannot be empty; use '-' for stdout")
-			}
-			c, err := authedClient(cmd.Context(), apiURL)
-			if err != nil {
-				return err
-			}
-			body := map[string]any{}
-			if srcDir != "" {
-				body["src_dir"] = srcDir
-			}
-			if len(args) > 1 {
-				body["paths"] = args[1:]
-			}
-			path := sbPath(args[0]) + "/files/export"
-			b, err := json.Marshal(body)
-			if err != nil {
-				return err
-			}
-			resp, err := c.DoRaw(cmd.Context(), http.MethodPost, path,
-				bytes.NewReader(b), "application/json")
-			if err != nil {
-				return err
-			}
-			defer func() { _ = resp.Body.Close() }()
-			if resp.StatusCode != http.StatusOK {
-				return fmt.Errorf("cella: expected HTTP 200 for a complete download, got HTTP %d", resp.StatusCode)
-			}
-			if out != "-" {
-				return saveDownload(out, resp.Body)
-			}
-			_, err = io.Copy(cmd.OutOrStdout(), resp.Body)
-			return err
-		},
-	}
-	f := cmd.Flags()
-	f.StringVar(&apiURL, "api-url", "", "override Cella API base URL")
-	f.StringVar(&srcDir, "src-dir", "", "directory inside the cella; default /workspace")
-	f.StringVarP(&out, "output", "o", "-", "output tar path (- for stdout)")
-	return cmd
-}
-
-func newCeImportCmd() *cobra.Command {
-	var (
-		apiURL  string
-		dest    string
-		input   string
-		timeout time.Duration
-	)
-	cmd := &cobra.Command{
-		Use:   "import <name|id>",
-		Short: "Upload files into the cella workspace (reads stdin or --input).",
-		Long: `Import files into a Cella workspace.
-
-Tar archives are extracted. Gzip, bzip2, and XZ compression are decoded
-before upload, including when reading tar from stdin. Zip archives are
-converted to tar. A regular file is copied as a single file into the
-destination directory.`,
-		Example: `  latere cella import dev --input workspace.tar
-  latere cella import dev --input app.zip --dest /workspace/app
-  tar -cf - src package.json | latere cella import dev --dest /workspace/app`,
-		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if input == "" {
-				return errors.New("--input cannot be empty; use '-' for stdin")
-			}
-			if timeout < 0 {
-				return fmt.Errorf("--timeout must not be negative")
-			}
-			c, err := authedClient(cmd.Context(), apiURL)
-			if err != nil {
-				return err
-			}
-			if c.HTTP != nil {
-				c.HTTP.Timeout = timeout
-			}
-			var (
-				src          = cmd.InOrStdin()
-				srcFile      *os.File
-				formFilename = "import.tar"
-				inputKind    = importInputTar
-			)
-			if input != "-" {
-				// Opening a FIFO can block before the HTTP timeout starts. Named
-				// inputs also need seeking for format detection and ZIP conversion.
-				info, err := os.Stat(input)
-				if err != nil {
-					return err
-				}
-				if !info.Mode().IsRegular() {
-					return fmt.Errorf("import input %q is not a regular file; use stdin for tar streams", input)
-				}
-				f, err := os.Open(input)
-				if err != nil {
-					return err
-				}
-				defer func() { _ = f.Close() }()
-				src = f
-				srcFile = f
-				formFilename = filepath.Base(input)
-				inputKind, err = classifyImportInput(input, f)
-				if err != nil {
-					return err
-				}
-			}
-			var payload importPayloadWriter
-			upload, contentType := newMultipartUpload(func(mw *multipart.Writer) error {
-				if dest != "" {
-					if err := mw.WriteField("dest", dest); err != nil {
-						return err
-					}
-				}
-				fw, err := createUploadPart(mw, "tarball", formFilename)
-				if err != nil {
-					return err
-				}
-				payload.Writer = fw
-				switch inputKind {
-				case importInputRegularFile:
-					err = writeSingleFileTar(&payload, input, srcFile)
-				case importInputZip:
-					err = writeZipAsTar(&payload, input, srcFile)
-				default:
-					err = copyImportTar(&payload, src)
-				}
-				return err
-			})
-			// Request construction can fail before the transport owns the body.
-			defer func() { _ = upload.Close() }()
-			path := sbPath(args[0]) + "/files/import"
-			var resp struct {
-				Imported string `json:"imported"`
-				Bytes    *int64 `json:"bytes"`
-				Dest     string `json:"dest"`
-			}
-			if err := c.Do(cmd.Context(), http.MethodPost, path, upload,
-				contentType, &resp); err != nil {
-				return err
-			}
-			if err := upload.finish(); err != nil {
-				return err
-			}
-			if resp.Bytes == nil {
-				return fmt.Errorf("import receipt is missing the byte count")
-			}
-			// JSON replaces invalid UTF-8 filename bytes with replacement runes.
-			if resp.Imported != string([]rune(formFilename)) || *resp.Bytes != payload.bytes {
-				return fmt.Errorf("import receipt reports %q (%d bytes); sent %q (%d bytes)", resp.Imported, *resp.Bytes, formFilename, payload.bytes)
-			}
-			return printJSON(cmd.OutOrStdout(), resp)
-		},
-	}
-	f := cmd.Flags()
-	f.StringVar(&apiURL, "api-url", "", "override Cella API base URL")
-	f.StringVar(&dest, "dest", "", "destination dir in the cella; default /workspace")
-	f.StringVarP(&input, "input", "i", "-", "input path; tar archives are extracted, regular files are copied")
-	f.DurationVar(&timeout, "timeout", 30*time.Minute, "HTTP timeout covering upload and extraction (0 disables)")
-	return cmd
-}
-
-// importPayloadWriter counts the tar bytes after conversion or decompression,
-// excluding multipart framing. Read bytes only after upload.finish succeeds.
-type importPayloadWriter struct {
-	io.Writer
-	bytes int64
-}
-
-func (w *importPayloadWriter) Write(p []byte) (int, error) {
-	n, err := w.Writer.Write(p)
-	w.bytes += int64(n)
-	return n, err
-}
-
-type importInputKind int
-
-const (
-	importInputTar importInputKind = iota
-	importInputRegularFile
-	importInputZip
-)
-
-func classifyImportInput(name string, f *os.File) (importInputKind, error) {
-	info, err := f.Stat()
-	if err != nil {
-		return importInputTar, err
-	}
-	if !info.Mode().IsRegular() {
-		return importInputTar, fmt.Errorf("import input %q is not a regular file; use stdin for tar streams", name)
-	}
-	if hasZipExtension(name) {
-		return importInputZip, nil
-	}
-	if hasTarExtension(name) {
-		return importInputTar, nil
-	}
-	kind, err := sniffImportInput(f)
-	if err != nil {
-		return importInputTar, err
-	}
-	return kind, nil
-}
-
-func hasTarExtension(name string) bool {
-	name = strings.ToLower(name)
-	for _, suffix := range []string{".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz", ".tbz2", ".tar.xz", ".txz"} {
-		if strings.HasSuffix(name, suffix) {
-			return true
-		}
-	}
-	return false
-}
-
-func hasZipExtension(name string) bool {
-	return strings.HasSuffix(strings.ToLower(name), ".zip")
-}
-
-func sniffImportInput(f *os.File) (importInputKind, error) {
-	var block [512]byte
-	n, err := io.ReadFull(f, block[:4])
-	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
-		return importInputTar, err
-	}
-	if _, seekErr := f.Seek(0, io.SeekStart); seekErr != nil {
-		return importInputTar, seekErr
-	}
-	if n >= 4 {
-		switch string(block[:4]) {
-		case "PK\x03\x04", "PK\x05\x06", "PK\x07\x08":
-			return importInputZip, nil
-		}
-	}
-	// Probe one decoded tar header. Compressed non-archives remain regular
-	// files; upload reads the complete archive again to verify its checksum.
-	decoded, decodeErr := newImportTarReader(f)
-	if decodeErr == nil {
-		n, decodeErr = io.ReadFull(decoded, block[:])
-		_ = decoded.Close()
-	}
-	if _, seekErr := f.Seek(0, io.SeekStart); seekErr != nil {
-		return importInputTar, seekErr
-	}
-	if decodeErr == nil && n == len(block) && block != ([512]byte{}) {
-		header, headerErr := tar.NewReader(bytes.NewReader(block[:])).Next()
-		// A complete nonzero block must pass header parsing before Next
-		// can request following PAX/GNU metadata and hit our probe's EOF.
-		if header != nil || errors.Is(headerErr, io.EOF) || errors.Is(headerErr, io.ErrUnexpectedEOF) {
-			return importInputTar, nil
-		}
-	}
-	return importInputRegularFile, nil
-}
-
-// copyImportTar sends plain tar to the API, detecting compression from the
-// stream so named archives and stdin behave identically. Copy through EOF to
-// surface decompression and checksum errors before completing the multipart body.
-func copyImportTar(dst io.Writer, src io.Reader) error {
-	decoded, err := newImportTarReader(src)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = decoded.Close() }()
-	_, err = io.Copy(dst, decoded)
-	return err
-}
-
-func newImportTarReader(src io.Reader) (io.ReadCloser, error) {
-	buffered := bufio.NewReader(src)
-	header, err := buffered.Peek(6)
-	if err != nil && !errors.Is(err, io.EOF) {
-		return nil, err
-	}
-	switch {
-	case bytes.HasPrefix(header, []byte{0x1f, 0x8b}):
-		return gzip.NewReader(buffered)
-	case bytes.HasPrefix(header, []byte("BZh")):
-		return io.NopCloser(bzip2.NewReader(buffered)), nil
-	case bytes.HasPrefix(header, []byte{0xfd, '7', 'z', 'X', 'Z', 0}):
-		reader, err := xz.NewReader(buffered)
-		if err != nil {
-			return nil, err
-		}
-		return io.NopCloser(reader), nil
-	default:
-		return io.NopCloser(buffered), nil
-	}
-}
-
-func writeSingleFileTar(dst io.Writer, name string, f *os.File) error {
-	info, err := f.Stat()
-	if err != nil {
-		return err
-	}
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return err
-	}
-	tw := tar.NewWriter(dst)
-	hdr, err := tar.FileInfoHeader(info, "")
-	if err != nil {
-		return err
-	}
-	hdr.Name = filepath.Base(name)
-	if err := tw.WriteHeader(hdr); err != nil {
-		return err
-	}
-	if _, err := io.Copy(tw, f); err != nil {
-		return err
-	}
-	return tw.Close()
-}
-
-func writeZipAsTar(dst io.Writer, name string, f *os.File) error {
-	info, err := f.Stat()
-	if err != nil {
-		return err
-	}
-	zr, err := zip.NewReader(f, info.Size())
-	if err != nil {
-		return fmt.Errorf("read zip %s: %w", name, err)
-	}
-	tw := tar.NewWriter(dst)
-	for _, zf := range zr.File {
-		if !safeArchivePath(zf.Name) {
-			return fmt.Errorf("zip entry has unsafe path: %s", zf.Name)
-		}
-		hdr, err := tar.FileInfoHeader(zf.FileInfo(), "")
-		if err != nil {
-			return err
-		}
-		hdr.Name = strings.TrimPrefix(zf.Name, "./")
-		if err := tw.WriteHeader(hdr); err != nil {
-			return err
-		}
-		if zf.FileInfo().IsDir() {
-			continue
-		}
-		rc, err := zf.Open()
-		if err != nil {
-			return err
-		}
-		_, copyErr := io.Copy(tw, rc)
-		closeErr := rc.Close()
-		if copyErr != nil {
-			return copyErr
-		}
-		if closeErr != nil {
-			return closeErr
-		}
-	}
-	return tw.Close()
-}
-
-// safeArchivePath accepts file and directory names below the archive root.
-// One leading "./" and a trailing directory slash are allowed; the remaining
-// path must be clean, relative, nonempty, and free of NUL or ".." elements.
-func safeArchivePath(name string) bool {
-	name = strings.TrimPrefix(name, "./")
-	name = strings.TrimSuffix(name, "/")
-	clean, err := relpath.Clean(name)
-	return err == nil && clean == name && clean != "."
-}
-
-// ---- extend / convert ----
-
-// newCeExtendCmd pushes the auto-delete deadline of an ephemeral
-// cella forward. Persistent cellas have no deadline so the API 409s.
-func newCeExtendCmd() *cobra.Command {
-	var (
-		apiURL   string
-		hours    int
-		deadline string
-	)
-	cmd := &cobra.Command{
-		Use:   "extend <name|id>",
-		Short: "Push the auto-delete deadline of an ephemeral cella forward.",
-		Long: `Extend an ephemeral cella's auto-delete deadline.
-
-Persistent cellas do not have an auto-delete deadline, so this command
-only applies to ephemeral cellas.`,
-		Example: `  latere cella extend dev
-  latere cella extend dev --hours 72
-  latere cella extend dev --deadline 2026-05-05T18:00:00Z`,
-		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			body := map[string]any{}
-			if cmd.Flags().Changed("deadline") {
-				t, err := time.Parse(time.RFC3339, deadline)
-				if err != nil {
-					return fmt.Errorf("--deadline must be RFC3339: %w", err)
-				}
-				if !t.After(time.Now()) {
-					return fmt.Errorf("--deadline must be in the future")
-				}
-				body["deadline"] = t
-			} else {
-				if hours <= 0 {
-					return fmt.Errorf("--hours must be greater than zero")
-				}
-				body["auto_delete_hours"] = hours
-			}
-			c, err := authedClient(cmd.Context(), apiURL)
-			if err != nil {
-				return err
-			}
-			b, err := json.Marshal(body)
-			if err != nil {
-				return err
-			}
-			var sb sandboxDTO
-			path := sbPath(args[0]) + "/extend"
-			if err := c.Do(cmd.Context(), http.MethodPost, path,
-				bytes.NewReader(b), "application/json", &sb); err != nil {
-				return err
-			}
-			return printSandbox(cmd.OutOrStdout(), sb)
-		},
-	}
-	f := cmd.Flags()
-	f.StringVar(&apiURL, "api-url", "", "override Cella API base URL")
-	f.IntVar(&hours, "hours", 24, "push deadline to now + N hours (N must be positive)")
-	f.StringVar(&deadline, "deadline", "", "future RFC3339 deadline (overrides --hours)")
-	return cmd
-}
-
-// newCeConvertCmd flips a cella between ephemeral and persistent.
-// Persistent → ephemeral requires --hours so the new lifetime is
-// explicit; the API rejects the request otherwise.
-func newCeConvertCmd() *cobra.Command {
-	var (
-		apiURL string
-		to     string
-		hours  int
-	)
-	cmd := &cobra.Command{
-		Use:   "convert <name|id> --to {ephemeral|persistent}",
-		Short: "Switch a cella between ephemeral and persistent.",
-		Long: `Convert a cella between ephemeral and persistent tiers.
-
-Converting to persistent removes the auto-delete deadline. Converting
-to ephemeral requires --hours so the new auto-delete deadline is
-explicit.`,
-		Example: `  latere cella convert dev --to persistent
-  latere cella convert dev --to ephemeral --hours 48`,
-		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if to != "ephemeral" && to != "persistent" {
-				return fmt.Errorf("--to must be ephemeral or persistent")
-			}
-			c, err := authedClient(cmd.Context(), apiURL)
-			if err != nil {
-				return err
-			}
-			body := map[string]any{"tier": to}
-			if to == "ephemeral" {
-				if hours <= 0 {
-					return fmt.Errorf("--hours is required when converting to ephemeral")
-				}
-				body["auto_delete_hours"] = hours
-			}
-			b, err := json.Marshal(body)
-			if err != nil {
-				return err
-			}
-			var sb sandboxDTO
-			path := sbPath(args[0]) + "/convert"
-			if err := c.Do(cmd.Context(), http.MethodPost, path,
-				bytes.NewReader(b), "application/json", &sb); err != nil {
-				return err
-			}
-			return printSandbox(cmd.OutOrStdout(), sb)
-		},
-	}
-	f := cmd.Flags()
-	f.StringVar(&apiURL, "api-url", "", "override Cella API base URL")
-	f.StringVar(&to, "to", "", "destination tier: ephemeral or persistent")
-	f.IntVar(&hours, "hours", 0, "auto-delete-hours; required when --to=ephemeral")
-	_ = cmd.MarkFlagRequired("to")
-	return cmd
-}
-
-// newCeResizeCmd grows a persistent cella's workspace disk. Disk can only
-// grow, so the API rejects a size at or below the current one; ephemeral
-// cellas are rejected since they are short-lived.
-func newCeResizeCmd() *cobra.Command {
-	var (
-		apiURL string
-		diskGB int
-	)
-	cmd := &cobra.Command{
-		Use:   "resize <name|id> --disk-gb N",
-		Short: "Grow a persistent cella's workspace disk.",
-		Long: `Grow a persistent cella's workspace disk to N GiB.
-
-Disk can only grow: a size at or below the current one is rejected.
-Only persistent cellas can be resized.`,
-		Example: `  latere cella resize dev --disk-gb 50`,
-		Args:    cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if diskGB <= 0 {
-				return fmt.Errorf("--disk-gb must be a positive size")
-			}
-			c, err := authedClient(cmd.Context(), apiURL)
-			if err != nil {
-				return err
-			}
-			b, err := json.Marshal(map[string]any{"disk_gb": diskGB})
-			if err != nil {
-				return err
-			}
-			var sb sandboxDTO
-			path := sbPath(args[0]) + "/resize"
-			if err := c.Do(cmd.Context(), http.MethodPost, path,
-				bytes.NewReader(b), "application/json", &sb); err != nil {
-				return err
-			}
-			return printSandbox(cmd.OutOrStdout(), sb)
-		},
-	}
-	f := cmd.Flags()
-	f.StringVar(&apiURL, "api-url", "", "override Cella API base URL")
-	f.IntVar(&diskGB, "disk-gb", 0, "new workspace size in GiB; must exceed the current size")
-	_ = cmd.MarkFlagRequired("disk-gb")
-	return cmd
-}
-
-// ---- granular file ops ----
-
-// newCeCatCmd streams a single file to the command's configured output.
-func newCeCatCmd() *cobra.Command {
-	var apiURL string
-	cmd := &cobra.Command{
-		Use:     "cat <name|id> <path>",
-		Short:   "Stream a file from the cella to stdout.",
-		Example: `  latere cella cat dev /workspace/out.log`,
-		Args:    cobra.ExactArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := authedClient(cmd.Context(), apiURL)
-			if err != nil {
-				return err
-			}
-			path := sbPath(args[0]) + "/files?path=" + url.QueryEscape(args[1]) + "&raw=true"
-			resp, err := c.DoRaw(cmd.Context(), http.MethodGet, path, nil, "")
-			if err != nil {
-				return err
-			}
-			defer func() { _ = resp.Body.Close() }()
-			if resp.StatusCode != http.StatusOK {
-				return fmt.Errorf("cella: expected HTTP 200 for a complete download, got HTTP %d", resp.StatusCode)
-			}
-			_, err = io.Copy(cmd.OutOrStdout(), resp.Body)
-			return err
-		},
-	}
-	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
-	return cmd
-}
-
-// newCeWriteCmd writes a single file from --input or the configured input stream.
-func newCeWriteCmd() *cobra.Command {
-	var (
-		apiURL string
-		input  string
-	)
-	cmd := &cobra.Command{
-		Use:   "write <name|id> <path>",
-		Short: "Write a file into the cella (reads stdin or --input).",
-		Example: `  echo hi | latere cella write dev /workspace/note.txt
-  latere cella write dev /workspace/app.tar -f app.tar`,
-		Args: cobra.ExactArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			src := cmd.InOrStdin()
-			if input != "" && input != "-" {
-				f, err := os.Open(input)
-				if err != nil {
-					return err
-				}
-				defer func() { _ = f.Close() }()
-				src = f
-			}
-			// The JSON write API accepts at most 10 MiB of decoded content.
-			// Read one extra byte to reject oversize streams without waiting for EOF.
-			const maxContentBytes = 10 << 20
-			content, err := io.ReadAll(io.LimitReader(src, maxContentBytes+1))
-			if err != nil {
-				return err
-			}
-			if len(content) > maxContentBytes {
-				return fmt.Errorf("content exceeds the 10 MiB write limit; use upload for larger files")
-			}
-			c, err := authedClient(cmd.Context(), apiURL)
-			if err != nil {
-				return err
-			}
-			b, err := json.Marshal(map[string]any{
-				"path":    args[1],
-				"content": base64.StdEncoding.EncodeToString(content),
-			})
-			if err != nil {
-				return err
-			}
-			return c.Do(cmd.Context(), http.MethodPut, sbPath(args[0])+"/files",
-				bytes.NewReader(b), "application/json", nil)
-		},
-	}
-	f := cmd.Flags()
-	f.StringVar(&apiURL, "api-url", "", "override Cella API base URL")
-	f.StringVarP(&input, "input", "f", "", "read content from this file (- or empty for stdin)")
-	return cmd
-}
-
-// newCeLsCmd lists a directory inside the cella.
-func newCeLsCmd() *cobra.Command {
-	var apiURL string
-	cmd := &cobra.Command{
-		Use:     "ls <name|id> <path>",
-		Short:   "List a directory inside the cella.",
-		Example: `  latere cella ls dev /workspace`,
-		Args:    cobra.ExactArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := authedClient(cmd.Context(), apiURL)
-			if err != nil {
-				return err
-			}
-			path := sbPath(args[0]) + "/files?path=" + url.QueryEscape(args[1]) + "&list=true"
-			var resp struct {
-				Entries []struct {
-					Name  string `json:"name"`
-					Size  int64  `json:"size"`
-					Mode  uint32 `json:"mode"`
-					IsDir bool   `json:"is_directory"`
-				} `json:"entries"`
-			}
-			if err := c.Do(cmd.Context(), http.MethodGet, path, nil, "", &resp); err != nil {
-				return err
-			}
-			for _, e := range resp.Entries {
-				name := e.Name
-				if e.IsDir {
-					name += "/"
-				}
-				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%04o\t%d\t%s\n", e.Mode, e.Size, name); err != nil {
-					return fmt.Errorf("write directory listing: %w", err)
-				}
-			}
-			return nil
-		},
-	}
-	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
-	return cmd
-}
-
-type cellaUploadFile struct{ rel, local string }
-
-// collectCellaUploadFiles validates every source before the request starts.
-// Special files can block on open/read or silently upload an empty body.
-func collectCellaUploadFiles(sources []string) ([]cellaUploadFile, error) {
-	var files []cellaUploadFile
-	addFile := func(local, rel string) error {
-		info, err := os.Stat(local)
-		if err != nil {
-			return err
-		}
-		if !info.Mode().IsRegular() {
-			return fmt.Errorf("upload source %q is not a regular file", local)
-		}
-		files = append(files, cellaUploadFile{rel: filepath.ToSlash(rel), local: local})
-		return nil
-	}
-	for _, src := range sources {
-		info, err := os.Stat(src)
-		if err != nil {
-			return nil, err
-		}
-		if info.IsDir() {
-			entry, err := os.Lstat(src)
-			if err != nil {
-				return nil, err
-			}
-			if entry.Mode()&os.ModeSymlink != 0 {
-				return nil, fmt.Errorf("upload source %q is not a regular file", src)
-			}
-			// Resolve symlinks before cleaning ..: WalkDir joins child paths
-			// lexically, which can otherwise select a different local directory.
-			root, err := filepath.EvalSymlinks(src)
-			if err != nil {
-				return nil, err
-			}
-			contentsOnly := root == "."
-			root, err = filepath.Abs(root)
-			if err != nil {
-				return nil, err
-			}
-			prefix := filepath.Base(root)
-			if contentsOnly || filepath.Dir(root) == root {
-				prefix = ""
-			}
-			if err := filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
-				if err != nil {
-					return err
-				}
-				if d.IsDir() {
-					return nil
-				}
-				rel, err := filepath.Rel(root, p)
-				if err != nil {
-					return err
-				}
-				return addFile(p, filepath.Join(prefix, rel))
-			}); err != nil {
-				return nil, err
-			}
-			continue
-		}
-		if err := addFile(src, filepath.Base(src)); err != nil {
-			return nil, err
-		}
-	}
-	if len(files) == 0 {
-		return nil, fmt.Errorf("no files to upload")
-	}
-	return files, nil
-}
-
-// newCeUploadCmd streams files and folders into the cella, preserving folder
-// structure. Each file is sent as a multipart part whose form-field name is its
-// path relative to the destination.
-func newCeUploadCmd() *cobra.Command {
-	var (
-		apiURL  string
-		dest    string
-		timeout time.Duration
-	)
-	cmd := &cobra.Command{
-		Use:   "upload <name|id> <src...> --dest D",
-		Short: "Stream files/folders into the cella (folder-preserving).",
-		Example: `  latere cella upload dev ./dist --dest /workspace
-  latere cella upload dev a.txt b.txt --dest /tmp`,
-		Args: cobra.MinimumNArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if timeout < 0 {
-				return fmt.Errorf("--timeout must not be negative")
-			}
-			c, err := authedClient(cmd.Context(), apiURL)
-			if err != nil {
-				return err
-			}
-			if c.HTTP != nil {
-				c.HTTP.Timeout = timeout
-			}
-			files, err := collectCellaUploadFiles(args[1:])
-			if err != nil {
-				return err
-			}
-			var uploadedBytes int64
-			upload, contentType := newMultipartUpload(func(mw *multipart.Writer) error {
-				if dest != "" {
-					if err := mw.WriteField("dest", dest); err != nil {
-						return err
-					}
-				}
-				for _, uf := range files {
-					f, err := os.Open(uf.local)
-					if err != nil {
-						return err
-					}
-					part, err := createUploadPart(mw, uf.rel, filepath.Base(uf.local))
-					if err != nil {
-						_ = f.Close()
-						return err
-					}
-					n, err := io.Copy(part, f)
-					uploadedBytes += n
-					if err != nil {
-						_ = f.Close()
-						return err
-					}
-					_ = f.Close()
-				}
-				return nil
-			})
-			// Request construction can fail before the transport owns the body.
-			defer func() { _ = upload.Close() }()
-			var resp struct {
-				Dest  string `json:"dest"`
-				Files int    `json:"files"`
-				Bytes int64  `json:"bytes"`
-			}
-			if err := c.Do(cmd.Context(), http.MethodPost, sbPath(args[0])+"/files/upload",
-				upload, contentType, &resp); err != nil {
-				return err
-			}
-			if err := upload.finish(); err != nil {
-				return err
-			}
-			if resp.Files != len(files) || resp.Bytes != uploadedBytes {
-				return fmt.Errorf("upload receipt reports %d files (%d bytes); sent %d files (%d bytes)", resp.Files, resp.Bytes, len(files), uploadedBytes)
-			}
-			fmt.Printf("uploaded %d files (%d bytes) to %s\n", resp.Files, resp.Bytes, resp.Dest)
-			return nil
-		},
-	}
-	f := cmd.Flags()
-	f.StringVar(&apiURL, "api-url", "", "override Cella API base URL")
-	f.StringVar(&dest, "dest", "", "destination directory inside the cella; default /workspace")
-	f.DurationVar(&timeout, "timeout", 5*time.Minute, "upload timeout (0 disables)")
-	return cmd
-}
-
-// newCeMkdirCmd creates a directory inside the cella.
-func newCeMkdirCmd() *cobra.Command {
-	var apiURL string
-	cmd := &cobra.Command{
-		Use:     "mkdir <name|id> <path>",
-		Short:   "Create a directory inside the cella.",
-		Example: `  latere cella mkdir dev /workspace/build`,
-		Args:    cobra.ExactArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := authedClient(cmd.Context(), apiURL)
-			if err != nil {
-				return err
-			}
-			b, err := json.Marshal(map[string]any{"path": args[1]})
-			if err != nil {
-				return err
-			}
-			return c.Do(cmd.Context(), http.MethodPost, sbPath(args[0])+"/files/mkdir",
-				bytes.NewReader(b), "application/json", nil)
-		},
-	}
-	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
-	return cmd
-}
-
-// newCeRmCmd deletes a file or directory tree inside the cella.
-func newCeRmCmd() *cobra.Command {
-	var apiURL string
-	cmd := &cobra.Command{
-		Use:     "rm <name|id> <path>",
-		Short:   "Delete a file or directory (recursive) inside the cella.",
-		Example: `  latere cella rm dev /workspace/old`,
-		Args:    cobra.ExactArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := authedClient(cmd.Context(), apiURL)
-			if err != nil {
-				return err
-			}
-			path := sbPath(args[0]) + "/files?path=" + url.QueryEscape(args[1])
-			return c.Do(cmd.Context(), http.MethodDelete, path, nil, "", nil)
-		},
-	}
-	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
-	return cmd
-}
-
-// newCeMvCmd renames or moves a file or directory inside the cella.
-func newCeMvCmd() *cobra.Command {
-	var apiURL string
-	cmd := &cobra.Command{
-		Use:     "mv <name|id> <from> <to>",
-		Short:   "Rename or move a file or directory inside the cella.",
-		Example: `  latere cella mv dev /workspace/a.txt /workspace/b.txt`,
-		Args:    cobra.ExactArgs(3),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := authedClient(cmd.Context(), apiURL)
-			if err != nil {
-				return err
-			}
-			b, err := json.Marshal(map[string]any{"from": args[1], "to": args[2]})
-			if err != nil {
-				return err
-			}
-			return c.Do(cmd.Context(), http.MethodPost, sbPath(args[0])+"/files/move",
-				bytes.NewReader(b), "application/json", nil)
-		},
-	}
-	cmd.Flags().StringVar(&apiURL, "api-url", "", "override Cella API base URL")
-	return cmd
-}
-
-// ---- helpers (HTTP composition + UI) ----
-
-// cellaAudience is the aud claim Cella enforces on every bearer it
-// accepts. It is the production audience whatever --api-url names: the
-// URL selects the deployment, the audience is what the issuer stamps.
-const cellaAudience = "sandboxd"
-
-// authedClient builds the Cella client for one command run. The bearer is
-// a token minted for cellaAudience alone from the saved login, so the
-// login token never reaches Cella; Refresh re-mints it whenever the held
-// one is due, which a transfer, a wait, or a log follow outlives several
-// times over. A streaming response (DoRaw) holds the token it started
-// with, so a stream that outlives it ends and the command reports it.
-//
-// LATERE_CELLA_TOKEN presents a bearer as given, for a development
-// deployment or a test, the same escape every other product has.
-func authedClient(ctx context.Context, apiURL string) (*api.Client, error) {
-	c := api.NewClient(apiURL)
-	if t := strings.TrimSpace(os.Getenv("LATERE_CELLA_TOKEN")); t != "" {
-		c.SetBearer(t, time.Time{})
-		return c, nil
-	}
-	authBase := api.ResolveAuthURL(c.BaseURL, "")
-	token, expiry, err := api.ActorToken(ctx, authBase, cellaAudience)
-	if err != nil {
-		return nil, fmt.Errorf("cannot authenticate to Cella: %w", err)
-	}
-	c.SetBearer(token, expiry)
-	c.Refresh = func(ctx context.Context) (string, time.Time, bool) {
-		fresh, freshExpiry, err := api.ActorToken(ctx, authBase, cellaAudience)
-		if err != nil {
-			return "", time.Time{}, false
-		}
-		return fresh, freshExpiry, true
-	}
-	return c, nil
-}
-
-func sbPath(idOrName string) string {
-	return "/v1/sandboxes/" + url.PathEscape(idOrName)
-}
-
-func runPath(runID string) string {
-	return "/v1/one-shot-runs/" + url.PathEscape(runID)
-}
-
-func startCommand(ctx context.Context, c *api.Client, sandbox string, argv []string, env map[string]string, cwd string, credentialCatalog []string) (commandDTO, error) {
-	body := map[string]any{
-		"argv":   argv,
-		"detach": true,
-	}
-	if len(env) > 0 {
-		body["env"] = env
-	}
-	if cwd != "" {
-		body["cwd"] = cwd
-	}
-	if len(credentialCatalog) > 0 {
-		body["credential_catalog"] = credentialCatalog
-	}
-	var cd commandDTO
-	err := c.PostJSON(ctx, sbPath(sandbox)+"/commands", body, &cd)
-	if err == nil && cd.CommandID == "" {
-		err = fmt.Errorf("start response is missing command_id; the command may have started")
-	}
-	return cd, err
-}
-
-func waitCommand(ctx context.Context, c *api.Client, sandbox, cmdID string, timeout time.Duration) (commandDTO, error) {
-	if timeout <= 0 {
-		timeout = 10 * time.Minute
-	}
-	waitCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	waitError := func(err error) error {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		if waitCtx.Err() != nil {
-			return fmt.Errorf("wait timed out: %w", waitCtx.Err())
-		}
-		return err
-	}
-	for {
-		var cd commandDTO
-		path := sbPath(sandbox) + "/commands/" + url.PathEscape(cmdID)
-		if err := c.GetJSON(waitCtx, path, &cd); err != nil {
-			return cd, waitError(err)
-		}
-		if cd.Phase != "running" {
-			return cd, nil
-		}
-		select {
-		case <-waitCtx.Done():
-			return cd, waitError(waitCtx.Err())
-		case <-time.After(time.Second):
-		}
-	}
-}
-
-func fetchLogsCursor(ctx context.Context, c *api.Client, sandbox, cmdID string, cursor int64) (logsCursorDTO, error) {
-	q := url.Values{}
-	q.Set("cursor", strconv.FormatInt(cursor, 10))
-	q.Set("stream", "false")
-	path := sbPath(sandbox) + "/commands/" + url.PathEscape(cmdID) + "/logs?" + q.Encode()
-	var out logsCursorDTO
-	err := c.GetJSON(ctx, path, &out)
-	return out, err
-}
-
-// streamLogs polls cursor-based logs until the command terminates.
-// SSE follow mode is the alternative; cursor polling works against
-// a simpler sandboxd build and survives reconnects naturally.
-func streamLogs(ctx context.Context, c *api.Client, sandbox, cmdID string, cursor int64, dst io.Writer) error {
-	for {
-		out, err := fetchLogsCursor(ctx, c, sandbox, cmdID, cursor)
-		if err != nil {
-			return err
-		}
-		if out.Bytes != "" {
-			if _, err := fmt.Fprint(dst, out.Bytes); err != nil {
-				return fmt.Errorf("write logs: %w", err)
-			}
-		}
-		cursor = out.NextCursor
-		if out.Phase != "running" {
-			return commandExitError(out.Phase, out.ExitCode)
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(500 * time.Millisecond):
-		}
-	}
-}
-
-func streamOneShotRunLogs(ctx context.Context, c *api.Client, runID string, cursor int64, dst io.Writer) error {
-	for {
-		out, err := fetchOneShotRunLogs(ctx, c, runID, cursor)
-		if err != nil {
-			return err
-		}
-		if out.Bytes != "" {
-			if _, err := fmt.Fprint(dst, out.Bytes); err != nil {
-				return fmt.Errorf("write logs: %w", err)
-			}
-		}
-		cursor = out.NextCursor
-		if out.Phase != "creating" && out.Phase != "running" {
-			return commandExitError(out.Phase, out.ExitCode)
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(500 * time.Millisecond):
-		}
-	}
-}
-
-// runAndStream is the foreground equivalent: start a detached command
-// then tail its logs until exit. Used by `latere exec` and
-// `latere sandbox run --follow`.
-func runAndStream(ctx context.Context, c *api.Client, sandbox string, argv []string, env map[string]string, cwd string, credentialCatalog []string, dst io.Writer) error {
-	cd, err := startCommand(ctx, c, sandbox, argv, env, cwd, credentialCatalog)
-	if err != nil {
-		return err
-	}
-	return streamLogs(ctx, c, sandbox, cd.CommandID, 0, dst)
-}
-
-func oneShotRunBody(argv []string, env map[string]string, cwd, image string, diskGB int, cpu, memory string, timeout int, credentialCatalog []string) map[string]any {
-	body := map[string]any{"argv": argv}
-	if len(env) > 0 {
-		body["env"] = env
-	}
-	if cwd != "" {
-		body["cwd"] = cwd
-	}
-	if image != "" {
-		body["image"] = image
-	}
-	if diskGB > 0 {
-		body["disk_gb"] = diskGB
-	}
-	if cpu != "" {
-		body["cpu"] = cpu
-	}
-	if memory != "" {
-		body["memory"] = memory
-	}
-	if timeout > 0 {
-		body["timeout_seconds"] = timeout
-	}
-	if len(credentialCatalog) > 0 {
-		body["credential_catalog"] = credentialCatalog
-	}
-	return body
-}
-
-func oneShotRun(ctx context.Context, c *api.Client, argv []string, env map[string]string, cwd, image string, diskGB int, cpu, memory string, timeout int, credentialCatalog []string) (oneShotRunDTO, error) {
-	effective := timeout
-	if effective <= 0 {
-		effective = 600
-	}
-	// The server permits timeout+10m for creation, then timeout for execution
-	// and 2m for cleanup. Leave another 30s for the final HTTP response.
-	const overhead = 12*time.Minute + 30*time.Second
-	const maxTimeoutSeconds = int64((math.MaxInt64 - overhead) / (2 * time.Second))
-	if int64(effective) > maxTimeoutSeconds {
-		return oneShotRunDTO{}, fmt.Errorf("--timeout exceeds the maximum supported one-shot duration of %d seconds", maxTimeoutSeconds)
-	}
-	body := oneShotRunBody(argv, env, cwd, image, diskGB, cpu, memory, timeout, credentialCatalog)
-	if c.HTTP != nil {
-		c.HTTP.Timeout = 2*time.Duration(effective)*time.Second + overhead
-	}
-	var raw json.RawMessage
-	status, err := c.PostJSONWithStatus(ctx, "/v1/one-shot-runs", body, &raw, http.StatusInternalServerError)
-	if err != nil {
-		return oneShotRunDTO{}, err
-	}
-	var out oneShotRunDTO
-	if len(raw) > 0 {
-		err = json.Unmarshal(raw, &out)
-	}
-	if status == http.StatusInternalServerError {
-		// Cleanup failures carry a completed run, including output and exit status.
-		// Other 500 responses must keep their normal API-error behavior.
-		if err == nil && out.RunID != "" && out.State == "cleanup_failed" && out.CleanupError != "" {
-			return out, nil
-		}
-		raw = raw[:min(len(raw), 1<<14)]
-		failure := &api.APIError{Status: status, Message: strings.TrimSpace(string(raw))}
-		_ = json.Unmarshal(raw, failure)
-		return oneShotRunDTO{}, failure
-	}
-	return out, err
-}
-
-func oneShotRunDetached(ctx context.Context, c *api.Client, argv []string, env map[string]string, cwd, image string, diskGB int, cpu, memory string, timeout int, credentialCatalog []string) (oneShotRunDTO, error) {
-	body := oneShotRunBody(argv, env, cwd, image, diskGB, cpu, memory, timeout, credentialCatalog)
-	var out oneShotRunDTO
-	err := c.PostJSON(ctx, "/v1/one-shot-runs?detach=true", body, &out)
-	if err == nil && out.RunID == "" {
-		err = fmt.Errorf("start response is missing run_id; the run may have started")
-	}
-	return out, err
-}
-
-func oneShotRunStatus(ctx context.Context, c *api.Client, runID string) (oneShotRunDTO, error) {
-	var out oneShotRunDTO
-	err := c.GetJSON(ctx, runPath(runID), &out)
-	if err == nil {
-		err = validateOneShotRunResponse(out, runID)
-	}
-	return out, err
-}
-
-func oneShotRunCancel(ctx context.Context, c *api.Client, runID string) (oneShotRunDTO, error) {
-	var out oneShotRunDTO
-	err := c.Do(ctx, http.MethodDelete, runPath(runID), nil, "", &out)
-	if err == nil {
-		err = validateOneShotRunResponse(out, runID)
-	}
-	return out, err
-}
-
-func validateOneShotRunResponse(out oneShotRunDTO, runID string) error {
-	if out.RunID == "" || out.RunID != runID {
-		return fmt.Errorf("run response identifies %q; requested %q", out.RunID, runID)
-	}
-	if strings.TrimSpace(out.State) == "" {
-		return fmt.Errorf("run response for %q is missing state", runID)
-	}
-	return nil
-}
-
-func fetchOneShotRunLogs(ctx context.Context, c *api.Client, runID string, cursor int64) (logsCursorDTO, error) {
-	q := url.Values{}
-	q.Set("cursor", strconv.FormatInt(cursor, 10))
-	q.Set("stream", "false")
-	path := runPath(runID) + "/logs?" + q.Encode()
-	var out logsCursorDTO
-	err := c.GetJSON(ctx, path, &out)
-	return out, err
-}
-
-func printDetachedOneShotRun(out oneShotRunDTO) {
-	fmt.Fprintf(os.Stderr, "run_id=%s state=%s", out.RunID, out.State)
-	if out.SandboxName != "" {
-		fmt.Fprintf(os.Stderr, " sandbox=%s", out.SandboxName)
-	}
-	if out.Timing.TotalMS > 0 {
-		fmt.Fprintf(os.Stderr, " total=%s", humanDurationMS(out.Timing.TotalMS))
-	}
-	fmt.Fprintln(os.Stderr)
-	if out.Links != nil {
-		if logs := out.Links["logs"]; logs != "" {
-			fmt.Fprintf(os.Stderr, "logs=%s\n", logs)
-		}
-	}
-}
-
-func printStartedDetachedOneShotRun(stdout io.Writer, out oneShotRunDTO) error {
-	if _, err := fmt.Fprintln(stdout, out.RunID); err != nil {
-		return fmt.Errorf("run %q started, but writing its ID failed: %w", out.RunID, err)
-	}
-	printDetachedOneShotRun(out)
-	return nil
-}
-
-func printOneShotRun(stdout, stderr io.Writer, out oneShotRunDTO) error {
-	if out.Stdout != "" {
-		if _, err := fmt.Fprint(stdout, out.Stdout); err != nil {
-			return fmt.Errorf("write command stdout: %w", err)
-		}
-	}
-	var diagnostic strings.Builder
-	if out.Stderr != "" {
-		diagnostic.WriteString(out.Stderr)
-	}
-	fmt.Fprintf(&diagnostic, "✓ cella created  %s  ·  %s\n", out.SandboxName, humanDurationMS(out.Timing.CreateMS))
-	if out.ExitCode != nil {
-		fmt.Fprintf(&diagnostic, "✓ command exited %d  ·  %s\n", *out.ExitCode, humanDurationMS(out.Timing.ExecMS))
-	} else {
-		fmt.Fprintf(&diagnostic, "✓ command %s  ·  %s\n", out.State, humanDurationMS(out.Timing.ExecMS))
-	}
-	if out.CleanupError != "" {
-		fmt.Fprintf(&diagnostic, "✗ sandbox cleanup failed  ·  %s\n", out.CleanupError)
-	} else {
-		fmt.Fprintf(&diagnostic, "✓ cella deleted  ·  total %s\n", humanDurationMS(out.Timing.TotalMS))
-	}
-	if out.Truncated {
-		fmt.Fprintln(&diagnostic, "output truncated")
-	}
-	if out.Error != "" {
-		fmt.Fprintf(&diagnostic, "%s\n", out.Error)
-	}
-	if _, err := fmt.Fprint(stderr, diagnostic.String()); err != nil {
-		return fmt.Errorf("write command stderr: %w", err)
-	}
-	return nil
-}
+// ---- output ----
 
 // parseKV turns ["KEY=VALUE", ...] into a map.
 func parseKV(items []string) (map[string]string, error) {
@@ -2108,23 +887,9 @@ func parseKV(items []string) (map[string]string, error) {
 	return m, nil
 }
 
-func jsonReader(v any) (io.Reader, error) {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return nil, err
-	}
-	return bytes.NewReader(b), nil
-}
-
-func printJSON(out io.Writer, v any) error {
-	enc := json.NewEncoder(out)
-	enc.SetIndent("", "  ")
-	return enc.Encode(v)
-}
-
-func printSandboxList(out io.Writer, sbs []sandboxDTO) error {
+func printSandboxList(out io.Writer, sbs []v1.Sandbox) error {
 	if len(sbs) == 0 {
-		if _, err := fmt.Fprintln(out, "No cellas are visible to this token."); err != nil {
+		if _, err := fmt.Fprintln(out, "No cellas are visible to this login."); err != nil {
 			return fmt.Errorf("write cella list: %w", err)
 		}
 		return nil
@@ -2142,144 +907,45 @@ func printSandboxList(out io.Writer, sbs []sandboxDTO) error {
 	return nil
 }
 
-func printSandbox(out io.Writer, s sandboxDTO) error {
+// printSandbox writes one cella as a record: what it is, its phase and why,
+// and what it runs.
+func printSandbox(out io.Writer, s v1.Sandbox) error {
 	var record strings.Builder
 	field := func(label, value string) {
 		record.WriteString(formatWrappedField(label, value))
 	}
-	field("cella", nameOrDash(s.Name))
-	field("id", s.ID)
-	field("state", s.State)
-	field("tier", defaultStr(s.Tier, "-"))
-	if s.DiskGB > 0 {
-		field("disk", fmt.Sprintf("%dGi", s.DiskGB))
+	field("cella", defaultStr(s.Metadata.Name, "-"))
+	field("id", s.Status.ID)
+	field("phase", s.Status.Phase)
+	field("reason", s.Status.Reason)
+	field("image", s.Spec.Image)
+	field("resources", sandboxResourceSummary(s.Spec.Resources))
+	if !s.Status.CreatedAt.IsZero() {
+		field("created", humanAge(s.Status.CreatedAt)+" ago")
 	}
-	if size := sandboxResourceSummary(s); size != "" {
-		field("resources", size)
+	if !s.Status.ExpiresAt.IsZero() {
+		field("expires", s.Status.ExpiresAt.UTC().Format(time.RFC3339))
 	}
-	if !s.CreatedAt.IsZero() {
-		field("created", humanAge(s.CreatedAt)+" ago")
-	}
-	if !s.Deadline.IsZero() {
-		field("deadline", s.Deadline.Format(time.RFC3339))
-	}
-	if s.Workdir != "" {
-		field("workdir", s.Workdir)
+	for _, w := range s.Status.Warnings {
+		field("warning", w)
 	}
 	if _, err := fmt.Fprint(out, record.String()); err != nil {
-		return fmt.Errorf("write cella details for %q: %w", s.ID, err)
+		return fmt.Errorf("write cella details for %q: %w", s.Status.ID, err)
 	}
 	return nil
 }
 
-// sandboxResourceSummary renders the cpu_milli / memory_mb fields
-// the server populates from the canonical annotations. Empty when
-// neither has been reported yet (older sandboxd build or sandbox
-// still creating).
-func sandboxResourceSummary(s sandboxDTO) string {
-	switch {
-	case s.CPUMilli > 0 && s.MemoryMB > 0:
-		return fmt.Sprintf("cpu=%dm memory=%dMi", s.CPUMilli, s.MemoryMB)
-	case s.CPUMilli > 0:
-		return fmt.Sprintf("cpu=%dm", s.CPUMilli)
-	case s.MemoryMB > 0:
-		return fmt.Sprintf("memory=%dMi", s.MemoryMB)
-	}
-	return ""
-}
-
-func nameOrDash(s string) string {
-	if s == "" {
-		return "-"
-	}
-	return s
-}
-
-func defaultStr(s, fallback string) string {
-	if s == "" {
-		return fallback
-	}
-	return s
-}
-
-func yesNo(v bool) string {
-	if v {
-		return "yes"
-	}
-	return "no"
-}
-
-func printWrappedField(label, value string) {
-	fprintf(os.Stdout, "%s", formatWrappedField(label, value))
-}
-
-func formatWrappedField(label, value string) string {
-	value = oneLine(value)
-	if value == "" {
-		return ""
-	}
-	const (
-		labelWidth = 12
-		maxWidth   = 88
-	)
-	prefix := fmt.Sprintf("%-*s", labelWidth, label+":")
-	lines := wrapText(value, maxWidth-labelWidth)
-	if len(lines) == 0 {
-		return prefix + "\n"
-	}
-	indent := strings.Repeat(" ", labelWidth)
-	return prefix + strings.Join(lines, "\n"+indent) + "\n"
-}
-
-func wrapText(s string, width int) []string {
-	words := strings.Fields(s)
-	if len(words) == 0 {
-		return nil
-	}
-	if width <= 0 {
-		width = 76
-	}
-	var lines []string
-	line := words[0]
-	for _, word := range words[1:] {
-		if len(line)+1+len(word) > width {
-			lines = append(lines, line)
-			line = word
-			continue
+// sandboxResourceSummary renders the resources a manifest resolved to, in the
+// quantities it was written in. Empty when none is set.
+func sandboxResourceSummary(r v1.Resources) string {
+	var parts []string
+	for _, p := range []struct {
+		name  string
+		value v1.Quantity
+	}{{"cpu", r.CPU}, {"memory", r.Memory}, {"disk", r.Disk}} {
+		if p.value != "" {
+			parts = append(parts, p.name+"="+string(p.value))
 		}
-		line += " " + word
 	}
-	lines = append(lines, line)
-	return lines
-}
-
-func oneLine(s string) string {
-	return strings.Join(strings.Fields(s), " ")
-}
-
-func humanAge(t time.Time) string {
-	if t.IsZero() {
-		return "-"
-	}
-	d := time.Since(t)
-	switch {
-	case d < time.Minute:
-		return fmt.Sprintf("%ds", int(d.Seconds()))
-	case d < time.Hour:
-		return fmt.Sprintf("%dm", int(d.Minutes()))
-	case d < 48*time.Hour:
-		return fmt.Sprintf("%dh", int(d.Hours()))
-	default:
-		return fmt.Sprintf("%dd", int(d.Hours()/24))
-	}
-}
-
-func humanDurationMS(ms int64) string {
-	if ms < 1000 {
-		return fmt.Sprintf("%d ms", ms)
-	}
-	if ms < 10_000 {
-		return fmt.Sprintf("%.1f s", float64(ms)/1000)
-	}
-	return fmt.Sprintf("%d s", ms/1000)
+	return strings.Join(parts, " ")
 }

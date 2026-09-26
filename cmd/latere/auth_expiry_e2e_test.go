@@ -63,8 +63,8 @@ func TestProductsRejectExpiredAuthWithoutRefreshE2E(t *testing.T) {
 						t.Error("unexpected product request or credential")
 					}
 					w.Header().Set("Content-Type", "application/json")
-					if r.URL.Path == "/v1/sandboxes" {
-						_, _ = w.Write([]byte(`[]`))
+					if r.URL.Path == "/v1/environments/sandboxes" {
+						_, _ = w.Write([]byte(`{"items":[]}`))
 						return
 					}
 					_, _ = w.Write([]byte(`{"entries":[],"agents":[]}`))
@@ -77,8 +77,8 @@ func TestProductsRejectExpiredAuthWithoutRefreshE2E(t *testing.T) {
 				case "topos":
 					args = []string{"topos", "agents", "list"}
 				case "cella":
-					args = []string{"cella", "list", "--api-url", server.URL}
-					// SANDBOX_API_URL and AUTH_URL both point at the stub, so
+					args = []string{"cella", "list", "--api-url", server.URL + "/v1/environments"}
+					// The Cella base and AUTH_URL both point at the stub, so
 					// the mint and the product call reach the same server.
 				}
 				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)

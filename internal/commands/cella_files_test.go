@@ -4,182 +4,212 @@
 package commands
 
 import (
-	"bytes"
-	"encoding/base64"
+	"archive/zip"
 	"encoding/json"
-	"io"
-	"mime"
-	"mime/multipart"
-	"net/http"
-	"net/http/httptest"
+	"maps"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/spf13/cobra"
-
-	"github.com/latere-ai/latere-cli/internal/api"
 )
 
-func TestCeFileCommandUseStrings(t *testing.T) {
-	cases := []struct {
-		cmd  *cobra.Command
-		want string
+// The one-file commands resolve a relative path under /workspace and reach
+// the file routes with it.
+func TestCellaOneFileCommands(t *testing.T) {
+	f := newFakeCore(t)
+	if out, _, err := f.runCella("", "cat", "dev", "out.log"); err != nil || out != "file content\n" {
+		t.Fatalf("cat = %q, %v", out, err)
+	}
+	if _, _, err := f.runCella("note\n", "write", "dev", "/workspace/note.txt"); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	out, _, err := f.runCella("", "ls", "dev", ".")
+	if err != nil || out != "0755\t96\tsrc/\n0644\t42\tgo.mod\n" {
+		t.Fatalf("ls = %q, %v", out, err)
+	}
+	for _, args := range [][]string{
+		{"mkdir", "dev", "build"},
+		{"rm", "dev", "/workspace/old"},
+		{"mv", "dev", "a.txt", "b.txt"},
+	} {
+		if _, _, err := f.runCella("", args...); err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+	}
+	want := []string{
+		"GET /sandboxes/dev/files/content?path=/workspace/out.log",
+		"PUT /sandboxes/dev/files?path=/workspace/note.txt",
+		"GET /sandboxes/dev/files/list?path=/workspace",
+		"POST /sandboxes/dev/files/mkdir",
+		"DELETE /sandboxes/dev/files?path=/workspace/old",
+		"POST /sandboxes/dev/files/move",
+	}
+	if got := f.seen(); strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("requests =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	if body := f.last("PUT", "/sandboxes/dev/files").Body; string(body) != "note\n" {
+		t.Errorf("write body = %q", body)
+	}
+	if body := f.last("POST", "/sandboxes/dev/files/mkdir").Body; string(body) != `{"path":"/workspace/build"}` {
+		t.Errorf("mkdir body = %s", body)
+	}
+	if body := f.last("POST", "/sandboxes/dev/files/move").Body; string(body) != `{"from":"/workspace/a.txt","to":"/workspace/b.txt"}` {
+		t.Errorf("move body = %s", body)
+	}
+}
+
+func TestCellaWriteFromFile(t *testing.T) {
+	f := newFakeCore(t)
+	src := filepath.Join(t.TempDir(), "app.cfg")
+	if err := os.WriteFile(src, []byte("key=value\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := f.runCella("", "write", "dev", "app.cfg", "-f", src); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if req := f.last("PUT", "/sandboxes/dev/files"); string(req.Body) != "key=value\n" || req.Query["path"][0] != "/workspace/app.cfg" {
+		t.Errorf("write = %s %q", req, req.Body)
+	}
+	if _, _, err := f.runCella("", "write", "dev", "x", "-f", filepath.Join(t.TempDir(), "absent")); err == nil {
+		t.Error("write from a missing file succeeded")
+	}
+}
+
+func TestCellaExport(t *testing.T) {
+	f := newFakeCore(t)
+	out, _, err := f.runCella("", "export", "dev", "src", "/etc/hosts")
+	if err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	if got := tarEntries(t, []byte(out)); got["workspace/main.go"] != "package main\n" {
+		t.Errorf("export entries = %v", got)
+	}
+	if got := f.seen()[0]; got != "GET /sandboxes/dev/files?path=/etc/hosts&path=/workspace/src" {
+		t.Errorf("export request = %s", got)
+	}
+
+	dest := filepath.Join(t.TempDir(), "ws.tar")
+	if _, _, err := f.runCella("", "export", "dev", "--src-dir", "results", "-o", dest); err != nil {
+		t.Fatalf("export -o: %v", err)
+	}
+	if got := f.seen()[1]; got != "GET /sandboxes/dev/files?path=/workspace/results" {
+		t.Errorf("export request = %s", got)
+	}
+	body, err := os.ReadFile(dest)
+	if err != nil || tarEntries(t, body)["workspace/main.go"] != "package main\n" {
+		t.Errorf("export file: %v", err)
+	}
+	if _, _, err := f.runCella("", "export", "dev", "-o", ""); err == nil {
+		t.Error("export with an empty --output succeeded")
+	}
+}
+
+// A failure the control plane reports after the first byte, in the trailer,
+// fails the export and leaves no archive that looks whole.
+func TestCellaExportTrailerFailure(t *testing.T) {
+	f := newFakeCore(t)
+	f.exportFailure = "read_failed"
+	dest := filepath.Join(t.TempDir(), "ws.tar")
+	_, _, err := f.runCella("", "export", "dev", "-o", dest)
+	if err == nil || !strings.Contains(err.Error(), "read_failed") {
+		t.Fatalf("err = %v, want the trailer's failure", err)
+	}
+	if _, statErr := os.Stat(dest); !os.IsNotExist(statErr) {
+		t.Errorf("a failed export left %s behind: %v", dest, statErr)
+	}
+}
+
+func TestCellaImport(t *testing.T) {
+	dir := t.TempDir()
+	single := filepath.Join(dir, "notes.txt")
+	if err := os.WriteFile(single, []byte("notes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	zipped := filepath.Join(dir, "app.zip")
+	zf, err := os.Create(zipped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zw := zip.NewWriter(zf)
+	w, err := zw.Create("app/main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write([]byte("package app")); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := zf.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name  string
+		args  []string
+		dest  string
+		files map[string]string
 	}{
-		{newCeCatCmd(), "cat <name|id> <path>"},
-		{newCeWriteCmd(), "write <name|id> <path>"},
-		{newCeLsCmd(), "ls <name|id> <path>"},
-		{newCeUploadCmd(), "upload <name|id> <src...> --dest D"},
-		{newCeMkdirCmd(), "mkdir <name|id> <path>"},
-		{newCeRmCmd(), "rm <name|id> <path>"},
-		{newCeMvCmd(), "mv <name|id> <from> <to>"},
-	}
-	for _, c := range cases {
-		if c.cmd.Use != c.want {
-			t.Errorf("Use = %q, want %q", c.cmd.Use, c.want)
-		}
-	}
-}
-
-// write composes a PUT with a base64 body, the same shape the command sends.
-func TestCeWriteComposition(t *testing.T) {
-	var gotPath, gotMethod string
-	var gotBody []byte
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotMethod, gotPath = r.Method, r.URL.Path
-		gotBody, _ = io.ReadAll(r.Body)
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer srv.Close()
-
-	c := &api.Client{BaseURL: srv.URL, Token: "t", HTTP: srv.Client()}
-	body, _ := json.Marshal(map[string]any{
-		"path":    "/workspace/note.txt",
-		"content": base64.StdEncoding.EncodeToString([]byte("hi")),
-	})
-	if err := c.Do(t.Context(), http.MethodPut, sbPath("dev")+"/files",
-		bytes.NewReader(body), "application/json", nil); err != nil {
-		t.Fatal(err)
-	}
-	if gotMethod != http.MethodPut || gotPath != "/v1/sandboxes/dev/files" {
-		t.Fatalf("method=%s path=%s", gotMethod, gotPath)
-	}
-	var sent struct{ Path, Content string }
-	_ = json.Unmarshal(gotBody, &sent)
-	if sent.Path != "/workspace/note.txt" {
-		t.Fatalf("path = %q", sent.Path)
-	}
-	dec, _ := base64.StdEncoding.DecodeString(sent.Content)
-	if string(dec) != "hi" {
-		t.Fatalf("content = %q", dec)
-	}
-}
-
-// rm issues a DELETE to the files path with the target as a query param.
-func TestCeRmComposition(t *testing.T) {
-	var gotMethod, gotPath, gotQuery string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotMethod, gotPath, gotQuery = r.Method, r.URL.Path, r.URL.RawQuery
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer srv.Close()
-
-	c := &api.Client{BaseURL: srv.URL, Token: "t", HTTP: srv.Client()}
-	path := sbPath("dev") + "/files?path=" + "%2Fworkspace%2Fold"
-	if err := c.Do(t.Context(), http.MethodDelete, path, nil, "", nil); err != nil {
-		t.Fatal(err)
-	}
-	if gotMethod != http.MethodDelete || gotPath != "/v1/sandboxes/dev/files" {
-		t.Fatalf("method=%s path=%s", gotMethod, gotPath)
-	}
-	if !strings.Contains(gotQuery, "path=%2Fworkspace%2Fold") {
-		t.Fatalf("query=%s", gotQuery)
-	}
-}
-
-// upload sends each file as a multipart part whose form-field name is the
-// destination-relative path, so folders survive.
-func TestCeUploadFieldNameCarriesPath(t *testing.T) {
-	var gotDest, gotFieldName string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mr, err := r.MultipartReader()
-		if err != nil {
-			http.Error(w, err.Error(), 400)
-			return
-		}
-		for {
-			part, err := mr.NextPart()
-			if err == io.EOF {
-				break
-			}
+		{"single file", []string{"import", "dev", "--input", single}, "/workspace", map[string]string{"notes.txt": "notes"}},
+		{"zip", []string{"import", "dev", "--input", zipped, "--dest", "app"}, "/workspace/app", map[string]string{"app/main.go": "package app"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFakeCore(t)
+			out, _, err := f.runCella("", tc.args...)
 			if err != nil {
-				http.Error(w, err.Error(), 400)
-				return
+				t.Fatalf("import: %v", err)
 			}
-			if part.FileName() == "" && part.FormName() == "dest" {
-				b, _ := io.ReadAll(part)
-				gotDest = string(b)
-				continue
+			req := f.last("PUT", "/sandboxes/dev/files")
+			if req.ContentType != "application/x-tar" || req.Query["dest"][0] != tc.dest {
+				t.Errorf("import request = %s as %q", req, req.ContentType)
 			}
-			gotFieldName = part.FormName()
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"dest":"/workspace","files":1,"bytes":3}`))
-	}))
-	defer srv.Close()
-
-	// Compose the same body the upload command builds.
-	pr, pw := io.Pipe()
-	mw := multipart.NewWriter(pw)
-	ct := mw.FormDataContentType()
-	go func() {
-		_ = mw.WriteField("dest", "/workspace")
-		part, _ := mw.CreateFormFile("dist/app.js", "app.js")
-		_, _ = part.Write([]byte("abc"))
-		_ = pw.CloseWithError(mw.Close())
-	}()
-
-	c := &api.Client{BaseURL: srv.URL, Token: "t", HTTP: srv.Client()}
-	var resp struct {
-		Files int `json:"files"`
-	}
-	if err := c.Do(t.Context(), http.MethodPost, sbPath("dev")+"/files/upload", pr, ct, &resp); err != nil {
-		t.Fatal(err)
-	}
-	if gotDest != "/workspace" {
-		t.Fatalf("dest = %q", gotDest)
-	}
-	if gotFieldName != "dist/app.js" {
-		t.Fatalf("field name = %q, want dist/app.js (folder path preserved)", gotFieldName)
-	}
-	// Sanity that the content type carried a multipart boundary.
-	if mt, _, _ := mime.ParseMediaType(ct); mt != "multipart/form-data" {
-		t.Fatalf("content type = %q", ct)
+			if got := tarEntries(t, req.Body); !maps.Equal(got, tc.files) {
+				t.Errorf("imported %v, want %v", got, tc.files)
+			}
+			var receipt map[string]any
+			if err := json.Unmarshal([]byte(out), &receipt); err != nil || receipt["dest"] != tc.dest || receipt["bytes"].(float64) != float64(len(req.Body)) {
+				t.Errorf("receipt = %q (%v)", out, err)
+			}
+		})
 	}
 }
 
-// ls composes a list GET and decodes the entries envelope.
-func TestCeLsComposition(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.Contains(r.URL.RawQuery, "list=true") {
-			http.Error(w, "missing list=true", 400)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"entries":[{"name":"a.txt","size":3,"mode":420,"is_directory":false}]}`))
-	}))
-	defer srv.Close()
-
-	c := &api.Client{BaseURL: srv.URL, Token: "t", HTTP: srv.Client()}
-	var resp struct {
-		Entries []struct {
-			Name string `json:"name"`
-		} `json:"entries"`
+func TestCellaImportFromStdin(t *testing.T) {
+	f := newFakeCore(t)
+	archive := tarOf(t, map[string]string{"a.txt": "A"})
+	if _, _, err := f.runCella(string(archive), "import", "dev"); err != nil {
+		t.Fatalf("import: %v", err)
 	}
-	path := sbPath("dev") + "/files?path=" + "%2Fworkspace" + "&list=true"
-	if err := c.Do(t.Context(), http.MethodGet, path, nil, "", &resp); err != nil {
+	if got := tarEntries(t, f.last("PUT", "/sandboxes/dev/files").Body); got["a.txt"] != "A" {
+		t.Errorf("imported %v", got)
+	}
+}
+
+func TestCellaUploadKeepsFolders(t *testing.T) {
+	f := newFakeCore(t)
+	dir := t.TempDir()
+	dist := filepath.Join(dir, "dist")
+	if err := os.MkdirAll(filepath.Join(dist, "js"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if len(resp.Entries) != 1 || resp.Entries[0].Name != "a.txt" {
-		t.Fatalf("entries = %+v", resp.Entries)
+	for p, content := range map[string]string{"index.html": "<html>", "js/app.js": "app()"} {
+		if err := os.WriteFile(filepath.Join(dist, p), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out, _, err := f.runCella("", "upload", "dev", dist, "--dest", "site")
+	if err != nil {
+		t.Fatalf("upload: %v", err)
+	}
+	req := f.last("PUT", "/sandboxes/dev/files")
+	if req.Query["dest"][0] != "/workspace/site" {
+		t.Errorf("upload request = %s", req)
+	}
+	want := map[string]string{"dist/index.html": "<html>", "dist/js/app.js": "app()"}
+	if got := tarEntries(t, req.Body); !maps.Equal(got, want) {
+		t.Errorf("uploaded %v, want %v", got, want)
+	}
+	if !strings.Contains(out, "uploaded 2 files (11 bytes) to /workspace/site") {
+		t.Errorf("upload output = %q", out)
 	}
 }

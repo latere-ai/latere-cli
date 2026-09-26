@@ -77,7 +77,7 @@ func urlOr(env, def string) string {
 func setupFamily(t *testing.T) *familyEnv {
 	t.Helper()
 	fe := &familyEnv{
-		cellaURL: urlOr("CELLA_API_URL", "https://cella.latere.ai"),
+		cellaURL: urlOr("CELLA_API_URL", "https://api.latere.ai/v1/environments"),
 		authURL:  urlOr("AUTH_URL", "https://auth.latere.ai"),
 		driveURL: urlOr("DRIVE_API_URL", "https://drive.latere.ai"),
 		toposURL: urlOr("TOPOS_API_URL", "https://topos.latere.ai"),
@@ -248,7 +248,7 @@ func TestFamilyE2E(t *testing.T) {
 	// Invariant 2 (trust-root): a garbage bearer is rejected everywhere,
 	// proving verification is on (not fail-open).
 	t.Run("invariant2/garbage-token-rejected", func(t *testing.T) {
-		for _, u := range []string{fe.authURL + "/tokeninfo", fe.cellaURL + "/v1/sandboxes"} {
+		for _, u := range []string{fe.authURL + "/tokeninfo", fe.cellaURL + "/sandboxes"} {
 			status, _ := fe.get(t, u, "garbage.not.a.jwt")
 			if status != http.StatusUnauthorized && status != http.StatusForbidden {
 				t.Errorf("%s with garbage bearer = %d, want 401/403", u, status)
@@ -334,7 +334,7 @@ func (fe *familyEnv) runLogoutTier(t *testing.T) {
 		if _, errOut, err := fe.run(t, 20*time.Second, "logout"); err != nil {
 			t.Fatalf("logout: %v\n%s", err, errOut)
 		}
-		status, _ := fe.get(t, fe.cellaURL+"/v1/sandboxes", old)
+		status, _ := fe.get(t, fe.cellaURL+"/sandboxes", old)
 		if status != http.StatusUnauthorized && status != http.StatusForbidden {
 			t.Errorf("reused bearer after logout = %d, want 401/403 (revocation)", status)
 		}

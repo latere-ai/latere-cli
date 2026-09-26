@@ -92,18 +92,18 @@ func TestOrgSwitchUpdatesTheSavedLoginE2E(t *testing.T) {
 						t.Error("actor token minted from previous identity")
 					}
 					_, _ = w.Write([]byte(`{"actor_token":"new-actor","expires_in":300}`))
-				case "/v1/sandboxes":
+				case "/v1/environments/sandboxes":
 					if r.Header.Get("Authorization") != "Bearer new-actor" {
 						t.Error("Cella command still uses the previous organization")
 					}
-					_, _ = w.Write([]byte(`[]`))
+					_, _ = w.Write([]byte(`{"items":[]}`))
 				default:
 					t.Error("unexpected endpoint")
 					w.WriteHeader(http.StatusNotFound)
 				}
 			}))
 			defer server.Close()
-			env := append(os.Environ(), "LATERE_CELLA_TOKEN=", "LATERE_AUTH_TOKEN_FILE="+authPath, "SANDBOX_API_URL="+server.URL, "AUTH_URL="+server.URL+tc.authSuffix, "XDG_CONFIG_HOME="+root, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
+			env := append(os.Environ(), "LATERE_CELLA_TOKEN=", "LATERE_AUTH_TOKEN_FILE="+authPath, "LATERE_CELLA_URL="+server.URL+"/v1/environments", "AUTH_URL="+server.URL+tc.authSuffix, "XDG_CONFIG_HOME="+root, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
 			run := func(args ...string) ([]byte, error) {
 				ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 				defer cancel()

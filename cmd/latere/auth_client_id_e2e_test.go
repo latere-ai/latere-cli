@@ -60,11 +60,11 @@ func TestLoginRetainsOAuthClientAcrossSessionE2E(t *testing.T) {
 					_ = json.NewEncoder(w).Encode(map[string]any{
 						"actor_token": fmt.Sprintf("actor-%d", n), "expires_in": 300,
 					})
-				case "/v1/sandboxes":
+				case "/v1/environments/sandboxes":
 					if !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer actor-") {
 						t.Errorf("Cella received %q, want a minted actor token", r.Header.Get("Authorization"))
 					}
-					_, _ = w.Write([]byte(`[]`))
+					_, _ = w.Write([]byte(`{"items":[]}`))
 				case "/revoke":
 					revocations.Add(1)
 					if r.PostForm.Get("token") != "renewed-refresh" {
@@ -77,7 +77,7 @@ func TestLoginRetainsOAuthClientAcrossSessionE2E(t *testing.T) {
 				}
 			}))
 			defer server.Close()
-			env := append(os.Environ(), "LATERE_CELLA_TOKEN=", "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_URL="+server.URL, "SANDBOX_API_URL="+server.URL, "AUTH_CLIENT_ID=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
+			env := append(os.Environ(), "LATERE_CELLA_TOKEN=", "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_URL="+server.URL, "LATERE_CELLA_URL="+server.URL+"/v1/environments", "AUTH_CLIENT_ID=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
 			run := func(args ...string) {
 				ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 				defer cancel()

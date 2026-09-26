@@ -50,7 +50,7 @@ func TestModelsInvokeConfiguredOutputE2E(t *testing.T) {
 					t.Fatal(err)
 				}
 				// Reuse the helper that installs an inherited writer on the full command tree.
-				args := []string{"-test.run=^TestCellaDownloadOutputHelperProcess$", "--", "models", "invoke", "test", "--model", "test-model", "--models-url", server.URL}
+				args := []string{"-test.run=^TestConfiguredOutputHelperProcess$", "--", "models", "invoke", "test", "--model", "test-model", "--models-url", server.URL}
 				if format == "json" {
 					args = append(args, "--json")
 				}

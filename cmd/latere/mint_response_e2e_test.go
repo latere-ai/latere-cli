@@ -53,12 +53,12 @@ func TestMintPresentsOnlyTheMintedTokenE2E(t *testing.T) {
 						payload = `{"actor_token":"new-actor"}`
 					}
 					_, _ = w.Write([]byte(payload))
-				case "/v1/sandboxes":
+				case "/v1/environments/sandboxes":
 					requests.Add(1)
 					if got := r.Header.Get("Authorization"); got != "Bearer new-actor" {
 						t.Errorf("Cella bearer = %q, want the minted actor token", got)
 					}
-					_, _ = w.Write([]byte(`[]`))
+					_, _ = w.Write([]byte(`{"items":[]}`))
 				default:
 					t.Errorf("unexpected endpoint: %s", r.URL.Path)
 					w.WriteHeader(http.StatusNotFound)
@@ -67,7 +67,7 @@ func TestMintPresentsOnlyTheMintedTokenE2E(t *testing.T) {
 			defer server.Close()
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()
-			command := exec.CommandContext(ctx, binary, "cella", "list", "--api-url", server.URL)
+			command := exec.CommandContext(ctx, binary, "cella", "list", "--api-url", server.URL+"/v1/environments")
 			command.Env = append(os.Environ(), "LATERE_CELLA_TOKEN=", "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_URL="+server.URL, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
 			out, err := command.CombinedOutput()
 			wantRequests := int32(1)

@@ -26,22 +26,19 @@ func (e *remoteExitError) Error() string {
 	return fmt.Sprintf("remote command exited with code %d", e.code)
 }
 
-// commandExitError requires a confirmed successful exit. A missing status or
-// failed lifecycle must not turn into shell success, even if cleanup retained 0.
-func commandExitError(state string, code *int) error {
-	if code == nil {
-		return fmt.Errorf("remote command ended in state %q without an exit code", state)
+// remoteExit is the result of a remote command that ended with code: nil for
+// zero, and otherwise the code, which HandleExitError makes this process's
+// own. A code outside 0-255 is no process exit status and is reported, never
+// passed on as success or truncated into another code.
+func remoteExit(code int) error {
+	switch {
+	case code == 0:
+		return nil
+	case code < 0 || code > 255:
+		return fmt.Errorf("remote command ended with invalid exit code %d", code)
+	default:
+		return &remoteExitError{code: code}
 	}
-	if *code < 0 || *code > 255 {
-		return fmt.Errorf("remote command ended in state %q with invalid exit code %d", state, *code)
-	}
-	if *code != 0 {
-		return &remoteExitError{code: *code}
-	}
-	if state != "exited" {
-		return fmt.Errorf("remote command ended in state %q despite exit code 0", state)
-	}
-	return nil
 }
 
 // HandleExitError maps a root-command error to a process exit code:

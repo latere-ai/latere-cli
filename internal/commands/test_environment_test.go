@@ -42,6 +42,7 @@ func runIsolatedCommandTests(m *testing.M) int {
 		"XDG_CONFIG_HOME":        root,
 		"LATERE_AUTH_TOKEN_FILE": filepath.Join(root, "latere", "auth-token.json"),
 		"LATERE_CELLA_TOKEN":     "",
+		"LATERE_CELLA_URL":       "",
 		// A handed model key or models URL would route every model test
 		// away from its stub.
 		"LATERE_MODEL_KEY":  "",

@@ -54,10 +54,6 @@ func newProductStub(t *testing.T) *productStub {
 			return
 		}
 		s.record(r.Header.Get("Authorization"))
-		if r.URL.Path == "/v1/sandboxes" {
-			_, _ = w.Write([]byte(`[]`))
-			return
-		}
 		_, _ = w.Write([]byte(`{"items":[],"entries":[],"agents":[]}`))
 	}))
 	t.Cleanup(s.srv.Close)
@@ -108,16 +104,15 @@ func TestProductCredentialsCarryOnlyTheirOwnAudience(t *testing.T) {
 		name, audience string
 		run            func(t *testing.T, s *productStub)
 	}{
-		{"cella ls", cellaAudience, func(t *testing.T, s *productStub) {
+		{"cella list", "cella", func(t *testing.T, s *productStub) {
 			t.Setenv("LATERE_CELLA_TOKEN", "")
 			t.Setenv("AUTH_URL", s.srv.URL)
-			c, err := authedClient(t.Context(), s.srv.URL)
-			if err != nil {
-				t.Fatalf("cella client: %v", err)
-			}
-			var out []json.RawMessage
-			if err := c.GetJSON(t.Context(), "/v1/sandboxes", &out); err != nil {
-				t.Fatalf("cella ls: %v", err)
+			cmd := newCellaCmd()
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+			cmd.SetArgs([]string{"list", "--api-url", s.srv.URL + "/v1/environments"})
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("cella list: %v", err)
 			}
 		}},
 		{"drive ls", drive.Audience, func(t *testing.T, s *productStub) {

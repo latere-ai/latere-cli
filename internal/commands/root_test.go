@@ -81,26 +81,19 @@ func TestHelpIncludesUserExamples(t *testing.T) {
 			name: "cella apply",
 			args: []string{"cella", "apply", "--help"},
 			want: []string{
-				"Create a Cella from a declarative Sandbox Manifest.",
-				"latere cella apply -f sandbox.yaml",
-				"Sandbox Manifest YAML file",
-			},
-		},
-		{
-			name: "cella policy",
-			args: []string{"cella", "policy", "--help"},
-			want: []string{
-				"List Cella policy profiles visible to the current token.",
-				"choose a selectable policy where sidecar is \"no\"",
+				"Create a cella from a declarative Sandbox manifest",
+				"apiVersion: cella.latere.ai/v1beta1",
+				"latere cella apply -f sandbox.yaml --wait",
+				"hold the create until the sandbox runs or fails",
 			},
 		},
 		{
 			name: "cella run",
 			args: []string{"cella", "run", "--help"},
 			want: []string{
-				"Run commands in Cella.",
-				"latere cella run dev --follow -- make test",
-				"one-shot image ref (default Cella base image)",
+				"Run one command in a disposable cella.",
+				"latere cella run --ephemeral --rm -- python -c 'print(\"hello\")'",
+				"catalog image: base (the default) or gui",
 			},
 		},
 		{

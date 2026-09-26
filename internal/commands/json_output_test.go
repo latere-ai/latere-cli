@@ -23,14 +23,13 @@ func TestSharedJSONConfiguredOutput(t *testing.T) {
 	for _, tc := range []struct {
 		name                   string
 		args                   []string
+		base                   string // the path the command's --api-url carries
 		path, body, key, value string
 		requests               int32
 	}{
-		{"cella", []string{"cella", "list", "--json"}, "/v1/sandboxes", `[{"id":"sb-1","name":"dev"}]`, "id", "sb-1", 1},
-		{"policy", []string{"cella", "policy", "--json"}, "/v1/policies", `[{"name":"restricted"}]`, "name", "restricted", 1},
-		{"policy list", []string{"cella", "policy", "list", "--json"}, "/v1/policies", `[{"name":"restricted"}]`, "name", "restricted", 1},
-		{"topos", []string{"topos", "agents", "list", "--json"}, "/v1/agents", `{"agents":[{"id":"agent-1"}]}`, "id", "agent-1", 1},
-		{"models", []string{"models", "list", "--json"}, "/openai/v1/models", `{"object":"list","data":[{"id":"model-1","object":"model"}]}`, "id", "model-1", 1},
+		{"cella", []string{"cella", "list", "--json"}, "/v1/environments", "/v1/environments/sandboxes", `{"items":[{"kind":"Sandbox","metadata":{"name":"dev"},"status":{"id":"sbx-1"}}],"next":""}`, "kind", "Sandbox", 1},
+		{"topos", []string{"topos", "agents", "list", "--json"}, "", "/v1/agents", `{"agents":[{"id":"agent-1"}]}`, "id", "agent-1", 1},
+		{"models", []string{"models", "list", "--json"}, "", "/openai/v1/models", `{"object":"list","data":[{"id":"model-1","object":"model"}]}`, "id", "model-1", 1},
 	} {
 		for _, failAfter := range []int{-1, 0, 3} {
 			t.Run(fmt.Sprintf("%s/failAfter=%d", tc.name, failAfter), func(t *testing.T) {
@@ -61,7 +60,7 @@ func TestSharedJSONConfiguredOutput(t *testing.T) {
 				if tc.name == "models" {
 					args = append(args, "--models-url", server.URL)
 				} else {
-					args = append(args, "--api-url", server.URL)
+					args = append(args, "--api-url", server.URL+tc.base)
 				}
 				root.SetArgs(args)
 				leaked, err := captureStdout(root.Execute)

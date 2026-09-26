@@ -31,14 +31,13 @@ func TestSharedJSONConfiguredOutputE2E(t *testing.T) {
 	for _, tc := range []struct {
 		name                   string
 		args                   []string
+		base                   string // the path the command's --api-url carries
 		path, body, key, value string
 		requests               int32
 	}{
-		{"cella", []string{"cella", "list", "--json"}, "/v1/sandboxes", `[{"id":"sb-1"}]`, "id", "sb-1", 1},
-		{"policy", []string{"cella", "policy", "--json"}, "/v1/policies", `[{"name":"restricted"}]`, "name", "restricted", 1},
-		{"policy list", []string{"cella", "policy", "list", "--json"}, "/v1/policies", `[{"name":"restricted"}]`, "name", "restricted", 1},
-		{"topos", []string{"topos", "agents", "list", "--json"}, "/v1/agents", `{"agents":[{"id":"agent-1"}]}`, "id", "agent-1", 1},
-		{"models", []string{"models", "list", "--json"}, "/openai/v1/models", `{"object":"list","data":[{"id":"model-1","object":"model"}]}`, "id", "model-1", 1},
+		{"cella", []string{"cella", "list", "--json"}, "/v1/environments", "/v1/environments/sandboxes", `{"items":[{"kind":"Sandbox","metadata":{"name":"dev"}}]}`, "kind", "Sandbox", 1},
+		{"topos", []string{"topos", "agents", "list", "--json"}, "", "/v1/agents", `{"agents":[{"id":"agent-1"}]}`, "id", "agent-1", 1},
+		{"models", []string{"models", "list", "--json"}, "", "/openai/v1/models", `{"object":"list","data":[{"id":"model-1","object":"model"}]}`, "id", "model-1", 1},
 	} {
 		for _, writable := range []string{"1", "0"} {
 			t.Run(tc.name+"/writable="+writable, func(t *testing.T) {
@@ -62,11 +61,11 @@ func TestSharedJSONConfiguredOutputE2E(t *testing.T) {
 					t.Fatal(err)
 				}
 				// Reuse the helper that installs an inherited writer on the full command tree.
-				args := append([]string{"-test.run=^TestCellaDownloadOutputHelperProcess$", "--"}, tc.args...)
+				args := append([]string{"-test.run=^TestConfiguredOutputHelperProcess$", "--"}, tc.args...)
 				if tc.name == "models" {
 					args = append(args, "--models-url", server.URL)
 				} else {
-					args = append(args, "--api-url", server.URL)
+					args = append(args, "--api-url", server.URL+tc.base)
 				}
 				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 				defer cancel()
