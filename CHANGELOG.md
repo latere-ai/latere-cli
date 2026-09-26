@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.13.0 - 2026-09-26
+
 ### Changed
 
 - `latere cella` runs on the Cella API at
