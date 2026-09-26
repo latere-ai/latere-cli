@@ -114,3 +114,54 @@ plane's default for the caller. The docs say so, with an example boundary.
 | 6 | The default base URL is `https://api.latere.ai/v1/environments`, overridden by `LATERE_CELLA_URL` and `--api-url`; the issuer is inferred from it | `internal/commands` and `internal/api` tests |
 | 7 | The bearer is an actor token for `cella`, and never the login token | the product audience test |
 | 8 | The removed commands are unknown, and no source names `cella.latere.ai` or `SANDBOX_API_URL` | a test over the command tree; a grep test |
+
+## Outcome
+
+Built on 2026-09-26, not released. Every criterion has a passing test:
+
+| # | Tests |
+|---|---|
+| 1 | `internal/commands/cella_apply_test.go`, `cella_run_test.go`, `cella_files_test.go` and `cella_shell_test.go` against the fake core in `cella_core_test.go`, which serves `/v1/environments` and refuses a request without the bearer; the built binary in `cmd/latere/cella_core_e2e_test.go` (`TestCellaOnTheCoreE2E`, `TestCellaOneShotOnTheCoreE2E`) |
+| 2 | `TestCellaApplyByNameHoldsWithWait`, `TestCellaApplyWaitReportsFailure`, `TestCellaApplyWaitStillStarting`, `TestCellaRunEphemeral`, `TestCellaRunEphemeralDeletesOnFailure` |
+| 3 | `TestCellaRunEphemeralDeletesOnFailure` (a failed start, a start still in progress when the hold ends, a failed command, a lost answer), `TestCellaRunEphemeralReportsFailedDelete` |
+| 4 | `TestCellaShellAttach` (request frame with the command and window, input up, output down, exit code), `TestCellaShellErrorFrame` |
+| 5 | `TestCellaRequestsUseTheCLIClient` (a counting transport under the CLI's client carries every request, the attach socket included) |
+| 6 | `TestResolveCellaURL`, `TestCellaIssuerFromDefaultURL`, `internal/api` `TestInferAuthURL` |
+| 7 | `TestProductCredentialsCarryOnlyTheirOwnAudience` (the `cella list` case pins the audience `cella`), `TestCellaTokenMintedAndReminted` |
+| 8 | `TestRemovedCellaCommands`, `TestRemovedCellaFlags`, `TestRemovedCellaCommandE2E`, `TestNothingNamesTheRetiredCellaAPI` (every non-test Go file, the README and `docs/`), `internal/api` `TestNewClientReadsNoEnvironment` |
+
+Where the build differs from the draft:
+
+- A removed command is not unknown: `latere cella policy` and the others in
+  the removed table exit 1 and say why the command is gone and what to use
+  instead. Printing the group's help with exit 0, which cobra does for an
+  unknown word under a group, would have read as success. `logs REF CMD_ID`
+  likewise names why it takes no command id.
+- `run --ephemeral --rm` names its sandbox (`run-` and twelve base32
+  characters) and applies it with `PUT /sandboxes/{name}?wait=1` rather than
+  `POST /sandboxes`, so a create whose answer never arrives, because the
+  hold was interrupted or the connection dropped, still leaves a name to
+  delete. When the command failed and the delete failed too, the exit code
+  is the command's and the failed delete is printed to stderr.
+- A `401` from the core is reported, not retried. The retired client
+  re-minted and resent once; the exported client never retries, and the
+  bearer is re-minted a minute before it lapses instead.
+- `InferAuthURL` builds the issuer from the scheme and the host alone. It
+  carried a query, a fragment or userinfo on the product URL over to the
+  issuer base.
+- `internal/api` loses `DoRaw`, `DoWithHeaders`, `PostJSONWithStatus` and
+  the policy sidecar error text, which only the retired API used, and
+  `internal/commands` loses its multipart upload.
+- `latere.ai/x/cella` v0.6.3 requires `latere.ai/x/pkg` v0.80.0, whose lux
+  usage fields no longer compile with the pinned Topos. Topos moves to its
+  main branch (`v0.6.1-0.20260925225244-d0fda6397e99`), which carries the
+  fix, until a Topos release is tagged.
+- The identity block names the audience `cella`, and its `client-audiences`
+  rule is waived until 2026-12-01. The rule reads the audience as a word in
+  every string literal, and the command group shares that word, so each
+  file with Cella help text reads as a second minter; the audience itself
+  is presented from `internal/commands/cella.go` alone.
+- The end-to-end tests that used `latere cella list` as the command that
+  mints and refreshes now answer the core's list route; the test of a
+  stalled `401` retry is gone with the retry. The two helper processes the
+  output and input tests share moved out of the retired Cella test files.

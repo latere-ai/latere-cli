@@ -16,6 +16,7 @@ specs/
   005-lux-env-redesign.md            (implemented: lux env keyed by dialect and provider, with token provenance and TTL)
   006-model-key.md                   (implemented: a model key on first use, created at auth and kept in the keychain)
   007-models-at-the-origin.md        (implemented: latere models over the platform origin; latere lux retired)
+  008-cella-at-the-origin.md         (implemented: latere cella on the Cella core under the platform origin)
 ```
 
 ## Status
@@ -43,6 +44,11 @@ Every spec in the tree has shipped:
   `latere review` and `latere topos --local` call them the same way. The
   `latere lux` namespace, the hosted plane it reached, and `lux serve` are
   gone.
+- `008-cella-at-the-origin.md`: `latere cella` drives sandboxes on the Cella
+  core at `https://api.latere.ai/v1/environments` through its exported Go
+  client, with a token minted for the audience `cella`. The commands of the
+  retired hosted sandbox API that the core has no counterpart for are gone,
+  and each says why.
 
 Two surfaces shipped without a dedicated design record: the token-lifecycle
 work, which [docs/login-and-tokens.md](../docs/login-and-tokens.md) documents,
