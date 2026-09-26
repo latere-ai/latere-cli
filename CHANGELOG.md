@@ -10,6 +10,40 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Changed
+
+- `latere cella` runs on the Cella API at
+  `https://api.latere.ai/v1/environments`, which replaces the retired
+  hosted sandbox service at `cella.latere.ai`. `LATERE_CELLA_URL` or
+  `--api-url` overrides the base URL, which includes its
+  `/v1/environments` path. Commands present a token minted for the audience
+  `cella`.
+
+- A create answers as soon as the sandbox is recorded, usually `Pending`.
+  `apply --wait[=DURATION]` holds the answer until the sandbox runs or
+  fails, and a sandbox that fails to start exits 1 with its reason.
+  Manifests name `apiVersion: cella.latere.ai/v1beta1` and an image from
+  the catalog, `base` or `gui`. A manifest that names its sandbox is
+  applied under that name, so applying it again updates the same sandbox.
+
+- `exec` returns the command's output when it ends, each stream cut at one
+  mebibyte, and takes `--cwd`, `--env` and `--timeout`. `run --ephemeral
+  --rm` creates, waits, runs and deletes, including when the start fails
+  or the command is interrupted. `logs <name>` reads the sandbox's main
+  process output. A relative path given to a file command is resolved
+  under `/workspace`.
+
+### Removed
+
+- `latere cella policy`, `rename`, `extend`, `convert`, `resize` and
+  `wait`, background runs (`run <name> -- CMD`, `run --follow`,
+  `run --detach`, `run status`, `run logs`, `run cancel`), and the
+  `--credential`, `--idempotency-key` and `shell --session` flags. The
+  Cella API has no counterpart for them, and each removed command exits 1
+  and says what to use instead.
+
+- `SANDBOX_API_URL` is no longer read; set `LATERE_CELLA_URL` instead.
+
 ## v0.12.0 - 2026-09-25
 
 ### Changed
