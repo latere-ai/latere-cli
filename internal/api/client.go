@@ -1,10 +1,11 @@
 // SPDX-FileCopyrightText: 2026 Latere AI
 // SPDX-License-Identifier: MIT
 
-// Package api is the HTTP client every `latere cella …` command shares.
-// It talks to the public Cella surface at cella.latere.ai and carries a
-// bearer the caller supplies: an actor token minted for that product from
-// the login saved by `latere login`.
+// Package api is the CLI's plain HTTP client, which the Topos commands and
+// the issuer calls share, with the saved login, the actor-token mint and the
+// token refresh they rest on. A client carries a bearer the caller supplies:
+// an actor token minted for one product from the login saved by
+// `latere login`, or the login itself at the issuer.
 package api
 
 import (
@@ -16,15 +17,11 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
 	"latere.ai/x/pkg/otel"
 )
-
-// DefaultAPIURL is overridden by SANDBOX_API_URL or --api-url.
-const DefaultAPIURL = "https://cella.latere.ai"
 
 // Client wraps the HTTP plumbing. Build with NewClient, then attach the
 // bearer with SetBearer.
@@ -50,17 +47,10 @@ type Client struct {
 // before the token lapses.
 const remintMargin = 60 * time.Second
 
-// NewClient builds a Client for apiURL, or for $SANDBOX_API_URL, or for
-// the public deployment. It carries no credential: `--help` and `latere
-// login` need a client before there is anything to present.
+// NewClient builds a Client for apiURL, which the caller has resolved from
+// its own flag, environment and default. It carries no credential: the
+// caller attaches the bearer for the service it is about to call.
 func NewClient(apiURL string) *Client {
-	if apiURL == "" {
-		if v := os.Getenv("SANDBOX_API_URL"); v != "" {
-			apiURL = v
-		} else {
-			apiURL = DefaultAPIURL
-		}
-	}
 	return &Client{
 		BaseURL: strings.TrimRight(apiURL, "/"),
 		HTTP: &http.Client{
@@ -108,7 +98,8 @@ func PreserveMethodOnRedirect(req *http.Request, via []*http.Request) error {
 
 // ---- HTTP plumbing ----
 
-// APIError is a structured error from sandboxd's writeErr envelope.
+// APIError is a refusal in the flat envelope of the issuer and Topos: a code,
+// a message and a request id.
 type APIError struct {
 	Status  int    `json:"-"` // HTTP response status, never supplied by the JSON envelope.
 	Code    string `json:"code"`
@@ -117,13 +108,6 @@ type APIError struct {
 }
 
 func (e *APIError) Error() string {
-	if e.Code == "policy_sidecar_required" {
-		return "cannot create cella: the selected policy requires Cella's credential sidecar, but the server has no complete sidecar configuration for this CLI token.\n" +
-			"This is not a local command syntax problem. Re-run `latere login` with the latest CLI, then retry.\n" +
-			"To choose another policy, run `latere cella policy list` and set `spec.policy` in your Manifest to a selectable policy where sidecar is `no`.\n" +
-			"If no such policy is available, ask your Latere admin/support to configure the CLI sidecar client or assign a non-sidecar policy.\n" +
-			"server code: policy_sidecar_required"
-	}
 	if e.Code != "" {
 		return fmt.Sprintf("%s: %s", e.Code, e.Message)
 	}
@@ -132,25 +116,12 @@ func (e *APIError) Error() string {
 
 // Do executes the request and decodes exactly one JSON value into out,
 // requiring a complete response. A nil out discards the response body
-// but still reports transfer errors. Use DoRaw for streaming responses.
+// but still reports transfer errors. When a Refresh hook is set it runs
+// before a request whose held token is within remintMargin of expiry, and
+// once more after a 401, retrying the request with the fresh bearer (only
+// when the body is nil or rewindable, so a consumed stream is never resent
+// corrupt).
 func (c *Client) Do(ctx context.Context, method, path string, body io.Reader, contentType string, out any) error {
-	return c.DoWithHeaders(ctx, method, path, body, contentType, nil, out)
-}
-
-// DoWithHeaders is Do with extra request headers (e.g. Idempotency-Key).
-// When a Refresh hook is set it runs before a request whose held token
-// is within remintMargin of expiry, and once more after a 401, retrying
-// the request with the fresh bearer (only when the body is nil or
-// rewindable, so a consumed stream is never resent corrupt).
-func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body io.Reader, contentType string, headers map[string]string, out any) error {
-	return c.doWithHeaders(ctx, method, path, body, contentType, headers, func(resp *http.Response) error {
-		return decodeResponse(resp, out, 0)
-	})
-}
-
-// doWithHeaders owns response closure and shares authentication/retry behavior
-// between ordinary requests and endpoints with structured error results.
-func (c *Client) doWithHeaders(ctx context.Context, method, path string, body io.Reader, contentType string, headers map[string]string, decode func(*http.Response) error) error {
 	c.remintIfDue(ctx)
 	// A rewindable body is read once and each attempt gets its own reader.
 	// Seeking the caller's reader back after a 401 raced the transport,
@@ -172,9 +143,6 @@ func (c *Client) doWithHeaders(ctx context.Context, method, path string, body io
 		req, err := c.req(ctx, method, path, attempt, contentType)
 		if err != nil {
 			return nil, err
-		}
-		for k, v := range headers {
-			req.Header.Set(k, v)
 		}
 		return c.HTTP.Do(req)
 	}
@@ -200,11 +168,11 @@ func (c *Client) doWithHeaders(ctx context.Context, method, path string, body io
 		}
 	}
 	defer func() { _ = resp.Body.Close() }()
-	return decode(resp)
+	return decodeResponse(resp, out)
 }
 
-func decodeResponse(resp *http.Response, out any, extraStatus int) error {
-	if resp.StatusCode/100 != 2 && (extraStatus == 0 || resp.StatusCode != extraStatus) {
+func decodeResponse(resp *http.Response, out any) error {
+	if resp.StatusCode/100 != 2 {
 		return parseAPIError(resp)
 	}
 	if out == nil || resp.StatusCode == http.StatusNoContent {
@@ -212,25 +180,6 @@ func decodeResponse(resp *http.Response, out any, extraStatus int) error {
 		return err
 	}
 	return decodeJSONResponse(resp.Body, out)
-}
-
-// DoRaw runs the request and returns the response so the caller can
-// stream the body (used for files/export and SSE log follow). Streaming
-// requests do not auto-refresh the bearer; a 401 surfaces to the caller.
-func (c *Client) DoRaw(ctx context.Context, method, path string, body io.Reader, contentType string) (*http.Response, error) {
-	req, err := c.req(ctx, method, path, body, contentType)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := c.HTTP.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode/100 != 2 {
-		defer func() { _ = resp.Body.Close() }()
-		return nil, parseAPIError(resp)
-	}
-	return resp, nil
 }
 
 // PostJSON is a convenience over Do for the common POST-JSON-decode-JSON
@@ -241,22 +190,6 @@ func (c *Client) PostJSON(ctx context.Context, path string, body, out any) error
 		return err
 	}
 	return c.Do(ctx, http.MethodPost, path, bytes.NewReader(b), "application/json", out)
-}
-
-// PostJSONWithStatus also decodes extraStatus as a complete JSON response.
-// It returns the actual HTTP status. Callers must validate the extra-status
-// payload and report its failure; ordinary non-2xx statuses remain APIError.
-func (c *Client) PostJSONWithStatus(ctx context.Context, path string, body, out any, extraStatus int) (int, error) {
-	b, err := json.Marshal(body)
-	if err != nil {
-		return 0, err
-	}
-	var status int
-	err = c.doWithHeaders(ctx, http.MethodPost, path, bytes.NewReader(b), "application/json", nil, func(resp *http.Response) error {
-		status = resp.StatusCode
-		return decodeResponse(resp, out, extraStatus)
-	})
-	return status, err
 }
 
 // GetJSON is the GET variant.

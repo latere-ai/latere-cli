@@ -82,14 +82,16 @@ func TestRefreshAuthTokenPersistsAndPreservesRefreshToken(t *testing.T) {
 	}
 }
 
-func TestNewClientResolvesBaseFromEnv(t *testing.T) {
-	t.Setenv("SANDBOX_API_URL", "https://cella.example/")
-	if c := NewClient(""); c.BaseURL != "https://cella.example" {
-		t.Errorf("BaseURL = %q, want env value trimmed", c.BaseURL)
+// NewClient takes the URL its caller resolved and reads nothing of its own:
+// SANDBOX_API_URL named the retired hosted sandbox API, and a value left in
+// a shell profile must not redirect any client.
+func TestNewClientReadsNoEnvironment(t *testing.T) {
+	t.Setenv("SANDBOX_API_URL", "https://retired.example")
+	if c := NewClient(""); c.BaseURL != "" {
+		t.Errorf("BaseURL = %q, want the empty URL it was given", c.BaseURL)
 	}
-	t.Setenv("SANDBOX_API_URL", "")
-	if c := NewClient(""); c.BaseURL != DefaultAPIURL {
-		t.Errorf("BaseURL = %q, want default", c.BaseURL)
+	if c := NewClient("https://x.example/"); c.BaseURL != "https://x.example" {
+		t.Errorf("BaseURL = %q, want the URL trimmed", c.BaseURL)
 	}
 	// A new client carries no credential and mints nothing: the caller
 	// attaches a token minted for the product it is about to call.

@@ -358,9 +358,7 @@ func newToposAgentsGetCmd() *cobra.Command {
 // ---- helpers ----
 
 // resolveToposURL returns the Topos API base URL: explicit flag wins,
-// then TOPOS_API_URL env, then the public default. Passing a non-empty
-// URL to api.NewClient bypasses NewClient's own env/default branch,
-// which resolves SANDBOX_API_URL for Cella.
+// then TOPOS_API_URL env, then the public default.
 func resolveToposURL(flagURL string) string {
 	if flagURL != "" {
 		return flagURL
