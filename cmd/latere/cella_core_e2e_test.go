@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -26,8 +27,10 @@ import (
 // binary: a create answers 201 Pending, or Running when held with wait=1, a
 // command exits with the code the case sets, and every request is recorded.
 type e2eCore struct {
-	srv      *httptest.Server
-	exitCode int
+	srv *httptest.Server
+	// exitCode is read by the server while the test, which shares no
+	// memory with the binary's requests, sets it between runs.
+	exitCode atomic.Int32
 
 	mu   sync.Mutex
 	seen []string
@@ -69,7 +72,7 @@ func newE2ECore(t *testing.T) *e2eCore {
 		case len(parts) == 1 && r.Method == http.MethodDelete:
 			answer(http.StatusOK, sandbox(parts[0], "Deleting"))
 		case len(parts) == 2 && parts[1] == "exec":
-			answer(http.StatusOK, map[string]any{"exitCode": c.exitCode, "stdout": "ran\n"})
+			answer(http.StatusOK, map[string]any{"exitCode": c.exitCode.Load(), "stdout": "ran\n"})
 		case len(parts) == 2 && parts[1] == "files" && r.Method == http.MethodPut:
 			body, _ := io.ReadAll(r.Body)
 			c.mu.Lock()
@@ -155,7 +158,7 @@ func TestCellaOnTheCoreE2E(t *testing.T) {
 	if out, _, code := c.run(t, "", "sandbox", "list"); code != 0 || !strings.Contains(out, "sbx-dev") {
 		t.Fatalf("list through the sandbox alias = %d %q", code, out)
 	}
-	c.exitCode = 5
+	c.exitCode.Store(5)
 	if out, _, code := c.run(t, "", "cella", "exec", "dev", "--", "false"); code != 5 || out != "ran\n" {
 		t.Fatalf("exec = %d %q, want the command's exit code 5", code, out)
 	}
@@ -184,7 +187,7 @@ func TestCellaOneShotOnTheCoreE2E(t *testing.T) {
 		t.Skip("binary e2e skipped with -short")
 	}
 	c := newE2ECore(t)
-	c.exitCode = 2
+	c.exitCode.Store(2)
 	out, errOut, code := c.run(t, "", "cella", "run", "--ephemeral", "--rm", "--", "false")
 	if code != 2 || out != "ran\n" || !strings.Contains(errOut, "deleted cella run-") {
 		t.Fatalf("run = %d %q %q", code, out, errOut)
