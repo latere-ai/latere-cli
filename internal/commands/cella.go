@@ -136,12 +136,12 @@ A create answers as soon as the sandbox is recorded, usually Pending.
 // that the Cella core has no counterpart for, each with the reason a user
 // reads when they run it.
 var removedCellaCommands = map[string]string{
-	"policy":  "the Cella core has no named policy profiles; a sandbox's egress boundary is spec.network.egress in its manifest",
+	"policy":  "Cella has no named policy profiles; a sandbox's egress boundary is spec.network.egress in its manifest",
 	"rename":  "a sandbox's name is fixed when it is created",
-	"extend":  "the Cella core has no tiers or deadlines; set spec.lifecycle (autoStop, ttl, autoDelete) in the manifest you create the sandbox from",
-	"convert": "the Cella core has no tiers or deadlines; set spec.lifecycle (autoStop, ttl, autoDelete) in the manifest you create the sandbox from",
+	"extend":  "Cella has no tiers or deadlines; set spec.lifecycle (autoStop, ttl, autoDelete) in the manifest you create the sandbox from",
+	"convert": "Cella has no tiers or deadlines; set spec.lifecycle (autoStop, ttl, autoDelete) in the manifest you create the sandbox from",
 	"resize":  "a sandbox's resources are fixed when it is created; apply a new sandbox with the resources it needs",
-	"wait":    "the Cella core runs a command to completion and keeps no command records; 'latere cella exec' runs one and waits for it",
+	"wait":    "Cella runs a command to completion and keeps no command records; 'latere cella exec' runs one and waits for it",
 }
 
 // ---- the client ----
@@ -607,7 +607,7 @@ func writeExecResult(stdout, stderr io.Writer, res cellaclient.ExecResult) error
 		return fmt.Errorf("write command stderr: %w", err)
 	}
 	if res.Truncated {
-		fprintln(stderr, "cella: the output was cut at the control plane's one mebibyte cap")
+		fprintln(stderr, "cella: the output was cut at Cella's one mebibyte cap")
 	}
 	return remoteExit(res.ExitCode)
 }
@@ -830,7 +830,7 @@ runs. --follow keeps writing it as it arrives.`,
 		Args: func(cmd *cobra.Command, args []string) error {
 			// A second argument was a command id on the retired API.
 			if len(args) == 2 {
-				return errors.New("logs reads a cella's main process output and takes no command id: the Cella core keeps no command records")
+				return errors.New("logs reads a cella's main process output and takes no command id: Cella keeps no command records")
 			}
 			return cobra.ExactArgs(1)(cmd, args)
 		},

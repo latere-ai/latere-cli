@@ -19,7 +19,7 @@ func TestCellaExecRunsToCompletion(t *testing.T) {
 	if code := exitCode(err); code != 7 {
 		t.Fatalf("exit code = %d (%v), want the command's 7", code, err)
 	}
-	if out != "out\n" || !strings.HasPrefix(errOut, "err\n") || !strings.Contains(errOut, "cut at the control plane's one mebibyte cap") {
+	if out != "out\n" || !strings.HasPrefix(errOut, "err\n") || !strings.Contains(errOut, "cut at Cella's one mebibyte cap") {
 		t.Errorf("stdout=%q stderr=%q", out, errOut)
 	}
 	req := f.last("POST", "/sandboxes/dev/exec")

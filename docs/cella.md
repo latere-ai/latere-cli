@@ -162,8 +162,8 @@ command's and the failed delete is printed to stderr.
 
 ## Files
 
-Read and change one file or directory inside a sandbox. A relative path is
-resolved under `/workspace`:
+Read and change one file or directory inside a sandbox. Every path is at
+or below `/workspace`, and a relative path is resolved under it:
 
 ```sh
 latere cella ls <name|id> /workspace
