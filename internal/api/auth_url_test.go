@@ -14,12 +14,16 @@ import (
 // wrong same host. InferAuthURL swaps the leading label robustly.
 func TestInferAuthURL(t *testing.T) {
 	cases := map[string]string{
-		"":                          "https://auth.latere.ai",
-		"https://cella.latere.ai":   "https://auth.latere.ai",
-		"https://api.example.com":   "https://auth.example.com",
-		"http://cella.localhost:80": "http://auth.localhost:80",
-		"://not-a-url":              "https://auth.latere.ai",
-		"https://localhost":         "https://auth.latere.ai",
+		"":                                      "https://auth.latere.ai",
+		"https://api.latere.ai/v1/environments": "https://auth.latere.ai",
+		"https://api.example.com":               "https://auth.example.com",
+		"http://cella.localhost:80":             "http://auth.localhost:80",
+		"://not-a-url":                          "https://auth.latere.ai",
+		"https://localhost":                     "https://auth.latere.ai",
+		// Only the scheme and the host carry over to the issuer: a query,
+		// a fragment or userinfo on the product URL named no part of it.
+		"https://api.latere.ai/v1/environments?debug=1#top": "https://auth.latere.ai",
+		"https://user:secret@api.example.com/v1":            "https://auth.example.com",
 		// An IP literal has no DNS labels to swap; splitting it at the
 		// first dot invented hosts like auth.0.0.1:8080 (issue #4).
 		"http://127.0.0.1:8080": "https://auth.latere.ai",

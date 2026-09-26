@@ -41,21 +41,20 @@ const actorMintTimeout = 15 * time.Second
 // before it is used to mint. It covers a slow round trip to the issuer.
 const refreshMargin = 60 * time.Second
 
-// InferAuthURL maps a product URL like https://cella.latere.ai to the
-// issuer base https://auth.latere.ai. Falls back to the public issuer if
-// the product URL isn't a known shape: a bare single-label host, or an IP
-// literal, whose dots separate octets rather than DNS labels and so have
-// no leading label to replace.
+// InferAuthURL maps a product URL like https://api.latere.ai/v1/environments
+// to the issuer base https://auth.latere.ai: the scheme, and the host with
+// its leading label replaced. Nothing else of the product URL belongs to the
+// issuer, so its path, query, fragment and userinfo are dropped. Falls back
+// to the public issuer if the product URL isn't a known shape: a bare
+// single-label host, or an IP literal, whose dots separate octets rather
+// than DNS labels and so have no leading label to replace.
 func InferAuthURL(apiURL string) string {
 	if apiURL == "" {
 		return DefaultAuthURL
 	}
 	if u, err := url.Parse(apiURL); err == nil && u.Host != "" && net.ParseIP(u.Hostname()) == nil {
-		// Replace the leading host label.
 		if _, rest, ok := strings.Cut(u.Host, "."); ok {
-			u.Host = "auth." + rest
-			u.Path = ""
-			return u.String()
+			return (&url.URL{Scheme: u.Scheme, Host: "auth." + rest}).String()
 		}
 	}
 	return DefaultAuthURL
