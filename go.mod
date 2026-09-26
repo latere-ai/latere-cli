@@ -20,7 +20,7 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 	latere.ai/x/cella v0.6.3
 	latere.ai/x/pkg v0.80.0
-	latere.ai/x/topos v0.6.1-0.20260925225244-d0fda6397e99
+	latere.ai/x/topos v0.7.0
 )
 
 require (
