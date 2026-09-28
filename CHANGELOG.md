@@ -10,6 +10,17 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Removed
+
+- `latere topos` no longer reaches the hosted Topos service at
+  `topos.latere.ai`, which is retired. The home screen,
+  `latere topos agents`, `latere topos session` and
+  `latere topos serve-sandbox` are gone, with `--api-url`,
+  `TOPOS_API_URL` and `TOPOS_TOKEN`, and `latere topos` without `--local`
+  exits 1 and says so. The hosted sessions only ever ran a built-in
+  stand-in model, and they are not migrated. `latere topos --local` and
+  `latere topos login` are unchanged.
+
 ## v0.13.0 - 2026-09-26
 
 ### Changed
