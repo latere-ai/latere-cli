@@ -48,7 +48,7 @@ curl https://api.latere.ai/v1/models/openai/v1/chat/completions \
 
 ## Check a model with one call
 
-`invoke` sends one prompt through the OpenAI door and prints the reply: no tools, no session. Use it to check that a model answers your key; for assistant work, run an agent instead: `latere topos --local -p "<prompt>"` on this machine, or `latere topos session start <agent-id> -p "<prompt>"` on the hosted platform.
+`invoke` sends one prompt through the OpenAI door and prints the reply: no tools, no session. Use it to check that a model answers your key; for assistant work, run an agent instead: `latere topos --local -p "<prompt>"` on this machine.
 
 ```sh
 latere models invoke --model anthropic/claude-sonnet-4.6 "Say hi"

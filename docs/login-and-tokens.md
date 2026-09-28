@@ -89,7 +89,6 @@ model call, which presents the model key.
 | `latere cella ...` | a token with audience `cella`, valid 5 minutes | minted per command at auth |
 | `latere models ...`, `latere review`, `latere topos --local` through the Latere API | the model key | created at auth on first use and kept, as above |
 | `git` against `code.latere.ai` | a token with audience `origo`, valid 5 minutes | minted per git operation at auth |
-| `latere topos ...` | a token with audience `toposd`, valid 5 minutes | minted per command at auth |
 | `latere drive ...` | a token with audience `drive.latere.ai`, valid 5 minutes | minted per command at auth |
 | `latere whoami` | the login token, only to refresh it when it is due | the claims it prints are read from the saved token, not asked of auth |
 
@@ -114,9 +113,8 @@ session or a large import, mints again before its next request. A `401`
 from Cella is reported as it is, not retried.
 
 Set `LATERE_CELLA_TOKEN` to present a bearer of your own instead, for a
-development deployment or a test. `TOPOS_TOKEN` and `LATERE_DRIVE_TOKEN` do
-the same for their products, and `LATERE_MODEL_KEY` hands the model
-commands a key.
+development deployment or a test. `LATERE_DRIVE_TOKEN` does the same for
+Drive, and `LATERE_MODEL_KEY` hands the model commands a key.
 
 ### Models
 
@@ -216,10 +214,9 @@ The CLI keeps one rule, which is the platform's:
 
 In CLI terms: you sign in once, and every product call mints its
 credential from that login. A `cella` token is only ever presented to
-Cella, an `origo` token only to Latere Code, a `toposd` token only to
-Topos, a `drive.latere.ai` token only to Drive, and the model key only to
-the model endpoints. Whichever credential is on the wire, the person it
-acts for is you.
+Cella, an `origo` token only to Latere Code, a `drive.latere.ai` token
+only to Drive, and the model key only to the model endpoints. Whichever
+credential is on the wire, the person it acts for is you.
 
 ## Scripting
 
