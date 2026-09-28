@@ -7,7 +7,7 @@ package main
 // one `latere` CLI identity and asserts each identity-fabric edge end to
 // end against live production. It is the reproducible companion to
 // specs/products/identity-fabric/release-and-verification.md: one login,
-// then every edge a CLI user can reach (cella, models, drive, topos, auth),
+// then every edge a CLI user can reach (cella, models, drive, auth),
 // plus the two invariants (owner-rooted subject, trust-root rule).
 //
 // Opt-in and tiered, because the higher tiers spend real money and mutate
@@ -15,7 +15,7 @@ package main
 //
 //	LATERE_FAMILY_E2E=1        read-only edges: whoami, /api/me,
 //	                           cella list, models list, drive ls,
-//	                           topos reachability, garbage-token 401.
+//	                           garbage-token 401.
 //	                           No cost, no resource creation.
 //	LATERE_FAMILY_E2E_WRITE=1  also: models invoke (a token), drive put/get/rm
 //	                           round-trip, cross-product 401. Spends money;
@@ -29,7 +29,7 @@ package main
 //	LATERE_FAMILY_E2E=1 go test ./cmd/latere/ -run TestFamilyE2E -v
 //
 // Service URLs default to production and are overridable:
-// CELLA_API_URL, AUTH_URL, LATERE_MODELS_URL, DRIVE_API_URL, TOPOS_API_URL.
+// CELLA_API_URL, AUTH_URL, LATERE_MODELS_URL, DRIVE_API_URL.
 // The models edges create this machine's model key on first use, as any
 // signed-in `latere models` does.
 
@@ -53,7 +53,6 @@ type familyEnv struct {
 	cellaURL string
 	authURL  string
 	driveURL string
-	toposURL string
 	sub      string // owner subject, read from whoami
 	httpc    *http.Client
 }
@@ -80,7 +79,6 @@ func setupFamily(t *testing.T) *familyEnv {
 		cellaURL: urlOr("CELLA_API_URL", "https://api.latere.ai/v1/environments"),
 		authURL:  urlOr("AUTH_URL", "https://auth.latere.ai"),
 		driveURL: urlOr("DRIVE_API_URL", "https://drive.latere.ai"),
-		toposURL: urlOr("TOPOS_API_URL", "https://topos.latere.ai"),
 		httpc:    &http.Client{Timeout: 30 * time.Second},
 	}
 
@@ -234,14 +232,6 @@ func TestFamilyE2E(t *testing.T) {
 	t.Run("cli->drive-ls", func(t *testing.T) {
 		if _, errOut, err := fe.run(t, 30*time.Second, "drive", "ls"); err != nil {
 			t.Fatalf("drive ls: %v\n%s", err, errOut)
-		}
-	})
-
-	// Edge: CLI/topos control plane reachability (the site authorizes).
-	t.Run("cli->topos-reachable", func(t *testing.T) {
-		status, _ := fe.get(t, fe.toposURL+"/", fe.token)
-		if status >= 500 {
-			t.Fatalf("topos %s unreachable: %d", fe.toposURL, status)
 		}
 	})
 

@@ -25,7 +25,7 @@ func TestProductsRejectExpiredAuthWithoutRefreshE2E(t *testing.T) {
 		t.Skip("binary e2e skipped with -short")
 	}
 	binary := latereBinary(t)
-	for _, product := range []string{"git helper", "drive", "topos", "cella"} {
+	for _, product := range []string{"git helper", "drive", "cella"} {
 		for _, state := range []string{"expired", "near expiry", "unknown expiry"} {
 			t.Run(product+"/"+state, func(t *testing.T) {
 				root := t.TempDir()
@@ -67,15 +67,13 @@ func TestProductsRejectExpiredAuthWithoutRefreshE2E(t *testing.T) {
 						_, _ = w.Write([]byte(`{"items":[]}`))
 						return
 					}
-					_, _ = w.Write([]byte(`{"entries":[],"agents":[]}`))
+					_, _ = w.Write([]byte(`{"entries":[]}`))
 				}))
 				defer server.Close()
 				args := []string{"git-credential", "get"}
 				switch product {
 				case "drive":
 					args = []string{"drive", "ls"}
-				case "topos":
-					args = []string{"topos", "agents", "list"}
 				case "cella":
 					args = []string{"cella", "list", "--api-url", server.URL + "/v1/environments"}
 					// The Cella base and AUTH_URL both point at the stub, so
@@ -85,7 +83,7 @@ func TestProductsRejectExpiredAuthWithoutRefreshE2E(t *testing.T) {
 				defer cancel()
 				command := exec.CommandContext(ctx, binary, args...)
 				command.Stdin = strings.NewReader("protocol=https\nhost=code.latere.ai\n\n")
-				command.Env = append(os.Environ(), "LATERE_CELLA_TOKEN=", "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_URL="+server.URL, "DRIVE_API_URL="+server.URL, "TOPOS_API_URL="+server.URL, "LATERE_DRIVE_TOKEN=", "TOPOS_TOKEN=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
+				command.Env = append(os.Environ(), "LATERE_CELLA_TOKEN=", "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_URL="+server.URL, "DRIVE_API_URL="+server.URL, "LATERE_DRIVE_TOKEN=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
 				var stdout, stderr bytes.Buffer
 				command.Stdout, command.Stderr = &stdout, &stderr
 				err = command.Run()

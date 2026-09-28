@@ -16,6 +16,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/latere-ai/latere-cli/internal/drive"
 )
 
 func TestProductCommandsNeverRefreshCellaCredentialsE2E(t *testing.T) {
@@ -25,9 +27,9 @@ func TestProductCommandsNeverRefreshCellaCredentialsE2E(t *testing.T) {
 	binary := latereBinary(t)
 	for _, source := range []string{"override", "login", "expired login"} {
 		for _, failure := range []bool{false, true} {
-			name := "topos/" + source + "/accepted"
+			name := "drive/" + source + "/accepted"
 			if failure {
-				name = "topos/" + source + "/product rejects bearer"
+				name = "drive/" + source + "/product rejects bearer"
 			}
 			t.Run(name, func(t *testing.T) {
 				root := t.TempDir()
@@ -40,13 +42,13 @@ func TestProductCommandsNeverRefreshCellaCredentialsE2E(t *testing.T) {
 				if err := os.WriteFile(authPath, authBefore, 0600); err != nil {
 					t.Fatal(err)
 				}
-				// Topos receives an actor token minted for its own audience,
+				// Drive receives an actor token minted for its own audience,
 				// never the root token on disk.
-				wantBearer := "topos-actor"
+				wantBearer := "drive-actor"
 				if source == "override" {
 					wantBearer = "product-override"
 				}
-				var cellaMints, productCalls, toposMints, authRefreshes atomic.Int32
+				var cellaMints, productCalls, driveMints, authRefreshes atomic.Int32
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					w.Header().Set("Content-Type", "application/json")
 					switch r.URL.Path {
@@ -63,14 +65,14 @@ func TestProductCommandsNeverRefreshCellaCredentialsE2E(t *testing.T) {
 						if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 							t.Error(err)
 						}
-						if body.Audience == "toposd" {
-							toposMints.Add(1)
-							_, _ = w.Write([]byte(`{"actor_token":"topos-actor","expires_in":300}`))
+						if body.Audience == drive.Audience {
+							driveMints.Add(1)
+							_, _ = w.Write([]byte(`{"actor_token":"drive-actor","expires_in":300}`))
 							return
 						}
 						cellaMints.Add(1)
 						_, _ = w.Write([]byte(`{"actor_token":"cella-actor","expires_in":300}`))
-					case "/v1/agents":
+					case "/v1/files/me/files":
 						productCalls.Add(1)
 						if got := r.Header.Get("Authorization"); got != "Bearer "+wantBearer {
 							t.Errorf("product received %q, want its own bearer", got)
@@ -79,7 +81,7 @@ func TestProductCommandsNeverRefreshCellaCredentialsE2E(t *testing.T) {
 							w.WriteHeader(http.StatusUnauthorized)
 							_, _ = w.Write([]byte(`{"code":"product_rejected","message":"rejected product credential"}`))
 						} else {
-							_, _ = w.Write([]byte(`{"agents":[]}`))
+							_, _ = w.Write([]byte(`{"entries":[]}`))
 						}
 					default:
 						t.Errorf("unexpected endpoint: %s", r.URL.Path)
@@ -87,13 +89,13 @@ func TestProductCommandsNeverRefreshCellaCredentialsE2E(t *testing.T) {
 					}
 				}))
 				defer server.Close()
-				env := append(os.Environ(), "LATERE_CELLA_TOKEN=", "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_URL="+server.URL, "LATERE_CELLA_URL="+server.URL+"/v1/environments", "TOPOS_API_URL="+server.URL, "TOPOS_TOKEN=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
+				env := append(os.Environ(), "LATERE_CELLA_TOKEN=", "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_URL="+server.URL, "LATERE_CELLA_URL="+server.URL+"/v1/environments", "DRIVE_API_URL="+server.URL, "LATERE_DRIVE_TOKEN=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
 				if source == "override" {
-					env = append(env, "TOPOS_TOKEN="+wantBearer)
+					env = append(env, "LATERE_DRIVE_TOKEN="+wantBearer)
 				}
 				ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 				defer cancel()
-				command := exec.CommandContext(ctx, binary, "topos", "agents", "list")
+				command := exec.CommandContext(ctx, binary, "drive", "ls")
 				command.Env = env
 				out, err := command.CombinedOutput()
 				if failure {
@@ -103,17 +105,17 @@ func TestProductCommandsNeverRefreshCellaCredentialsE2E(t *testing.T) {
 				} else if err != nil {
 					t.Errorf("product command = %v: %s", err, out)
 				}
-				// A Topos command mints for its own audience alone; Cella's
+				// A Drive command mints for its own audience alone; Cella's
 				// audience is never asked for on its behalf.
 				if cellaMints.Load() != 0 || productCalls.Load() != 1 {
 					t.Errorf("requests: Cella mints=%d product=%d, want 0/1", cellaMints.Load(), productCalls.Load())
 				}
-				wantToposMints := int32(1)
+				wantDriveMints := int32(1)
 				if source == "override" {
-					wantToposMints = 0
+					wantDriveMints = 0
 				}
-				if toposMints.Load() != wantToposMints {
-					t.Errorf("Topos actor mint calls = %d, want %d", toposMints.Load(), wantToposMints)
+				if driveMints.Load() != wantDriveMints {
+					t.Errorf("Drive actor mint calls = %d, want %d", driveMints.Load(), wantDriveMints)
 				}
 				wantRefreshes := int32(0)
 				if source == "expired login" {
