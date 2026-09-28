@@ -28,7 +28,9 @@ setting, and each command's `--help` names the flags it takes.
 | `LATERE_CLAUDE_TOKEN_FILE` | `claude.json` in your user configuration directory | The Claude sign-in `latere topos login` saved. |
 | `ANTHROPIC_API_KEY` | none | An Anthropic API key. When set, `latere topos --local` calls Anthropic directly with it, ahead of every other provider. |
 | `CLAUDE_CODE_OAUTH_TOKEN` | none | A Claude Code token `latere topos --local` falls back to when you have no saved provider and no `latere` login. |
-| `CODE_HOST` | `code.latere.ai` | The Latere Code host the git credential helper answers for. A nonblank value also allows plain HTTP, for a development host. |
+| `LATERE_PLATFORM_URL` | `https://platform.latere.ai` | The platform `latere repos` creates, lists and reads repositories on. `--platform-url` overrides it. |
+| `LATERE_PLATFORM_TOKEN` | none | A bearer to present to the platform instead of minting one. |
+| `CODE_HOST` | `code.latere.ai` | The Latere Code host the git credential helper answers for, and the one `latere repos` prints clone URLs for. A nonblank value also allows plain HTTP, for a development host. |
 | `DRIVE_API_URL` | `https://drive.latere.ai` | The Drive API. `--drive-url` overrides it. |
 | `LATERE_DRIVE_TOKEN` | none | A bearer to present to Drive instead of minting one. `--token` overrides it. |
 | `EVAL_API_URL` | `https://eval.latere.ai` | The Eval API. `--api-url` overrides it. |

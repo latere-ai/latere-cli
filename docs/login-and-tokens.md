@@ -88,6 +88,7 @@ model call, which presents the model key.
 |---|---|---|
 | `latere cella ...` | a token with audience `cella`, valid 5 minutes | minted per command at auth |
 | `latere models ...`, `latere review`, `latere topos --local` through the Latere API | the model key | created at auth on first use and kept, as above |
+| `latere repos ...` | a token with audience `api.latere.ai`, the platform's, valid 5 minutes | minted per command at auth |
 | `git` against `code.latere.ai` | a token with audience `origo`, valid 5 minutes | minted per git operation at auth |
 | `latere drive ...` | a token with audience `drive.latere.ai`, valid 5 minutes | minted per command at auth |
 | `latere whoami` | the login token, only to refresh it when it is due | the claims it prints are read from the saved token, not asked of auth |

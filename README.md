@@ -117,6 +117,9 @@ latere login
 git clone https://code.latere.ai/<owner>/<repo>.git
 ```
 
+`latere repos create <owner>/<name>` creates a repository to push to, and
+`latere repos list` shows the ones you can reach ([docs/repos.md](docs/repos.md)).
+
 The helper answers for that host only; every other host keeps the helpers
 you already have. Fetch and clone need read access, push needs write
 access, and a public repository clones with no credential at all.
@@ -139,6 +142,7 @@ git clone https://code.latere.ai/<owner>/<repo>.git
 | Command | What it does | Guide |
 |---------|--------------|-------|
 | `latere cella` | Sandboxes on the Cella API: create from a manifest, run commands, open a shell, read logs, and move files in and out. | [docs/cella.md](docs/cella.md) |
+| `latere repos` | Git repositories on Latere Code: create one under your handle or your organization, list your context's repositories and the ones shared with you, and look one up by name. | [docs/repos.md](docs/repos.md) |
 | `latere models` | Call language models through the Latere API with a model key the CLI creates and keeps: list the models your key reaches, point a stock SDK at the API, and check a model with one call. | [docs/models.md](docs/models.md) |
 | `latere topos` | A coding agent on this machine: `--local` runs it in your directory against your files, interactively or on one prompt. The hosted Topos service is retired. | [docs/topos.md](docs/topos.md) |
 | `latere review` | Adversarial review of your latest Claude Code session: a proposer defends the diff, critics attack it through the Latere API, and unresolved attacks set the exit code. | [docs/review.md](docs/review.md) |

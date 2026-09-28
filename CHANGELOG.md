@@ -10,6 +10,20 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Added
+
+- `latere repos create <owner>/<name> [--public]` creates a Git repository on
+  Latere Code under your handle, or under the organization you are in as an
+  owner or admin, private unless `--public` is given, and prints its id and
+  clone URLs. `latere repos list` shows your current context's repositories
+  and, in your personal context, the ones shared with you, with your role on
+  each; `latere repos get <owner>/<name>` shows one. Each takes `--json`. The
+  commands call the platform at `https://platform.latere.ai` with a token
+  minted for the audience `api.latere.ai`; `LATERE_PLATFORM_URL` or
+  `--platform-url` overrides the address, and `LATERE_PLATFORM_TOKEN`
+  presents a bearer as given. A refusal prints the platform's code and
+  sentence and exits 1.
+
 ## v0.13.1 - 2026-09-28
 
 ### Removed
