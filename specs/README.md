@@ -17,6 +17,7 @@ specs/
   006-model-key.md                   (implemented: a model key on first use, created at auth and kept in the keychain)
   007-models-at-the-origin.md        (implemented: latere models over the platform origin; latere lux retired)
   008-cella-at-the-origin.md         (implemented: latere cella on the Cella core under the platform origin)
+  009-repos-command.md               (implemented: latere repos create, list and get on platformd's repository routes)
 ```
 
 ## Status
@@ -49,6 +50,10 @@ Every spec in the tree has shipped:
   client, with a token minted for the audience `cella`. The commands of the
   retired hosted sandbox API that the core has no counterpart for are gone,
   and each says why.
+- `009-repos-command.md`: `latere repos` creates, lists and looks up Git
+  repositories on platformd's repository routes at
+  `https://platform.latere.ai`, with a token minted for the audience
+  `api.latere.ai`.
 
 Two surfaces shipped without a dedicated design record: the token-lifecycle
 work, which [docs/login-and-tokens.md](../docs/login-and-tokens.md) documents,
@@ -58,7 +63,7 @@ That is a recorded decision, not an open action item.
 ## Conventions
 
 - The CLI talks to the auth service (login, org switch) with the saved login
-  token, and reaches every product backend (Cella, Drive, Topos, Origo)
+  token, and reaches every product backend (Cella, Drive, Origo, the platform)
   with a token minted at auth for that one product. The model endpoints
   take the model key instead (006, 007). It does not host an HTTP server,
   does not own a cookie session, and has no frontend.
