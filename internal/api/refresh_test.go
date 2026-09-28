@@ -123,8 +123,8 @@ func TestClientRetriesSeekableBodyAfterRefresh(t *testing.T) {
 	c := NewClient(srv.URL)
 	c.SetBearer("stale-actor", time.Time{})
 	c.Refresh = func(context.Context) (string, time.Time, bool) { return "fresh-actor", time.Time{}, true }
-	if err := c.PostJSON(context.Background(), "/v1/things", map[string]int{"x": 1}, nil); err != nil {
-		t.Fatalf("PostJSON: %v", err)
+	if err := c.Do(context.Background(), http.MethodPost, "/v1/things", strings.NewReader(`{"x":1}`), "application/json", nil); err != nil {
+		t.Fatalf("Do: %v", err)
 	}
 	if postCalls != 2 {
 		t.Errorf("post calls = %d, want 2 (401 then rewound retry)", postCalls)

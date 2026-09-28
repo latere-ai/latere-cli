@@ -182,16 +182,6 @@ func decodeResponse(resp *http.Response, out any) error {
 	return decodeJSONResponse(resp.Body, out)
 }
 
-// PostJSON is a convenience over Do for the common POST-JSON-decode-JSON
-// pattern.
-func (c *Client) PostJSON(ctx context.Context, path string, body, out any) error {
-	b, err := json.Marshal(body)
-	if err != nil {
-		return err
-	}
-	return c.Do(ctx, http.MethodPost, path, bytes.NewReader(b), "application/json", out)
-}
-
 // GetJSON is the GET variant.
 func (c *Client) GetJSON(ctx context.Context, path string, out any) error {
 	return c.Do(ctx, http.MethodGet, path, nil, "", out)

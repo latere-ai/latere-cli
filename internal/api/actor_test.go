@@ -123,7 +123,7 @@ func TestActorTokenRefreshesAnExpiringLogin(t *testing.T) {
 		ExpiresAt:    time.Now().Add(10 * time.Second),
 	})
 
-	if _, _, err := ActorToken(t.Context(), s.srv.URL, "toposd"); err != nil {
+	if _, _, err := ActorToken(t.Context(), s.srv.URL, "cella"); err != nil {
 		t.Fatalf("ActorToken: %v", err)
 	}
 	if s.refresh.Load() != 1 {
