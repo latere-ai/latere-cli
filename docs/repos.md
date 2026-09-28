@@ -26,8 +26,8 @@ The owner must be one you may create under in the context you are in:
 A name is letters, digits, and `.` `_` `-`, up to 64 of them, and is unique
 under its owner. A repository is private unless you pass `--public`; you can
 change that later on the repository's **Access** tab in the console. An owner
-holds at most as many repositories as its plan allows, and the platform says
-so when a create would pass it.
+holds a limited number of repositories, and a create past it is refused
+`repository_limit`.
 
 The repository is created empty, and the command prints its id and the two
 clone URLs. Push a first commit over git:
