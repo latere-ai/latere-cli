@@ -174,6 +174,42 @@ var (
 	styleErr      = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
 )
 
+// The payloads of the topos.Event hooks the local renderers decode. The line
+// REPL and the full-screen TUI read the same events, so the shapes are
+// declared once here.
+
+type textDeltaPayload struct {
+	Text string `json:"text"`
+}
+
+type toolCall struct {
+	Name  string          `json:"name"`
+	Input json.RawMessage `json:"input"`
+}
+
+type toolResult struct {
+	Content string `json:"content"`
+	IsError bool   `json:"is_error"`
+}
+
+type preToolUsePayload struct {
+	ToolCall toolCall `json:"tool_call"`
+}
+
+type postToolUsePayload struct {
+	ToolCall toolCall   `json:"tool_call"`
+	Result   toolResult `json:"result"`
+}
+
+type usageTotals struct {
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
+}
+
+type usagePayload struct {
+	Total usageTotals `json:"total"`
+}
+
 // localRenderer streams a run to the terminal as distinct blocks. It keeps the
 // small amount of state needed to know when an assistant text block is open, so
 // text, tool calls, and results are cleanly separated.
@@ -243,4 +279,14 @@ func summarizeToolInput(raw json.RawMessage) string {
 		}
 	}
 	return ""
+}
+
+// truncLine collapses content to a single trimmed line capped at n runes.
+func truncLine(s string, n int) string {
+	s = strings.TrimSpace(strings.ReplaceAll(s, "\n", " "))
+	r := []rune(s)
+	if len(r) > n {
+		return string(r[:n]) + "…"
+	}
+	return s
 }

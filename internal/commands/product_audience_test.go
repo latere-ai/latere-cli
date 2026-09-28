@@ -54,7 +54,7 @@ func newProductStub(t *testing.T) *productStub {
 			return
 		}
 		s.record(r.Header.Get("Authorization"))
-		_, _ = w.Write([]byte(`{"items":[],"entries":[],"agents":[]}`))
+		_, _ = w.Write([]byte(`{"items":[],"entries":[]}`))
 	}))
 	t.Cleanup(s.srv.Close)
 	return s
@@ -123,20 +123,6 @@ func TestProductCredentialsCarryOnlyTheirOwnAudience(t *testing.T) {
 			cmd.SetArgs([]string{"--drive-url", s.srv.URL, "--auth-url", s.srv.URL, "ls"})
 			if err := cmd.Execute(); err != nil {
 				t.Fatalf("drive ls: %v", err)
-			}
-		}},
-		{"topos", toposAudience, func(t *testing.T, s *productStub) {
-			t.Setenv("TOPOS_TOKEN", "")
-			t.Setenv("AUTH_URL", s.srv.URL)
-			c, err := toposClient(t.Context(), s.srv.URL)
-			if err != nil {
-				t.Fatalf("toposClient: %v", err)
-			}
-			var out struct {
-				Agents []json.RawMessage `json:"agents"`
-			}
-			if err := c.GetJSON(t.Context(), "/v1/agents", &out); err != nil {
-				t.Fatalf("topos agents: %v", err)
 			}
 		}},
 		{"git credential", codeAudience, func(t *testing.T, s *productStub) {

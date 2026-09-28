@@ -9,6 +9,7 @@ package commands
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	toposlux "latere.ai/x/topos/models/lux"
@@ -40,5 +41,14 @@ func TestModelString(t *testing.T) {
 	m := toposlux.New("k", "", toposlux.WithModel("claude-test-9"))
 	if got := modelString(m); got != "claude-test-9" {
 		t.Fatalf("modelString = %q, want claude-test-9", got)
+	}
+}
+
+func TestTruncLine(t *testing.T) {
+	if got := truncLine("a\nb  c", 100); got != "a b  c" {
+		t.Fatalf("truncLine newline = %q", got)
+	}
+	if got := truncLine(strings.Repeat("x", 10), 3); got != "xxx…" {
+		t.Fatalf("truncLine cap = %q, want xxx…", got)
 	}
 }

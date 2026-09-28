@@ -4,117 +4,50 @@
 package commands
 
 import (
-	"context"
 	"errors"
-	"fmt"
-	"io"
-	"net/url"
-	"os"
-	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
-
-	"github.com/latere-ai/latere-cli/internal/api"
 )
 
-// ---- DTOs (subset of Topos API; keep loose so additive backend
-//      changes don't break the CLI). ----
+// errToposHostedRetired is returned when `latere topos` runs without --local:
+// the hosted Topos platform is retired, so the local agent is the only mode.
+var errToposHostedRetired = errors.New("the hosted Topos platform is retired; run 'latere topos --local' to run an agent on this machine")
 
-type agentDTO struct {
-	ID                 string    `json:"id"`
-	OrgID              string    `json:"org_id"`
-	OwnerSub           string    `json:"owner_sub"`
-	DisplayName        string    `json:"display_name"`
-	Kind               string    `json:"kind"`
-	WorkspaceRef       string    `json:"workspace_ref,omitempty"`
-	CustomInstructions string    `json:"custom_instructions,omitempty"`
-	PrincipalID        string    `json:"principal_id,omitempty"`
-	CreatedAt          time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"`
-}
-
-type listAgentsResponse struct {
-	Agents []agentDTO `json:"agents"`
-}
-
-// createAgentRequest is the body for POST /v1/agents. org_id/owner are
-// derived server-side from the bearer's claims, never sent by the client.
-type createAgentRequest struct {
-	DisplayName        string `json:"display_name"`
-	Kind               string `json:"kind"`
-	CustomInstructions string `json:"custom_instructions,omitempty"`
-}
-
-// sessionCreateRequest is the body for POST /v1/agents/{id}/sessions.
-type sessionCreateRequest struct {
-	Prompt string `json:"prompt"`
-}
-
-// sessionResultDTO mirrors the Topos harness SessionResult (kept loose so
-// additive backend changes don't break the CLI).
-type sessionResultDTO struct {
-	SessionID  string `json:"session_id"`
-	SandboxID  string `json:"sandbox_id"`
-	Output     string `json:"output"`
-	StopReason string `json:"stop_reason"`
-	ToolCalls  int    `json:"tool_calls"`
-	Usage      struct {
-		InputTokens  int `json:"input_tokens"`
-		OutputTokens int `json:"output_tokens"`
-	} `json:"usage"`
-}
-
-// ---- top-level ----
-
-// newToposCmd is the canonical `latere topos …` command group. Topos is
-// the Latere agent control plane at topos.latere.ai.
+// newToposCmd is the `latere topos …` command group: the Topos agent loop run
+// on this machine, and the picker for the model provider it uses.
 func newToposCmd() *cobra.Command {
 	var (
-		apiURL string
-		local  bool
-		dir    string
-		model  string
-		print  string
+		local bool
+		dir   string
+		model string
+		print string
 	)
 	cmd := &cobra.Command{
 		Use:   "topos",
-		Short: "Topos: the Latere agent platform.",
-		Long: `Topos is the Latere agent platform — run agents locally or on the hosted
-control plane.
+		Short: "Topos: run the Latere agent on this machine.",
+		Long: `Topos is the Latere agent loop.
 
 Run 'latere topos --local' to run an agent entirely on this machine: it works in
 your current directory with your real files, using your local model credential
 (ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN). No control plane, no login.
 
-Run 'latere topos' (no --local) to use the hosted control plane: resume a running
-session or start a new one; it signs you in on first use.`,
+The hosted Topos platform is retired, so --local is required.`,
 		Example: `  latere topos --local                      run an agent here, on your files
   latere topos --local -p "add a test for foo()"   one-shot, then exit
-  latere topos                              hosted: open the platform`,
+  latere topos login                        choose the model provider`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if local {
-				return runToposLocal(cmd.Context(), dir, model, print, cmd.Root().Version)
+			if !local {
+				return errToposHostedRetired
 			}
-			// The hosted home has no agent to hand a prompt to; a prompt it
-			// cannot run must fail loudly rather than open the interactive
-			// home with the prompt discarded.
-			if print != "" {
-				return errors.New("--print needs --local here; on the hosted platform run 'latere topos session start <agent-id> -p \"<prompt>\"'")
-			}
-			return runToposHome(cmd.Context(), apiURL)
+			return runToposLocal(cmd.Context(), dir, model, print, cmd.Root().Version)
 		},
 	}
 	cmd.Flags().BoolVar(&local, "local", false, "run the agent on this machine (no control plane), like Claude Code")
 	cmd.Flags().StringVar(&dir, "dir", ".", "working directory for --local (default: current directory)")
 	cmd.Flags().StringVar(&model, "model", "", "model name for --local (default: the adapter's default)")
 	cmd.Flags().StringVarP(&print, "print", "p", "", "with --local: run this one prompt, stream the result, and exit")
-	cmd.Flags().StringVar(&apiURL, "api-url", "", "override the Topos API base URL")
 	cmd.AddCommand(newToposLoginCmd())
-	cmd.AddCommand(newToposAgentsCmd())
-	cmd.AddCommand(newToposSessionCmd())
-	cmd.AddCommand(newToposServeSandboxCmd())
 	return cmd
 }
 
@@ -138,321 +71,4 @@ picking an API key (separate quota) or Ollama (fully local).`,
 			return runAuthPicker(cmd.Context())
 		},
 	}
-}
-
-// ---- agents subgroup ----
-
-func newToposAgentsCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "agents",
-		Short: "Manage Topos agents.",
-		Long:  "List and inspect agents registered on the Topos control plane.",
-		Example: `  latere topos agents list
-  latere topos agents get agent_01hxy`,
-	}
-	cmd.AddCommand(newToposAgentsListCmd())
-	cmd.AddCommand(newToposAgentsGetCmd())
-	cmd.AddCommand(newToposAgentsCreateCmd())
-	return cmd
-}
-
-// newToposAgentsCreateCmd implements `latere topos agents create`.
-func newToposAgentsCreateCmd() *cobra.Command {
-	var (
-		apiURL       string
-		name         string
-		kind         string
-		instructions string
-		jsonF        bool
-	)
-	cmd := &cobra.Command{
-		Use:   "create",
-		Short: "Create a Topos agent.",
-		Long: `Create an agent on the Topos control plane.
-
-The agent's owner and org are derived from the bearer token's claims;
-they are never sent by the client. Requires a token addressed to Topos
-(the toposd audience).`,
-		Example: `  latere topos agents create --name "Build Bot" --kind worker
-  latere topos agents create --name Helper --kind assistant \
-    --instructions "You triage CI failures."`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if name == "" || kind == "" {
-				return fmt.Errorf("--name and --kind are required")
-			}
-			c, err := toposClient(cmd.Context(), apiURL)
-			if err != nil {
-				return err
-			}
-			var created agentDTO
-			err = c.PostJSON(cmd.Context(), "/v1/agents", createAgentRequest{
-				DisplayName:        name,
-				Kind:               kind,
-				CustomInstructions: instructions,
-			}, &created)
-			if err != nil {
-				return err
-			}
-			if jsonF {
-				return printJSON(cmd.OutOrStdout(), created)
-			}
-			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Created agent %s\n\n", created.ID); err != nil {
-				return fmt.Errorf("write agent %q creation confirmation: %w", created.ID, err)
-			}
-			return printAgent(cmd.OutOrStdout(), created)
-		},
-	}
-	cmd.Flags().StringVar(&apiURL, "api-url", "", "override the Topos API base URL")
-	cmd.Flags().StringVar(&name, "name", "", "display name (required)")
-	cmd.Flags().StringVar(&kind, "kind", "", "agent kind, e.g. assistant|worker (required)")
-	cmd.Flags().StringVar(&instructions, "instructions", "", "custom system-prompt instructions")
-	cmd.Flags().BoolVar(&jsonF, "json", false, "JSON output")
-	return cmd
-}
-
-// ---- session subgroup ----
-
-func newToposSessionCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "session",
-		Short: "Trigger and manage Topos agent sessions.",
-		Long: `Trigger agent runs on the Topos control plane.
-
-A session is one run. 'create' triggers an autonomous run and prints the
-result once it completes. 'start' opens an interactive session (a coding
-assistant TUI, or --print for a one-shot prompt); 'attach' reconnects to a
-running session; 'ls' lists interactive sessions.`,
-		Example: `  latere topos session start agent_01hxy
-  latere topos session start agent_01hxy -p "summarize README.md"
-  latere topos session attach sess_01hxy
-  latere topos session create agent_01hxy --prompt "List the repo files."`,
-	}
-	cmd.AddCommand(newToposSessionCreateCmd())
-	cmd.AddCommand(newToposSessionStartCmd())
-	cmd.AddCommand(newToposSessionAttachCmd())
-	cmd.AddCommand(newToposSessionLsCmd())
-	return cmd
-}
-
-// newToposSessionCreateCmd implements `latere topos session create <agent-id>`.
-func newToposSessionCreateCmd() *cobra.Command {
-	var (
-		apiURL string
-		prompt string
-		jsonF  bool
-	)
-	cmd := &cobra.Command{
-		Use:   "create <agent-id>",
-		Short: "Trigger an autonomous run on an agent.",
-		Long: `Trigger one autonomous run (a session) on the given agent.
-
-POSTs the initial prompt to the agent's session endpoint; the run
-executes on the control plane and the result is printed when it
-completes. Requires a token addressed to Topos (the toposd audience).`,
-		Example: `  latere topos session create agent_01hxy --prompt "Summarize README.md"`,
-		Args:    cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if prompt == "" {
-				return fmt.Errorf("--prompt is required")
-			}
-			c, err := toposClient(cmd.Context(), apiURL)
-			if err != nil {
-				return err
-			}
-			var result sessionResultDTO
-			err = c.PostJSON(cmd.Context(), agentPath(args[0])+"/sessions",
-				sessionCreateRequest{Prompt: prompt}, &result)
-			if err != nil {
-				return err
-			}
-			if jsonF {
-				return printJSON(cmd.OutOrStdout(), result)
-			}
-			return printSessionResult(cmd.OutOrStdout(), result)
-		},
-	}
-	cmd.Flags().StringVar(&apiURL, "api-url", "", "override the Topos API base URL")
-	cmd.Flags().StringVarP(&prompt, "prompt", "p", "", "initial prompt that starts the run (required)")
-	cmd.Flags().BoolVar(&jsonF, "json", false, "JSON output")
-	return cmd
-}
-
-func printSessionResult(out io.Writer, r sessionResultDTO) error {
-	var metadata strings.Builder
-	field := func(label, value string) {
-		metadata.WriteString(formatWrappedField(label, value))
-	}
-	field("session", r.SessionID)
-	field("sandbox", defaultStr(r.SandboxID, "-"))
-	field("stop_reason", defaultStr(r.StopReason, "-"))
-	field("tool_calls", fmt.Sprintf("%d", r.ToolCalls))
-	field("tokens", fmt.Sprintf("%d in / %d out", r.Usage.InputTokens, r.Usage.OutputTokens))
-	if _, err := fmt.Fprint(out, metadata.String()); err != nil {
-		return fmt.Errorf("write session %q metadata: %w", r.SessionID, err)
-	}
-	if r.Output != "" {
-		if _, err := fmt.Fprintf(out, "\n%s\n", r.Output); err != nil {
-			return fmt.Errorf("write session %q output: %w", r.SessionID, err)
-		}
-	}
-	return nil
-}
-
-// newToposAgentsListCmd implements `latere topos agents list`.
-func newToposAgentsListCmd() *cobra.Command {
-	var (
-		apiURL string
-		jsonF  bool
-	)
-	cmd := &cobra.Command{
-		Use:   "list",
-		Short: "List agents visible to the current token.",
-		Long:  "List the agents you can run on Topos.",
-		Example: `  latere topos agents list
-  latere topos agents list --json`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := toposClient(cmd.Context(), apiURL)
-			if err != nil {
-				return err
-			}
-			var resp listAgentsResponse
-			if err := c.GetJSON(cmd.Context(), "/v1/agents", &resp); err != nil {
-				return err
-			}
-			if jsonF {
-				return printJSON(cmd.OutOrStdout(), resp.Agents)
-			}
-			return printAgentList(cmd.OutOrStdout(), resp.Agents)
-		},
-	}
-	cmd.Flags().StringVar(&apiURL, "api-url", "", "override the Topos API base URL")
-	cmd.Flags().BoolVar(&jsonF, "json", false, "JSON output")
-	return cmd
-}
-
-// newToposAgentsGetCmd implements `latere topos agents get <id>`.
-func newToposAgentsGetCmd() *cobra.Command {
-	var apiURL string
-	cmd := &cobra.Command{
-		Use:     "get <id>",
-		Short:   "Get a Topos agent by id.",
-		Long:    "Fetch one agent by id and print the full JSON response.",
-		Example: `  latere topos agents get agent_01hxy`,
-		Args:    cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := toposClient(cmd.Context(), apiURL)
-			if err != nil {
-				return err
-			}
-			var agent agentDTO
-			if err := c.GetJSON(cmd.Context(), agentPath(args[0]), &agent); err != nil {
-				return err
-			}
-			return printJSON(cmd.OutOrStdout(), agent)
-		},
-	}
-	cmd.Flags().StringVar(&apiURL, "api-url", "", "override the Topos API base URL")
-	return cmd
-}
-
-// ---- helpers ----
-
-// resolveToposURL returns the Topos API base URL: explicit flag wins,
-// then TOPOS_API_URL env, then the public default.
-func resolveToposURL(flagURL string) string {
-	if flagURL != "" {
-		return flagURL
-	}
-	if v := os.Getenv("TOPOS_API_URL"); v != "" {
-		return v
-	}
-	return "https://topos.latere.ai"
-}
-
-// toposAudience is the aud claim Topos enforces on every bearer it accepts:
-// agents' internal/auth.BuildAuthenticator pins Audiences to AUTH_CLIENT_ID,
-// the registered OIDC client of the Topos console, which is "toposd" in
-// auth's client registry. The login token carries it too, but the login
-// token also names the auth issuer, so every Topos call presents an actor
-// token minted for this audience alone.
-const toposAudience = "toposd"
-
-// toposClient builds an authenticated API client pointed at the Topos
-// control plane. For local development, TOPOS_TOKEN overrides the saved
-// token with a static bearer, so a server running with TOPOS_DEV_AUTH=true +
-// TOPOS_DEV_TOKEN can be reached in one step without `latere login`.
-//
-// Against production, Topos validates a bearer that names toposAudience.
-// That is a token minted for Topos alone, not the login token: the login
-// token names the issuer, and a credential valid at the identity service
-// must not travel to a product.
-func toposClient(ctx context.Context, apiURL string) (*api.Client, error) {
-	c := api.NewClient(resolveToposURL(apiURL))
-	if v := os.Getenv("TOPOS_TOKEN"); v != "" {
-		c.SetBearer(v, time.Time{})
-		return c, nil
-	}
-	bearer, err := toposBearer(ctx)
-	if err != nil {
-		return nil, err
-	}
-	c.SetBearer(bearer, time.Time{})
-	return c, nil
-}
-
-// toposBearer returns the bearer presented to Topos: a token minted for
-// toposAudience alone from the saved login. It is the same mint every
-// other product path makes, with Topos's audience.
-func toposBearer(ctx context.Context) (string, error) {
-	bearer, _, err := api.ActorToken(ctx, api.ResolveAuthURL("", ""), toposAudience)
-	if err != nil {
-		return "", fmt.Errorf("cannot authenticate to Topos: %w; run `latere login` to get a token addressed to Topos", err)
-	}
-	return bearer, nil
-}
-
-func agentPath(id string) string {
-	return "/v1/agents/" + url.PathEscape(id)
-}
-
-func printAgentList(out io.Writer, agents []agentDTO) error {
-	if len(agents) == 0 {
-		if _, err := fmt.Fprintln(out, "No agents are visible to this token."); err != nil {
-			return fmt.Errorf("write agent list: %w", err)
-		}
-		return nil
-	}
-	for i, a := range agents {
-		if i > 0 {
-			if _, err := fmt.Fprintln(out); err != nil {
-				return fmt.Errorf("write agent list separator: %w", err)
-			}
-		}
-		if err := printAgent(out, a); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func printAgent(out io.Writer, a agentDTO) error {
-	var record strings.Builder
-	field := func(label, value string) {
-		record.WriteString(formatWrappedField(label, value))
-	}
-	field("id", a.ID)
-	field("display_name", defaultStr(a.DisplayName, "-"))
-	field("kind", defaultStr(a.Kind, "-"))
-	field("org_id", defaultStr(a.OrgID, "-"))
-	field("owner", defaultStr(a.OwnerSub, "-"))
-	if a.WorkspaceRef != "" {
-		field("workspace", a.WorkspaceRef)
-	}
-	if !a.CreatedAt.IsZero() {
-		field("created", humanAge(a.CreatedAt)+" ago")
-	}
-	if _, err := fmt.Fprint(out, record.String()); err != nil {
-		return fmt.Errorf("write agent %q details: %w", a.ID, err)
-	}
-	return nil
 }

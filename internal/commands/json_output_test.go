@@ -17,7 +17,6 @@ import (
 
 func TestSharedJSONConfiguredOutput(t *testing.T) {
 	t.Setenv("LATERE_CELLA_TOKEN", "synthetic-token")
-	t.Setenv("TOPOS_TOKEN", "synthetic-token")
 	t.Setenv("LATERE_MODEL_KEY", "synthetic-token")
 	t.Setenv("LATERE_NO_UPDATE_CHECK", "1")
 	for _, tc := range []struct {
@@ -28,7 +27,6 @@ func TestSharedJSONConfiguredOutput(t *testing.T) {
 		requests               int32
 	}{
 		{"cella", []string{"cella", "list", "--json"}, "/v1/environments", "/v1/environments/sandboxes", `{"items":[{"kind":"Sandbox","metadata":{"name":"dev"},"status":{"id":"sbx-1"}}],"next":""}`, "kind", "Sandbox", 1},
-		{"topos", []string{"topos", "agents", "list", "--json"}, "", "/v1/agents", `{"agents":[{"id":"agent-1"}]}`, "id", "agent-1", 1},
 		{"models", []string{"models", "list", "--json"}, "", "/openai/v1/models", `{"object":"list","data":[{"id":"model-1","object":"model"}]}`, "id", "model-1", 1},
 	} {
 		for _, failAfter := range []int{-1, 0, 3} {

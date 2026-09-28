@@ -111,23 +111,22 @@ func TestHostSandboxReportsCanceledCommands(t *testing.T) {
 	}
 }
 
-func TestServedHostSandboxRejectsEmptyCommand(t *testing.T) {
-	allow := func(context.Context, string, sandbox.ExecOptions) error { return nil }
-	client, stop := dialServedSandbox(t, t.TempDir(), allow)
-	defer stop()
-	ctx := t.Context()
-	sb, err := client.Create(ctx, sandbox.CreateOptions{})
+func TestHostSandboxRejectsEmptyCommand(t *testing.T) {
+	sb, err := newHostSandbox(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.Exec(ctx, sb.ID, sandbox.ExecOptions{}); err == nil {
-		t.Fatal("empty command reported success over RPC")
+	ctx := t.Context()
+	if _, err := sb.Exec(ctx, "local", sandbox.ExecOptions{}); err == nil {
+		t.Fatal("empty command reported success")
 	}
-	stream, err := client.StreamExec(ctx, sb.ID, sandbox.ExecOptions{})
+	stream, err := sb.StreamExec(ctx, "local", sandbox.ExecOptions{})
 	if stream != nil {
-		_ = stream.Close()
+		if cerr := stream.Close(); cerr != nil {
+			t.Errorf("close stream: %v", cerr)
+		}
 	}
 	if err == nil {
-		t.Fatal("empty streaming command reported success over RPC")
+		t.Fatal("empty streaming command reported success")
 	}
 }
