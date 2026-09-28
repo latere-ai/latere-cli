@@ -49,10 +49,10 @@ waive:
 # The identity shape of the family: specs/infrastructure/identity.md in latere-ai/specs
 identity:
   role: client
-  audiences: [cella, drive.latere.ai, origo]
+  audiences: [cella, drive.latere.ai, origo, api.latere.ai]
   roles_only: true
   waive:
     client-audiences:
       reason: >-
-        the command group `latere cella` shares its name with the audience cella, and the rule matches the word in every string literal, so each file with cella help text reads as a second minter; the audience is presented from internal/commands/cella.go alone. The waiver also pauses the rule for drive.latere.ai and origo until it ends
+        the command group `latere cella` shares its name with the audience cella, and the rule matches the word in every string literal, so each file with cella help text reads as a second minter; the audience is presented from internal/commands/cella.go alone. The waiver also pauses the rule for drive.latere.ai, origo and api.latere.ai until it ends; api.latere.ai is also the host of the Cella and models URLs, so every literal naming those URLs reads as a mint of it, while the audience is presented from internal/commands/repos.go alone
       until: 2026-12-01
