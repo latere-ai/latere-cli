@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.13.1 - 2026-09-28
+
 ### Removed
 
 - `latere topos` no longer reaches the hosted Topos service at
