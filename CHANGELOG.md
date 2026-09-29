@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.14.0 - 2026-09-29
+
 ### Added
 
 - `latere repos create <owner>/<name> [--public]` creates a Git repository on
