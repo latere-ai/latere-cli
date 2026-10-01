@@ -10,6 +10,9 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+- `latere.ai/x/pkg` v0.90.2 and OpenTelemetry Go v1.46.0, past GO-2026-6615 and
+  GO-2026-6505.
+
 ## v0.14.0 - 2026-09-29
 
 ### Added
