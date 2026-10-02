@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.15.0 - 2026-10-02
+
 ### Removed
 
 - `latere drive` and its flags, `DRIVE_API_URL` and `LATERE_DRIVE_TOKEN`.
