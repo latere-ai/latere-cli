@@ -18,6 +18,7 @@ specs/
   008-cella-at-the-origin.md         (implemented: latere cella on the Cella core under the platform origin)
   009-repos-command.md               (implemented: latere repos create, list and get on platformd's repository routes)
   010-app-command.md                 (implemented: latere app create, list, show, deploys, logs and delete on the Apps API)
+  011-capability-commands.md         (drafted: latere environments and latere agents replace cella, topos and review)
 ```
 
 ## Status
