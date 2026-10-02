@@ -61,7 +61,6 @@ load it from your shell startup files.`,
 	root.AddCommand(newAuthLogoutCmd())
 	root.AddCommand(newOrgCmd())
 	root.AddCommand(newAuthCmd())
-	root.AddCommand(newDriveCmd())
 	root.AddCommand(newGitCredentialCmd())
 	root.AddCommand(newCellaCmd())
 	root.AddCommand(newEvalCmd())
@@ -83,7 +82,7 @@ load it from your shell startup files.`,
 func skipUpdateCheck(cmd *cobra.Command) bool {
 	for c := cmd; c != nil; c = c.Parent() {
 		switch c.Name() {
-		case "upgrade", "completion", "help", "__complete", "__completeNoDesc", "git-credential", "print-token", "drive":
+		case "upgrade", "completion", "help", "__complete", "__completeNoDesc", "git-credential", "print-token":
 			return true
 		}
 	}

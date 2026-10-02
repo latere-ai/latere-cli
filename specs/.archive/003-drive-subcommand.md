@@ -1,6 +1,6 @@
 ---
 title: latere drive subcommand
-status: implemented
+status: archived
 depends_on:
   - 004-flatten-auth-commands.md
 affects:
@@ -190,3 +190,9 @@ needs a second identity. None blocking.
 - Git sugar (`clone`) and LFS — Drive does not serve git; repositories live
   on Latere Code, where plain `git` works through the credential helper.
 - Public share-link download (`/v1/s/{token}/…`) — curl-able without auth.
+
+## Outcome
+
+Shipped in v0.7.0 and removed on 2026-10-02: Drive retired on 2026-09-19,
+its address stopped answering, and every `latere drive` command failed to
+connect. Files on Latere are in Storage, at `api.latere.ai/v1/storage`.

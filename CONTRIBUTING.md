@@ -54,7 +54,6 @@ environment variables**, so a green `go test ./...` does not mean they ran:
 | `internal/commands` | the command tree: one file per command group, and the terminal interfaces for Topos |
 | `internal/api` | the Cella client, the saved login, token refresh, and the actor-token mint every product credential comes from |
 | `internal/config` | where the CLI keeps its files: `$XDG_CONFIG_HOME/latere`, or `~/.config/latere` |
-| `internal/drive` | the Drive client |
 | `internal/modelkey` | the model key for the Latere API: creation at auth, and storage in the keychain or a file |
 | `internal/reviews` | where `latere review` writes its logs, and their retention |
 | `internal/upgrade` | release discovery, verification, self-replacement, and the daily check |

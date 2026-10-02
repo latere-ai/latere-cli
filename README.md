@@ -146,7 +146,6 @@ git clone https://code.latere.ai/<owner>/<repo>.git
 | `latere models` | Call language models through the Latere API with a model key the CLI creates and keeps: list the models your key reaches, point a stock SDK at the API, and check a model with one call. | [docs/models.md](docs/models.md) |
 | `latere topos` | A coding agent on this machine: `--local` runs it in your directory against your files, interactively or on one prompt. The hosted Topos service is retired. | [docs/topos.md](docs/topos.md) |
 | `latere review` | Adversarial review of your latest Claude Code session: a proposer defends the diff, critics attack it through the Latere API, and unresolved attacks set the exit code. | [docs/review.md](docs/review.md) |
-| `latere drive` | Files on Latere Drive. Drive has been retired and its address no longer answers, so these commands fail to connect. | [docs/drive.md](docs/drive.md) |
 
 [`docs/configuration.md`](docs/configuration.md) lists every environment
 variable the CLI reads and every file it keeps.

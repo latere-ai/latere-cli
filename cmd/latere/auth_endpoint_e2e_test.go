@@ -28,27 +28,28 @@ const (
 	gitCredentialAnswer  = "username=x-access-token\npassword=code-actor\n\n"
 )
 
-// driveLs is the product command the refresh tests run against server, which
-// is both auth and Drive: `drive ls` refreshes the saved login when it is
-// due, mints a Drive token with it, presents that token to Drive, and reports
-// any failure on stderr with a non-zero exit.
-func driveLs(server string) []string {
-	return []string{"drive", "--drive-url", server, "--auth-url", server, "ls"}
+// reposList is the product command the refresh tests run against server,
+// which is both auth and the platform: `repos list` refreshes the saved login
+// when it is due, mints a platform token with it, presents that token to the
+// platform, and reports any failure on stderr with a non-zero exit.
+func reposList(server string) []string {
+	return []string{"repos", "--platform-url", server, "--auth-url", server, "list"}
 }
 
-// serveDriveList answers a Drive listing on the refresh tests' stub, and
-// reports whether r was one. The listing must present the token auth minted.
-func serveDriveList(t *testing.T, w http.ResponseWriter, r *http.Request, products *atomic.Int32) bool {
+// servePlatformList answers a repository listing on the refresh tests' stub,
+// and reports whether r was one. The listing must present the token auth
+// minted.
+func servePlatformList(t *testing.T, w http.ResponseWriter, r *http.Request, products *atomic.Int32) bool {
 	t.Helper()
-	if r.Method != http.MethodGet || !strings.HasPrefix(r.URL.Path, "/v1/") {
+	if r.Method != http.MethodGet || r.URL.Path != "/repositories" {
 		return false
 	}
 	products.Add(1)
-	if r.Header.Get("Authorization") != "Bearer drive-actor" {
-		t.Errorf("Drive received %q, want the minted Drive token", r.Header.Get("Authorization"))
+	if r.Header.Get("Authorization") != "Bearer platform-actor" {
+		t.Errorf("the platform received %q, want the minted platform token", r.Header.Get("Authorization"))
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write([]byte(`{"entries":[]}`))
+	_, _ = w.Write([]byte(`{"repositories":[]}`))
 	return true
 }
 

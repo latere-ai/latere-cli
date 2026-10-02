@@ -40,18 +40,18 @@ func TestAuthRefreshRequiresPersistenceE2E(t *testing.T) {
 				backup := filepath.Join(root, "old-auth.json")
 				var calls, products atomic.Int32
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					// After the refresh is saved, the command mints a Drive
-					// token with the new root and lists Drive with it; neither
+					// After the refresh is saved, the command mints a platform
+					// token with the new root and lists repositories with it; neither
 					// is a refresh call.
 					if r.Method == http.MethodPost && r.URL.Path == "/actor-tokens" {
 						if r.Header.Get("Authorization") != "Bearer new-root" {
 							t.Errorf("mint presented %q, want the refreshed root", r.Header.Get("Authorization"))
 						}
 						w.Header().Set("Content-Type", "application/json")
-						_, _ = w.Write([]byte(`{"actor_token":"drive-actor","expires_in":300}`))
+						_, _ = w.Write([]byte(`{"actor_token":"platform-actor","expires_in":300}`))
 						return
 					}
-					if serveDriveList(t, w, r, &products) {
+					if servePlatformList(t, w, r, &products) {
 						return
 					}
 					calls.Add(1)
@@ -91,8 +91,8 @@ func TestAuthRefreshRequiresPersistenceE2E(t *testing.T) {
 				defer server.Close()
 				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 				defer cancel()
-				cmd := exec.CommandContext(ctx, binary, driveLs(server.URL)...)
-				cmd.Env = append(os.Environ(), "LATERE_AUTH_TOKEN_FILE="+authPath, "LATERE_DRIVE_TOKEN=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
+				cmd := exec.CommandContext(ctx, binary, reposList(server.URL)...)
+				cmd.Env = append(os.Environ(), "LATERE_AUTH_TOKEN_FILE="+authPath, "LATERE_PLATFORM_TOKEN=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
 				var stdout, stderr bytes.Buffer
 				cmd.Stdout, cmd.Stderr = &stdout, &stderr
 				err := cmd.Run()
@@ -117,7 +117,7 @@ func TestAuthRefreshRequiresPersistenceE2E(t *testing.T) {
 						t.Errorf("previous credential changed: %v", err)
 					}
 					if products.Load() != 0 {
-						t.Errorf("Drive was called after the refresh could not be saved")
+						t.Errorf("the platform was called after the refresh could not be saved")
 					}
 				}
 				if calls.Load() != 1 {

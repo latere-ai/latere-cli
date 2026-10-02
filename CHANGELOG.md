@@ -10,6 +10,15 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Removed
+
+- `latere drive` and its flags, `DRIVE_API_URL` and `LATERE_DRIVE_TOKEN`.
+  Drive was retired on 2026-09-19 and its address no longer answers, so
+  every one of these commands failed to connect. Files on Latere are in
+  Storage, at `api.latere.ai/v1/storage` and in the console.
+
+### Changed
+
 - `latere print-token` refreshes a saved login that is due before printing
   it, as `latere whoami` does, so a script no longer receives a token that
   expired since the last command. It takes `--auth-url` like `whoami`.

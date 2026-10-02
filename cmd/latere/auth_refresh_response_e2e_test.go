@@ -48,17 +48,18 @@ func TestAuthRefreshRequiresCompleteResponseE2E(t *testing.T) {
 				}
 				var calls, products atomic.Int32
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					// A refresh that landed is followed by a Drive mint with the
-					// new root and a Drive listing; neither is a refresh call.
+					// A refresh that landed is followed by a platform mint with
+					// the new root and a repository listing; neither is a
+					// refresh call.
 					if r.Method == http.MethodPost && r.URL.Path == "/actor-tokens" {
 						if r.Header.Get("Authorization") != "Bearer new-root" {
 							t.Errorf("mint presented %q, want the refreshed root", r.Header.Get("Authorization"))
 						}
 						w.Header().Set("Content-Type", "application/json")
-						_, _ = w.Write([]byte(`{"actor_token":"drive-actor","expires_in":300}`))
+						_, _ = w.Write([]byte(`{"actor_token":"platform-actor","expires_in":300}`))
 						return
 					}
-					if serveDriveList(t, w, r, &products) {
+					if servePlatformList(t, w, r, &products) {
 						return
 					}
 					calls.Add(1)
@@ -78,8 +79,8 @@ func TestAuthRefreshRequiresCompleteResponseE2E(t *testing.T) {
 				defer server.Close()
 				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 				defer cancel()
-				cmd := exec.CommandContext(ctx, binary, driveLs(server.URL)...)
-				cmd.Env = append(os.Environ(), "LATERE_AUTH_TOKEN_FILE="+authPath, "LATERE_DRIVE_TOKEN=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
+				cmd := exec.CommandContext(ctx, binary, reposList(server.URL)...)
+				cmd.Env = append(os.Environ(), "LATERE_AUTH_TOKEN_FILE="+authPath, "LATERE_PLATFORM_TOKEN=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
 				var stdout, stderr bytes.Buffer
 				cmd.Stdout, cmd.Stderr = &stdout, &stderr
 				err := cmd.Run()

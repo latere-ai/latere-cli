@@ -16,9 +16,11 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/latere-ai/latere-cli/internal/drive"
 )
+
+// platformAudience is the aud a repos command's actor token is minted for,
+// the origin platformd verifies.
+const platformAudience = "api.latere.ai"
 
 func TestProductCommandsNeverRefreshCellaCredentialsE2E(t *testing.T) {
 	if testing.Short() {
@@ -27,9 +29,9 @@ func TestProductCommandsNeverRefreshCellaCredentialsE2E(t *testing.T) {
 	binary := latereBinary(t)
 	for _, source := range []string{"override", "login", "expired login"} {
 		for _, failure := range []bool{false, true} {
-			name := "drive/" + source + "/accepted"
+			name := "repos/" + source + "/accepted"
 			if failure {
-				name = "drive/" + source + "/product rejects bearer"
+				name = "repos/" + source + "/product rejects bearer"
 			}
 			t.Run(name, func(t *testing.T) {
 				root := t.TempDir()
@@ -42,13 +44,13 @@ func TestProductCommandsNeverRefreshCellaCredentialsE2E(t *testing.T) {
 				if err := os.WriteFile(authPath, authBefore, 0600); err != nil {
 					t.Fatal(err)
 				}
-				// Drive receives an actor token minted for its own audience,
-				// never the root token on disk.
-				wantBearer := "drive-actor"
+				// The platform receives an actor token minted for its own
+				// audience, never the root token on disk.
+				wantBearer := "platform-actor"
 				if source == "override" {
 					wantBearer = "product-override"
 				}
-				var cellaMints, productCalls, driveMints, authRefreshes atomic.Int32
+				var cellaMints, productCalls, productMints, authRefreshes atomic.Int32
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					w.Header().Set("Content-Type", "application/json")
 					switch r.URL.Path {
@@ -65,14 +67,14 @@ func TestProductCommandsNeverRefreshCellaCredentialsE2E(t *testing.T) {
 						if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 							t.Error(err)
 						}
-						if body.Audience == drive.Audience {
-							driveMints.Add(1)
-							_, _ = w.Write([]byte(`{"actor_token":"drive-actor","expires_in":300}`))
+						if body.Audience == platformAudience {
+							productMints.Add(1)
+							_, _ = w.Write([]byte(`{"actor_token":"platform-actor","expires_in":300}`))
 							return
 						}
 						cellaMints.Add(1)
 						_, _ = w.Write([]byte(`{"actor_token":"cella-actor","expires_in":300}`))
-					case "/v1/files/me/files":
+					case "/repositories":
 						productCalls.Add(1)
 						if got := r.Header.Get("Authorization"); got != "Bearer "+wantBearer {
 							t.Errorf("product received %q, want its own bearer", got)
@@ -81,7 +83,7 @@ func TestProductCommandsNeverRefreshCellaCredentialsE2E(t *testing.T) {
 							w.WriteHeader(http.StatusUnauthorized)
 							_, _ = w.Write([]byte(`{"code":"product_rejected","message":"rejected product credential"}`))
 						} else {
-							_, _ = w.Write([]byte(`{"entries":[]}`))
+							_, _ = w.Write([]byte(`{"repositories":[]}`))
 						}
 					default:
 						t.Errorf("unexpected endpoint: %s", r.URL.Path)
@@ -89,33 +91,33 @@ func TestProductCommandsNeverRefreshCellaCredentialsE2E(t *testing.T) {
 					}
 				}))
 				defer server.Close()
-				env := append(os.Environ(), "LATERE_CELLA_TOKEN=", "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_URL="+server.URL, "LATERE_CELLA_URL="+server.URL+"/v1/environments", "DRIVE_API_URL="+server.URL, "LATERE_DRIVE_TOKEN=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
+				env := append(os.Environ(), "LATERE_CELLA_TOKEN=", "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_URL="+server.URL, "LATERE_CELLA_URL="+server.URL+"/v1/environments", "LATERE_PLATFORM_URL="+server.URL, "LATERE_PLATFORM_TOKEN=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
 				if source == "override" {
-					env = append(env, "LATERE_DRIVE_TOKEN="+wantBearer)
+					env = append(env, "LATERE_PLATFORM_TOKEN="+wantBearer)
 				}
 				ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 				defer cancel()
-				command := exec.CommandContext(ctx, binary, "drive", "ls")
+				command := exec.CommandContext(ctx, binary, "repos", "list")
 				command.Env = env
 				out, err := command.CombinedOutput()
 				if failure {
-					if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 || !strings.Contains(string(out), "product_rejected") {
+					if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 || !strings.Contains(string(out), "rejected product credential") {
 						t.Errorf("product rejection = %v: %s", err, out)
 					}
 				} else if err != nil {
 					t.Errorf("product command = %v: %s", err, out)
 				}
-				// A Drive command mints for its own audience alone; Cella's
+				// A repos command mints for its own audience alone; Cella's
 				// audience is never asked for on its behalf.
 				if cellaMints.Load() != 0 || productCalls.Load() != 1 {
 					t.Errorf("requests: Cella mints=%d product=%d, want 0/1", cellaMints.Load(), productCalls.Load())
 				}
-				wantDriveMints := int32(1)
+				wantMints := int32(1)
 				if source == "override" {
-					wantDriveMints = 0
+					wantMints = 0
 				}
-				if driveMints.Load() != wantDriveMints {
-					t.Errorf("Drive actor mint calls = %d, want %d", driveMints.Load(), wantDriveMints)
+				if productMints.Load() != wantMints {
+					t.Errorf("platform actor mint calls = %d, want %d", productMints.Load(), wantMints)
 				}
 				wantRefreshes := int32(0)
 				if source == "expired login" {

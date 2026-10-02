@@ -17,7 +17,7 @@ import (
 
 func TestDownloadsPreserveOutputOnTruncatedResponse(t *testing.T) {
 	t.Setenv("LATERE_CELLA_TOKEN", "test-tok")
-	for _, command := range []string{"drive", "cella"} {
+	for _, command := range []string{"cella"} {
 		for _, existing := range []bool{false, true} {
 			t.Run(command+map[bool]string{false: "/new", true: "/existing"}[existing], func(t *testing.T) {
 				dir := t.TempDir()
@@ -32,16 +32,11 @@ func TestDownloadsPreserveOutputOnTruncatedResponse(t *testing.T) {
 					_, _ = io.WriteString(w, "partial")
 				}))
 				defer srv.Close()
-				var err error
-				if command == "drive" {
-					_, _, err = execDrive(t, srv, "get", "files/download", "-o", dest)
-				} else {
-					cmd := newCeExportCmd()
-					cmd.SetOut(new(bytes.Buffer))
-					cmd.SetErr(new(bytes.Buffer))
-					cmd.SetArgs([]string{"dev", "--api-url", srv.URL, "-o", dest})
-					err = cmd.Execute()
-				}
+				cmd := newCeExportCmd()
+				cmd.SetOut(new(bytes.Buffer))
+				cmd.SetErr(new(bytes.Buffer))
+				cmd.SetArgs([]string{"dev", "--api-url", srv.URL, "-o", dest})
+				err := cmd.Execute()
 				if !errors.Is(err, io.ErrUnexpectedEOF) {
 					t.Fatalf("error = %v, want truncated-response error", err)
 				}
@@ -71,7 +66,7 @@ func TestDownloadsPreserveOutputOnTruncatedResponse(t *testing.T) {
 
 func TestDownloadsReplaceOutputAfterCompleteResponse(t *testing.T) {
 	t.Setenv("LATERE_CELLA_TOKEN", "test-tok")
-	for _, command := range []string{"drive", "cella"} {
+	for _, command := range []string{"cella"} {
 		t.Run(command, func(t *testing.T) {
 			dir := t.TempDir()
 			dest := filepath.Join(dir, "download")
@@ -86,14 +81,9 @@ func TestDownloadsReplaceOutputAfterCompleteResponse(t *testing.T) {
 				_, _ = io.WriteString(w, "complete")
 			}))
 			defer srv.Close()
-			var err error
-			if command == "drive" {
-				_, _, err = execDrive(t, srv, "get", "files/download", "-o", link)
-			} else {
-				cmd := newCeExportCmd()
-				cmd.SetArgs([]string{"dev", "--api-url", srv.URL, "-o", link})
-				err = cmd.Execute()
-			}
+			cmd := newCeExportCmd()
+			cmd.SetArgs([]string{"dev", "--api-url", srv.URL, "-o", link})
+			err := cmd.Execute()
 			if err != nil {
 				t.Fatal(err)
 			}

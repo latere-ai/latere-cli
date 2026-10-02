@@ -13,8 +13,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/latere-ai/latere-cli/internal/drive"
 )
 
 // audienceIssuer is the auth issuer the stub stamps on every token it mints.
@@ -113,16 +111,6 @@ func TestProductCredentialsCarryOnlyTheirOwnAudience(t *testing.T) {
 			cmd.SetArgs([]string{"list", "--api-url", s.srv.URL + "/v1/environments"})
 			if err := cmd.Execute(); err != nil {
 				t.Fatalf("cella list: %v", err)
-			}
-		}},
-		{"drive ls", drive.Audience, func(t *testing.T, s *productStub) {
-			t.Setenv("LATERE_DRIVE_TOKEN", "")
-			cmd := newDriveCmd()
-			cmd.SetOut(io.Discard)
-			cmd.SetErr(io.Discard)
-			cmd.SetArgs([]string{"--drive-url", s.srv.URL, "--auth-url", s.srv.URL, "ls"})
-			if err := cmd.Execute(); err != nil {
-				t.Fatalf("drive ls: %v", err)
 			}
 		}},
 		{"git credential", codeAudience, func(t *testing.T, s *productStub) {

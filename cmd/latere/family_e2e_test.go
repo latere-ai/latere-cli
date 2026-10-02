@@ -7,19 +7,18 @@ package main
 // one `latere` CLI identity and asserts each identity-fabric edge end to
 // end against live production. It is the reproducible companion to
 // specs/products/identity-fabric/release-and-verification.md: one login,
-// then every edge a CLI user can reach (cella, models, drive, auth),
+// then every edge a CLI user can reach (cella, models, repos, auth),
 // plus the two invariants (owner-rooted subject, trust-root rule).
 //
 // Opt-in and tiered, because the higher tiers spend real money and mutate
 // real state:
 //
 //	LATERE_FAMILY_E2E=1        read-only edges: whoami, /api/me,
-//	                           cella list, models list, drive ls,
+//	                           cella list, models list, repos list,
 //	                           garbage-token 401.
 //	                           No cost, no resource creation.
-//	LATERE_FAMILY_E2E_WRITE=1  also: models invoke (a token), drive put/get/rm
-//	                           round-trip, cross-product 401. Spends money;
-//	                           cleans up after itself.
+//	LATERE_FAMILY_E2E_WRITE=1  also: models invoke (a token), cross-product
+//	                           401. Spends money; cleans up after itself.
 //	LATERE_FAMILY_E2E_LOGOUT=1 also: logout then reuse the old bearer ->
 //	                           401. Destructive: ends the session.
 //
@@ -29,14 +28,13 @@ package main
 //	LATERE_FAMILY_E2E=1 go test ./cmd/latere/ -run TestFamilyE2E -v
 //
 // Service URLs default to production and are overridable:
-// CELLA_API_URL, AUTH_URL, LATERE_MODELS_URL, DRIVE_API_URL.
+// CELLA_API_URL, AUTH_URL, LATERE_MODELS_URL.
 // The models edges create this machine's model key on first use, as any
 // signed-in `latere models` does.
 
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -52,7 +50,6 @@ type familyEnv struct {
 	token    string // cella-issued bearer (token.json), valid at cella
 	cellaURL string
 	authURL  string
-	driveURL string
 	sub      string // owner subject, read from whoami
 	httpc    *http.Client
 }
@@ -78,7 +75,6 @@ func setupFamily(t *testing.T) *familyEnv {
 	fe := &familyEnv{
 		cellaURL: urlOr("CELLA_API_URL", "https://api.latere.ai/v1/environments"),
 		authURL:  urlOr("AUTH_URL", "https://auth.latere.ai"),
-		driveURL: urlOr("DRIVE_API_URL", "https://drive.latere.ai"),
 		httpc:    &http.Client{Timeout: 30 * time.Second},
 	}
 
@@ -228,10 +224,10 @@ func TestFamilyE2E(t *testing.T) {
 		}
 	})
 
-	// Edge: CLI -> drive (per-request auth).
-	t.Run("cli->drive-ls", func(t *testing.T) {
-		if _, errOut, err := fe.run(t, 30*time.Second, "drive", "ls"); err != nil {
-			t.Fatalf("drive ls: %v\n%s", err, errOut)
+	// Edge: CLI -> repos (per-request auth at the platform).
+	t.Run("cli->repos-list", func(t *testing.T) {
+		if _, errOut, err := fe.run(t, 30*time.Second, "repos", "list"); err != nil {
+			t.Fatalf("repos list: %v\n%s", err, errOut)
 		}
 	})
 
@@ -271,8 +267,7 @@ func TestFamilyE2E(t *testing.T) {
 	}
 }
 
-// runWriteTier exercises the cost/mutation edges: a live model completion and
-// a drive round-trip. Each cleans up after itself.
+// runWriteTier exercises the cost edge: a live model completion.
 func (fe *familyEnv) runWriteTier(t *testing.T) {
 	// Edge: CLI -> models invoke (a real one-shot completion) with the first
 	// model the key reaches.
@@ -289,28 +284,6 @@ func (fe *familyEnv) runWriteTier(t *testing.T) {
 		}
 		if strings.TrimSpace(out) == "" {
 			t.Error("models invoke returned empty completion")
-		}
-	})
-
-	// Edge: CLI -> drive round-trip (put, ls sees it, get matches, rm).
-	t.Run("cli->drive-roundtrip", func(t *testing.T) {
-		dir := t.TempDir()
-		src := filepath.Join(dir, "e2e-probe.txt")
-		want := fmt.Sprintf("family-e2e %d", time.Now().UnixNano())
-		if err := os.WriteFile(src, []byte(want), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		dest := "files/family-e2e-probe.txt"
-		if _, errOut, err := fe.run(t, 40*time.Second, "drive", "put", src, dest); err != nil {
-			t.Fatalf("drive put: %v\n%s", err, errOut)
-		}
-		t.Cleanup(func() { _, _, _ = fe.run(t, 30*time.Second, "drive", "rm", "--permanent", dest) })
-		got, errOut, err := fe.run(t, 40*time.Second, "drive", "get", dest, "-o", "-")
-		if err != nil {
-			t.Fatalf("drive get: %v\n%s", err, errOut)
-		}
-		if !strings.Contains(got, want) {
-			t.Errorf("drive get mismatch: got %q, want to contain %q", got, want)
 		}
 	})
 }
