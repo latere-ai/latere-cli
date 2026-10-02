@@ -244,12 +244,16 @@ func switchOrgContext(cmd *cobra.Command, authURL, clientID, orgID string) error
 // newAuthPrintTokenCmd prints the saved login token to stdout so it
 // can be embedded in shell scripts: `TOKEN=$(latere print-token)`.
 // Writes one trailing newline, which shell command substitution removes.
+// A token that is due is refreshed first, as every command that uses it
+// does, so a script never receives one that has lapsed.
 func newAuthPrintTokenCmd() *cobra.Command {
-	return &cobra.Command{
+	var authURL string
+	cmd := &cobra.Command{
 		Use:   "print-token",
 		Args:  cobra.NoArgs,
 		Short: "Print the saved login token to stdout (for use in scripts).",
-		Long: `Print the access token from ~/.config/latere/auth-token.json.
+		Long: `Print the access token from ~/.config/latere/auth-token.json,
+refreshed first when it is due.
 
 The token is addressed to auth.latere.ai and opens nothing else: a
 product refuses it. To reach a product, use that product's command; the
@@ -260,17 +264,19 @@ model endpoints take a model key, which 'latere models env --raw' prints.
 		Example: `  TOKEN=$(latere print-token)
   curl -H "Authorization: Bearer $TOKEN" https://auth.latere.ai/api/me`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			tok, err := api.LoadAuthToken()
+			access, _, err := api.LoginToken(cmd.Context(), authURL)
 			if err != nil {
 				return err
 			}
-			if tok.AccessToken == "" {
+			if access == "" {
 				return api.ErrNoToken
 			}
-			_, err = fmt.Fprintln(cmd.OutOrStdout(), tok.AccessToken)
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), access)
 			return err
 		},
 	}
+	cmd.Flags().StringVar(&authURL, "auth-url", "", "override auth base URL (default $AUTH_URL or https://auth.latere.ai)")
+	return cmd
 }
 
 func newAuthLoginCmd() *cobra.Command {

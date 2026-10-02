@@ -10,6 +10,9 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+- `latere print-token` refreshes a saved login that is due before printing
+  it, as `latere whoami` does, so a script no longer receives a token that
+  expired since the last command. It takes `--auth-url` like `whoami`.
 - `latere.ai/x/pkg` v0.90.2 and OpenTelemetry Go v1.46.0, past GO-2026-6615 and
   GO-2026-6505.
 
