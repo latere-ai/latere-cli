@@ -190,3 +190,129 @@ func TestStripANSI(t *testing.T) {
 		}
 	}
 }
+
+// gitCommit makes an empty commit in dir and answers its id.
+func gitCommit(t *testing.T, dir string) string {
+	t.Helper()
+	gitRun(t, dir, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "--allow-empty", "-q", "-m", "init")
+	return gitRun(t, dir, "rev-parse", "HEAD")
+}
+
+// stubDeployOf is a preview deploy of commit sha.
+func stubDeployOf(id, sha, status string) string {
+	return strings.Replace(stubDeployJSON(id, status, "refs/heads/main", true, oneComponent),
+		"3f2a9c1b7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a", sha, 1)
+}
+
+// shortenDeployWait makes `logs -f` wait for the deploy of HEAD for wait,
+// reading the deploys every millisecond.
+func shortenDeployWait(t *testing.T, wait time.Duration) {
+	t.Helper()
+	w, p := appDeployWait, appDeployPoll
+	appDeployWait, appDeployPoll = wait, time.Millisecond
+	t.Cleanup(func() { appDeployWait, appDeployPoll = w, p })
+}
+
+// After a push, the newest deploy is still the previous one until the push's
+// deploy is recorded; following it would report a build that already ended.
+func TestAppLogsFollowWaitsForTheDeployOfHEAD(t *testing.T) {
+	shortenDeployWait(t, 10*time.Second)
+	s := newStubApps(t)
+	dir := gitRepo(t)
+	gitRun(t, dir, "remote", "add", "latere", "https://code.latere.ai/u-1/hello.git")
+	head := gitCommit(t, dir)
+	const pushedID = "9e8d7c6b-5a49-4382-9716-a5b4c3d2e1f0"
+	previous := stubDeployOf(stubPreviewID, "1111111111111111111111111111111111111111", "ready")
+	s.deploysSeq = []string{
+		`{"deploys":[` + previous + `]}`,
+		`{"deploys":[` + previous + `]}`,
+		`{"deploys":[` + stubDeployOf(pushedID, head, "queued") + `,` + previous + `]}`,
+	}
+	s.frames = []string{sseLine(1, "npm run build"), "event: end\ndata: {\"status\":\"built\"}\n\n"}
+	_, errOut, err := runAppIn(t, s, dir, "", "logs", "-f")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantContains(t, errOut, "Waiting for the deploy of "+head[:7]+"...\n", "Deploy 9e8d7c6b built.", "Preview: https://9e8d7c6b--hello.latere.site")
+	seen := s.seen()
+	if last := seen[len(seen)-1]; last != "GET /v1/apps/apps/hello/deploys/"+pushedID+"/logs?follow=1" {
+		t.Errorf("requests = %v", seen)
+	}
+}
+
+func TestAppLogsFollowFindsTheDeployOfHEADAtOnce(t *testing.T) {
+	shortenDeployWait(t, 10*time.Second)
+	s := newStubApps(t)
+	dir := gitRepo(t)
+	gitRun(t, dir, "remote", "add", "latere", "https://code.latere.ai/u-1/hello.git")
+	head := gitCommit(t, dir)
+	// The newest deploy is another commit's; the one of HEAD is older.
+	s.deploys["hello"] = `{"deploys":[` + stubDeployOf(stubReleaseID, "2222222222222222222222222222222222222222", "building") + `,` + stubDeployOf(stubPreviewID, head, "ready") + `]}`
+	s.frames = []string{"event: end\ndata: {\"status\":\"built\"}\n\n"}
+	_, errOut, err := runAppIn(t, s, dir, "", "logs", "-f")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(errOut, "Waiting") {
+		t.Errorf("waited for a deploy the list had: %q", errOut)
+	}
+	if got := s.seen()[1]; got != "GET /v1/apps/apps/hello/deploys/"+stubPreviewID+"/logs?follow=1" {
+		t.Errorf("request = %q", got)
+	}
+}
+
+func TestAppLogsFollowGivesUpOnTheDeployOfHEAD(t *testing.T) {
+	shortenDeployWait(t, 20*time.Millisecond)
+	s := newStubApps(t)
+	dir := gitRepo(t)
+	gitRun(t, dir, "remote", "add", "latere", "https://code.latere.ai/u-1/hello.git")
+	head := gitCommit(t, dir)
+	s.deploysSeq = []string{`{"deploys":[]}`}
+	_, _, err := runAppIn(t, s, dir, "", "logs", "-f")
+	if err == nil {
+		t.Fatal("want a refusal")
+	}
+	wantContains(t, err.Error(), "no deploy of "+head[:7]+", the commit HEAD names, appeared within 20ms", "git push latere <branch>", "latere app logs hello <deploy>")
+	for _, r := range s.seen() {
+		if strings.Contains(r, "/logs") {
+			t.Errorf("opened a log: %v", s.seen())
+		}
+	}
+}
+
+// The wait is for a push's deploy: a named slug, a named deploy and the
+// stored log each read the deploys once.
+func TestAppLogsWaitsOnlyWhenFollowingThePushedCommit(t *testing.T) {
+	shortenDeployWait(t, 10*time.Second)
+	for _, args := range [][]string{{"logs", "-f", "hello"}, {"logs", "-f", "hello", "5d2f8a1c"}, {"logs"}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			s := newStubApps(t)
+			dir := gitRepo(t)
+			gitRun(t, dir, "remote", "add", "latere", "https://code.latere.ai/u-1/hello.git")
+			gitCommit(t, dir)
+			s.frames = []string{"event: end\ndata: {\"status\":\"built\"}\n\n"}
+			_, errOut, err := runAppIn(t, s, dir, "", args...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(errOut, "Waiting") || s.deploysReads != 1 {
+				t.Errorf("stderr %q, deploy reads %d", errOut, s.deploysReads)
+			}
+		})
+	}
+}
+
+// A repository without a commit has no HEAD to wait for; the newest deploy
+// is followed.
+func TestAppLogsFollowInARepositoryWithoutCommits(t *testing.T) {
+	s := newStubApps(t)
+	dir := gitRepo(t)
+	gitRun(t, dir, "remote", "add", "latere", "https://code.latere.ai/u-1/hello.git")
+	s.frames = []string{"event: end\ndata: {\"status\":\"built\"}\n\n"}
+	if _, _, err := runAppIn(t, s, dir, "", "logs", "-f"); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.seen()[1]; got != "GET /v1/apps/apps/hello/deploys/"+stubPreviewID+"/logs?follow=1" {
+		t.Errorf("request = %q", got)
+	}
+}

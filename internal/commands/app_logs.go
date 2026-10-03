@@ -14,6 +14,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -51,8 +52,10 @@ slug is read from the git remote latere.
 
 --follow streams the log while the deploy builds and exits when the build
 ends: 0 when it built, and 1 with the failure's code and message when it
-failed or was canceled. After 'git push latere main' the new deploy can take
-a moment to appear, so run the two together:
+failed or was canceled. When the slug is read from the git remote and no
+[deploy] is given, it follows the newest deploy of the commit HEAD names, and
+waits up to a minute for that deploy to appear, since a push creates it a
+moment after the push returns. That makes a push and its build one command:
 
   git push latere main && latere app logs -f
 
@@ -78,7 +81,13 @@ otherwise. --json prints each line as the API's JSON, one per line.`,
 				out: cmd.OutOrStdout(), errOut: cmd.ErrOrStderr(),
 			}
 			l.raw = jsonF || outputIsTerminal(l.out)
-			if err := l.resolve(cmd.Context(), deployArg); err != nil {
+			// After a push, the deploy to follow is the one of the commit
+			// pushed, which the newest deploy may not be yet.
+			head := ""
+			if follow && fromRemote && deployArg == "" {
+				head = headCommit(cmd.Context())
+			}
+			if err := l.resolve(cmd.Context(), deployArg, head); err != nil {
 				return withSlugSource(err, slug, fromRemote)
 			}
 			if follow {
@@ -107,12 +116,38 @@ type appLogs struct {
 	out, errOut io.Writer
 }
 
-// resolve picks the deploy: the newest without an argument, else the one
-// the argument names, which the API resolves when it is a prefix.
-func (l *appLogs) resolve(ctx context.Context, arg string) error {
+// appDeployWait is how long `logs -f` waits for the deploy of the commit
+// HEAD names to appear, and appDeployPoll how often it reads the deploys
+// meanwhile. A push returns before the deploy it creates is recorded.
+var (
+	appDeployWait = time.Minute
+	appDeployPoll = 2 * time.Second
+)
+
+// headCommit is the commit HEAD names in the current directory's
+// repository, or "" when there is none to read.
+func headCommit(ctx context.Context) string {
+	dir, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	sha, err := gitIn(ctx, dir, "rev-parse", "--verify", "-q", "HEAD")
+	if err != nil {
+		return ""
+	}
+	return sha
+}
+
+// resolve picks the deploy: the one the argument names, which the API
+// resolves when it is a prefix; else the newest of the commit head, waiting
+// for it to appear, when head is given; else the newest.
+func (l *appLogs) resolve(ctx context.Context, arg, head string) error {
 	deploys, _, err := l.client.listDeploys(ctx, l.slug)
 	if err != nil {
 		return err
+	}
+	if arg == "" && head != "" {
+		return l.awaitCommit(ctx, deploys, head)
 	}
 	if arg == "" {
 		if len(deploys) == 0 {
@@ -133,6 +168,36 @@ func (l *appLogs) resolve(ctx context.Context, arg string) error {
 		}
 	}
 	return nil
+}
+
+// awaitCommit picks the newest deploy of the commit head, reading the
+// deploys again until it appears or appDeployWait has passed.
+func (l *appLogs) awaitCommit(ctx context.Context, deploys []appDeploy, head string) error {
+	short := head[:min(7, len(head))]
+	deadline := time.Now().Add(appDeployWait)
+	for waited := false; ; waited = true {
+		for i := range deploys {
+			if deploys[i].CommitSHA == head {
+				l.id, l.deploy = deploys[i].ID, &deploys[i]
+				return nil
+			}
+		}
+		if !time.Now().Before(deadline) {
+			return fmt.Errorf("no deploy of %s, the commit HEAD names, appeared within %s.\nPush it with: git push %s <branch>\nOr name a deploy from 'latere app deploys': latere app logs %s <deploy>", short, appDeployWait, appRemote, l.slug)
+		}
+		if !waited {
+			fprintf(l.errOut, "Waiting for the deploy of %s...\n", short)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(min(appDeployPoll, time.Until(deadline))):
+		}
+		var err error
+		if deploys, _, err = l.client.listDeploys(ctx, l.slug); err != nil {
+			return err
+		}
+	}
 }
 
 func (l *appLogs) path(follow bool) string {

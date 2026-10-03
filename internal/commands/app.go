@@ -84,9 +84,9 @@ push, which 'latere login' already lets git sign in for:
   git push latere main      builds a preview of main
   git push latere v1.0.0    releases that commit to the app's address
 
-'latere app logs -f' follows the newest build and exits 0 when it succeeds
-and 1 when it fails or is canceled, so 'git push latere main && latere app
-logs -f' is the whole loop.
+'latere app logs -f' follows the build of the commit you pushed and exits
+0 when it succeeds and 1 when it fails or is canceled, so
+'git push latere main && latere app logs -f' is the whole loop.
 
 A command that takes [slug] reads it from the git remote latere of the
 repository you run it in when you leave it out.
@@ -144,6 +144,7 @@ type appDeploy struct {
 	ID         string `json:"id"`
 	Status     string `json:"status"`
 	Preview    bool   `json:"preview"`
+	CommitSHA  string `json:"commit_sha"`
 	Ref        string `json:"ref"`
 	URL        string `json:"url"`
 	PreviewURL string `json:"preview_url"`

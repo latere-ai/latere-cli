@@ -73,6 +73,10 @@ type stubApps struct {
 	// frameDelay is the pause before each frame, as a building deploy's
 	// stream has.
 	frameDelay time.Duration
+	// deploysSeq, when set, answers the deploys of every app in turn, the
+	// last one again once they run out, as deploys a push creates appear.
+	deploysSeq   []string
+	deploysReads int
 }
 
 func newStubApps(t *testing.T) *stubApps {
@@ -147,7 +151,18 @@ func newStubApps(t *testing.T) *stubApps {
 		}
 	}
 	mux.HandleFunc("GET /v1/apps/apps/{slug}", byApp(func() map[string]string { return s.apps }))
-	mux.HandleFunc("GET /v1/apps/apps/{slug}/deploys", byApp(func() map[string]string { return s.deploys }))
+	deploys := byApp(func() map[string]string { return s.deploys })
+	mux.HandleFunc("GET /v1/apps/apps/{slug}/deploys", func(w http.ResponseWriter, r *http.Request) {
+		s.mu.Lock()
+		seq, n := s.deploysSeq, s.deploysReads
+		s.deploysReads++
+		s.mu.Unlock()
+		if len(seq) == 0 {
+			deploys(w, r)
+			return
+		}
+		_, _ = io.WriteString(w, seq[min(n, len(seq)-1)])
+	})
 	mux.HandleFunc("GET /v1/apps/apps/{slug}/releases", byApp(func() map[string]string { return s.releases }))
 	mux.HandleFunc("DELETE /v1/apps/apps/{slug}", func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := s.apps[r.PathValue("slug")]; !ok {
