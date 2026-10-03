@@ -50,12 +50,17 @@ another by its id or a prefix of at least 8 hexadecimal digits, as
 'latere app deploys' lists them. One argument is the slug; without any, the
 slug is read from the git remote latere.
 
+The deploy of a release builds nothing: it serves the build of the preview it
+released. For it, the command says so on one line and prints that preview's
+build log, under the same rules.
+
 --follow streams the log while the deploy builds and exits when the build
 ends: 0 when it built, and 1 with the failure's code and message when it
 failed or was canceled. When the slug is read from the git remote and no
 [deploy] is given, it follows the newest deploy of the commit HEAD names, and
 waits up to a minute for that deploy to appear, since a push creates it a
-moment after the push returns. That makes a push and its build one command:
+moment after the push returns. A deploy that has not started building yet
+says so before its first line. That makes a push and its build one command:
 
   git push latere main && latere app logs -f
 
@@ -90,7 +95,11 @@ otherwise. --json prints each line as the API's JSON, one per line.`,
 			if err := l.resolve(cmd.Context(), deployArg, head); err != nil {
 				return withSlugSource(err, slug, fromRemote)
 			}
+			l.toSource()
 			if follow {
+				if d := l.deploy; d != nil && (d.Status == "waiting" || d.Status == "queued") {
+					fprintln(l.errOut, "Waiting for the build to start...")
+				}
 				return l.follow(cmd.Context())
 			}
 			return l.stored(cmd.Context())
@@ -110,7 +119,12 @@ type appLogs struct {
 	id string
 	// deploy is the deploy id names, when the app's list has it.
 	deploy *appDeploy
-	json   bool
+	// deploys is the app's list deploy was picked from.
+	deploys []appDeploy
+	// release is the deploy of a release whose log was asked for, when the
+	// log read is that of the preview it released.
+	release *appDeploy
+	json    bool
 	// raw keeps a line's escape sequences: on a terminal, and in JSON.
 	raw         bool
 	out, errOut io.Writer
@@ -146,6 +160,7 @@ func (l *appLogs) resolve(ctx context.Context, arg, head string) error {
 	if err != nil {
 		return err
 	}
+	l.deploys = deploys
 	if arg == "" && head != "" {
 		return l.awaitCommit(ctx, deploys, head)
 	}
@@ -178,7 +193,7 @@ func (l *appLogs) awaitCommit(ctx context.Context, deploys []appDeploy, head str
 	for waited := false; ; waited = true {
 		for i := range deploys {
 			if deploys[i].CommitSHA == head {
-				l.id, l.deploy = deploys[i].ID, &deploys[i]
+				l.id, l.deploy, l.deploys = deploys[i].ID, &deploys[i], deploys
 				return nil
 			}
 		}
@@ -196,6 +211,24 @@ func (l *appLogs) awaitCommit(ctx context.Context, deploys []appDeploy, head str
 		var err error
 		if deploys, _, err = l.client.listDeploys(ctx, l.slug); err != nil {
 			return err
+		}
+	}
+}
+
+// toSource turns the deploy of a release into the preview it released. A
+// release's deploy serves that preview's build and builds nothing, so its
+// own log is empty; the log that says what was built is the preview's.
+func (l *appLogs) toSource() {
+	d := l.deploy
+	if d == nil || d.FromDeploy == "" {
+		return
+	}
+	fprintf(l.errOut, "Deploy %s released %s from preview %s without a build; its build log:\n", shortID(d.ID), refName(d.Ref), shortID(d.FromDeploy))
+	l.release, l.id, l.deploy = d, d.FromDeploy, nil
+	for i := range l.deploys {
+		if l.deploys[i].ID == d.FromDeploy {
+			l.deploy = &l.deploys[i]
+			break
 		}
 	}
 }
@@ -325,7 +358,11 @@ func (l *appLogs) end(data []byte) error {
 	// it.
 	case "built", "ready", "live":
 		fprintf(l.errOut, "Deploy %s built.\n", id)
-		if d := l.deploy; d != nil {
+		if r := l.release; r != nil {
+			if r.URL != "" {
+				fprintf(l.errOut, "Released as %s at %s\n", refName(r.Ref), r.URL)
+			}
+		} else if d := l.deploy; d != nil {
 			if d.Preview && d.PreviewURL != "" {
 				fprintf(l.errOut, "Preview: %s\n", d.PreviewURL)
 			} else if !d.Preview && d.URL != "" {

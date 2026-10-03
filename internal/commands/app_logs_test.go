@@ -316,3 +316,96 @@ func TestAppLogsFollowInARepositoryWithoutCommits(t *testing.T) {
 		t.Errorf("request = %q", got)
 	}
 }
+
+// stubReleaseDeployOf is the deploy of the release tag, which serves the
+// build of the preview from and builds nothing.
+func stubReleaseDeployOf(id, from, tag, status string) string {
+	d := stubDeployJSON(id, status, "refs/tags/"+tag, false, oneComponent)
+	return strings.Replace(d, `"from_deploy":null`, `"from_deploy":"`+from+`"`, 1)
+}
+
+// A release's deploy has no build log of its own; its log is the one of the
+// preview it released, named on one line first.
+func TestAppLogsOfAReleaseIsItsPreviews(t *testing.T) {
+	const releaseID = "02c415ed-1111-4222-8333-944455556666"
+	release := stubReleaseDeployOf(releaseID, stubPreviewID, "v1.0.0", "live")
+	preview := stubDeployJSON(stubPreviewID, "ready", "refs/heads/main", true, oneComponent)
+	note := "Deploy 02c415ed released v1.0.0 from preview 5d2f8a1c without a build; its build log:\n"
+	for _, tc := range []struct {
+		name string
+		args []string
+		// json is whether stdout is the preview's lines as the API wrote
+		// them.
+		json   bool
+		follow bool
+	}{
+		{"newest, stored", []string{"logs", "hello"}, false, false},
+		{"named, stored", []string{"logs", "hello", "02c415ed"}, false, false},
+		{"stored as JSON", []string{"logs", "hello", "--json"}, true, false},
+		{"followed", []string{"logs", "hello", "-f"}, false, true},
+		{"followed as JSON", []string{"logs", "hello", "-f", "--json"}, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newStubApps(t)
+			s.deploys["hello"] = `{"deploys":[` + release + `,` + preview + `]}`
+			s.frames = []string{sseLine(1, "npm run build"), ": heartbeat\n\n", "event: end\ndata: {\"status\":\"built\"}\n\n"}
+			out, errOut, err := runApp(t, s, tc.args...)
+			if err != nil {
+				t.Fatalf("logs = %v", err)
+			}
+			if !strings.HasPrefix(errOut, note) {
+				t.Errorf("stderr = %q, want it to start with %q", errOut, note)
+			}
+			want := "GET /v1/apps/apps/hello/deploys/" + stubPreviewID + "/logs"
+			if tc.follow {
+				want += "?follow=1"
+				wantContains(t, errOut, "Deploy 5d2f8a1c built.\n", "Released as v1.0.0 at https://hello.latere.site\n")
+				wantContains(t, out, "npm run build")
+			} else {
+				wantContains(t, out, "fetching 3f2a9c1 for app")
+			}
+			if tc.json && out != s.logs {
+				t.Errorf("json =\n%q\nwant the preview's lines\n%q", out, s.logs)
+			}
+			if got := s.seen()[1]; got != want {
+				t.Errorf("request = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+// A deploy that is not the release of an earlier one reads its own log,
+// with no line about a release.
+func TestAppLogsOfABuildingDeploySaysNothingOfARelease(t *testing.T) {
+	s := newStubApps(t)
+	_, errOut, err := runApp(t, s, "logs", "hello", "0b1c2d3e")
+	if err != nil || strings.Contains(errOut, "released") {
+		t.Errorf("logs = %v, stderr %q", err, errOut)
+	}
+}
+
+func TestAppLogsFollowOfAQueuedDeploy(t *testing.T) {
+	for _, tc := range []struct {
+		status string
+		waits  bool
+	}{{"waiting", true}, {"queued", true}, {"building", false}, {"ready", false}} {
+		t.Run(tc.status, func(t *testing.T) {
+			s := newStubApps(t)
+			s.deploys["hello"] = `{"deploys":[` + stubDeployJSON(stubPreviewID, tc.status, "refs/heads/main", true, oneComponent) + `]}`
+			s.frames = []string{sseLine(1, "npm run build"), "event: end\ndata: {\"status\":\"built\"}\n\n"}
+			_, errOut, err := runApp(t, s, "logs", "hello", "-f")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.HasPrefix(errOut, "Waiting for the build to start...\n"); got != tc.waits {
+				t.Errorf("stderr = %q, want the wait line: %t", errOut, tc.waits)
+			}
+		})
+	}
+	// The stored log says nothing of a wait.
+	s := newStubApps(t)
+	s.deploys["hello"] = `{"deploys":[` + stubDeployJSON(stubPreviewID, "queued", "refs/heads/main", true, oneComponent) + `]}`
+	if _, errOut, err := runApp(t, s, "logs", "hello"); err != nil || errOut != "" {
+		t.Errorf("logs = %v, stderr %q", err, errOut)
+	}
+}

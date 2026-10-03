@@ -145,6 +145,7 @@ type appDeploy struct {
 	Status     string `json:"status"`
 	Preview    bool   `json:"preview"`
 	CommitSHA  string `json:"commit_sha"`
+	FromDeploy string `json:"from_deploy"`
 	Ref        string `json:"ref"`
 	URL        string `json:"url"`
 	PreviewURL string `json:"preview_url"`

@@ -31,7 +31,9 @@ committed: the commit log already holds that.
     message, when it fails or is canceled. Inside the app's repository it
     follows the deploy of the commit `HEAD` names and waits up to a minute
     for it to appear, so `git push latere main && latere app logs -f` is one
-    step. Color codes are kept on a terminal and removed otherwise.
+    step. The deploy of a release builds nothing, so for it the command says
+    which preview it released and prints that preview's build log. Color
+    codes are kept on a terminal and removed otherwise.
   - `latere app delete <slug>` asks for the slug typed back unless `--yes`;
     the slug stays held for your account for seven days.
   - A `[slug]` left out is read from the git remote `latere`. The commands

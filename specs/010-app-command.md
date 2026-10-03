@@ -91,6 +91,13 @@ remote and no `[deploy]` is given, `logs -f` follows the newest deploy whose
 `commit_sha` is the commit `HEAD` names, reading the deploys every two seconds
 for up to a minute until it appears. Every other form takes the newest.
 
+The deploy of a release has `from_deploy`, the id of the preview whose build
+it serves, and has no build log of its own. For it, `logs` prints `Deploy
+<id> released <tag> from preview <id> without a build; its build log:` to
+stderr and reads the preview's log instead, stored or followed, and with
+`--json`. With `--follow`, a deploy that is `waiting` or `queued` prints
+`Waiting for the build to start...` before its first line.
+
 Log lines are printed as `<time> <src> <line>`, with the component before the
 step when the deploy builds more than one. Escape sequences in a line are
 kept when stdout is a terminal and removed otherwise.
@@ -121,6 +128,7 @@ adds the line that says to run `latere login`.
 | 8 | Escape sequences are removed off a terminal and kept on one | `TestAppLogsStoredOfTheNewestDeploy`, `TestAppLogsKeepsColorOnATerminal`, `TestStripANSI` |
 | 9 | `delete` asks for the slug typed back unless `--yes`, and makes no request on a mismatch | `TestAppDelete` |
 | 10 | The bearer is an actor token for `insula`, never the login token, unless `LATERE_APP_TOKEN` is set | `TestProductCredentialsCarryOnlyTheirOwnAudience`, `TestAppTokenFromTheEnvironment`, `TestAppE2E` |
+| 11 | The log of a release's deploy is the log of the preview it released, said on one line, stored, followed and in JSON; a queued deploy followed says it waits for the build | `TestAppLogsOfAReleaseIsItsPreviews`, `TestAppLogsFollowOfAQueuedDeploy` |
 
 ## Outcome
 

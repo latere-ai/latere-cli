@@ -102,6 +102,14 @@ repository, `latere app logs -f` follows the deploy of the commit `HEAD`
 names, and waits up to a minute for it to appear. That is what makes
 `git push latere main && latere app logs -f` one step.
 
+The deploy of a release builds nothing: it serves the build of the preview
+whose commit the tag names. Its log is that preview's, so the command says so
+and prints the preview's build log instead, followed or not:
+
+```text
+Deploy 02c415ed released v1.0.0 from preview cbc11a51 without a build; its build log:
+```
+
 Color codes in the log are printed as they are on a terminal and removed when
 the output goes to a file or a pipe.
 
