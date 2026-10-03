@@ -31,7 +31,7 @@ import (
 	"latere.ai/x/topos/sandbox"
 )
 
-// The full-screen TUI for `latere topos --local`, in the spirit of Claude Code /
+// The full-screen TUI for `latere agents run`, in the spirit of Claude Code /
 // Codex: an alt-screen app with a header, a scrolling transcript that streams, a
 // bordered input, and a status line. It reuses the verified core (buildLocalModel,
 // host sandbox, tools, model switching) unchanged — this is presentation only.
@@ -549,7 +549,7 @@ func (m *localTUI) setupGlamour(w int) {
 
 func (m *localTUI) View() string {
 	if !m.ready {
-		return "Starting Topos…"
+		return "Starting the Latere agent…"
 	}
 	inputBox := styleInputBorder.Width(m.width - 2).Render(m.input.View())
 	// No fixed header: the banner lives at the top of the scrolling transcript.
@@ -560,7 +560,7 @@ func (m *localTUI) View() string {
 // away with the conversation). The active model stays visible in the status line.
 func (m *localTUI) bannerView() string {
 	bar := lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Render("▌")
-	l1 := bar + " " + lipgloss.NewStyle().Bold(true).Render("Topos") + styleDim.Render("  local · v"+m.version)
+	l1 := bar + " " + lipgloss.NewStyle().Bold(true).Render("Latere agent") + styleDim.Render("  local · v"+m.version)
 	return l1 + "\n" +
 		"  " + styleDim.Render(m.curModel) + "\n" +
 		"  " + styleDim.Render(homeAbbrev(m.cwd))

@@ -103,7 +103,7 @@ func TestOrgSwitchUpdatesTheSavedLoginE2E(t *testing.T) {
 				}
 			}))
 			defer server.Close()
-			env := append(os.Environ(), "LATERE_CELLA_TOKEN=", "LATERE_AUTH_TOKEN_FILE="+authPath, "LATERE_CELLA_URL="+server.URL+"/v1/environments", "AUTH_URL="+server.URL+tc.authSuffix, "XDG_CONFIG_HOME="+root, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
+			env := append(os.Environ(), "LATERE_ENVIRONMENTS_TOKEN=", "LATERE_AUTH_TOKEN_FILE="+authPath, "LATERE_ENVIRONMENTS_URL="+server.URL+"/v1/environments", "AUTH_URL="+server.URL+tc.authSuffix, "XDG_CONFIG_HOME="+root, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
 			run := func(args ...string) ([]byte, error) {
 				ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 				defer cancel()
@@ -189,7 +189,7 @@ func TestOrgSwitchUpdatesTheSavedLoginE2E(t *testing.T) {
 			if refreshes.Load() != 1 {
 				t.Errorf("unnecessary refresh after org switch: got %d token requests, want 1", refreshes.Load())
 			}
-			if out, err := run("cella", "list"); err != nil {
+			if out, err := run("environments", "list"); err != nil {
 				t.Fatalf("Cella list: %v\n%s", err, out)
 			}
 		})

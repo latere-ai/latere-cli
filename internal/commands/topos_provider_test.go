@@ -11,6 +11,8 @@ import (
 	"context"
 	"errors"
 	"io"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -29,7 +31,7 @@ func TestBuildLocalModelFromProviderConfig(t *testing.T) {
 	t.Setenv("LATERE_CLAUDE_TOKEN_FILE", filepath.Join(t.TempDir(), "claude.json"))
 	t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(t.TempDir(), "auth.json"))
 	cfgPath := filepath.Join(t.TempDir(), "provider.json")
-	t.Setenv("LATERE_TOPOS_PROVIDER_FILE", cfgPath)
+	t.Setenv("LATERE_AGENT_PROVIDER_FILE", cfgPath)
 
 	// No config + no env → errNeedAuth (so --local shows the picker).
 	if _, err := buildLocalModel(context.Background(), ""); !errors.Is(err, errNeedAuth) {
@@ -64,7 +66,7 @@ func TestBuildLocalModelDefaultsToTheOrigin(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat-ambient-shared")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN_AUTO", "")
 	t.Setenv("LATERE_CLAUDE_TOKEN_FILE", filepath.Join(t.TempDir(), "claude.json"))
-	t.Setenv("LATERE_TOPOS_PROVIDER_FILE", filepath.Join(t.TempDir(), "provider.json"))
+	t.Setenv("LATERE_AGENT_PROVIDER_FILE", filepath.Join(t.TempDir(), "provider.json"))
 	t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(t.TempDir(), "auth.json"))
 
 	// Signed in to latere → the origin is the default, overriding the ambient token.
@@ -92,7 +94,7 @@ func TestLocalModelCallsTheDoor(t *testing.T) {
 	t.Setenv("LATERE_MODELS_URL", w.modelsURL())
 	t.Setenv("AUTH_URL", w.srv.URL)
 	t.Setenv("ANTHROPIC_API_KEY", "")
-	t.Setenv("LATERE_TOPOS_PROVIDER_FILE", filepath.Join(t.TempDir(), "provider.json"))
+	t.Setenv("LATERE_AGENT_PROVIDER_FILE", filepath.Join(t.TempDir(), "provider.json"))
 	m, err := buildLocalModel(t.Context(), "")
 	if err != nil {
 		t.Fatalf("buildLocalModel: %v", err)
@@ -136,7 +138,7 @@ func TestProviderConfigBeatsAmbientClaudeToken(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat-ambient-shared")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN_AUTO", "")
 	t.Setenv("LATERE_CLAUDE_TOKEN_FILE", filepath.Join(t.TempDir(), "claude.json"))
-	t.Setenv("LATERE_TOPOS_PROVIDER_FILE", filepath.Join(t.TempDir(), "provider.json"))
+	t.Setenv("LATERE_AGENT_PROVIDER_FILE", filepath.Join(t.TempDir(), "provider.json"))
 	// No latere/Lux token, so the ambient-token fallback path is exercised.
 	t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(t.TempDir(), "auth.json"))
 
@@ -149,14 +151,14 @@ func TestProviderConfigBeatsAmbientClaudeToken(t *testing.T) {
 	}
 
 	// With no provider config, the ambient token is the fallback (still usable).
-	t.Setenv("LATERE_TOPOS_PROVIDER_FILE", filepath.Join(t.TempDir(), "empty.json"))
+	t.Setenv("LATERE_AGENT_PROVIDER_FILE", filepath.Join(t.TempDir(), "empty.json"))
 	if m, err := buildLocalModel(context.Background(), ""); err != nil || m == nil {
 		t.Fatalf("ambient token fallback = (%v, %v)", m, err)
 	}
 }
 
 func TestProviderConfigRoundTrip(t *testing.T) {
-	t.Setenv("LATERE_TOPOS_PROVIDER_FILE", filepath.Join(t.TempDir(), "p.json"))
+	t.Setenv("LATERE_AGENT_PROVIDER_FILE", filepath.Join(t.TempDir(), "p.json"))
 	want := providerConfig{Provider: "anthropic", Method: "apikey", APIKey: "k", Model: "m"}
 	if err := saveProviderConfig(want); err != nil {
 		t.Fatalf("save: %v", err)
@@ -164,6 +166,44 @@ func TestProviderConfigRoundTrip(t *testing.T) {
 	got, err := loadProviderConfig()
 	if err != nil || got != want {
 		t.Fatalf("load = (%+v, %v), want %+v", got, err, want)
+	}
+}
+
+// A provider choice saved under the name it had before spec 010 is moved to
+// the current name the first time it is read, so no one chooses again. With
+// the variable naming a file, the legacy file is left alone.
+func TestProviderConfigMovesFromLegacyName(t *testing.T) {
+	config := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", config)
+	t.Setenv("HOME", config)
+	t.Setenv("LATERE_AGENT_PROVIDER_FILE", "")
+	t.Setenv("LATERE_TOPOS_PROVIDER_FILE", "")
+	dir := latereConfigDir()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	legacy := filepath.Join(dir, "topos-provider.json")
+	if err := os.WriteFile(legacy, []byte(`{"provider":"ollama","model":"llama3"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := loadProviderConfig()
+	if err != nil || got.Provider != "ollama" || got.Model != "llama3" {
+		t.Fatalf("load = (%+v, %v), want the legacy choice", got, err)
+	}
+	if _, err := os.Stat(legacy); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the legacy file is still there: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "agent-provider.json")); err != nil {
+		t.Errorf("the choice was not moved to agent-provider.json: %v", err)
+	}
+
+	// The retired variable alone is refused, not read and not ignored.
+	t.Setenv("LATERE_TOPOS_PROVIDER_FILE", filepath.Join(config, "elsewhere.json"))
+	if _, err := loadProviderConfig(); err == nil || !strings.Contains(err.Error(), "LATERE_TOPOS_PROVIDER_FILE is now LATERE_AGENT_PROVIDER_FILE") {
+		t.Errorf("retired variable: %v, want a refusal naming the new one", err)
+	}
+	if _, err := buildLocalModel(context.Background(), ""); err == nil || !strings.Contains(err.Error(), "LATERE_AGENT_PROVIDER_FILE") {
+		t.Errorf("buildLocalModel with the retired variable: %v, want the refusal rather than another provider", err)
 	}
 }
 

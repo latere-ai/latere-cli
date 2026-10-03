@@ -25,7 +25,7 @@ func TestProductsRejectExpiredAuthWithoutRefreshE2E(t *testing.T) {
 		t.Skip("binary e2e skipped with -short")
 	}
 	binary := latereBinary(t)
-	for _, product := range []string{"git helper", "repos", "cella"} {
+	for _, product := range []string{"git helper", "repos", "environments"} {
 		for _, state := range []string{"expired", "near expiry", "unknown expiry"} {
 			t.Run(product+"/"+state, func(t *testing.T) {
 				root := t.TempDir()
@@ -74,8 +74,8 @@ func TestProductsRejectExpiredAuthWithoutRefreshE2E(t *testing.T) {
 				switch product {
 				case "repos":
 					args = []string{"repos", "--platform-url", server.URL, "list"}
-				case "cella":
-					args = []string{"cella", "list", "--api-url", server.URL + "/v1/environments"}
+				case "environments":
+					args = []string{"environments", "list", "--api-url", server.URL + "/v1/environments"}
 					// The Cella base and AUTH_URL both point at the stub, so
 					// the mint and the product call reach the same server.
 				}
@@ -83,7 +83,7 @@ func TestProductsRejectExpiredAuthWithoutRefreshE2E(t *testing.T) {
 				defer cancel()
 				command := exec.CommandContext(ctx, binary, args...)
 				command.Stdin = strings.NewReader("protocol=https\nhost=code.latere.ai\n\n")
-				command.Env = append(os.Environ(), "LATERE_CELLA_TOKEN=", "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_URL="+server.URL, "LATERE_PLATFORM_TOKEN=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
+				command.Env = append(os.Environ(), "LATERE_ENVIRONMENTS_TOKEN=", "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_URL="+server.URL, "LATERE_PLATFORM_TOKEN=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
 				var stdout, stderr bytes.Buffer
 				command.Stdout, command.Stderr = &stdout, &stderr
 				err = command.Run()

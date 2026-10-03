@@ -66,7 +66,7 @@ func TestCommandsPreserveHTTPErrorStatusE2E(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()
 			command := exec.CommandContext(ctx, binary, args...)
-			command.Env = append(os.Environ(), "LATERE_CELLA_TOKEN=", "LATERE_MODEL_KEY=test-key", "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_URL="+server.URL, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
+			command.Env = append(os.Environ(), "LATERE_ENVIRONMENTS_TOKEN=", "LATERE_MODEL_KEY=test-key", "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_URL="+server.URL, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
 			var stdout, stderr bytes.Buffer
 			command.Stdout, command.Stderr = &stdout, &stderr
 			err := command.Run()

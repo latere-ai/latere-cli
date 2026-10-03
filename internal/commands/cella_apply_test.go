@@ -46,7 +46,7 @@ func TestCellaApplyAnswersPendingWithoutWait(t *testing.T) {
 	if string(req.Body) != unnamedManifest || req.ContentType != "application/json" {
 		t.Errorf("create body %q as %q, want the manifest unchanged as JSON", req.Body, req.ContentType)
 	}
-	for _, want := range []string{"cella:", "generated", "phase:", "Pending", "sbx-generated", "cpu=2 memory=4Gi"} {
+	for _, want := range []string{"workload:", "generated", "phase:", "Pending", "sbx-generated", "cpu=2 memory=4Gi"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
@@ -166,7 +166,7 @@ func TestCellaListFollowsPages(t *testing.T) {
 func TestCellaListEmpty(t *testing.T) {
 	f := newFakeCore(t)
 	out, _, err := f.runCella("", "list")
-	if err != nil || !strings.Contains(out, "No cellas are visible") {
+	if err != nil || !strings.Contains(out, "No workloads are visible") {
 		t.Fatalf("list = %q, %v", out, err)
 	}
 	out, _, err = f.runCella("", "list", "--json")

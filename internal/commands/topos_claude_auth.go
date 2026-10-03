@@ -28,7 +28,7 @@ import (
 	"latere.ai/x/pkg/otel"
 )
 
-// Claude (Anthropic) OAuth login for `latere topos --local`, the same PKCE flow
+// Claude (Anthropic) OAuth login for `latere agents run`, the same PKCE flow
 // other local harnesses (opencode, Claude Code) use. It mints an sk-ant-oat
 // access token that the SDK's Anthropic adapter sends as a Bearer with the OAuth
 // beta. Owning our own token means --local does not piggyback on (and get
@@ -248,7 +248,7 @@ func claudeOAuthBearer(ctx context.Context) (string, error) {
 	if t.RefreshToken != "" && !t.ExpiresAt.IsZero() && time.Now().After(t.ExpiresAt.Add(-60*time.Second)) {
 		refreshed, rerr := refreshClaudeToken(ctx, &http.Client{Timeout: 30 * time.Second, Transport: otel.Transport(nil)}, t.RefreshToken)
 		if rerr != nil {
-			return "", fmt.Errorf("claude token expired and refresh failed (%w); run `latere topos login`", rerr)
+			return "", fmt.Errorf("claude token expired and refresh failed (%w); run `latere agents provider`", rerr)
 		}
 		if refreshed.RefreshToken == "" {
 			refreshed.RefreshToken = t.RefreshToken

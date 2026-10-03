@@ -14,7 +14,7 @@ package main
 // real state:
 //
 //	LATERE_FAMILY_E2E=1        read-only edges: whoami, /api/me,
-//	                           cella list, models list, repos list,
+//	                           environments list, models list, repos list,
 //	                           garbage-token 401.
 //	                           No cost, no resource creation.
 //	LATERE_FAMILY_E2E_WRITE=1  also: models invoke (a token), cross-product
@@ -205,11 +205,11 @@ func TestFamilyE2E(t *testing.T) {
 		}
 	})
 
-	// Edge: CLI -> cella (actor token + exchange chain). Authorized listing.
-	t.Run("cli->cella-list", func(t *testing.T) {
-		_, errOut, err := fe.run(t, 30*time.Second, "cella", "list")
+	// Edge: CLI -> Environments (actor token + exchange chain). Authorized listing.
+	t.Run("cli->environments-list", func(t *testing.T) {
+		_, errOut, err := fe.run(t, 30*time.Second, "environments", "list")
 		if err != nil {
-			t.Fatalf("cella list (authorization failed?): %v\n%s", err, errOut)
+			t.Fatalf("environments list (authorization failed?): %v\n%s", err, errOut)
 		}
 	})
 

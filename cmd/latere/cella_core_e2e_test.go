@@ -120,12 +120,19 @@ func (c *e2eCore) requests() []string {
 // code.
 func (c *e2eCore) run(t *testing.T, stdin string, args ...string) (stdout, stderr string, code int) {
 	t.Helper()
+	return c.runWith(t, stdin, []string{"LATERE_ENVIRONMENTS_URL=" + c.srv.URL + "/v1/environments", "LATERE_ENVIRONMENTS_TOKEN=e2e-token"}, args...)
+}
+
+// runWith is run with the given variables in place of the control plane's
+// address and bearer.
+func (c *e2eCore) runWith(t *testing.T, stdin string, env []string, args ...string) (stdout, stderr string, code int) {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, latereBinary(t), args...)
 	cmd.Stdin = strings.NewReader(stdin)
 	root := t.TempDir()
-	cmd.Env = append(os.Environ(), "LATERE_CELLA_URL="+c.srv.URL+"/v1/environments", "LATERE_CELLA_TOKEN=e2e-token",
+	cmd.Env = append(append(os.Environ(), env...),
 		"LATERE_AUTH_TOKEN_FILE="+filepath.Join(root, "absent-auth.json"), "XDG_CONFIG_HOME="+root,
 		"LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
 	var out, errOut strings.Builder
@@ -140,38 +147,38 @@ func (c *e2eCore) run(t *testing.T, stdin string, args ...string) (stdout, stder
 	return out.String(), errOut.String(), 0
 }
 
-// The built binary drives a sandbox's life on the core: a held apply, the
-// list, a command with its exit code, a file round trip, a terminal, and the
-// delete.
-func TestCellaOnTheCoreE2E(t *testing.T) {
+// The built binary drives a workload's life as `latere environments`: a held
+// apply, the list, a command with its exit code, a file round trip, a
+// terminal, and the delete.
+func TestEnvironmentsOnTheCoreE2E(t *testing.T) {
 	if testing.Short() {
 		t.Skip("binary e2e skipped with -short")
 	}
 	c := newE2ECore(t)
-	manifest := filepath.Join(t.TempDir(), "sandbox.yaml")
+	manifest := filepath.Join(t.TempDir(), "workload.yaml")
 	if err := os.WriteFile(manifest, []byte("apiVersion: cella.latere.ai/v1beta1\nkind: Sandbox\nmetadata:\n  name: dev\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if out, errOut, code := c.run(t, "", "cella", "apply", "-f", manifest, "--wait"); code != 0 || !strings.Contains(out, "Running") {
+	if out, errOut, code := c.run(t, "", "environments", "apply", "-f", manifest, "--wait"); code != 0 || !strings.Contains(out, "Running") {
 		t.Fatalf("apply --wait = %d %q %q", code, out, errOut)
 	}
-	if out, _, code := c.run(t, "", "sandbox", "list"); code != 0 || !strings.Contains(out, "sbx-dev") {
-		t.Fatalf("list through the sandbox alias = %d %q", code, out)
+	if out, _, code := c.run(t, "", "environments", "list"); code != 0 || !strings.Contains(out, "workload:") || !strings.Contains(out, "sbx-dev") {
+		t.Fatalf("list = %d %q", code, out)
 	}
 	c.exitCode.Store(5)
-	if out, _, code := c.run(t, "", "cella", "exec", "dev", "--", "false"); code != 5 || out != "ran\n" {
+	if out, _, code := c.run(t, "", "environments", "exec", "dev", "--", "false"); code != 5 || out != "ran\n" {
 		t.Fatalf("exec = %d %q, want the command's exit code 5", code, out)
 	}
-	if _, errOut, code := c.run(t, "hello", "cella", "write", "dev", "note.txt"); code != 0 {
+	if _, errOut, code := c.run(t, "hello", "environments", "write", "dev", "note.txt"); code != 0 {
 		t.Fatalf("write = %d %q", code, errOut)
 	}
-	if out, _, code := c.run(t, "", "cella", "cat", "dev", "note.txt"); code != 0 || out != "hello" {
+	if out, _, code := c.run(t, "", "environments", "cat", "dev", "note.txt"); code != 0 || out != "hello" {
 		t.Fatalf("cat = %d %q", code, out)
 	}
-	if out, _, code := c.run(t, "ls\n", "cella", "shell", "dev"); code != 4 || out != "echo: ls\n" {
+	if out, _, code := c.run(t, "ls\n", "environments", "shell", "dev"); code != 4 || out != "echo: ls\n" {
 		t.Fatalf("shell = %d %q, want the shell's exit code 4", code, out)
 	}
-	if _, errOut, code := c.run(t, "", "cella", "delete", "dev"); code != 0 || !strings.Contains(errOut, "deleted dev") {
+	if _, errOut, code := c.run(t, "", "environments", "delete", "dev"); code != 0 || !strings.Contains(errOut, "deleted dev") {
 		t.Fatalf("delete = %d %q", code, errOut)
 	}
 	want := []string{"PUT /dev", "GET ", "POST /dev/exec", "PUT /dev/files", "GET /dev/files/content", "GET /dev/attach", "DELETE /dev"}
@@ -182,14 +189,14 @@ func TestCellaOnTheCoreE2E(t *testing.T) {
 
 // run --ephemeral --rm creates, runs and deletes, and exits with the
 // command's code.
-func TestCellaOneShotOnTheCoreE2E(t *testing.T) {
+func TestEnvironmentsOneShotOnTheCoreE2E(t *testing.T) {
 	if testing.Short() {
 		t.Skip("binary e2e skipped with -short")
 	}
 	c := newE2ECore(t)
 	c.exitCode.Store(2)
-	out, errOut, code := c.run(t, "", "cella", "run", "--ephemeral", "--rm", "--", "false")
-	if code != 2 || out != "ran\n" || !strings.Contains(errOut, "deleted cella run-") {
+	out, errOut, code := c.run(t, "", "environments", "run", "--ephemeral", "--rm", "--", "false")
+	if code != 2 || out != "ran\n" || !strings.Contains(errOut, "deleted workload run-") {
 		t.Fatalf("run = %d %q %q", code, out, errOut)
 	}
 	got := c.requests()
@@ -204,11 +211,58 @@ func TestRemovedCellaCommandE2E(t *testing.T) {
 		t.Skip("binary e2e skipped with -short")
 	}
 	c := newE2ECore(t)
-	_, errOut, code := c.run(t, "", "cella", "policy", "list")
-	if code != 1 || !strings.Contains(errOut, "'latere cella policy' is no longer available") {
+	_, errOut, code := c.run(t, "", "environments", "policy", "list")
+	if code != 1 || !strings.Contains(errOut, "'latere environments policy' is no longer available") {
 		t.Fatalf("policy = %d %q", code, errOut)
 	}
 	if got := c.requests(); len(got) != 0 {
 		t.Errorf("requests = %v, want none", got)
+	}
+}
+
+// The words named after the open cores (spec 010) exit 1 with their
+// replacement and reach nothing: `latere cella list` names `latere
+// environments`, and `latere topos --local` names `latere agents run`.
+func TestRetiredCommandWordsE2E(t *testing.T) {
+	if testing.Short() {
+		t.Skip("binary e2e skipped with -short")
+	}
+	c := newE2ECore(t)
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"cella", "list"}, "'latere cella' is now 'latere environments', with the same commands"},
+		{[]string{"sandbox", "list"}, "'latere sandbox' is now 'latere environments', with the same commands"},
+		{[]string{"topos", "--local"}, "'latere topos --local' is now 'latere agents run'"},
+		{[]string{"review"}, "'latere review' is now 'latere agents review'"},
+	} {
+		out, errOut, code := c.run(t, "", tc.args...)
+		if code != 1 || out != "" || strings.TrimSpace(errOut) == "" || !strings.Contains(errOut, tc.want) {
+			t.Errorf("%v = %d %q %q, want exit 1 naming the replacement", tc.args, code, out, errOut)
+		}
+	}
+	if got := c.requests(); len(got) != 0 {
+		t.Errorf("requests = %v, want none", got)
+	}
+}
+
+// The control plane's retired variable set alone is refused with the new
+// name; set beside the new one, the new one wins.
+func TestRetiredEnvironmentsVariableE2E(t *testing.T) {
+	if testing.Short() {
+		t.Skip("binary e2e skipped with -short")
+	}
+	c := newE2ECore(t)
+	_, errOut, code := c.runWith(t, "", []string{"LATERE_CELLA_URL=" + c.srv.URL + "/v1/environments", "LATERE_ENVIRONMENTS_URL=", "LATERE_ENVIRONMENTS_TOKEN=e2e-token"}, "environments", "list")
+	if code != 1 || !strings.Contains(errOut, "LATERE_CELLA_URL is now LATERE_ENVIRONMENTS_URL") {
+		t.Fatalf("old variable alone = %d %q, want the refusal", code, errOut)
+	}
+	if got := c.requests(); len(got) != 0 {
+		t.Errorf("requests = %v, want none", got)
+	}
+	out, errOut, code := c.runWith(t, "", []string{"LATERE_CELLA_URL=http://127.0.0.1:1/v1/environments", "LATERE_ENVIRONMENTS_URL=" + c.srv.URL + "/v1/environments", "LATERE_ENVIRONMENTS_TOKEN=e2e-token"}, "environments", "list")
+	if code != 0 || !strings.Contains(out, "sbx-dev") {
+		t.Fatalf("both set = %d %q %q, want the new variable's control plane", code, out, errOut)
 	}
 }

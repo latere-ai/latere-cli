@@ -96,7 +96,7 @@ func TestBuildLocalModelCredentials(t *testing.T) {
 	// Isolate the on-disk config so a real login (incl. the latere/Lux token)
 	// can't leak in.
 	t.Setenv("LATERE_CLAUDE_TOKEN_FILE", filepath.Join(t.TempDir(), "claude.json"))
-	t.Setenv("LATERE_TOPOS_PROVIDER_FILE", filepath.Join(t.TempDir(), "provider.json"))
+	t.Setenv("LATERE_AGENT_PROVIDER_FILE", filepath.Join(t.TempDir(), "provider.json"))
 	t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(t.TempDir(), "auth.json"))
 	if _, err := buildLocalModel(context.Background(), ""); err == nil {
 		t.Fatal("expected an error with no credentials")

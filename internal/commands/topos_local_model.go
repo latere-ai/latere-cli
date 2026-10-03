@@ -17,7 +17,7 @@ import (
 	"latere.ai/x/topos/models"
 )
 
-// handleLocalCommand runs a slash command typed at the `latere topos --local`
+// handleLocalCommand runs a slash command typed at the `latere agents run`
 // prompt. It returns quit=true when the session should end. rebuild swaps the
 // runner's model (used by /model); curModel points at the header's model label.
 func handleLocalCommand(ctx context.Context, line string, curModel *string, rebuild func(models.Model) error) (quit bool) {

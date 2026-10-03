@@ -40,6 +40,15 @@ func TestMain(m *testing.M) {
 			os.Exit(1)
 		}
 	}
+	// The retired variable names are refused when set alone (spec 010), and
+	// every helper process inherits this environment, so one left in a
+	// developer's shell would fail unrelated tests.
+	for _, retired := range []string{"LATERE_CELLA_URL", "LATERE_CELLA_TOKEN", "LATERE_TOPOS_PROVIDER_FILE"} {
+		if err := os.Unsetenv(retired); err != nil {
+			fmt.Fprintf(os.Stderr, "unset %s: %v\n", retired, err)
+			os.Exit(1)
+		}
+	}
 	code := m.Run()
 	if e2eBinary.dir != "" {
 		if err := os.RemoveAll(e2eBinary.dir); err != nil {

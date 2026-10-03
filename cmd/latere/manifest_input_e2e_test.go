@@ -27,7 +27,7 @@ func TestApplyConfiguredManifestInputE2E(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	for _, product := range []string{"cella", "sandbox", "eval"} {
+	for _, product := range []string{"environments", "eval"} {
 		limit := 64 << 10
 		if product == "eval" {
 			limit = 256 << 10
@@ -80,7 +80,7 @@ func TestApplyConfiguredManifestInputE2E(t *testing.T) {
 				defer cancel()
 				command := exec.CommandContext(ctx, binary, args...)
 				command.Stdin = strings.NewReader("suite: wrong\n")
-				command.Env = append(os.Environ(), "LATERE_CELLA_TOKEN=synthetic-token", "LATERE_AUTH_TOKEN_FILE="+filepath.Join(dir, "absent-auth.json"), "XDG_CONFIG_HOME="+dir, "EVAL_ADMIN_TOKEN=synthetic-token", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "LATERE_TEST_CONFIGURED_INPUT="+source)
+				command.Env = append(os.Environ(), "LATERE_ENVIRONMENTS_TOKEN=synthetic-token", "LATERE_AUTH_TOKEN_FILE="+filepath.Join(dir, "absent-auth.json"), "XDG_CONFIG_HOME="+dir, "EVAL_ADMIN_TOKEN=synthetic-token", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "LATERE_TEST_CONFIGURED_INPUT="+source)
 				out, err := command.CombinedOutput()
 				if wantError == "" {
 					if err != nil || requests.Load() != 1 {

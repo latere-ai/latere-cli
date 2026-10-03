@@ -113,7 +113,7 @@ const codeActorOutput = "username=x-access-token\npassword=" + mintedActor + "\n
 // CODE_HOST override from the environment.
 func isolateTokens(t *testing.T) {
 	t.Helper()
-	t.Setenv("LATERE_CELLA_TOKEN", "")
+	t.Setenv("LATERE_ENVIRONMENTS_TOKEN", "")
 	t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(t.TempDir(), "absent-auth-token.json"))
 	t.Setenv("CODE_HOST", "")
 }

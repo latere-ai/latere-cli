@@ -9,7 +9,7 @@ import (
 	"io"
 )
 
-// unresolvedError is returned by `latere review` when a debate completes with
+// unresolvedError is returned by `latere agents review` when a debate completes with
 // open attacks. It carries the count so main can map it to a distinct exit
 // code: a completed debate with unresolved attacks is the verdict "review
 // found issues", which must be distinguishable from a command error. This

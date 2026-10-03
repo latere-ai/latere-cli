@@ -26,17 +26,17 @@ func newCeShellCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "shell <name|id> [-- <cmd>...]",
 		Aliases: []string{"attach"},
-		Short:   "Open an interactive terminal inside a cella.",
-		Long: `Open an interactive terminal inside a running cella: the image's shell,
+		Short:   "Open an interactive terminal inside a workload.",
+		Long: `Open an interactive terminal inside a running workload: the image's shell,
 or the command given after --. The terminal follows your window's size,
 and the CLI exits with the shell's exit code.
 
-If the cella is stopped, start it first with 'latere cella start'.
+If the workload is stopped, start it first with 'latere environments start'.
 The alias 'attach' is kept for users who prefer terminal attachment
 language.`,
-		Example: `  latere cella shell dev
-  latere cella attach dev
-  latere cella shell dev -- python3`,
+		Example: `  latere environments shell dev
+  latere environments attach dev
+  latere environments shell dev -- python3`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := cellaClient(apiURL)

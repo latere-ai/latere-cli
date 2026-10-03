@@ -102,15 +102,15 @@ func TestProductCredentialsCarryOnlyTheirOwnAudience(t *testing.T) {
 		name, audience string
 		run            func(t *testing.T, s *productStub)
 	}{
-		{"cella list", "cella", func(t *testing.T, s *productStub) {
-			t.Setenv("LATERE_CELLA_TOKEN", "")
+		{"environments list", "cella", func(t *testing.T, s *productStub) {
+			t.Setenv("LATERE_ENVIRONMENTS_TOKEN", "")
 			t.Setenv("AUTH_URL", s.srv.URL)
-			cmd := newCellaCmd()
+			cmd := newEnvironmentsCmd()
 			cmd.SetOut(io.Discard)
 			cmd.SetErr(io.Discard)
 			cmd.SetArgs([]string{"list", "--api-url", s.srv.URL + "/v1/environments"})
 			if err := cmd.Execute(); err != nil {
-				t.Fatalf("cella list: %v", err)
+				t.Fatalf("environments list: %v", err)
 			}
 		}},
 		{"app list", appAudience, func(t *testing.T, s *productStub) {

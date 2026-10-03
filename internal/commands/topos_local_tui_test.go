@@ -56,7 +56,7 @@ func newTestTUI(t *testing.T) *localTUI {
 	t.Helper()
 	// A deterministic credential so /model switches resolve without network.
 	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
-	t.Setenv("LATERE_TOPOS_PROVIDER_FILE", filepath.Join(t.TempDir(), "provider.json"))
+	t.Setenv("LATERE_AGENT_PROVIDER_FILE", filepath.Join(t.TempDir(), "provider.json"))
 	sb, err := newHostSandbox(t.TempDir())
 	if err != nil {
 		t.Fatal(err)

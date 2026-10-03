@@ -11,6 +11,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -37,21 +39,52 @@ type providerConfig struct {
 	OllamaHost string `json:"ollama_host,omitempty"` // ollama base URL
 }
 
-func providerConfigPath() string {
-	if p := os.Getenv("LATERE_TOPOS_PROVIDER_FILE"); p != "" {
-		return p
+// providerFile is where the local agent's provider choice is kept, in the
+// user's configuration directory. legacyProviderFile is the name it had
+// before spec 010; a choice found there is moved, not chosen again.
+const (
+	providerFile       = "agent-provider.json"
+	legacyProviderFile = "topos-provider.json"
+)
+
+// providerConfigPath is $LATERE_AGENT_PROVIDER_FILE, or providerFile in the
+// user's configuration directory. The retired variable set alone is refused.
+func providerConfigPath() (string, error) {
+	p, err := capabilityEnv(envAgentProviderFile)
+	if err != nil || p != "" {
+		return p, err
 	}
+	return filepath.Join(latereConfigDir(), providerFile), nil
+}
+
+func latereConfigDir() string {
 	dir, err := os.UserConfigDir()
 	if err != nil || dir == "" {
 		home, _ := os.UserHomeDir()
 		dir = filepath.Join(home, ".config")
 	}
-	return filepath.Join(dir, "latere", "topos-provider.json")
+	return filepath.Join(dir, "latere")
 }
 
+// loadProviderConfig reads the provider choice. A choice saved under the
+// legacy name, with none under the current one and no variable naming the
+// file, is moved to the current name first.
 func loadProviderConfig() (providerConfig, error) {
 	var c providerConfig
-	b, err := os.ReadFile(providerConfigPath())
+	p, err := providerConfigPath()
+	if err != nil {
+		return c, err
+	}
+	b, err := os.ReadFile(p)
+	if errors.Is(err, fs.ErrNotExist) && os.Getenv(envAgentProviderFile) == "" {
+		legacy := filepath.Join(latereConfigDir(), legacyProviderFile)
+		if _, statErr := os.Stat(legacy); statErr == nil {
+			if mvErr := os.Rename(legacy, p); mvErr != nil {
+				return c, fmt.Errorf("move the provider choice from %s to %s: %w", legacy, p, mvErr)
+			}
+			b, err = os.ReadFile(p)
+		}
+	}
 	if err != nil {
 		return c, err
 	}
@@ -59,7 +92,10 @@ func loadProviderConfig() (providerConfig, error) {
 }
 
 func saveProviderConfig(c providerConfig) error {
-	p := providerConfigPath()
+	p, err := providerConfigPath()
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return err
 	}
@@ -70,7 +106,7 @@ func saveProviderConfig(c providerConfig) error {
 	return os.WriteFile(p, b, 0o600)
 }
 
-// buildLocalModel resolves the model for `latere topos --local`. Resolution
+// buildLocalModel resolves the model for `latere agents run`. Resolution
 // order: an explicit ANTHROPIC_API_KEY; a saved provider choice (the picker);
 // the Latere models at the origin when signed in to latere or handed a model
 // key (the default, billed to the key's context); an ambient
@@ -82,9 +118,14 @@ func buildLocalModel(ctx context.Context, modelName string) (models.Model, error
 		return anthropicDirect(key, false, modelName)
 	}
 
-	// 2. An explicit provider choice (the picker / `latere topos login`) wins over
-	// the ambient defaults below.
-	if cfg, err := loadProviderConfig(); err == nil && cfg.Provider != "" {
+	// 2. An explicit provider choice (the picker / `latere agents provider`)
+	// wins over the ambient defaults below. A retired variable naming the
+	// file is an error, not a reason to fall through to another provider.
+	cfg, err := loadProviderConfig()
+	if _, renamed := errors.AsType[*renamedEnvError](err); renamed {
+		return nil, err
+	}
+	if err == nil && cfg.Provider != "" {
 		return modelFromProviderConfig(ctx, cfg, modelName)
 	}
 

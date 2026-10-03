@@ -52,7 +52,7 @@ func quietSDKLogs() {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})))
 }
 
-// localSystemPrompt is the default instruction for `latere topos --local`: a
+// localSystemPrompt is the default instruction for `latere agents run`: a
 // coding assistant working directly in the user's directory.
 const localSystemPrompt = `You are a coding assistant running on the user's local machine, in their working directory.
 The tools operate on their real files. Edit files with the file tools rather than through shell commands, and use the shell to run and verify. Be concise.`
@@ -69,7 +69,7 @@ func runToposLocal(ctx context.Context, dir, modelName, oneShot, version string)
 		// and retry; otherwise (one-shot -p, or piped) fail with a clear message
 		// rather than launching a TUI with no TTY.
 		if oneShot != "" || !term.IsTerminal(int(os.Stdin.Fd())) {
-			return errors.New("no model credential — run `latere topos login`, or set ANTHROPIC_API_KEY")
+			return errors.New("no model credential: run `latere agents provider`, or set ANTHROPIC_API_KEY")
 		}
 		if perr := runAuthPicker(ctx); perr != nil {
 			return perr
@@ -136,7 +136,7 @@ func runToposLocal(ctx context.Context, dir, modelName, oneShot, version string)
 	}
 
 	abs, _ := os.Getwd()
-	fmt.Printf("Topos (local) in %s\n", abs)
+	fmt.Printf("Latere agent (local) in %s\n", abs)
 	fmt.Printf("model: %s   ·   /model to switch, /help for commands, Ctrl+D to quit\n", curModel)
 	sc := bufio.NewScanner(os.Stdin)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)

@@ -37,16 +37,16 @@ func newCeExportCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "export <name|id> [paths...]",
-		Short: "Stream a tar of files from the cella workspace.",
-		Long: `Export files from a Cella workspace as a tar stream.
+		Short: "Stream a tar of files from the workload's workspace.",
+		Long: `Export files from a workload's workspace as a tar stream.
 
 Relative paths are resolved under --src-dir, /workspace by default; with no
 path the whole of --src-dir is exported. Entries in the archive are named
 relative to the workspace. The tar is written to stdout unless --output
 names a file, which is written only once the whole archive has arrived.`,
-		Example: `  latere cella export dev -o workspace.tar
-  latere cella export dev src package.json -o app.tar
-  latere cella export dev --src-dir /workspace/results logs -o results.tar`,
+		Example: `  latere environments export dev -o workspace.tar
+  latere environments export dev src package.json -o app.tar
+  latere environments export dev --src-dir /workspace/results logs -o results.tar`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if out == "" {
@@ -83,7 +83,7 @@ names a file, which is written only once the whole archive has arrived.`,
 	}
 	f := cmd.Flags()
 	f.StringVar(&apiURL, "api-url", "", cellaURLUsage)
-	f.StringVar(&srcDir, "src-dir", "", "directory inside the cella that relative paths start from; default /workspace")
+	f.StringVar(&srcDir, "src-dir", "", "directory inside the workload that relative paths start from; default /workspace")
 	f.StringVarP(&out, "output", "o", "-", "output tar path (- for stdout)")
 	return cmd
 }
@@ -140,16 +140,16 @@ func newCeImportCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "import <name|id>",
-		Short: "Upload files into the cella workspace (reads stdin or --input).",
-		Long: `Import files into a Cella workspace.
+		Short: "Upload files into the workload's workspace (reads stdin or --input).",
+		Long: `Import files into a workload's workspace.
 
 Tar archives are extracted. Gzip, bzip2, and XZ compression are decoded
 before upload, including when reading tar from stdin. Zip archives are
 converted to tar. A regular file is copied as a single file into the
 destination directory.`,
-		Example: `  latere cella import dev --input workspace.tar
-  latere cella import dev --input app.zip --dest /workspace/app
-  tar -cf - src package.json | latere cella import dev --dest /workspace/app`,
+		Example: `  latere environments import dev --input workspace.tar
+  latere environments import dev --input app.zip --dest /workspace/app
+  tar -cf - src package.json | latere environments import dev --dest /workspace/app`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if input == "" {
@@ -218,7 +218,7 @@ destination directory.`,
 	}
 	f := cmd.Flags()
 	f.StringVar(&apiURL, "api-url", "", cellaURLUsage)
-	f.StringVar(&dest, "dest", "", "destination dir in the cella; default /workspace")
+	f.StringVar(&dest, "dest", "", "destination dir in the workload; default /workspace")
 	f.StringVarP(&input, "input", "i", "-", "input path; tar archives are extracted, regular files are copied")
 	f.DurationVar(&timeout, "timeout", 30*time.Minute, "time allowed for the upload and extraction (0 disables)")
 	return cmd
@@ -432,8 +432,8 @@ func newCeCatCmd() *cobra.Command {
 	var apiURL string
 	cmd := &cobra.Command{
 		Use:     "cat <name|id> <path>",
-		Short:   "Stream a file from the cella to stdout.",
-		Example: `  latere cella cat dev /workspace/out.log`,
+		Short:   "Stream a file from the workload to stdout.",
+		Example: `  latere environments cat dev /workspace/out.log`,
 		Args:    cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := cellaClient(apiURL)
@@ -463,11 +463,11 @@ func newCeWriteCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "write <name|id> <path>",
-		Short: "Write a file into the cella (reads stdin or --input).",
-		Long: `Write one file into the cella from stdin or --input, creating any
+		Short: "Write a file into the workload (reads stdin or --input).",
+		Long: `Write one file into the workload from stdin or --input, creating any
 missing parent directories.`,
-		Example: `  echo hi | latere cella write dev /workspace/note.txt
-  latere cella write dev /workspace/app.tar -f app.tar`,
+		Example: `  echo hi | latere environments write dev /workspace/note.txt
+  latere environments write dev /workspace/app.tar -f app.tar`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			src := cmd.InOrStdin()
@@ -497,9 +497,9 @@ func newCeLsCmd() *cobra.Command {
 	var apiURL string
 	cmd := &cobra.Command{
 		Use:     "ls <name|id> <path>",
-		Short:   "List a directory inside the cella.",
+		Short:   "List a directory inside the workload.",
 		Long:    "List a directory's entries, one per line: the mode in octal, the size in bytes, and the name, with a trailing slash on a directory.",
-		Example: `  latere cella ls dev /workspace`,
+		Example: `  latere environments ls dev /workspace`,
 		Args:    cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := cellaClient(apiURL)
@@ -609,9 +609,9 @@ func newCeUploadCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "upload <name|id> <src...> --dest D",
-		Short: "Stream files/folders into the cella (folder-preserving).",
-		Example: `  latere cella upload dev ./dist --dest /workspace
-  latere cella upload dev a.txt b.txt --dest /workspace/tmp`,
+		Short: "Stream files/folders into the workload (folder-preserving).",
+		Example: `  latere environments upload dev ./dist --dest /workspace
+  latere environments upload dev a.txt b.txt --dest /workspace/tmp`,
 		Args: cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if timeout < 0 {
@@ -646,7 +646,7 @@ func newCeUploadCmd() *cobra.Command {
 	}
 	f := cmd.Flags()
 	f.StringVar(&apiURL, "api-url", "", cellaURLUsage)
-	f.StringVar(&dest, "dest", "", "destination directory inside the cella; default /workspace")
+	f.StringVar(&dest, "dest", "", "destination directory inside the workload; default /workspace")
 	f.DurationVar(&timeout, "timeout", 5*time.Minute, "upload timeout (0 disables)")
 	return cmd
 }
@@ -695,8 +695,8 @@ func newCeMkdirCmd() *cobra.Command {
 	var apiURL string
 	cmd := &cobra.Command{
 		Use:     "mkdir <name|id> <path>",
-		Short:   "Create a directory, and its missing parents, inside the cella.",
-		Example: `  latere cella mkdir dev /workspace/build`,
+		Short:   "Create a directory, and its missing parents, inside the workload.",
+		Example: `  latere environments mkdir dev /workspace/build`,
 		Args:    cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := cellaClient(apiURL)
@@ -715,8 +715,8 @@ func newCeRmCmd() *cobra.Command {
 	var apiURL string
 	cmd := &cobra.Command{
 		Use:     "rm <name|id> <path>",
-		Short:   "Delete a file or directory (recursive) inside the cella.",
-		Example: `  latere cella rm dev /workspace/old`,
+		Short:   "Delete a file or directory (recursive) inside the workload.",
+		Example: `  latere environments rm dev /workspace/old`,
 		Args:    cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := cellaClient(apiURL)
@@ -735,8 +735,8 @@ func newCeMvCmd() *cobra.Command {
 	var apiURL string
 	cmd := &cobra.Command{
 		Use:     "mv <name|id> <from> <to>",
-		Short:   "Rename or move a file or directory inside the cella.",
-		Example: `  latere cella mv dev /workspace/a.txt /workspace/b.txt`,
+		Short:   "Rename or move a file or directory inside the workload.",
+		Example: `  latere environments mv dev /workspace/a.txt /workspace/b.txt`,
 		Args:    cobra.ExactArgs(3),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := cellaClient(apiURL)

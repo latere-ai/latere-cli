@@ -91,7 +91,7 @@ func TestProductCommandsNeverRefreshCellaCredentialsE2E(t *testing.T) {
 					}
 				}))
 				defer server.Close()
-				env := append(os.Environ(), "LATERE_CELLA_TOKEN=", "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_URL="+server.URL, "LATERE_CELLA_URL="+server.URL+"/v1/environments", "LATERE_PLATFORM_URL="+server.URL, "LATERE_PLATFORM_TOKEN=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
+				env := append(os.Environ(), "LATERE_ENVIRONMENTS_TOKEN=", "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_URL="+server.URL, "LATERE_ENVIRONMENTS_URL="+server.URL+"/v1/environments", "LATERE_PLATFORM_URL="+server.URL, "LATERE_PLATFORM_TOKEN=", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
 				if source == "override" {
 					env = append(env, "LATERE_PLATFORM_TOKEN="+wantBearer)
 				}

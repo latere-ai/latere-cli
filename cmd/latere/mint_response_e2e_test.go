@@ -67,8 +67,8 @@ func TestMintPresentsOnlyTheMintedTokenE2E(t *testing.T) {
 			defer server.Close()
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()
-			command := exec.CommandContext(ctx, binary, "cella", "list", "--api-url", server.URL+"/v1/environments")
-			command.Env = append(os.Environ(), "LATERE_CELLA_TOKEN=", "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_URL="+server.URL, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
+			command := exec.CommandContext(ctx, binary, "environments", "list", "--api-url", server.URL+"/v1/environments")
+			command.Env = append(os.Environ(), "LATERE_ENVIRONMENTS_TOKEN=", "LATERE_AUTH_TOKEN_FILE="+authPath, "AUTH_URL="+server.URL, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
 			out, err := command.CombinedOutput()
 			wantRequests := int32(1)
 			if invalid {

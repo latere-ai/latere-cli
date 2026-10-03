@@ -28,7 +28,7 @@ import (
 // under, which the CLI's base URL carries.
 const corePrefix = "/v1/environments"
 
-// coreToken is the bearer every command presents through LATERE_CELLA_TOKEN.
+// coreToken is the bearer every command presents through LATERE_ENVIRONMENTS_TOKEN.
 const coreToken = "core-token"
 
 // coreRequest is one request the fake core received.
@@ -86,8 +86,8 @@ type fakeCore struct {
 
 func newFakeCore(t *testing.T) *fakeCore {
 	t.Helper()
-	t.Setenv("LATERE_CELLA_TOKEN", coreToken)
-	t.Setenv("LATERE_CELLA_URL", "")
+	t.Setenv("LATERE_ENVIRONMENTS_TOKEN", coreToken)
+	t.Setenv("LATERE_ENVIRONMENTS_URL", "")
 	f := &fakeCore{t: t, heldPhase: cellaRunning, pageSize: 200}
 	f.srv = httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.srv.Close)
@@ -368,11 +368,11 @@ func (f *fakeCore) serveAttach(w http.ResponseWriter, r *http.Request) {
 	f.attach(conn)
 }
 
-// runCella runs one `latere cella` command against the fake core. The base
+// runCella runs one `latere environments` command against the fake core. The base
 // URL flag goes right after the subcommand's name, ahead of any argv after
 // --.
 func (f *fakeCore) runCella(stdin string, args ...string) (stdout, stderr string, err error) {
-	cmd := newCellaCmd()
+	cmd := newEnvironmentsCmd()
 	var out, errOut bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&errOut)

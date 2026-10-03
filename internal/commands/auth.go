@@ -306,8 +306,8 @@ auth.latere.ai alone; every product call presents a five-minute token
 minted from it for that one product.
 
 Use --personal or --org-id to preselect the token context from the
-terminal. Re-run login with a different context to switch which cellas
-the CLI can list and operate.
+terminal. Re-run login with a different context to switch which workloads,
+repositories and models the CLI reaches.
 
 After a successful login the CLI also wires git's credential helper for
 code.latere.ai (idempotent, scoped to that host only), so plain
@@ -383,7 +383,7 @@ context; --personal and --org-id apply only to browser login.`,
 	f.StringVar(&clientID, "client-id", "latere-cli", "OAuth client_id used for the device-code request")
 	f.StringVar(&scopes, "scopes", api.LoginScopes,
 		"space-delimited scope list")
-	f.BoolVar(&personal, "personal", false, "issue the CLI token for personal cellas")
+	f.BoolVar(&personal, "personal", false, "issue the CLI token for your personal context")
 	f.StringVar(&orgID, "org-id", "", "issue the CLI token for this organization id")
 	f.BoolVar(&noBrowser, "no-browser", false, "print the device URL without opening a browser")
 	f.BoolVar(&noGit, "no-git", false, "do not configure git's credential helper for code.latere.ai")

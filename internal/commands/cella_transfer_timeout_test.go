@@ -23,7 +23,7 @@ func (f transferTimeoutTransport) RoundTrip(r *http.Request) (*http.Response, er
 func TestCellaTransferTimeout(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(root, "absent-auth.json"))
-	t.Setenv("LATERE_CELLA_TOKEN", "synthetic-token")
+	t.Setenv("LATERE_ENVIRONMENTS_TOKEN", "synthetic-token")
 	source := filepath.Join(root, "file")
 	if err := os.WriteFile(source, []byte("content"), 0600); err != nil {
 		t.Fatal(err)

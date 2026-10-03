@@ -54,5 +54,5 @@ identity:
   waive:
     client-audiences:
       reason: >-
-        the command group `latere cella` shares its name with the audience cella, and the rule matches the word in every string literal, so each file with cella help text reads as a second minter; the audience is presented from internal/commands/cella.go alone. The waiver also pauses the rule for drive.latere.ai, origo and api.latere.ai until it ends; api.latere.ai is also the host of the Cella and models URLs, so every literal naming those URLs reads as a mint of it, while the audience is presented from internal/commands/repos.go alone. The Apps URL, https://api.latere.ai/v1/apps, is one more such literal; the Apps audience insula is presented from internal/commands/app.go alone
+        the manifest's apiVersion cella.latere.ai, which the `latere environments` help prints, shares its word with the audience cella, and the rule matches the word in every string literal, so each file with that help text reads as a second minter; the audience is presented from internal/commands/cella.go alone. The waiver also pauses the rule for drive.latere.ai, origo and api.latere.ai until it ends; api.latere.ai is also the host of the Environments and models URLs, so every literal naming those URLs reads as a mint of it, while the audience is presented from internal/commands/repos.go alone
       until: 2026-12-01

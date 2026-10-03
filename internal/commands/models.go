@@ -299,7 +299,7 @@ func newModelsInvokeCmd(modelsURL, authURL *string) *cobra.Command {
 
 This is a check, not an assistant: no tools, no session, no workspace.
 Use it to see that a model answers your key. For assistant work, run
-'latere topos --local -p "<prompt>"'.
+'latere agents run -p "<prompt>"'.
 
 Name the model as 'latere models' lists it.`,
 		Example: `  latere models invoke --model anthropic/claude-sonnet-4.6 "Say hi"

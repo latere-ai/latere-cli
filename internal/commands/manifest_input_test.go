@@ -17,7 +17,7 @@ import (
 
 func TestApplyConfiguredManifestInput(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("LATERE_CELLA_TOKEN", "synthetic-token")
+	t.Setenv("LATERE_ENVIRONMENTS_TOKEN", "synthetic-token")
 	t.Setenv("EVAL_ADMIN_TOKEN", "synthetic-token")
 	t.Setenv("LATERE_NO_UPDATE_CHECK", "1")
 	process, err := os.CreateTemp(dir, "process-stdin")
@@ -30,7 +30,7 @@ func TestApplyConfiguredManifestInput(t *testing.T) {
 	previous := os.Stdin
 	os.Stdin = process
 	t.Cleanup(func() { os.Stdin = previous; _ = process.Close() })
-	for _, product := range []string{"cella", "sandbox", "eval"} {
+	for _, product := range []string{"environments", "eval"} {
 		limit := 64 << 10
 		if product == "eval" {
 			limit = evalMaxManifestBytes

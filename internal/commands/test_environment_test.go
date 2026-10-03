@@ -39,12 +39,17 @@ func runIsolatedCommandTests(m *testing.M) int {
 	}
 	defer os.RemoveAll(root)
 	for key, value := range map[string]string{
-		"XDG_CONFIG_HOME":        root,
-		"LATERE_AUTH_TOKEN_FILE": filepath.Join(root, "latere", "auth-token.json"),
-		"LATERE_CELLA_TOKEN":     "",
-		"LATERE_CELLA_URL":       "",
-		"LATERE_APP_TOKEN":       "",
-		"LATERE_APP_URL":         "",
+		"XDG_CONFIG_HOME":           root,
+		"LATERE_AUTH_TOKEN_FILE":    filepath.Join(root, "latere", "auth-token.json"),
+		"LATERE_ENVIRONMENTS_TOKEN": "",
+		"LATERE_ENVIRONMENTS_URL":   "",
+		// The retired names are refused when set alone (spec 010), so one
+		// left in a developer's shell would fail unrelated tests.
+		"LATERE_CELLA_TOKEN":         "",
+		"LATERE_CELLA_URL":           "",
+		"LATERE_TOPOS_PROVIDER_FILE": "",
+		"LATERE_APP_TOKEN":           "",
+		"LATERE_APP_URL":             "",
 		// A handed model key or models URL would route every model test
 		// away from its stub.
 		"LATERE_MODEL_KEY":  "",

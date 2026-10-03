@@ -34,7 +34,7 @@ import (
 // See specs/002-review-local-subcommand.md and
 // specs/007-models-at-the-origin.md.
 
-// reviewOpts holds the resolved flags for one `latere review` invocation.
+// reviewOpts holds the resolved flags for one `latere agents review` invocation.
 type reviewOpts struct {
 	session   string
 	dir       string
@@ -58,8 +58,8 @@ recent Claude Code session.
 
 The proposer forks your real Claude Code session
 (claude --resume <id> --fork-session) so it argues with the full
-transcript, harness context, and working tree. The critics run through
-topos and call their model through the Latere API with your model key
+transcript, harness context, and working tree. The critics run in the
+Latere agent and call their model through the Latere API with your model key
 (see 'latere models key'), so critic cost is drawn from your current
 context with no provider key needed locally.
 
@@ -72,9 +72,9 @@ directory; pass --session <id> to pick a specific one.
 Review logs are written to a user-global state dir
 ($XDG_STATE_HOME/latere/reviews/<repo-key>/), not into the reviewed
 repo. Old sessions are pruned automatically; --state-dir overrides.`,
-		Example: `  latere review
-  latere review --forks 3 --max-rounds 6
-  latere review --session 4f3c2b1a --dir ~/code/myrepo`,
+		Example: `  latere agents review
+  latere agents review --forks 3 --max-rounds 6
+  latere agents review --session 4f3c2b1a --dir ~/code/myrepo`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runReview(cmd.Context(), cmd, &o)
@@ -85,7 +85,7 @@ repo. Old sessions are pruned automatically; --state-dir overrides.`,
 	cmd.Flags().StringVar(&o.stateDir, "state-dir", "", "where to write review logs (default: $XDG_STATE_HOME/latere/reviews/<repo-key>/)")
 	cmd.Flags().IntVar(&o.forks, "forks", 1, "number of independent critic forks")
 	cmd.Flags().IntVar(&o.maxRounds, "max-rounds", 4, "per-fork internal-round cap")
-	cmd.Flags().IntVar(&o.costCap, "cost-cap", 50000, "soft token budget (proposer tokens; topos critics report no usage yet)")
+	cmd.Flags().IntVar(&o.costCap, "cost-cap", 50000, "soft token budget (proposer tokens; the critics report no usage yet)")
 	cmd.Flags().StringVar(&o.model, "model", defaultCatalogModel, "critic model, as 'latere models' lists it")
 	cmd.Flags().DurationVar(&o.propTO, "proposer-timeout", 5*time.Minute, "per-round deadline for the proposer's claude call (large sessions may need more)")
 	cmd.Flags().StringVar(&o.modelsURL, "models-url", "", "override the models base URL (overrides LATERE_MODELS_URL)")

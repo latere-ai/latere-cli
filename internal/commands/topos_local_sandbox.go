@@ -21,7 +21,7 @@ import (
 
 // hostSandbox is a sandbox.Provider that runs directly on the local machine,
 // rooted at a working directory (your project), with no isolation. It is what
-// `latere topos --local` uses so the agent reads, edits, and runs commands
+// `latere agents run` uses so the agent reads, edits, and runs commands
 // against your real files — the same model as Claude Code. The control-plane
 // path uses Cella instead; this is deliberately unsandboxed local execution.
 type hostSandbox struct {

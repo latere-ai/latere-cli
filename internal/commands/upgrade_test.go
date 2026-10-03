@@ -18,7 +18,7 @@ func TestSkipUpdateCheck(t *testing.T) {
 	}{
 		{[]string{"upgrade"}, true},
 		{[]string{"completion", "zsh"}, true},
-		{[]string{"cella", "list"}, false},
+		{[]string{"environments", "list"}, false},
 		{[]string{"auth", "login"}, false},
 	}
 	for _, c := range cases {

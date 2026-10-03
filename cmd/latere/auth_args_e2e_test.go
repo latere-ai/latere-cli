@@ -57,7 +57,7 @@ func TestAuthExtraArgumentsHaveNoEffectsE2E(t *testing.T) {
 				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 				defer cancel()
 				command := exec.CommandContext(ctx, binary, args...)
-				command.Env = append(os.Environ(), "LATERE_CELLA_TOKEN=", "LATERE_AUTH_TOKEN_FILE="+authPath,
+				command.Env = append(os.Environ(), "LATERE_ENVIRONMENTS_TOKEN=", "LATERE_AUTH_TOKEN_FILE="+authPath,
 					"AUTH_URL="+server.URL, "XDG_CONFIG_HOME="+root,
 					"LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true")
 				var out, diagnostics bytes.Buffer

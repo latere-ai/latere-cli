@@ -343,7 +343,7 @@ func TestModelsHelpText(t *testing.T) {
 	}{
 		{[]string{"models", "--help"}, []string{"https://api.latere.ai/v1/models", "LATERE_MODELS_URL", "latere login", "model key"}},
 		{[]string{"models", "env", "--help"}, []string{"OPENAI_BASE_URL", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "--raw"}},
-		{[]string{"models", "invoke", "--help"}, []string{"not an assistant", "latere topos --local", "--model"}},
+		{[]string{"models", "invoke", "--help"}, []string{"not an assistant", "latere agents run", "--model"}},
 		{[]string{"models", "list", "--help"}, []string{"console's Models section"}},
 	}
 	for _, tc := range cases {

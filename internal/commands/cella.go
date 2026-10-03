@@ -33,9 +33,9 @@ import (
 // /v1 route onto.
 const defaultCellaURL = "https://api.latere.ai/v1/environments"
 
-// cellaURLUsage is the --api-url help every Cella command shares. The base
-// carries the path the routes sit under, so a bare host is not enough.
-const cellaURLUsage = "Cella API base URL, including its /v1/environments path (default " + defaultCellaURL + ", or $LATERE_CELLA_URL)"
+// cellaURLUsage is the --api-url help every workload command shares. The
+// base carries the path the routes sit under, so a bare host is not enough.
+const cellaURLUsage = "Environments API base URL, including its /v1/environments path (default " + defaultCellaURL + ", or $" + envEnvironmentsURL + ")"
 
 // cellaAudience is the aud claim of the bearer every Cella command presents:
 // the control plane's own audience, which auth mints actor tokens for on the
@@ -70,29 +70,29 @@ const (
 	cellaLost     = "Lost"
 )
 
-// newCellaCmd is the canonical `latere cella …` command tree. The API's
-// resource is the sandbox, and the product is Cella, so the CLI follows the
-// product. `latere sandbox …` is kept as an alias.
-func newCellaCmd() *cobra.Command {
+// newEnvironmentsCmd is the `latere environments …` command tree: the
+// workloads of the platform's Environments capability (spec 010). The
+// commands drive the Cella core at the platform origin (spec 008); a person
+// reads the capability's words, workload and Environments.
+func newEnvironmentsCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "cella",
-		Aliases: []string{"sandbox"},
-		Short:   "Manage cellas: create, list, run commands in, and move files in or out.",
-		Long: `Manage Cella sandboxes on the Latere platform.
+		Use:   "environments",
+		Short: "Manage workloads: create, list, run commands in, and move files in or out.",
+		Long: `Manage the workloads of Latere Environments.
 
-A cella is a sandbox with a persistent workspace at /workspace. It runs on
-the Cella control plane at https://api.latere.ai/v1/environments, reaches
-only the hosts its egress boundary admits, and runs an image from the
-platform's catalog: base, or gui for a desktop.
+A workload is an isolated Linux machine with a persistent workspace at
+/workspace. It runs at https://api.latere.ai/v1/environments, reaches only
+the hosts its egress boundary admits, and runs an image from the platform's
+catalog: base, or gui for a desktop.
 
-A create answers as soon as the sandbox is recorded, usually Pending.
-'latere cella apply --wait' holds the answer until it runs or fails.`,
-		Example: `  latere cella apply -f sandbox.yaml --wait
-  latere cella list
-  latere cella exec dev -- uname -a
-  latere cella shell dev
-  latere cella run --ephemeral --rm -- python -c 'print(1)'
-  latere cella export dev src -o workspace.tar`,
+A create answers as soon as the workload is recorded, usually Pending.
+'latere environments apply --wait' holds the answer until it runs or fails.`,
+		Example: `  latere environments apply -f workload.yaml --wait
+  latere environments list
+  latere environments exec dev -- uname -a
+  latere environments shell dev
+  latere environments run --ephemeral --rm -- python -c 'print(1)'
+  latere environments export dev src -o workspace.tar`,
 		// The group runs only for a word that names none of its commands,
 		// to say why a command of the retired API is gone. Its flags are
 		// not the group's to refuse first.
@@ -103,9 +103,9 @@ A create answers as soon as the sandbox is recorded, usually Pending.
 				return cmd.Help()
 			}
 			if reason, ok := removedCellaCommands[args[0]]; ok {
-				return fmt.Errorf("'latere cella %s' is no longer available: %s", args[0], reason)
+				return fmt.Errorf("'latere environments %s' is no longer available: %s", args[0], reason)
 			}
-			return fmt.Errorf("unknown command %q for %q; 'latere cella --help' lists the commands", args[0], cmd.CommandPath())
+			return fmt.Errorf("unknown command %q for %q; 'latere environments --help' lists the commands", args[0], cmd.CommandPath())
 		},
 	}
 	cmd.AddCommand(
@@ -136,27 +136,32 @@ A create answers as soon as the sandbox is recorded, usually Pending.
 // that the Cella core has no counterpart for, each with the reason a user
 // reads when they run it.
 var removedCellaCommands = map[string]string{
-	"policy":  "Cella has no named policy profiles; a sandbox's egress boundary is spec.network.egress in its manifest",
-	"rename":  "a sandbox's name is fixed when it is created",
-	"extend":  "Cella has no tiers or deadlines; set spec.lifecycle (autoStop, ttl, autoDelete) in the manifest you create the sandbox from",
-	"convert": "Cella has no tiers or deadlines; set spec.lifecycle (autoStop, ttl, autoDelete) in the manifest you create the sandbox from",
-	"resize":  "a sandbox's resources are fixed when it is created; apply a new sandbox with the resources it needs",
-	"wait":    "Cella runs a command to completion and keeps no command records; 'latere cella exec' runs one and waits for it",
+	"policy":  "Environments has no named policy profiles; a workload's egress boundary is spec.network.egress in its manifest",
+	"rename":  "a workload's name is fixed when it is created",
+	"extend":  "Environments has no tiers or deadlines; set spec.lifecycle (autoStop, ttl, autoDelete) in the manifest you create the workload from",
+	"convert": "Environments has no tiers or deadlines; set spec.lifecycle (autoStop, ttl, autoDelete) in the manifest you create the workload from",
+	"resize":  "a workload's resources are fixed when it is created; apply a new workload with the resources it needs",
+	"wait":    "Environments runs a command to completion and keeps no command records; 'latere environments exec' runs one and waits for it",
 }
 
 // ---- the client ----
 
 // resolveCellaURL returns the control plane's address: the flag, then
-// $LATERE_CELLA_URL, then the hosted control plane.
-func resolveCellaURL(flagURL string) string {
+// $LATERE_ENVIRONMENTS_URL, then the hosted control plane. The retired
+// variable set alone is refused rather than ignored.
+func resolveCellaURL(flagURL string) (string, error) {
 	u := flagURL
 	if u == "" {
-		u = os.Getenv("LATERE_CELLA_URL")
+		v, err := capabilityEnv(envEnvironmentsURL)
+		if err != nil {
+			return "", err
+		}
+		u = v
 	}
 	if u == "" {
 		u = defaultCellaURL
 	}
-	return strings.TrimRight(u, "/")
+	return strings.TrimRight(u, "/"), nil
 }
 
 // cellaHTTPClient carries every Cella request, the attach socket included.
@@ -174,12 +179,19 @@ func cellaHTTPClient() *http.Client {
 // and the token is re-minted when the held one is within cellaTokenMargin of
 // its expiry, which a transfer, an attach or a log follow outlives.
 //
-// LATERE_CELLA_TOKEN presents a bearer as given, for a development
-// deployment or a test, the same escape every other product has.
+// LATERE_ENVIRONMENTS_TOKEN presents a bearer as given, for a development
+// deployment or a test, the same escape every other capability has.
 func cellaClient(apiURL string) (*cellaclient.Client, error) {
-	base := resolveCellaURL(apiURL)
+	base, err := resolveCellaURL(apiURL)
+	if err != nil {
+		return nil, err
+	}
+	given, err := capabilityEnv(envEnvironmentsToken)
+	if err != nil {
+		return nil, err
+	}
 	var token cellaclient.TokenSource
-	if t := strings.TrimSpace(os.Getenv("LATERE_CELLA_TOKEN")); t != "" {
+	if t := strings.TrimSpace(given); t != "" {
 		token = cellaclient.StaticToken(t)
 	} else {
 		token = mintedCellaToken(api.ResolveAuthURL(base, ""))
@@ -208,7 +220,7 @@ func mintedCellaToken(authBase string) cellaclient.TokenSource {
 		}
 		token, exp, err := api.ActorToken(ctx, authBase, cellaAudience)
 		if err != nil {
-			return "", fmt.Errorf("cannot authenticate to Cella: %w", err)
+			return "", fmt.Errorf("cannot authenticate to Environments: %w", err)
 		}
 		if exp.IsZero() {
 			exp = time.Now().Add(cellaUnknownExpiry + cellaTokenMargin)
@@ -230,7 +242,7 @@ func resolveCellaPath(p string) string {
 
 // ---- apply / list / get / start / stop / delete ----
 
-// newCeApplyCmd registers `latere cella apply -f <file>`. The manifest is
+// newCeApplyCmd registers `latere environments apply -f <file>`. The manifest is
 // sent as written: the control plane decodes JSON and YAML alike, strictly,
 // and is the authoritative validator. A manifest that names its sandbox is
 // applied under that name, so applying it again updates the sandbox rather
@@ -243,9 +255,9 @@ func newCeApplyCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "apply",
-		Short: "Create or update a cella from a Sandbox manifest.",
-		Long: `Create a cella from a declarative Sandbox manifest, or update the one
-it names.
+		Short: "Create or update a workload from its manifest.",
+		Long: `Create a workload from a declarative manifest, or update the one it
+names. The manifest's kind is Sandbox, the API's name for a workload.
 
 A manifest in YAML or JSON:
 
@@ -262,18 +274,18 @@ A manifest in YAML or JSON:
     lifecycle:
       autoStop: 15m                 # Stop after this much idle time.
 
-The answer is the sandbox as soon as it is recorded, usually Pending.
---wait holds it until the sandbox runs or fails, ten minutes unless
---wait=DURATION says otherwise, and a sandbox that fails exits 1 with
+The answer is the workload as soon as it is recorded, usually Pending.
+--wait holds it until the workload runs or fails, ten minutes unless
+--wait=DURATION says otherwise, and a workload that fails exits 1 with
 its reason.
 
-Field reference: https://platform.latere.ai/docs/cella/manifest`,
-		Example: `  latere cella apply -f sandbox.yaml
-  latere cella apply -f sandbox.yaml --wait
-  cat sandbox.json | latere cella apply -f - --wait=2m`,
+Field reference: https://platform.latere.ai/docs/environments/manifest`,
+		Example: `  latere environments apply -f workload.yaml
+  latere environments apply -f workload.yaml --wait
+  cat workload.json | latere environments apply -f - --wait=2m`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if strings.TrimSpace(file) == "" {
-				return fmt.Errorf("-f is required (path to a Sandbox manifest, or - for stdin)")
+				return fmt.Errorf("-f is required (path to a workload manifest, or - for stdin)")
 			}
 			held := cmd.Flags().Changed("wait")
 			if held && (wait <= 0 || wait > time.Hour) {
@@ -311,18 +323,18 @@ Field reference: https://platform.latere.ai/docs/cella/manifest`,
 			switch {
 			case !starting(phase):
 			case held:
-				fprintf(cmd.ErrOrStderr(), "%s is still %s after the hold; 'latere cella get %s' reads its phase\n", name, phase, name)
+				fprintf(cmd.ErrOrStderr(), "%s is still %s after the hold; 'latere environments get %s' reads its phase\n", name, phase, name)
 			default:
-				fprintf(cmd.ErrOrStderr(), "%s is %s; 'latere cella get %s' reads its phase, and 'apply --wait' holds the create until it runs\n", name, phase, name)
+				fprintf(cmd.ErrOrStderr(), "%s is %s; 'latere environments get %s' reads its phase, and 'apply --wait' holds the create until it runs\n", name, phase, name)
 			}
 			return nil
 		},
 	}
 	f := cmd.Flags()
-	f.StringVarP(&file, "file", "f", "", "path to a Sandbox manifest in YAML or JSON, or - for stdin")
+	f.StringVarP(&file, "file", "f", "", "path to a workload manifest in YAML or JSON, or - for stdin")
 	_ = cmd.MarkFlagRequired("file")
 	f.StringVar(&apiURL, "api-url", "", cellaURLUsage)
-	f.DurationVarP(&wait, "wait", "w", 0, "hold the create until the sandbox runs or fails, at most this long (default 10m)")
+	f.DurationVarP(&wait, "wait", "w", 0, "hold the create until the workload runs or fails, at most this long (default 10m)")
 	f.Lookup("wait").NoOptDefVal = cellaCreateHold.String()
 	return cmd
 }
@@ -363,7 +375,7 @@ func starting(phase string) bool {
 func startFailure(sb v1.Sandbox) error {
 	switch sb.Status.Phase {
 	case cellaFailed, cellaLost:
-		return fmt.Errorf("cella %s did not start: phase %s, reason %s", sb.Metadata.Name, sb.Status.Phase, defaultStr(sb.Status.Reason, "not given"))
+		return fmt.Errorf("workload %s did not start: phase %s, reason %s", sb.Metadata.Name, sb.Status.Phase, defaultStr(sb.Status.Reason, "not given"))
 	}
 	return nil
 }
@@ -406,10 +418,10 @@ func newCeListCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List your cellas.",
-		Long:  "List the cellas the current login may read, with each one's phase.",
-		Example: `  latere cella list
-  latere cella list --json`,
+		Short: "List your workloads.",
+		Long:  "List the workloads the current login may read, with each one's phase.",
+		Example: `  latere environments list
+  latere environments list --json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := cellaClient(apiURL)
 			if err != nil {
@@ -437,10 +449,10 @@ func newCeGetCmd() *cobra.Command {
 	var apiURL string
 	cmd := &cobra.Command{
 		Use:   "get <name|id>",
-		Short: "Get a cella by name or id.",
-		Long:  "Fetch one cella by name or id and print it as the control plane answered, in JSON.",
-		Example: `  latere cella get dev
-  latere cella get sbx_01k5x6j9c2`,
+		Short: "Get a workload by name or id.",
+		Long:  "Fetch one workload by name or id and print it as the API answered, in JSON.",
+		Example: `  latere environments get dev
+  latere environments get sbx_01k5x6j9c2`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := cellaClient(apiURL)
@@ -469,18 +481,18 @@ func printRawJSON(out io.Writer, raw []byte) error {
 	return err
 }
 
-func newCeStartCmd() *cobra.Command { return simpleAction("start", "Start a stopped cella.") }
-func newCeStopCmd() *cobra.Command  { return simpleAction("stop", "Stop a running cella.") }
+func newCeStartCmd() *cobra.Command { return simpleAction("start", "Start a stopped workload.") }
+func newCeStopCmd() *cobra.Command  { return simpleAction("stop", "Stop a running workload.") }
 
 func simpleAction(verb, short string) *cobra.Command {
 	var apiURL string
 	cmd := &cobra.Command{
 		Use:   verb + " <name|id>",
 		Short: short,
-		Long: fmt.Sprintf("%s a cella by name or id. The workspace is kept across a stop and a start.",
+		Long: fmt.Sprintf("%s a workload by name or id. The workspace is kept across a stop and a start.",
 			strings.ToUpper(verb[:1])+verb[1:]),
-		Example: fmt.Sprintf(`  latere cella %s dev
-  latere cella %s sbx_01k5x6j9c2`, verb, verb),
+		Example: fmt.Sprintf(`  latere environments %s dev
+  latere environments %s sbx_01k5x6j9c2`, verb, verb),
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := cellaClient(apiURL)
@@ -506,12 +518,12 @@ func newCeDeleteCmd() *cobra.Command {
 	var apiURL string
 	cmd := &cobra.Command{
 		Use:   "delete <name|id>",
-		Short: "Delete a cella (workspace contents are lost).",
-		Long: `Delete a cella and its workspace.
+		Short: "Delete a workload (workspace contents are lost).",
+		Long: `Delete a workload and its workspace.
 
 This removes the workspace. Export files first if you need to keep them.`,
-		Example: `  latere cella export dev -o dev.tar
-  latere cella delete dev`,
+		Example: `  latere environments export dev -o dev.tar
+  latere environments delete dev`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := cellaClient(apiURL)
@@ -531,7 +543,7 @@ This removes the workspace. Export files first if you need to keep them.`,
 
 // ---- exec / run / logs ----
 
-// newCeExecCmd registers `latere cella exec`: one command in an existing
+// newCeExecCmd registers `latere environments exec`: one command in an existing
 // cella, run to completion on the control plane's synchronous route.
 func newCeExecCmd() *cobra.Command {
 	var (
@@ -542,16 +554,16 @@ func newCeExecCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "exec <name|id> -- <cmd>...",
-		Short: "Run a command in a cella and wait for it.",
-		Long: `Run a command in an existing cella and wait for it to end.
+		Short: "Run a command in a workload and wait for it.",
+		Long: `Run a command in an existing workload and wait for it to end.
 
 The command's standard output and standard error are written to yours
 when it ends, each cut at one mebibyte, and the CLI exits with the
 command's exit code. Its standard input is empty. For an interactive
-program, open a terminal with 'latere cella shell'.`,
-		Example: `  latere cella exec dev -- uname -a
-  latere cella exec dev --cwd app --env DEBUG=1 -- python -m pytest
-  latere cella exec dev --timeout 30m -- make build`,
+program, open a terminal with 'latere environments shell'.`,
+		Example: `  latere environments exec dev -- uname -a
+  latere environments exec dev --cwd app --env DEBUG=1 -- python -m pytest
+  latere environments exec dev --timeout 30m -- make build`,
 		Args: cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			req, err := cellaExecRequest(args[1:], envFlag, cwd, timeout)
@@ -607,12 +619,12 @@ func writeExecResult(stdout, stderr io.Writer, res cellaclient.ExecResult) error
 		return fmt.Errorf("write command stderr: %w", err)
 	}
 	if res.Truncated {
-		fprintln(stderr, "cella: the output was cut at Cella's one mebibyte cap")
+		fprintln(stderr, "environments: the output was cut at the one mebibyte cap")
 	}
 	return remoteExit(res.ExitCode)
 }
 
-// newCeRunCmd registers `latere cella run --ephemeral --rm`: a disposable
+// newCeRunCmd registers `latere environments run --ephemeral --rm`: a disposable
 // cella created for one command and deleted after it.
 func newCeRunCmd() *cobra.Command {
 	var (
@@ -630,24 +642,24 @@ func newCeRunCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "run --ephemeral --rm -- <argv>...",
-		Short: "Run one command in a disposable cella that is deleted after it.",
-		Long: `Run one command in a disposable cella.
+		Short: "Run one command in a disposable workload that is deleted after it.",
+		Long: `Run one command in a disposable workload.
 
-Cella creates a sandbox for this command, waits for it to run, runs the
-command, and deletes the sandbox when the command ends, fails, or is
+The CLI creates a workload for this command, waits for it to run, runs the
+command, and deletes the workload when the command ends, fails, or is
 interrupted. Both --ephemeral and --rm are required, so the deletion is
-never implied. To run a command in a cella you keep, use
-'latere cella exec'.
+never implied. To run a command in a workload you keep, use
+'latere environments exec'.
 
-The sandbox takes the platform's default egress boundary. It also stops
+The workload takes the platform's default egress boundary. It also stops
 after 15 minutes idle and is deleted two hours after its creation, so
 one the CLI could not delete does not linger.`,
-		Example: `  latere cella run --ephemeral --rm -- python -c 'print("hello")'
-  latere cella run --ephemeral --rm --cpu 2 --memory 4Gi -- make test
-  latere cella run --ephemeral --rm --json -- uname -a`,
+		Example: `  latere environments run --ephemeral --rm -- python -c 'print("hello")'
+  latere environments run --ephemeral --rm --cpu 2 --memory 4Gi -- make test
+  latere environments run --ephemeral --rm --json -- uname -a`,
 		Args: func(cmd *cobra.Command, args []string) error {
 			if !ephemeral || !rm {
-				return fmt.Errorf("run needs --ephemeral --rm; to run a command in an existing cella, use 'latere cella exec'")
+				return fmt.Errorf("run needs --ephemeral --rm; to run a command in an existing workload, use 'latere environments exec'")
 			}
 			if len(args) == 0 {
 				return fmt.Errorf("missing argv after --")
@@ -677,8 +689,8 @@ one the CLI could not delete does not linger.`,
 	f.StringVar(&apiURL, "api-url", "", cellaURLUsage)
 	f.StringArrayVar(&envFlag, "env", nil, "environment variable KEY=VALUE for the command; repeatable")
 	f.StringVar(&cwd, "cwd", "", "working directory; a relative path is under /workspace")
-	f.BoolVar(&ephemeral, "ephemeral", false, "create a disposable cella for this command; required")
-	f.BoolVar(&rm, "rm", false, "delete the cella after the command; required")
+	f.BoolVar(&ephemeral, "ephemeral", false, "create a disposable workload for this command; required")
+	f.BoolVar(&rm, "rm", false, "delete the workload after the command; required")
 	f.StringVar(&image, "image", "", "catalog image: base (the default) or gui")
 	f.IntVar(&diskGB, "disk", 0, "workspace size in GiB (default: the platform's)")
 	f.StringVar(&cpu, "cpu", "", "CPU limit as a Kubernetes quantity, e.g. 1.5 or 1500m")
@@ -774,7 +786,7 @@ func runOneShot(ctx context.Context, c *cellaclient.Client, spec v1.Sandbox, req
 		return fmt.Errorf("cella %s is still %s after %s", name, sb.Status.Phase, cellaCreateHold)
 	}
 	if !jsonOut {
-		fprintf(stderr, "created cella %s in %s\n", name, created.Round(time.Millisecond))
+		fprintf(stderr, "created workload %s in %s\n", name, created.Round(time.Millisecond))
 	}
 	res, _, err := c.Exec(ctx, name, req)
 	if err != nil {
@@ -804,10 +816,10 @@ func deleteOneShot(ctx context.Context, c *cellaclient.Client, name string, quie
 		if cellaclient.CodeOf(err) == "not_found" {
 			return nil
 		}
-		return fmt.Errorf("delete cella %s: %w; delete it with 'latere cella delete %s'", name, err, name)
+		return fmt.Errorf("delete workload %s: %w; delete it with 'latere environments delete %s'", name, err, name)
 	}
 	if !quiet {
-		fprintf(stderr, "deleted cella %s\n", name)
+		fprintf(stderr, "deleted workload %s\n", name)
 	}
 	return nil
 }
@@ -821,16 +833,16 @@ func newCeLogsCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "logs <name|id>",
-		Short: "Read or follow a cella's main process output.",
-		Long: `Read the output of a cella's main process, the command its manifest
+		Short: "Read or follow a workload's main process output.",
+		Long: `Read the output of a workload's main process, the command its manifest
 runs. --follow keeps writing it as it arrives.`,
-		Example: `  latere cella logs dev
-  latere cella logs dev --tail 100
-  latere cella logs dev --follow --since 2026-09-26T10:00:00Z`,
+		Example: `  latere environments logs dev
+  latere environments logs dev --tail 100
+  latere environments logs dev --follow --since 2026-09-26T10:00:00Z`,
 		Args: func(cmd *cobra.Command, args []string) error {
 			// A second argument was a command id on the retired API.
 			if len(args) == 2 {
-				return errors.New("logs reads a cella's main process output and takes no command id: Cella keeps no command records")
+				return errors.New("logs reads a workload's main process output and takes no command id: Environments keeps no command records")
 			}
 			return cobra.ExactArgs(1)(cmd, args)
 		},
@@ -889,15 +901,15 @@ func parseKV(items []string) (map[string]string, error) {
 
 func printSandboxList(out io.Writer, sbs []v1.Sandbox) error {
 	if len(sbs) == 0 {
-		if _, err := fmt.Fprintln(out, "No cellas are visible to this login."); err != nil {
-			return fmt.Errorf("write cella list: %w", err)
+		if _, err := fmt.Fprintln(out, "No workloads are visible to this login."); err != nil {
+			return fmt.Errorf("write workload list: %w", err)
 		}
 		return nil
 	}
 	for i, s := range sbs {
 		if i > 0 {
 			if _, err := fmt.Fprintln(out); err != nil {
-				return fmt.Errorf("write cella list separator: %w", err)
+				return fmt.Errorf("write workload list separator: %w", err)
 			}
 		}
 		if err := printSandbox(out, s); err != nil {
@@ -914,7 +926,7 @@ func printSandbox(out io.Writer, s v1.Sandbox) error {
 	field := func(label, value string) {
 		record.WriteString(formatWrappedField(label, value))
 	}
-	field("cella", defaultStr(s.Metadata.Name, "-"))
+	field("workload", defaultStr(s.Metadata.Name, "-"))
 	field("id", s.Status.ID)
 	field("phase", s.Status.Phase)
 	field("reason", s.Status.Reason)
@@ -930,7 +942,7 @@ func printSandbox(out io.Writer, s v1.Sandbox) error {
 		field("warning", w)
 	}
 	if _, err := fmt.Fprint(out, record.String()); err != nil {
-		return fmt.Errorf("write cella details for %q: %w", s.Status.ID, err)
+		return fmt.Errorf("write workload details for %q: %w", s.Status.ID, err)
 	}
 	return nil
 }

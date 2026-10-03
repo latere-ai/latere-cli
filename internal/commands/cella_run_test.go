@@ -19,7 +19,7 @@ func TestCellaExecRunsToCompletion(t *testing.T) {
 	if code := exitCode(err); code != 7 {
 		t.Fatalf("exit code = %d (%v), want the command's 7", code, err)
 	}
-	if out != "out\n" || !strings.HasPrefix(errOut, "err\n") || !strings.Contains(errOut, "cut at Cella's one mebibyte cap") {
+	if out != "out\n" || !strings.HasPrefix(errOut, "err\n") || !strings.Contains(errOut, "cut at the one mebibyte cap") {
 		t.Errorf("stdout=%q stderr=%q", out, errOut)
 	}
 	req := f.last("POST", "/sandboxes/dev/exec")
@@ -104,7 +104,7 @@ func TestCellaRunEphemeral(t *testing.T) {
 		manifest.Spec.Lifecycle.AutoStop != "15m" || manifest.Spec.Lifecycle.TTL != "2h" {
 		t.Errorf("manifest = %s", reqs[0].Body)
 	}
-	if out != "hello\n" || !strings.Contains(errOut, "created cella "+name) || !strings.Contains(errOut, "deleted cella "+name) {
+	if out != "hello\n" || !strings.Contains(errOut, "created workload "+name) || !strings.Contains(errOut, "deleted workload "+name) {
 		t.Errorf("stdout=%q stderr=%q", out, errOut)
 	}
 }
@@ -189,15 +189,15 @@ func TestCellaRunEphemeralReportsFailedDelete(t *testing.T) {
 		if code := exitCode(err); code != 3 {
 			t.Fatalf("exit code = %d (%v), want 3", code, err)
 		}
-		if !strings.Contains(errOut, "delete it with 'latere cella delete run-") {
-			t.Errorf("stderr = %q, want the leftover cella named", errOut)
+		if !strings.Contains(errOut, "delete it with 'latere environments delete run-") {
+			t.Errorf("stderr = %q, want the leftover workload named", errOut)
 		}
 	})
 	t.Run("command succeeded", func(t *testing.T) {
 		f := newFakeCore(t)
 		f.deleteStatus = 500
 		_, _, err := f.runCella("", "run", "--ephemeral", "--rm", "--", "true")
-		if err == nil || !strings.Contains(err.Error(), "delete it with 'latere cella delete run-") || exitCode(err) != 1 {
+		if err == nil || !strings.Contains(err.Error(), "delete it with 'latere environments delete run-") || exitCode(err) != 1 {
 			t.Fatalf("err = %v, want the failed delete as the result", err)
 		}
 	})
@@ -209,7 +209,7 @@ func TestCellaRunRequiresEphemeralAndRm(t *testing.T) {
 		{"run", "dev", "--", "true"},
 		{"run", "--ephemeral", "--", "true"},
 	} {
-		if _, _, err := f.runCella("", args...); err == nil || !strings.Contains(err.Error(), "'latere cella exec'") {
+		if _, _, err := f.runCella("", args...); err == nil || !strings.Contains(err.Error(), "'latere environments exec'") {
 			t.Errorf("%v: err = %v, want the pointer to exec", args, err)
 		}
 	}

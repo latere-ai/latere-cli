@@ -17,7 +17,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// The auth picker shown by `latere topos --local` when no model credential is
+// The auth picker shown by `latere agents run` when no model credential is
 // configured: choose a provider and sign in / enter a key, like opencode's auth
 // flow. Only providers whose SDK adapter actually works are offered (Anthropic,
 // Ollama); OpenAI/Gemini are pending their adapters.
@@ -117,7 +117,7 @@ var (
 
 func (m authModel) View() string {
 	var b strings.Builder
-	b.WriteString(authTitle.Render("Sign in to Topos") + "  " + authDim.Render("choose a model provider") + "\n\n")
+	b.WriteString(authTitle.Render("Latere agent") + "  " + authDim.Render("choose a model provider") + "\n\n")
 	if m.entering {
 		b.WriteString(m.input.View() + "\n\n")
 		b.WriteString(authDim.Render("[enter] save   [esc] back") + "\n")
