@@ -5,21 +5,21 @@
 [![go](https://img.shields.io/badge/go-1.27-00ADD8?logo=go&logoColor=white)](go.mod)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-`latere` is the command-line interface for the Latere product family. You
-sign in once, and one binary reaches every product with your identity:
-[Cella](docs/cella.md) sandboxes, [apps](docs/app.md) you deploy with a git
-push, models through the Latere API, a
-[Topos](https://platform.latere.ai/console/agents) coding agent on your
-machine, git on Latere Code (`code.latere.ai`), and adversarial review of a
-Claude Code session. There is no API key to allocate and no
+`latere` is the command line of the Latere platform. You sign in once, and
+one binary reaches every capability with your identity: workloads in
+[Environments](docs/environments.md), [apps](docs/app.md) you deploy with a
+git push, [models](docs/models.md) through the Latere API, the Latere
+[agent](docs/agents.md) on your machine and an adversarial review of a
+Claude Code session, and [repositories](docs/repos.md) on Latere Code
+(`code.latere.ai`). There is no API key to allocate and no
 second credential to manage.
 
 ```sh
 latere login
-latere cella apply -f sandbox.yaml
+latere environments apply -f workload.yaml
 latere app create hello && git push latere main && latere app logs -f
 latere models invoke --model openai/gpt-4.1-mini "Say hi"
-latere topos --local
+latere agents run
 git clone https://code.latere.ai/<owner>/<repo>.git
 ```
 
@@ -141,16 +141,15 @@ latere login --token "$LATERE_TOKEN"
 git clone https://code.latere.ai/<owner>/<repo>.git
 ```
 
-## Products
+## Capabilities
 
 | Command | What it does | Guide |
 |---------|--------------|-------|
-| `latere cella` | Sandboxes on the Cella API: create from a manifest, run commands, open a shell, read logs, and move files in and out. | [docs/cella.md](docs/cella.md) |
+| `latere environments` | Workloads in Latere Environments: create one from a manifest, run commands, open a shell, read logs, and move files in and out. | [docs/environments.md](docs/environments.md) |
 | `latere app` | Apps on the platform: create one and add its git remote, list your apps, show one, list its deploys, follow a build to its outcome, and delete one. A `git push` deploys. | [docs/app.md](docs/app.md) |
 | `latere repos` | Git repositories on Latere Code: create one under your handle or your organization, list your context's repositories and the ones shared with you, and look one up by name. | [docs/repos.md](docs/repos.md) |
 | `latere models` | Call language models through the Latere API with a model key the CLI creates and keeps: list the models your key reaches, point a stock SDK at the API, and check a model with one call. | [docs/models.md](docs/models.md) |
-| `latere topos` | A coding agent on this machine: `--local` runs it in your directory against your files, interactively or on one prompt. The hosted Topos service is retired. | [docs/topos.md](docs/topos.md) |
-| `latere review` | Adversarial review of your latest Claude Code session: a proposer defends the diff, critics attack it through the Latere API, and unresolved attacks set the exit code. | [docs/review.md](docs/review.md) |
+| `latere agents` | Latere Agents on this machine: `run` runs the agent in your directory against your files, interactively or on one prompt; `provider` chooses its model; `review` runs an adversarial review of your latest Claude Code session, whose unresolved attacks set the exit code. | [docs/agents.md](docs/agents.md) |
 
 [`docs/configuration.md`](docs/configuration.md) lists every environment
 variable the CLI reads and every file it keeps.

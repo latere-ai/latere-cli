@@ -48,7 +48,7 @@ curl https://api.latere.ai/v1/models/openai/v1/chat/completions \
 
 ## Check a model with one call
 
-`invoke` sends one prompt through the OpenAI door and prints the reply: no tools, no session. Use it to check that a model answers your key; for assistant work, run an agent instead: `latere topos --local -p "<prompt>"` on this machine.
+`invoke` sends one prompt through the OpenAI door and prints the reply: no tools, no session. Use it to check that a model answers your key; for assistant work, run an agent instead: `latere agents run -p "<prompt>"` on this machine.
 
 ```sh
 latere models invoke --model anthropic/claude-sonnet-4.6 "Say hi"
@@ -72,7 +72,7 @@ A CI job can hand the CLI a key with `LATERE_MODEL_KEY`; the CLI then presents t
 
 ## Other commands that call models
 
-`latere review` runs its critics through the Latere API with your model key, and `latere topos --local` does the same once you are signed in. Both take a model named as `latere models` lists it; see [Review](review.md) and [Topos](topos.md).
+`latere agents review` runs its critics through the Latere API with your model key, and `latere agents run` does the same once you are signed in. Both take a model named as `latere models` lists it; see [Agents](agents.md).
 
 ## Configuration
 

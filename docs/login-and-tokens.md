@@ -74,9 +74,9 @@ best effort on Windows), including when an existing file had broader
 permissions. A concurrent reader always sees a complete file. A symlink at
 the token path is replaced, and its target is left unchanged.
 
-`latere topos login` keeps its own model provider choice for
-`latere topos --local`, which uses no Latere identity; see
-[Topos](topos.md#choosing-the-model). [configuration.md](configuration.md)
+`latere agents provider` keeps its own model provider choice for
+`latere agents run`, which uses no Latere identity; see
+[Agents](agents.md#choosing-the-model). [configuration.md](configuration.md)
 lists every file the CLI keeps.
 
 ## How each product gets its credential
@@ -86,8 +86,8 @@ model call, which presents the model key.
 
 | Command | What is sent | Where it comes from |
 |---|---|---|
-| `latere cella ...` | a token with audience `cella`, valid 5 minutes | minted per command at auth |
-| `latere models ...`, `latere review`, `latere topos --local` through the Latere API | the model key | created at auth on first use and kept, as above |
+| `latere environments ...` | a token with audience `cella`, valid 5 minutes | minted per command at auth |
+| `latere models ...`, `latere agents review`, `latere agents run` through the Latere API | the model key | created at auth on first use and kept, as above |
 | `latere repos ...` | a token with audience `api.latere.ai`, the platform's, valid 5 minutes | minted per command at auth |
 | `latere app ...` | a token with audience `insula`, the Apps API's, valid 5 minutes | minted per command at auth |
 | `git` against `code.latere.ai` | a token with audience `origo`, valid 5 minutes | minted per git operation at auth |
@@ -99,21 +99,22 @@ nothing else, valid at that one product and useless anywhere else. Auth
 mints only for the audiences this client is registered for, and a token
 lives at most five minutes. A command that outlives its token mints again
 before its next request. A streaming response, such as
-`latere cella logs --follow` or a file export, keeps the token it opened
+`latere environments logs --follow` or a file export, keeps the token it opened
 with, and a stream that outlives it ends with an error.
 
 Your login token is addressed to `auth.latere.ai` and opens nothing else.
 A product refuses it, which is the point: a token that names the issuer is
 a credential to your account, not to one product.
 
-### Cella
+### Environments
 
-`latere cella` mints a `cella` token for its first request and reuses it
-while it is valid. A command that outlives it, such as a long terminal
-session or a large import, mints again before its next request. A `401`
-from Cella is reported as it is, not retried.
+`latere environments` mints a token with the audience `cella`, the
+Environments API's own, for its first request and reuses it while it is
+valid. A command that outlives it, such as a long terminal session or a
+large import, mints again before its next request. A `401` from the
+Environments API is reported as it is, not retried.
 
-Set `LATERE_CELLA_TOKEN` to present a bearer of your own instead, for a
+Set `LATERE_ENVIRONMENTS_TOKEN` to present a bearer of your own instead, for a
 development deployment or a test. `LATERE_PLATFORM_TOKEN` does the same for
 the platform, `LATERE_APP_TOKEN` for the Apps API, and `LATERE_MODEL_KEY`
 hands the model commands a key.
@@ -215,10 +216,9 @@ The CLI keeps one rule, which is the platform's:
 > carries a token auth minted for the far product's audience.
 
 In CLI terms: you sign in once, and every product call mints its
-credential from that login. A `cella` token is only ever presented to
-Cella, an `origo` token only to Latere Code, an `api.latere.ai` token
-only to the platform, an `insula` token only to the Apps API, and the model
-key only to the model endpoints. Whichever
+credential from that login. A `cella` token is only ever presented to the
+Environments API, an `origo` token only to Latere Code, an `api.latere.ai` token
+only to the platform, an `insula` token only to the Apps API, and the model key only to the model endpoints. Whichever
 credential is on the wire, the person it acts for is you.
 
 ## Scripting
@@ -251,9 +251,10 @@ variable is in [configuration.md](configuration.md).
 
 ## Related reading
 
-- [Cella authentication](https://platform.latere.ai/docs/cella/authentication):
-  the audience Cella requires and what a token grants inside a sandbox.
-- [Lux keys](https://platform.latere.ai/docs/lux/keys): the model keys the
-  Latere API takes.
+- [Environments authentication](https://platform.latere.ai/docs/environments/authentication):
+  the audience the Environments API requires and what a token grants
+  inside a workload.
+- [Model keys](https://platform.latere.ai/docs/models/keys): the model keys
+  the Latere API takes.
 - [Latere Code access](https://platform.latere.ai/docs/repos/access): who
   may read and push a repository.

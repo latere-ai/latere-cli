@@ -51,11 +51,11 @@ environment variables**, so a green `go test ./...` does not mean they ran:
 | Path | What it holds |
 |------|---------------|
 | `cmd/latere` | `main`, and the end-to-end tests that run the built binary against test servers |
-| `internal/commands` | the command tree: one file per command group, and the terminal interfaces for Topos |
-| `internal/api` | the Cella client, the saved login, token refresh, and the actor-token mint every product credential comes from |
+| `internal/commands` | the command tree: one file per command group (the workload commands in `cella*.go`, the local agent in `topos*.go`, after the open cores they drive), and the agent's terminal interfaces |
+| `internal/api` | the Environments client, the saved login, token refresh, and the actor-token mint every product credential comes from |
 | `internal/config` | where the CLI keeps its files: `$XDG_CONFIG_HOME/latere`, or `~/.config/latere` |
 | `internal/modelkey` | the model key for the Latere API: creation at auth, and storage in the keychain or a file |
-| `internal/reviews` | where `latere review` writes its logs, and their retention |
+| `internal/reviews` | where `latere agents review` writes its logs, and their retention |
 | `internal/upgrade` | release discovery, verification, self-replacement, and the daily check |
 
 A product command never presents the login token. It asks auth for a token

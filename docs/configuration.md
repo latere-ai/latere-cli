@@ -19,15 +19,15 @@ setting, and each command's `--help` names the flags it takes.
 
 | Variable | Default | What it does |
 |----------|---------|--------------|
-| `LATERE_CELLA_URL` | `https://api.latere.ai/v1/environments` | The Cella API base URL, including its `/v1/environments` path. `--api-url` overrides it. |
-| `LATERE_CELLA_TOKEN` | none | A bearer to present to Cella instead of minting one. |
-| `LATERE_MODELS_URL` | `https://api.latere.ai/v1/models` | The model endpoints of the Latere API, which `latere models`, `latere review` and `latere topos --local` call. `--models-url` overrides it. |
+| `LATERE_ENVIRONMENTS_URL` | `https://api.latere.ai/v1/environments` | The Environments API base URL, including its `/v1/environments` path. `--api-url` overrides it. |
+| `LATERE_ENVIRONMENTS_TOKEN` | none | A bearer to present to the Environments API instead of minting one. |
+| `LATERE_MODELS_URL` | `https://api.latere.ai/v1/models` | The model endpoints of the Latere API, which `latere models`, `latere agents review` and `latere agents run` call. `--models-url` overrides it. |
 | `LATERE_MODEL_KEY` | none | A model key to present to the Latere API instead of the one the CLI keeps. With it, the model commands need no login. |
 | `LATERE_MODEL_KEYS_FILE` | `~/.config/latere/model-keys.json` | Where model keys are kept on a machine with no system keychain. |
-| `LATERE_TOPOS_PROVIDER_FILE` | `topos-provider.json` in your user configuration directory | The model provider `latere topos login` saved for `latere topos --local`. |
-| `LATERE_CLAUDE_TOKEN_FILE` | `claude.json` in your user configuration directory | The Claude sign-in `latere topos login` saved. |
-| `ANTHROPIC_API_KEY` | none | An Anthropic API key. When set, `latere topos --local` calls Anthropic directly with it, ahead of every other provider. |
-| `CLAUDE_CODE_OAUTH_TOKEN` | none | A Claude Code token `latere topos --local` falls back to when you have no saved provider and no `latere` login. |
+| `LATERE_AGENT_PROVIDER_FILE` | `agent-provider.json` in your user configuration directory | The model provider `latere agents provider` saved for `latere agents run`. |
+| `LATERE_CLAUDE_TOKEN_FILE` | `claude.json` in your user configuration directory | The Claude sign-in `latere agents provider` saved. |
+| `ANTHROPIC_API_KEY` | none | An Anthropic API key. When set, `latere agents run` calls Anthropic directly with it, ahead of every other provider. |
+| `CLAUDE_CODE_OAUTH_TOKEN` | none | A Claude Code token `latere agents run` falls back to when you have no saved provider and no `latere` login. |
 | `LATERE_APP_URL` | `https://api.latere.ai/v1/apps` | The Apps API base URL, including its `/v1/apps` path, which `latere app` calls. `--api-url` overrides it. |
 | `LATERE_APP_TOKEN` | none | A bearer to present to the Apps API instead of minting one. |
 | `LATERE_PLATFORM_URL` | `https://platform.latere.ai` | The platform `latere repos` creates, lists and reads repositories on. `--platform-url` overrides it. |
@@ -46,7 +46,7 @@ macOS.
 |----------|---------|--------------|
 | `LATERE_NO_UPDATE_CHECK` | unset | Any value turns off the daily release check and auto-upgrade. |
 | `CI` | unset | Any value turns them off as well, so a build never upgrades itself. |
-| `XDG_STATE_HOME` | `~/.local/state` | The base of the directory `latere review` writes its logs to, `$XDG_STATE_HOME/latere/reviews`. |
+| `XDG_STATE_HOME` | `~/.local/state` | The base of the directory `latere agents review` writes its logs to, `$XDG_STATE_HOME/latere/reviews`. |
 
 ## Files
 
@@ -63,9 +63,9 @@ In your user configuration directory, under `latere/`:
 
 | File | What it holds |
 |------|---------------|
-| `topos-provider.json` | The model provider `latere topos --local` uses, and an Anthropic API key when you chose one. |
-| `claude.json` | The Claude sign-in `latere topos login` saved. |
+| `agent-provider.json` | The model provider `latere agents run` uses, and an Anthropic API key when you chose one. A choice saved by an earlier version under another name is moved here the first time it is read. |
+| `claude.json` | The Claude sign-in `latere agents provider` saved. |
 
-`latere review` writes each run's logs to
+`latere agents review` writes each run's logs to
 `$XDG_STATE_HOME/latere/reviews/<repo-key>/` and prunes old ones; see
-[review.md](review.md#review-log-location).
+[agents.md](agents.md#review-log-location).
