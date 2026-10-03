@@ -7,15 +7,17 @@
 
 `latere` is the command-line interface for the Latere product family. You
 sign in once, and one binary reaches every product with your identity:
-[Cella](docs/cella.md) sandboxes, models through the Latere
-API, a [Topos](https://platform.latere.ai/console/agents) coding agent on
-your machine, git on Latere Code (`code.latere.ai`), and adversarial
-review of a Claude Code session. There is no API key to allocate and no
+[Cella](docs/cella.md) sandboxes, [apps](docs/app.md) you deploy with a git
+push, models through the Latere API, a
+[Topos](https://platform.latere.ai/console/agents) coding agent on your
+machine, git on Latere Code (`code.latere.ai`), and adversarial review of a
+Claude Code session. There is no API key to allocate and no
 second credential to manage.
 
 ```sh
 latere login
 latere cella apply -f sandbox.yaml
+latere app create hello && git push latere main && latere app logs -f
 latere models invoke --model openai/gpt-4.1-mini "Say hi"
 latere topos --local
 git clone https://code.latere.ai/<owner>/<repo>.git
@@ -119,6 +121,8 @@ git clone https://code.latere.ai/<owner>/<repo>.git
 
 `latere repos create <owner>/<name>` creates a repository to push to, and
 `latere repos list` shows the ones you can reach ([docs/repos.md](docs/repos.md)).
+`latere app create` creates an app, whose repository you push to deploy it
+([docs/app.md](docs/app.md)).
 
 The helper answers for that host only; every other host keeps the helpers
 you already have. Fetch and clone need read access, push needs write
@@ -142,6 +146,7 @@ git clone https://code.latere.ai/<owner>/<repo>.git
 | Command | What it does | Guide |
 |---------|--------------|-------|
 | `latere cella` | Sandboxes on the Cella API: create from a manifest, run commands, open a shell, read logs, and move files in and out. | [docs/cella.md](docs/cella.md) |
+| `latere app` | Apps on the platform: create one and add its git remote, list your apps, show one, list its deploys, follow a build to its outcome, and delete one. A `git push` deploys. | [docs/app.md](docs/app.md) |
 | `latere repos` | Git repositories on Latere Code: create one under your handle or your organization, list your context's repositories and the ones shared with you, and look one up by name. | [docs/repos.md](docs/repos.md) |
 | `latere models` | Call language models through the Latere API with a model key the CLI creates and keeps: list the models your key reaches, point a stock SDK at the API, and check a model with one call. | [docs/models.md](docs/models.md) |
 | `latere topos` | A coding agent on this machine: `--local` runs it in your directory against your files, interactively or on one prompt. The hosted Topos service is retired. | [docs/topos.md](docs/topos.md) |

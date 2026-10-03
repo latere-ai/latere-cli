@@ -89,6 +89,7 @@ model call, which presents the model key.
 | `latere cella ...` | a token with audience `cella`, valid 5 minutes | minted per command at auth |
 | `latere models ...`, `latere review`, `latere topos --local` through the Latere API | the model key | created at auth on first use and kept, as above |
 | `latere repos ...` | a token with audience `api.latere.ai`, the platform's, valid 5 minutes | minted per command at auth |
+| `latere app ...` | a token with audience `insula`, the Apps API's, valid 5 minutes | minted per command at auth |
 | `git` against `code.latere.ai` | a token with audience `origo`, valid 5 minutes | minted per git operation at auth |
 | `latere whoami` | the login token, only to refresh it when it is due | the claims it prints are read from the saved token, not asked of auth |
 
@@ -114,7 +115,8 @@ from Cella is reported as it is, not retried.
 
 Set `LATERE_CELLA_TOKEN` to present a bearer of your own instead, for a
 development deployment or a test. `LATERE_PLATFORM_TOKEN` does the same for
-the platform, and `LATERE_MODEL_KEY` hands the model commands a key.
+the platform, `LATERE_APP_TOKEN` for the Apps API, and `LATERE_MODEL_KEY`
+hands the model commands a key.
 
 ### Models
 
@@ -215,7 +217,8 @@ The CLI keeps one rule, which is the platform's:
 In CLI terms: you sign in once, and every product call mints its
 credential from that login. A `cella` token is only ever presented to
 Cella, an `origo` token only to Latere Code, an `api.latere.ai` token
-only to the platform, and the model key only to the model endpoints. Whichever
+only to the platform, an `insula` token only to the Apps API, and the model
+key only to the model endpoints. Whichever
 credential is on the wire, the person it acts for is you.
 
 ## Scripting

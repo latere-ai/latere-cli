@@ -10,6 +10,35 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Added
+
+- `latere app` creates apps on the platform and follows their builds.
+  Deploying is a git push to the app's repository, which `latere login`
+  already lets git sign in for.
+  - `latere app create [name] [--slug s]` creates a public app in your
+    current context, prints its address, its newest-preview address and its
+    push URL, and in a git repository adds the push URL as the remote
+    `latere` (`--remote <name>` names it, `--no-remote` skips it). A
+    repository whose `latere` remote names another app is refused before
+    anything is created. A refused create says why: a taken, held (with the
+    hold's end) or reserved slug, or the rule an invalid slug breaks.
+  - `latere app list`, `show [slug]` and `deploys [slug]` show your apps,
+    what production serves, the newest preview, the push URL, and the
+    deploys with their ref, status and preview address. Each takes `--json`.
+  - `latere app logs [slug] [deploy] [-f]` prints a build log, the newest
+    deploy's unless a deploy id or 8-character prefix is given. `-f` follows
+    it and exits 0 when the build succeeds and 1, with the failure's code and
+    message, when it fails or is canceled. Inside the app's repository it
+    follows the deploy of the commit `HEAD` names and waits up to a minute
+    for it to appear, so `git push latere main && latere app logs -f` is one
+    step. Color codes are kept on a terminal and removed otherwise.
+  - `latere app delete <slug>` asks for the slug typed back unless `--yes`;
+    the slug stays held for your account for seven days.
+  - A `[slug]` left out is read from the git remote `latere`. The commands
+    call `https://api.latere.ai/v1/apps` with a token minted for the
+    audience `insula`; `LATERE_APP_URL` or `--api-url` overrides the address,
+    and `LATERE_APP_TOKEN` presents a bearer as given.
+
 ## v0.15.0 - 2026-10-02
 
 ### Removed

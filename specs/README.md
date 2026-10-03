@@ -17,6 +17,7 @@ specs/
   007-models-at-the-origin.md        (implemented: latere models over the platform origin; latere lux retired)
   008-cella-at-the-origin.md         (implemented: latere cella on the Cella core under the platform origin)
   009-repos-command.md               (implemented: latere repos create, list and get on platformd's repository routes)
+  010-app-command.md                 (implemented: latere app create, list, show, deploys, logs and delete on the Apps API)
 ```
 
 ## Status
@@ -53,6 +54,10 @@ Every spec in the tree has shipped:
   repositories on platformd's repository routes at
   `https://platform.latere.ai`, with a token minted for the audience
   `api.latere.ai`.
+- `010-app-command.md`: `latere app` creates apps, adds their git remote,
+  lists and shows them, lists their deploys and follows a build to its
+  outcome on the Apps API at `https://api.latere.ai/v1/apps`, with a token
+  minted for the audience `insula`. Deploying is a git push.
 
 Two surfaces shipped without a dedicated design record: the token-lifecycle
 work, which [docs/login-and-tokens.md](../docs/login-and-tokens.md) documents,
@@ -62,7 +67,8 @@ That is a recorded decision, not an open action item.
 ## Conventions
 
 - The CLI talks to the auth service (login, org switch) with the saved login
-  token, and reaches every product backend (Cella, Origo, the platform)
+  token, and reaches every product backend (Cella, Origo, the platform,
+  Apps)
   with a token minted at auth for that one product. The model endpoints
   take the model key instead (006, 007). It does not host an HTTP server,
   does not own a cookie session, and has no frontend.
