@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.16.0 - 2026-10-03
+
 ### Added
 
 - `latere app` creates apps on the platform and follows their builds.
