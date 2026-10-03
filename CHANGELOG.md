@@ -23,6 +23,8 @@ committed: the commit log already holds that.
   | `latere review` | `latere agents review` |
   | `LATERE_CELLA_URL`, `LATERE_CELLA_TOKEN` | `LATERE_ENVIRONMENTS_URL`, `LATERE_ENVIRONMENTS_TOKEN` |
   | `LATERE_TOPOS_PROVIDER_FILE`, `topos-provider.json` | `LATERE_AGENT_PROVIDER_FILE`, `agent-provider.json` |
+  | `latere app <command>` | `latere apps <command>`, every command kept |
+  | `LATERE_APP_URL`, `LATERE_APP_TOKEN` | `LATERE_APPS_URL`, `LATERE_APPS_TOKEN` |
 
   For this release the old words exit 1 and name their replacement, whatever
   followed them, and the release after removes them. An old variable set

@@ -56,6 +56,8 @@ capability now, as the API path already does.
 | `LATERE_CELLA_URL` | `LATERE_ENVIRONMENTS_URL` |
 | `LATERE_CELLA_TOKEN` | `LATERE_ENVIRONMENTS_TOKEN` |
 | `LATERE_TOPOS_PROVIDER_FILE` | `LATERE_AGENT_PROVIDER_FILE` |
+| `latere app <verb> ...` | `latere apps <verb> ...`, every verb kept |
+| `LATERE_APP_URL`, `LATERE_APP_TOKEN` | `LATERE_APPS_URL`, `LATERE_APPS_TOKEN` |
 
 `latere agents run` is the agent on this machine, on the current directory's
 files, with a local model credential. It takes no `--local` flag: running
@@ -76,7 +78,7 @@ interface names the Latere agent where it said Topos.
 
 ### The retired words
 
-`cella`, `sandbox`, `topos` and `review` stay for one release as hidden
+`cella`, `sandbox`, `topos`, `review` and `app` stay for one release as hidden
 commands. Each accepts any arguments and flags, prints one sentence naming
 the replacement, and exits 1, so a script that still calls one fails on the
 first run with the new command in its error rather than doing nothing. The
@@ -133,3 +135,8 @@ Implemented as designed, with these additions:
   developer's shell would otherwise fail unrelated tests with the refusal.
 - Go file names (`cella*.go`, `topos*.go`) and identifiers keep the core's
   names; CONTRIBUTING says so.
+- `latere app`, which spec 010 added and v0.16.0 released while this was
+  built, broke the same rule with a singular word where every other group
+  is the capability's plural. It became `latere apps`, and `app`,
+  `LATERE_APP_URL` and `LATERE_APP_TOKEN` are refused like the other old
+  words. Spec 010 keeps the name it shipped under.
