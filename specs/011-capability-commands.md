@@ -1,6 +1,6 @@
 ---
 title: "Capability-named commands: `latere environments` and `latere agents`"
-status: drafted
+status: implemented
 depends_on:
   - specs/002-review-local-subcommand.md
   - specs/008-cella-at-the-origin.md
@@ -54,6 +54,8 @@ capability now, as the API path already does.
 | `latere topos login` | `latere agents provider` |
 | `latere review [flags]` | `latere agents review [flags]` |
 | `LATERE_CELLA_URL` | `LATERE_ENVIRONMENTS_URL` |
+| `LATERE_CELLA_TOKEN` | `LATERE_ENVIRONMENTS_TOKEN` |
+| `LATERE_TOPOS_PROVIDER_FILE` | `LATERE_AGENT_PROVIDER_FILE` |
 
 `latere agents run` is the agent on this machine, on the current directory's
 files, with a local model credential. It takes no `--local` flag: running
@@ -80,8 +82,8 @@ the replacement, and exits 1, so a script that still calls one fails on the
 first run with the new command in its error rather than doing nothing. The
 release after removes them, and an old word is then an unknown command.
 
-`LATERE_CELLA_URL` set while `LATERE_ENVIRONMENTS_URL` is not is refused with
-a message naming the new variable. Ignoring it would send a script that
+A retired variable set while its replacement is not is refused with a
+message naming the new variable. Ignoring it would send a script that
 points at a staging control plane to production without a word. When both
 are set the new one is used.
 
@@ -113,3 +115,21 @@ capabilities, and what its command becomes waits on that decision.
 | 4 | No help, example, error, README or docs page names `cella`, `topos` or `latere review` as a command, except the retired-word refusals | a scan test over shipped sources and docs |
 | 5 | A provider choice saved at the old path is read and moved to the new one | `internal/commands` tests |
 | 6 | The built binary runs the workload commands as `latere environments` against a fake control plane | `cmd/latere` e2e tests |
+
+## Outcome
+
+Implemented as designed, with these additions:
+
+- `LATERE_CELLA_TOKEN` and `LATERE_TOPOS_PROVIDER_FILE` are renamed as well,
+  under the same refusal rule; the design named only the URL variable.
+- `internal/commands/retired.go` holds every old word and variable, and a
+  scan test over shipped sources, the README, CONTRIBUTING and `docs/` fails
+  on any other mention, comments included.
+- The documentation pages became `docs/environments.md` and
+  `docs/agents.md`, the latter merging the local agent's page and the
+  review's. Links to platform pages name `/docs/environments/` and
+  `/docs/models/`, which the platform redirects the old paths to.
+- The test entry points clear the retired variables, since one left in a
+  developer's shell would otherwise fail unrelated tests with the refusal.
+- Go file names (`cella*.go`, `topos*.go`) and identifiers keep the core's
+  names; CONTRIBUTING says so.

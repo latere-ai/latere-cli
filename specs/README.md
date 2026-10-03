@@ -18,7 +18,7 @@ specs/
   008-cella-at-the-origin.md         (implemented: latere cella on the Cella core under the platform origin)
   009-repos-command.md               (implemented: latere repos create, list and get on platformd's repository routes)
   010-app-command.md                 (implemented: latere app create, list, show, deploys, logs and delete on the Apps API)
-  011-capability-commands.md         (drafted: latere environments and latere agents replace cella, topos and review)
+  011-capability-commands.md         (implemented: latere environments and latere agents replace cella, topos and review)
 ```
 
 ## Status
@@ -59,6 +59,11 @@ Every spec in the tree has shipped:
   lists and shows them, lists their deploys and follows a build to its
   outcome on the Apps API at `https://api.latere.ai/v1/apps`, with a token
   minted for the audience `insula`. Deploying is a git push.
+- `011-capability-commands.md`: the command groups are named after the
+  platform's capabilities. `latere environments` replaces `latere cella`,
+  and `latere agents run`, `provider` and `review` replace `latere topos
+  --local`, `latere topos login` and `latere review`; the old words are
+  refused with their replacement for one release.
 
 Two surfaces shipped without a dedicated design record: the token-lifecycle
 work, which [docs/login-and-tokens.md](../docs/login-and-tokens.md) documents,

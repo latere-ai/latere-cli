@@ -10,6 +10,29 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Changed
+
+- The commands are named after the platform's capabilities, as `latere models`
+  and `latere repos` already were:
+
+  | Before | Now |
+  |---|---|
+  | `latere cella <command>`, alias `latere sandbox` | `latere environments <command>`, every command kept |
+  | `latere topos --local` | `latere agents run` (no `--local`: it always runs on this machine) |
+  | `latere topos login` | `latere agents provider` |
+  | `latere review` | `latere agents review` |
+  | `LATERE_CELLA_URL`, `LATERE_CELLA_TOKEN` | `LATERE_ENVIRONMENTS_URL`, `LATERE_ENVIRONMENTS_TOKEN` |
+  | `LATERE_TOPOS_PROVIDER_FILE`, `topos-provider.json` | `LATERE_AGENT_PROVIDER_FILE`, `agent-provider.json` |
+
+  For this release the old words exit 1 and name their replacement, whatever
+  followed them, and the release after removes them. An old variable set
+  without its replacement is refused with the new name rather than ignored;
+  with both set, the new one is used. A provider choice saved in
+  `topos-provider.json` is moved to `agent-provider.json` the first time it is
+  read. Help and output say workload for what Environments runs: the list
+  labels a record `workload:` where it said `cella:`, and `--json` output is
+  unchanged. `latere eval` keeps its name for now.
+
 ## v0.16.0 - 2026-10-03
 
 ### Added
