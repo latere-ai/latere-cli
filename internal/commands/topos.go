@@ -8,7 +8,7 @@ import (
 )
 
 // newAgentsCmd is the `latere agents …` command group of the platform's
-// Agents capability (spec 010): the Latere agent run on this machine, the
+// Agents capability (spec 011): the Latere agent run on this machine, the
 // model provider it uses, and the adversarial review of a Claude Code
 // session. Hosted agents are created and run on the platform, from the
 // console and its API; this group is what runs here.

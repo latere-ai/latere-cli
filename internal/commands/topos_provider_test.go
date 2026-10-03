@@ -169,7 +169,7 @@ func TestProviderConfigRoundTrip(t *testing.T) {
 	}
 }
 
-// A provider choice saved under the name it had before spec 010 is moved to
+// A provider choice saved under the name it had before spec 011 is moved to
 // the current name the first time it is read, so no one chooses again. With
 // the variable naming a file, the legacy file is left alone.
 func TestProviderConfigMovesFromLegacyName(t *testing.T) {

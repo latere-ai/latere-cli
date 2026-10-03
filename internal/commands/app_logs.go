@@ -47,7 +47,7 @@ func newAppLogsCmd(apiURL, authURL *string) *cobra.Command {
 		Short: "Print or follow a deploy's build log.",
 		Long: `Print the build log of a deploy, the newest one unless [deploy] names
 another by its id or a prefix of at least 8 hexadecimal digits, as
-'latere app deploys' lists them. One argument is the slug; without any, the
+'latere apps deploys' lists them. One argument is the slug; without any, the
 slug is read from the git remote latere.
 
 The deploy of a release builds nothing: it serves the build of the preview it
@@ -62,14 +62,14 @@ waits up to a minute for that deploy to appear, since a push creates it a
 moment after the push returns. A deploy that has not started building yet
 says so before its first line. That makes a push and its build one command:
 
-  git push latere main && latere app logs -f
+  git push latere main && latere apps logs -f
 
 Color codes in a line are printed as they are on a terminal and removed
 otherwise. --json prints each line as the API's JSON, one per line.`,
-		Example: `  latere app logs
-  latere app logs -f
-  latere app logs hello 5d2f8a1c
-  latere app logs hello --json`,
+		Example: `  latere apps logs
+  latere apps logs -f
+  latere apps logs hello 5d2f8a1c
+  latere apps logs hello --json`,
 		Args: cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			slug, fromRemote, err := resolveAppSlug(cmd, firstArg(args))
@@ -198,7 +198,7 @@ func (l *appLogs) awaitCommit(ctx context.Context, deploys []appDeploy, head str
 			}
 		}
 		if !time.Now().Before(deadline) {
-			return fmt.Errorf("no deploy of %s, the commit HEAD names, appeared within %s.\nPush it with: git push %s <branch>\nOr name a deploy from 'latere app deploys': latere app logs %s <deploy>", short, appDeployWait, appRemote, l.slug)
+			return fmt.Errorf("no deploy of %s, the commit HEAD names, appeared within %s.\nPush it with: git push %s <branch>\nOr name a deploy from 'latere apps deploys': latere apps logs %s <deploy>", short, appDeployWait, appRemote, l.slug)
 		}
 		if !waited {
 			fprintf(l.errOut, "Waiting for the deploy of %s...\n", short)

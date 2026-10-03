@@ -1,6 +1,6 @@
 # Apps
 
-`latere app` creates apps on the Latere platform and shows what your pushes
+`latere apps` creates apps on the Latere platform and shows what your pushes
 built. An app is a git repository and an address: a push to a branch builds a
 preview of it, and a pushed tag that starts with `v` releases that commit to
 the app's address. Every command acts in your current context: your personal
@@ -13,12 +13,12 @@ also lets git sign in to `code.latere.ai`, which is where you push.
 
 ```sh
 cd my-site
-latere app create hello                   # create the app and add the remote latere
-git push latere main && latere app logs -f   # build a preview and follow it
+latere apps create hello                   # create the app and add the remote latere
+git push latere main && latere apps logs -f   # build a preview and follow it
 git push latere v1.0.0                    # release that commit to the address
 ```
 
-`latere app create` prints the app's address, the address of its newest
+`latere apps create` prints the app's address, the address of its newest
 preview, and its push URL, then the next command to run:
 
 ```text
@@ -36,11 +36,11 @@ Next:
 ## Create an app
 
 ```sh
-latere app create                     # a generated slug
-latere app create "Hello World"       # a slug derived from the name: hello-world
-latere app create --slug hello        # this slug or a refusal
-latere app create --remote deploy     # add the remote under another name
-latere app create --no-remote --json  # no remote; the app as JSON
+latere apps create                     # a generated slug
+latere apps create "Hello World"       # a slug derived from the name: hello-world
+latere apps create --slug hello        # this slug or a refusal
+latere apps create --remote deploy     # add the remote under another name
+latere apps create --no-remote --json  # no remote; the app as JSON
 ```
 
 The slug is the app's address. It is 1 to 40 lowercase letters, digits and
@@ -67,9 +67,9 @@ When a create is refused, the command says why and exits 1:
 ## See what you have
 
 ```sh
-latere app list              # slug, state, the release production serves, address
-latere app show              # one app: addresses, production, newest preview, push URL
-latere app deploys           # the deploys, newest first: id, ref, status, preview address, age
+latere apps list              # slug, state, the release production serves, address
+latere apps show              # one app: addresses, production, newest preview, push URL
+latere apps deploys           # the deploys, newest first: id, ref, status, preview address, age
 ```
 
 Each takes `--json` and prints the API's own objects. `show --json` prints an
@@ -83,10 +83,10 @@ out.
 ## Follow a build
 
 ```sh
-latere app logs                  # the newest deploy's build log so far
-latere app logs -f               # follow it until the build ends
-latere app logs hello 5d2f8a1c   # one deploy, by an id prefix of 8 or more characters
-latere app logs --json           # each line as JSON
+latere apps logs                  # the newest deploy's build log so far
+latere apps logs -f               # follow it until the build ends
+latere apps logs hello 5d2f8a1c   # one deploy, by an id prefix of 8 or more characters
+latere apps logs --json           # each line as JSON
 ```
 
 `--follow` exits 0 when the build succeeds and 1 when it fails or is canceled,
@@ -98,9 +98,9 @@ Read the build log; the failing line is near the end.
 ```
 
 A push records its deploy a moment after it returns. So inside the app's
-repository, `latere app logs -f` follows the deploy of the commit `HEAD`
+repository, `latere apps logs -f` follows the deploy of the commit `HEAD`
 names, and waits up to a minute for it to appear. That is what makes
-`git push latere main && latere app logs -f` one step.
+`git push latere main && latere apps logs -f` one step.
 
 The deploy of a release builds nothing: it serves the build of the preview
 whose commit the tag names. Its log is that preview's, so the command says so
@@ -116,12 +116,12 @@ the output goes to a file or a pipe.
 ## Delete an app
 
 ```sh
-latere app delete hello          # asks you to type the slug back
-latere app delete hello --yes
+latere apps delete hello          # asks you to type the slug back
+latere apps delete hello --yes
 ```
 
 The app's address stops serving it at once. The slug stays held for your
-account for seven days, and `latere app create --slug hello` within them
+account for seven days, and `latere apps create --slug hello` within them
 restores the app and its repository.
 
 ## Where the commands go
@@ -132,5 +132,5 @@ your login token itself is never sent there.
 
 | Variable | Default | What it does |
 |---|---|---|
-| `LATERE_APP_URL` | `https://api.latere.ai/v1/apps` | The Apps API's address, including its `/v1/apps` path. `--api-url` overrides it. |
-| `LATERE_APP_TOKEN` | none | A bearer to present as given instead of minting one. |
+| `LATERE_APPS_URL` | `https://api.latere.ai/v1/apps` | The Apps API's address, including its `/v1/apps` path. `--api-url` overrides it. |
+| `LATERE_APPS_TOKEN` | none | A bearer to present as given instead of minting one. |

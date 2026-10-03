@@ -114,7 +114,7 @@ func TestProductCredentialsCarryOnlyTheirOwnAudience(t *testing.T) {
 			}
 		}},
 		{"app list", appAudience, func(t *testing.T, s *productStub) {
-			t.Setenv("LATERE_APP_TOKEN", "")
+			t.Setenv("LATERE_APPS_TOKEN", "")
 			t.Setenv("AUTH_URL", s.srv.URL)
 			cmd := newAppCmd()
 			cmd.SetOut(io.Discard)

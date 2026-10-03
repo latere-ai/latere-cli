@@ -89,7 +89,7 @@ model call, which presents the model key.
 | `latere environments ...` | a token with audience `cella`, valid 5 minutes | minted per command at auth |
 | `latere models ...`, `latere agents review`, `latere agents run` through the Latere API | the model key | created at auth on first use and kept, as above |
 | `latere repos ...` | a token with audience `api.latere.ai`, the platform's, valid 5 minutes | minted per command at auth |
-| `latere app ...` | a token with audience `insula`, the Apps API's, valid 5 minutes | minted per command at auth |
+| `latere apps ...` | a token with audience `insula`, the Apps API's, valid 5 minutes | minted per command at auth |
 | `git` against `code.latere.ai` | a token with audience `origo`, valid 5 minutes | minted per git operation at auth |
 | `latere whoami` | the login token, only to refresh it when it is due | the claims it prints are read from the saved token, not asked of auth |
 
@@ -116,7 +116,7 @@ Environments API is reported as it is, not retried.
 
 Set `LATERE_ENVIRONMENTS_TOKEN` to present a bearer of your own instead, for a
 development deployment or a test. `LATERE_PLATFORM_TOKEN` does the same for
-the platform, `LATERE_APP_TOKEN` for the Apps API, and `LATERE_MODEL_KEY`
+the platform, `LATERE_APPS_TOKEN` for the Apps API, and `LATERE_MODEL_KEY`
 hands the model commands a key.
 
 ### Models

@@ -71,7 +71,7 @@ const (
 )
 
 // newEnvironmentsCmd is the `latere environments …` command tree: the
-// workloads of the platform's Environments capability (spec 010). The
+// workloads of the platform's Environments capability (spec 011). The
 // commands drive the Cella core at the platform origin (spec 008); a person
 // reads the capability's words, workload and Environments.
 func newEnvironmentsCmd() *cobra.Command {

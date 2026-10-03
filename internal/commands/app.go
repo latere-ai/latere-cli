@@ -44,7 +44,7 @@ const defaultAppURL = "https://api.latere.ai/v1/apps"
 const appAudience = "insula"
 
 // appURLUsage is the --api-url help every app command shares.
-const appURLUsage = "Apps API base URL, including its /v1/apps path (default " + defaultAppURL + ", or $LATERE_APP_URL)"
+const appURLUsage = "Apps API base URL, including its /v1/apps path (default " + defaultAppURL + ", or $LATERE_APPS_URL)"
 
 // appRemote is the git remote `app create` adds and every command that
 // takes [slug] reads the slug from.
@@ -71,12 +71,12 @@ const appReleaseReads = 8
 func newAppCmd() *cobra.Command {
 	var apiURL, authURL string
 	cmd := &cobra.Command{
-		Use:   "app",
+		Use:   "apps",
 		Short: "Create apps, see their deploys, and follow their builds.",
 		Long: `Create apps on the Latere platform, see their deploys, and follow their
 builds.
 
-An app is a git repository and an address. 'latere app create' makes one in
+An app is a git repository and an address. 'latere apps create' makes one in
 your current context, your personal account or the organization 'latere org'
 selected, and adds its push URL as the git remote latere. Deploying is a git
 push, which 'latere login' already lets git sign in for:
@@ -84,21 +84,21 @@ push, which 'latere login' already lets git sign in for:
   git push latere main      builds a preview of main
   git push latere v1.0.0    releases that commit to the app's address
 
-'latere app logs -f' follows the build of the commit you pushed and exits
+'latere apps logs -f' follows the build of the commit you pushed and exits
 0 when it succeeds and 1 when it fails or is canceled, so
-'git push latere main && latere app logs -f' is the whole loop.
+'git push latere main && latere apps logs -f' is the whole loop.
 
 A command that takes [slug] reads it from the git remote latere of the
 repository you run it in when you leave it out.
 
 The commands call https://api.latere.ai/v1/apps with a token minted for your
-login. LATERE_APP_URL or --api-url overrides the address, and
-LATERE_APP_TOKEN presents a bearer as given.`,
-		Example: `  latere app create hello
-  git push latere main && latere app logs -f
-  latere app list
-  latere app show
-  latere app deploys --json
+login. LATERE_APPS_URL or --api-url overrides the address, and
+LATERE_APPS_TOKEN presents a bearer as given.`,
+		Example: `  latere apps create hello
+  git push latere main && latere apps logs -f
+  latere apps list
+  latere apps show
+  latere apps deploys --json
   git push latere v1.0.0`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -265,30 +265,42 @@ type appClient struct {
 	base    string
 	authURL string
 	bearer  string
+	// envErr is a retired variable set without its replacement.
+	envErr error
 }
 
-// newAppClient resolves the API's address: the flag, then $LATERE_APP_URL,
-// then the platform origin.
+// newAppClient resolves the API's address: the flag, then $LATERE_APPS_URL,
+// then the platform origin. A retired variable set without its replacement
+// is kept as envErr, which the client's first request answers with.
 func newAppClient(flagURL, authURL string) *appClient {
+	c := &appClient{authURL: authURL}
 	u := flagURL
 	if u == "" {
-		u = os.Getenv("LATERE_APP_URL")
+		u, c.envErr = capabilityEnv(envAppsURL)
 	}
 	if u == "" {
 		u = defaultAppURL
 	}
-	return &appClient{base: strings.TrimRight(u, "/"), authURL: authURL}
+	c.base = strings.TrimRight(u, "/")
+	return c
 }
 
-// token is the bearer: LATERE_APP_TOKEN as given, else an actor token minted
+// token is the bearer: LATERE_APPS_TOKEN as given, else an actor token minted
 // for appAudience from the saved login, so the login token never reaches
 // the API. One token serves the command; it lives five minutes, and a log
 // stream needs it only to open.
 func (c *appClient) token(ctx context.Context) (string, error) {
+	if c.envErr != nil {
+		return "", c.envErr
+	}
 	if c.bearer != "" {
 		return c.bearer, nil
 	}
-	if t := strings.TrimSpace(os.Getenv("LATERE_APP_TOKEN")); t != "" {
+	given, err := capabilityEnv(envAppsToken)
+	if err != nil {
+		return "", err
+	}
+	if t := strings.TrimSpace(given); t != "" {
 		c.bearer = t
 		return t, nil
 	}
@@ -596,11 +608,11 @@ restores that app.
 In a git repository the command adds the push URL as the remote latere, or
 the name --remote gives; --no-remote skips that. When the remote already
 exists for another app the command refuses and creates nothing.`,
-		Example: `  latere app create
-  latere app create "Hello World"
-  latere app create --slug hello
-  latere app create hello --remote deploy
-  latere app create --no-remote --json`,
+		Example: `  latere apps create
+  latere apps create "Hello World"
+  latere apps create --slug hello
+  latere apps create hello --remote deploy
+  latere apps create --no-remote --json`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if strings.TrimSpace(remote) == "" {
@@ -769,8 +781,8 @@ slug, the state, the release tag the app's address serves, and the address.
 
 'latere org' switches the context. --json prints the apps as the API answers
 them.`,
-		Example: `  latere app list
-  latere app list --json`,
+		Example: `  latere apps list
+  latere apps list --json`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			c := newAppClient(*apiURL, *authURL)
@@ -863,7 +875,7 @@ func productionTags(ctx context.Context, c *appClient, apps []appResource) ([]st
 func printAppList(out io.Writer, apps []appResource, production []string) error {
 	var b strings.Builder
 	if len(apps) == 0 {
-		b.WriteString("No apps in your current context. Create one with: latere app create\n")
+		b.WriteString("No apps in your current context. Create one with: latere apps create\n")
 	} else {
 		w := tabwriter.NewWriter(&b, 0, 4, 2, ' ', 0)
 		fprintln(w, "SLUG\tSTATE\tPRODUCTION\tADDRESS")
@@ -892,9 +904,9 @@ deploy, and the URLs to push to and clone from.
 Without [slug], the slug is read from the git remote latere. --json prints
 an object with the app, the release production serves, and the newest
 preview deploy, each as the API answers it, or null.`,
-		Example: `  latere app show
-  latere app show hello
-  latere app show hello --json`,
+		Example: `  latere apps show
+  latere apps show hello
+  latere apps show hello --json`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			slug, fromRemote, err := resolveAppSlug(cmd, firstArg(args))
@@ -996,13 +1008,13 @@ func newAppDeploysCmd(apiURL, authURL *string) *cobra.Command {
 that was pushed, the status, the deploy's own preview address, and its age.
 
 A pushed branch builds a preview; a pushed tag that starts with v builds the
-deploy of a release. The short id is what 'latere app logs' takes.
+deploy of a release. The short id is what 'latere apps logs' takes.
 
 Without [slug], the slug is read from the git remote latere. --json prints
 the deploys as the API answers them.`,
-		Example: `  latere app deploys
-  latere app deploys hello
-  latere app deploys hello --json`,
+		Example: `  latere apps deploys
+  latere apps deploys hello
+  latere apps deploys hello --json`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			slug, fromRemote, err := resolveAppSlug(cmd, firstArg(args))
@@ -1055,8 +1067,8 @@ removes the files of its deploys and its repository.
 The command asks for the slug typed back unless --yes is given. The slug
 stays held for your account for seven days after the deletion, and creating
 an app with that slug within them restores the app and its repository.`,
-		Example: `  latere app delete hello
-  latere app delete hello --yes`,
+		Example: `  latere apps delete hello
+  latere apps delete hello --yes`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			slug := args[0]
@@ -1073,7 +1085,7 @@ an app with that slug within them restores the app and its repository.`,
 			if _, err := newAppClient(*apiURL, *authURL).call(cmd.Context(), http.MethodDelete, appPath(slug), nil); err != nil {
 				return err
 			}
-			fprintf(cmd.OutOrStdout(), "Deleting %s. Its address no longer serves it.\nThe slug stays held for your account for seven days; `latere app create --slug %s` restores the app until then.\n", slug, slug)
+			fprintf(cmd.OutOrStdout(), "Deleting %s. Its address no longer serves it.\nThe slug stays held for your account for seven days; `latere apps create --slug %s` restores the app until then.\n", slug, slug)
 			return nil
 		},
 	}

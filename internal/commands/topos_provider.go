@@ -41,7 +41,7 @@ type providerConfig struct {
 
 // providerFile is where the local agent's provider choice is kept, in the
 // user's configuration directory. legacyProviderFile is the name it had
-// before spec 010; a choice found there is moved, not chosen again.
+// before spec 011; a choice found there is moved, not chosen again.
 const (
 	providerFile       = "agent-provider.json"
 	legacyProviderFile = "topos-provider.json"

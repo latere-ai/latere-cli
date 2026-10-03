@@ -212,7 +212,7 @@ func (s *stubApps) seen() []string {
 	return append([]string(nil), s.requests...)
 }
 
-// runAppIn runs `latere app …` in dir against the stub, with a saved login
+// runAppIn runs `latere apps …` in dir against the stub, with a saved login
 // the stub's mint answers, and answers stdout, stderr and the error.
 func runAppIn(t *testing.T, s *stubApps, dir, stdin string, args ...string) (string, string, error) {
 	t.Helper()
@@ -220,8 +220,8 @@ func runAppIn(t *testing.T, s *stubApps, dir, stdin string, args ...string) (str
 	// git looks for a repository no further up than dir, so a case outside
 	// one never finds the checkout the suite runs in.
 	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir))
-	t.Setenv("LATERE_APP_URL", s.srv.URL+"/v1/apps")
-	t.Setenv("LATERE_APP_TOKEN", "")
+	t.Setenv("LATERE_APPS_URL", s.srv.URL+"/v1/apps")
+	t.Setenv("LATERE_APPS_TOKEN", "")
 	t.Setenv("AUTH_URL", s.srv.URL)
 	t.Setenv("LATERE_NO_UPDATE_CHECK", "1")
 	t.Setenv("OTEL_SDK_DISABLED", "true")
@@ -231,12 +231,12 @@ func runAppIn(t *testing.T, s *stubApps, dir, stdin string, args ...string) (str
 	root.SetOut(&out)
 	root.SetErr(&errOut)
 	root.SetIn(strings.NewReader(stdin))
-	root.SetArgs(append([]string{"app"}, args...))
+	root.SetArgs(append([]string{"apps"}, args...))
 	err := root.Execute()
 	return out.String(), errOut.String(), err
 }
 
-// runApp runs `latere app …` in an empty directory outside any repository.
+// runApp runs `latere apps …` in an empty directory outside any repository.
 func runApp(t *testing.T, s *stubApps, args ...string) (string, string, error) {
 	t.Helper()
 	return runAppIn(t, s, t.TempDir(), "", args...)
@@ -551,7 +551,7 @@ func TestAppListOfAnEmptyContext(t *testing.T) {
 	s := newStubApps(t)
 	s.pages = []string{`{"items":[],"has_more":false,"next_cursor":null}`}
 	out, _, err := runApp(t, s, "list")
-	if err != nil || out != "No apps in your current context. Create one with: latere app create\n" {
+	if err != nil || out != "No apps in your current context. Create one with: latere apps create\n" {
 		t.Errorf("list = %q, %v", out, err)
 	}
 	out, _, err = runApp(t, s, "list", "--json")
@@ -661,7 +661,7 @@ func TestAppWithoutASlugOrARemote(t *testing.T) {
 			if err == nil {
 				t.Fatal("want a refusal")
 			}
-			wantContains(t, err.Error(), "missing the [slug] argument", "no git remote named latere", "latere app "+args[0]+" <slug>")
+			wantContains(t, err.Error(), "missing the [slug] argument", "no git remote named latere", "latere apps "+args[0]+" <slug>")
 			if len(s.seen()) != 0 {
 				t.Errorf("requests = %v, want none", s.seen())
 			}
@@ -751,7 +751,7 @@ func TestAppDelete(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			wantContains(t, out, "Deleting hello.", "held for your account for seven days", "latere app create --slug hello")
+			wantContains(t, out, "Deleting hello.", "held for your account for seven days", "latere apps create --slug hello")
 			if (len(tc.args) == 0) != strings.Contains(errOut, "Type the slug to confirm") {
 				t.Errorf("prompt = %q", errOut)
 			}
@@ -770,14 +770,14 @@ func TestAppDeleteOfAnUnknownApp(t *testing.T) {
 
 func TestAppTokenFromTheEnvironment(t *testing.T) {
 	s := newStubApps(t)
-	t.Setenv("LATERE_APP_URL", s.srv.URL+"/v1/apps")
+	t.Setenv("LATERE_APPS_URL", s.srv.URL+"/v1/apps")
 	t.Chdir(t.TempDir())
-	t.Setenv("LATERE_APP_TOKEN", "given-bearer")
+	t.Setenv("LATERE_APPS_TOKEN", "given-bearer")
 	t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(t.TempDir(), "absent.json"))
 	root := NewRoot("test")
 	root.SetOut(io.Discard)
 	root.SetErr(io.Discard)
-	root.SetArgs([]string{"app", "deploys", "hello"})
+	root.SetArgs([]string{"apps", "deploys", "hello"})
 	if err := root.Execute(); err != nil {
 		t.Fatal(err)
 	}
@@ -788,13 +788,13 @@ func TestAppTokenFromTheEnvironment(t *testing.T) {
 
 func TestAppWithNoLoginSaysToSignIn(t *testing.T) {
 	s := newStubApps(t)
-	t.Setenv("LATERE_APP_URL", s.srv.URL+"/v1/apps")
-	t.Setenv("LATERE_APP_TOKEN", "")
+	t.Setenv("LATERE_APPS_URL", s.srv.URL+"/v1/apps")
+	t.Setenv("LATERE_APPS_TOKEN", "")
 	t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(t.TempDir(), "absent.json"))
 	root := NewRoot("test")
 	root.SetOut(io.Discard)
 	root.SetErr(io.Discard)
-	root.SetArgs([]string{"app", "list"})
+	root.SetArgs([]string{"apps", "list"})
 	if err := root.Execute(); err == nil || !strings.Contains(err.Error(), "cannot authenticate to Apps") {
 		t.Errorf("list = %v", err)
 	}
@@ -805,12 +805,12 @@ func TestAppWithNoLoginSaysToSignIn(t *testing.T) {
 
 func TestAppUnreachableAPI(t *testing.T) {
 	s := newStubApps(t)
-	t.Setenv("LATERE_APP_TOKEN", "given-bearer")
+	t.Setenv("LATERE_APPS_TOKEN", "given-bearer")
 	t.Chdir(t.TempDir())
 	root := NewRoot("test")
 	root.SetOut(io.Discard)
 	root.SetErr(io.Discard)
-	root.SetArgs([]string{"app", "list", "--api-url", "http://127.0.0.1:1/v1/apps"})
+	root.SetArgs([]string{"apps", "list", "--api-url", "http://127.0.0.1:1/v1/apps"})
 	if err := root.Execute(); err == nil || !strings.Contains(err.Error(), "reach the Apps API at http://127.0.0.1:1/v1/apps") {
 		t.Errorf("list = %v", err)
 	}
@@ -820,11 +820,11 @@ func TestAppUnreachableAPI(t *testing.T) {
 }
 
 func TestAppURLDefaultAndOverride(t *testing.T) {
-	t.Setenv("LATERE_APP_URL", "")
+	t.Setenv("LATERE_APPS_URL", "")
 	if got := newAppClient("", "").base; got != defaultAppURL {
 		t.Errorf("default = %q", got)
 	}
-	t.Setenv("LATERE_APP_URL", "https://apps.example/v1/apps/")
+	t.Setenv("LATERE_APPS_URL", "https://apps.example/v1/apps/")
 	if got := newAppClient("", "").base; got != "https://apps.example/v1/apps" {
 		t.Errorf("environment = %q", got)
 	}
@@ -839,5 +839,5 @@ func TestAppWithoutASubcommandShowsHelp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantContains(t, out, "git push latere main && latere app logs -f", "create", "deploys", "logs")
+	wantContains(t, out, "git push latere main && latere apps logs -f", "create", "deploys", "logs")
 }

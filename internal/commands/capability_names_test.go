@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-// The command groups are named after the platform's capabilities (spec 010):
+// The command groups are named after the platform's capabilities (spec 011):
 // `environments` carries every workload command, and `agents` the local agent,
 // its provider and the review.
 func TestCapabilityCommandTree(t *testing.T) {
@@ -63,6 +63,7 @@ func TestRetiredCommandWords(t *testing.T) {
 		want string
 	}{
 		{[]string{"cella", "list"}, "'latere cella' is now 'latere environments'"},
+		{[]string{"app", "list"}, "'latere app' is now 'latere apps'"},
 		{[]string{"cella", "apply", "-f", "workload.yaml", "--wait"}, "'latere cella' is now 'latere environments'"},
 		{[]string{"sandbox", "ls", "dev", "/workspace"}, "'latere sandbox' is now 'latere environments'"},
 		{[]string{"topos", "--local", "-p", "explain this repo"}, "is now 'latere agents run'"},

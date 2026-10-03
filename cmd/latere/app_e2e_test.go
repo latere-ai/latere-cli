@@ -94,7 +94,7 @@ func TestAppE2E(t *testing.T) {
 	if err := os.Mkdir(work, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	env := append(os.Environ(), "LATERE_APP_URL="+server.URL+"/v1/apps", "LATERE_APP_TOKEN=", "AUTH_URL="+server.URL,
+	env := append(os.Environ(), "LATERE_APPS_URL="+server.URL+"/v1/apps", "LATERE_APPS_TOKEN=", "AUTH_URL="+server.URL,
 		"LATERE_AUTH_TOKEN_FILE="+authPath, "GIT_CEILING_DIRECTORIES="+root,
 		"LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
 	run := func(args ...string) (string, string, error) {
@@ -109,7 +109,7 @@ func TestAppE2E(t *testing.T) {
 		return stdout.String(), stderr.String(), err
 	}
 
-	out, stderr, err := run("app", "create", "--slug", "hello")
+	out, stderr, err := run("apps", "create", "--slug", "hello")
 	if err != nil {
 		t.Fatalf("create: %v %q", err, stderr)
 	}
@@ -128,7 +128,7 @@ func TestAppE2E(t *testing.T) {
 	mu.Lock()
 	end = `{"status":"built"}`
 	mu.Unlock()
-	out, stderr, err = run("app", "logs", "hello", "-f")
+	out, stderr, err = run("apps", "logs", "hello", "-f")
 	if err != nil {
 		t.Fatalf("logs -f of a built deploy: %v %q", err, stderr)
 	}
@@ -142,7 +142,7 @@ func TestAppE2E(t *testing.T) {
 	mu.Lock()
 	end = `{"status":"failed","error":{"code":"build_failed","message":"The build command failed.","hint":"Read the build log; the failing line is near the end.","component":"app"}}`
 	mu.Unlock()
-	out, stderr, err = run("app", "logs", "hello", "-f")
+	out, stderr, err = run("apps", "logs", "hello", "-f")
 	if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 {
 		t.Fatalf("logs -f of a failed deploy = %v, want exit 1", err)
 	}

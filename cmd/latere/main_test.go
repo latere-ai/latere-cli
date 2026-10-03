@@ -40,7 +40,7 @@ func TestMain(m *testing.M) {
 			os.Exit(1)
 		}
 	}
-	// The retired variable names are refused when set alone (spec 010), and
+	// The retired variable names are refused when set alone (spec 011), and
 	// every helper process inherits this environment, so one left in a
 	// developer's shell would fail unrelated tests.
 	for _, retired := range []string{"LATERE_CELLA_URL", "LATERE_CELLA_TOKEN", "LATERE_TOPOS_PROVIDER_FILE"} {

@@ -272,7 +272,7 @@ func TestAppLogsFollowGivesUpOnTheDeployOfHEAD(t *testing.T) {
 	if err == nil {
 		t.Fatal("want a refusal")
 	}
-	wantContains(t, err.Error(), "no deploy of "+head[:7]+", the commit HEAD names, appeared within 20ms", "git push latere <branch>", "latere app logs hello <deploy>")
+	wantContains(t, err.Error(), "no deploy of "+head[:7]+", the commit HEAD names, appeared within 20ms", "git push latere <branch>", "latere apps logs hello <deploy>")
 	for _, r := range s.seen() {
 		if strings.Contains(r, "/logs") {
 			t.Errorf("opened a log: %v", s.seen())

@@ -220,7 +220,7 @@ func TestRemovedCellaCommandE2E(t *testing.T) {
 	}
 }
 
-// The words named after the open cores (spec 010) exit 1 with their
+// The words named after the open cores (spec 011) exit 1 with their
 // replacement and reach nothing: `latere cella list` names `latere
 // environments`, and `latere topos --local` names `latere agents run`.
 func TestRetiredCommandWordsE2E(t *testing.T) {

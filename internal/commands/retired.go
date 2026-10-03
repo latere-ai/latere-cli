@@ -11,7 +11,7 @@ import (
 )
 
 // The command words and variables named after an open core rather than the
-// platform capability it serves (spec 010). Each old word is refused for one
+// platform capability it serves (spec 011). Each old word is refused for one
 // release with its replacement, so a script that still uses it fails on its
 // first run with the new name in the error, and is removed in the release
 // after. This file is the one place the old words are written; the scan in
@@ -24,6 +24,7 @@ var retiredCommands = map[string]string{
 	"sandbox": "'latere sandbox' is now 'latere environments', with the same commands",
 	"topos":   "'latere topos --local' is now 'latere agents run', and 'latere topos login' is 'latere agents provider'",
 	"review":  "'latere review' is now 'latere agents review', with the same flags",
+	"app":     "'latere app' is now 'latere apps', with the same commands",
 }
 
 // newRetiredCmd is a hidden command for a retired word. It takes any
@@ -46,6 +47,8 @@ var renamedVariables = map[string]string{
 	"LATERE_CELLA_URL":           envEnvironmentsURL,
 	"LATERE_CELLA_TOKEN":         envEnvironmentsToken,
 	"LATERE_TOPOS_PROVIDER_FILE": envAgentProviderFile,
+	"LATERE_APP_URL":             envAppsURL,
+	"LATERE_APP_TOKEN":           envAppsToken,
 }
 
 // The variables that replaced them.
@@ -53,6 +56,8 @@ const (
 	envEnvironmentsURL   = "LATERE_ENVIRONMENTS_URL"
 	envEnvironmentsToken = "LATERE_ENVIRONMENTS_TOKEN"
 	envAgentProviderFile = "LATERE_AGENT_PROVIDER_FILE"
+	envAppsURL           = "LATERE_APPS_URL"
+	envAppsToken         = "LATERE_APPS_TOKEN"
 )
 
 // renamedEnvError is a retired variable set without its replacement. It is

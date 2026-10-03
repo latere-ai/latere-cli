@@ -7,7 +7,7 @@
 
 `latere` is the command line of the Latere platform. You sign in once, and
 one binary reaches every capability with your identity: workloads in
-[Environments](docs/environments.md), [apps](docs/app.md) you deploy with a
+[Environments](docs/environments.md), [apps](docs/apps.md) you deploy with a
 git push, [models](docs/models.md) through the Latere API, the Latere
 [agent](docs/agents.md) on your machine and an adversarial review of a
 Claude Code session, and [repositories](docs/repos.md) on Latere Code
@@ -17,7 +17,7 @@ second credential to manage.
 ```sh
 latere login
 latere environments apply -f workload.yaml
-latere app create hello && git push latere main && latere app logs -f
+latere apps create hello && git push latere main && latere apps logs -f
 latere models invoke --model openai/gpt-4.1-mini "Say hi"
 latere agents run
 git clone https://code.latere.ai/<owner>/<repo>.git
@@ -121,8 +121,8 @@ git clone https://code.latere.ai/<owner>/<repo>.git
 
 `latere repos create <owner>/<name>` creates a repository to push to, and
 `latere repos list` shows the ones you can reach ([docs/repos.md](docs/repos.md)).
-`latere app create` creates an app, whose repository you push to deploy it
-([docs/app.md](docs/app.md)).
+`latere apps create` creates an app, whose repository you push to deploy it
+([docs/apps.md](docs/apps.md)).
 
 The helper answers for that host only; every other host keeps the helpers
 you already have. Fetch and clone need read access, push needs write
@@ -146,7 +146,7 @@ git clone https://code.latere.ai/<owner>/<repo>.git
 | Command | What it does | Guide |
 |---------|--------------|-------|
 | `latere environments` | Workloads in Latere Environments: create one from a manifest, run commands, open a shell, read logs, and move files in and out. | [docs/environments.md](docs/environments.md) |
-| `latere app` | Apps on the platform: create one and add its git remote, list your apps, show one, list its deploys, follow a build to its outcome, and delete one. A `git push` deploys. | [docs/app.md](docs/app.md) |
+| `latere apps` | Apps on the platform: create one and add its git remote, list your apps, show one, list its deploys, follow a build to its outcome, and delete one. A `git push` deploys. | [docs/apps.md](docs/apps.md) |
 | `latere repos` | Git repositories on Latere Code: create one under your handle or your organization, list your context's repositories and the ones shared with you, and look one up by name. | [docs/repos.md](docs/repos.md) |
 | `latere models` | Call language models through the Latere API with a model key the CLI creates and keeps: list the models your key reaches, point a stock SDK at the API, and check a model with one call. | [docs/models.md](docs/models.md) |
 | `latere agents` | Latere Agents on this machine: `run` runs the agent in your directory against your files, interactively or on one prompt; `provider` chooses its model; `review` runs an adversarial review of your latest Claude Code session, whose unresolved attacks set the exit code. | [docs/agents.md](docs/agents.md) |
