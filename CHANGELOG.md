@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.17.0 - 2026-10-03
+
 ### Changed
 
 - The commands are named after the platform's capabilities, as `latere models`
