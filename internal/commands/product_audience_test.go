@@ -113,6 +113,17 @@ func TestProductCredentialsCarryOnlyTheirOwnAudience(t *testing.T) {
 				t.Fatalf("cella list: %v", err)
 			}
 		}},
+		{"app list", appAudience, func(t *testing.T, s *productStub) {
+			t.Setenv("LATERE_APP_TOKEN", "")
+			t.Setenv("AUTH_URL", s.srv.URL)
+			cmd := newAppCmd()
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+			cmd.SetArgs([]string{"list", "--api-url", s.srv.URL + "/v1/apps"})
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("app list: %v", err)
+			}
+		}},
 		{"git credential", codeAudience, func(t *testing.T, s *productStub) {
 			out, err := runGitCredential(t, codeGetInput, "get", "--auth-url", s.srv.URL)
 			if err != nil {
