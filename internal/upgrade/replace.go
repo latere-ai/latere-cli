@@ -96,7 +96,7 @@ func replaceFile(exe string, newBin []byte) error {
 func notWritableError(dir, exe string) error {
 	return fmt.Errorf("cannot write to %s, so %s cannot be replaced.\n"+
 		"Re-run the installer:\n"+
-		"  curl -fsSL https://latere.ai/install.sh | sh\n"+
+		"  curl -fsSL https://platform.latere.ai | sh\n"+
 		"or, for a system-wide install:\n"+
-		"  curl -fsSL https://latere.ai/install.sh | PREFIX=/usr/local sh", dir, exe)
+		"  curl -fsSL https://platform.latere.ai | PREFIX=/usr/local sh", dir, exe)
 }

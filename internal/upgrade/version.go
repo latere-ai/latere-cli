@@ -7,8 +7,8 @@
 // Release lookup deliberately reads the github.com/<repo>/releases/latest
 // redirect rather than api.github.com: the API caps unauthenticated callers
 // at 60 requests/hour per IP, a budget routinely exhausted behind shared
-// carrier-grade NAT. install.sh resolves "latest" the same way for the same
-// reason.
+// carrier-grade NAT. The installer the platform serves resolves "latest"
+// the same way for the same reason.
 package upgrade
 
 import (

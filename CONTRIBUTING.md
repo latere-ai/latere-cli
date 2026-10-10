@@ -82,8 +82,8 @@ the pre-push hook and fails the release workflow. That workflow is the
 shared CLI release pipeline in `latere-ai/ci`: it runs the suite under the
 race detector on Linux and macOS, then GoReleaser builds the archives from
 `.goreleaser.yaml` and publishes the GitHub release with `checksums.txt`
-and the changelog section as its body. `install.sh` and `latere upgrade`
-both install the newest published release, so a tag whose workflow failed
+and the changelog section as its body. The installer the platform serves and
+`latere upgrade` both install the newest published release, so a tag whose workflow failed
 reaches nobody.
 
 ## Writing

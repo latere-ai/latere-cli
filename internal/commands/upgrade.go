@@ -32,7 +32,8 @@ bad, roll back with 'latere upgrade <previous-version>' and (optionally)
 
 The release is resolved from github.com/latere-ai/latere-cli, the archive's
 checksum is verified, and the running binary is replaced in place. If latere
-was installed somewhere you cannot write, re-run install.sh.
+was installed somewhere you cannot write, run the installer again:
+curl -fsSL https://platform.latere.ai | sh
 
 Set LATERE_NO_UPDATE_CHECK=1 to silence the passive update check.`,
 		Example: `  latere upgrade            # install the latest release

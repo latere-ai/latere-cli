@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -58,9 +59,13 @@ func TestReplaceFileNotWritable(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected a permission error on a non-writable directory")
 	}
-	// The message should guide the user back to the installer.
-	if !containsAll(err.Error(), "install.sh") {
-		t.Errorf("error %q should mention install.sh", err)
+	// The message guides the user back to the installer, which the platform
+	// answers at its front page. The address it gave before is removed.
+	if !containsAll(err.Error(), "curl -fsSL https://platform.latere.ai | sh", "curl -fsSL https://platform.latere.ai | PREFIX=/usr/local sh") {
+		t.Errorf("error %q should give the install command", err)
+	}
+	if strings.Contains(err.Error(), "install.sh") {
+		t.Errorf("error %q still names install.sh", err)
 	}
 }
 

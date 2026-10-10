@@ -17,6 +17,9 @@ builds:
     ldflags:
       - -s -w -X main.version={{.Version}}
 
+# The installer platform.latere.ai serves (latere-ai/platform, spec 186) downloads
+# an archive by this name and checksums.txt beside it, as `latere upgrade`
+# does. A release that renames either breaks every install.
 archives:
   - id: default
     name_template: "latere_{{ .Version }}_{{ .Os }}_{{ .Arch }}"

@@ -26,8 +26,11 @@ git clone https://code.latere.ai/<owner>/<repo>.git
 ## Install
 
 ```sh
-curl -fsSL https://latere.ai/install.sh | sh
+curl -fsSL https://platform.latere.ai | sh
 ```
+
+platform.latere.ai answers curl and wget with the installer, and a
+browser with the platform's site.
 
 The installer supports Linux and macOS on amd64 and arm64. It writes to
 `$HOME/.local/bin`, so it needs no `sudo`, and prints the line to add to
@@ -35,10 +38,10 @@ your shell profile when that directory is not on your `PATH`.
 
 ```sh
 # Pin a version
-curl -fsSL https://latere.ai/install.sh | sh -s -- vX.Y.Z
+curl -fsSL https://platform.latere.ai | sh -s -- vX.Y.Z
 
 # Install system-wide
-curl -fsSL https://latere.ai/install.sh | PREFIX=/usr/local sh
+curl -fsSL https://platform.latere.ai | PREFIX=/usr/local sh
 
 # Build from source
 go install github.com/latere-ai/latere-cli/cmd/latere@latest

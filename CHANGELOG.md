@@ -10,6 +10,11 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Changed
+
+- **Install with the platform's address alone: `curl -fsSL https://platform.latere.ai | sh`.** platform.latere.ai answers curl and wget with the installer at its front page. `latere upgrade` gives this command when it cannot replace a binary it may not write, and the README uses it. `https://latere.ai/install.sh`, the address before it, is removed. Pinning a version and a system-wide install are unchanged: `| sh -s -- vX.Y.Z` and `| PREFIX=/usr/local sh`.
+- **The installer lives with the platform that serves it.** `install.sh` is no longer in this repository, and what a person runs is the script of the platform's last release, not this repository's main branch.
+
 ### Security
 
 - Built with Go 1.27.2 and golang.org/x/net v0.60.0, which fix GO-2026-6611, GO-2026-6612, GO-2026-6613 and GO-2026-6617.
