@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.18.0 - 2026-10-11
+
 ### Changed
 
 - **A new app is private.** `latere apps create` no longer makes every app
