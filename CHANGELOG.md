@@ -10,6 +10,42 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Changed
+
+- `latere apps visibility` removes the app's password when it has one, with
+  either value, and says so. `private` means only people invited, so the
+  people who used the password no longer get in. An `unlisted` app opens for
+  anyone with the link, where a password decides nothing, and one left set
+  would open the app again the next time it is private. The command asks the
+  platform whether the app has a password before it changes anything, and
+  leaves the app as it is when the platform does not answer. It takes
+  `--platform-url`, and a script that gives it `LATERE_APPS_TOKEN` needs
+  `LATERE_PLATFORM_TOKEN` or a saved login as well.
+- `latere apps visibility` and `latere apps access` name who can open an app
+  by the same three choices the console and the chat offer: `Only people
+  invited`, `Anyone with the password` and `Anyone with the link`. The
+  sentence each prints starts with the choice, so a script that matched the
+  sentence of v0.18.0 needs the new one. `--json` is unchanged.
+
+### Added
+
+- `latere apps password [slug]` sets a password on an app, or replaces the
+  one it has. Anyone who types the password at the app's address opens the
+  app and its previews, with no Latere account, while you, the members of
+  the organization that owns the app and the people you invited still sign
+  in. The password is typed at a prompt that asks twice and shows nothing,
+  read from one line of standard input with `--stdin`, or made by
+  `--generate`, which prints it once on the last line of the output. It is
+  never a flag's value or an argument. Setting a password makes the app
+  private when it is not, and the command says so. `--json` carries a
+  password only when `--generate` made it. Where the platform does not offer
+  passwords yet, the command says so and changes nothing.
+- `latere apps password --remove [slug]` removes the password: the people
+  who used it no longer get in. It is no error when the app has none.
+- `latere apps access` says whether an app has a password and since when,
+  and `--json` carries the platform's `password`. A password left on an app
+  anyone with the link opens is said with the command that removes it.
+
 ## v0.18.0 - 2026-10-11
 
 ### Changed

@@ -20,6 +20,7 @@ specs/
   010-app-command.md                 (implemented: latere app create, list, show, deploys, logs and delete on the Apps API)
   011-capability-commands.md         (implemented: latere environments and latere agents replace cella, topos and review)
   012-app-access.md                  (implemented: a new app is private; latere apps visibility, access, share and unshare)
+  013-app-password.md                (implemented: latere apps password; access says a password, and visibility removes one)
 ```
 
 ## Status
@@ -72,6 +73,13 @@ Every spec in the tree has shipped:
   the people invited to an app on platformd's access routes at
   `https://platform.latere.ai`, with the token `latere repos` mints. The CLI
   never sets `public`, which only a listing in the gallery gives.
+- `013-app-password.md`: `latere apps password` sets, replaces and removes
+  the password that opens a private app for anyone who types it, on
+  platformd's password routes beside the access list. The password is typed
+  at a prompt, read from standard input or generated, never a flag's value
+  or an argument, and printed only when the command generated it. `access`
+  names which of the three choices an app is on, and `visibility` asks the
+  platform first and removes a password with either of its values.
 
 Two surfaces shipped without a dedicated design record: the token-lifecycle
 work, which [docs/login-and-tokens.md](../docs/login-and-tokens.md) documents,
