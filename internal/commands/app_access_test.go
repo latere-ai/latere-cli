@@ -64,12 +64,12 @@ func TestAppVisibilityChangesWhoCanOpenTheApp(t *testing.T) {
 			[]string{"visibility: unlisted\n", "It was public before. If it was shown in the gallery, it has left the gallery.\n"},
 			[]string{"latere apps share", "that request"}},
 		{"a public app made private", "public", "private", "personal",
-			[]string{"visibility: private\n\nOnly people invited: you and the people you invite open it, each after signing in with a Latere account.\n",
+			[]string{"visibility: private\n\nOnly people invited: it opens for them and for you, each after signing in with a Latere account.\n",
 				"It was public before. If it was shown in the gallery, it has left the gallery.\n",
 				"Invite people by email with: latere apps share hello <email>...\n"},
 			nil},
 		{"an unlisted app made private ends a request to be shown", "unlisted", "private", "organization",
-			[]string{"Only people invited: the members of its organization and the people invited open it, each after signing in with a Latere account.\n",
+			[]string{"Only people invited: it opens for them and for the members of its organization, each after signing in with a Latere account.\n",
 				"If you had asked to show it in the gallery, that request has ended.\n", "latere apps share hello <email>..."},
 			[]string{"It was public before"}},
 		{"the visibility it already has", "unlisted", "unlisted", "personal",
@@ -213,7 +213,7 @@ func TestAppVisibilityRemovesAPassword(t *testing.T) {
 		want, lacks      []string
 	}{
 		{"anyone with the password to only people invited", "private", "private",
-			[]string{"visibility: private\n\nOnly people invited: you and the people you invite open it, each after signing in with a Latere account.\n" +
+			[]string{"visibility: private\n\nOnly people invited: it opens for them and for you, each after signing in with a Latere account.\n" +
 				"It was private already.\n" +
 				"Its password was removed. The people who used it no longer get in, and a visit made with it ends within a minute.\n" +
 				"Invite people by email with: latere apps share hello <email>...\n"},
@@ -223,7 +223,7 @@ func TestAppVisibilityRemovesAPassword(t *testing.T) {
 				"Its password was removed. Anyone with the link opens the app, where a password decides nothing, and one left set would open the app again once it is private.\n"},
 			[]string{"A password is set", "Remove it with", "no longer get in"}},
 		{"a password left on an unlisted app, made private", "unlisted", "private",
-			[]string{"Only people invited: you and the people you invite open it",
+			[]string{"Only people invited: it opens for them and for you",
 				"If you had asked to show it in the gallery, that request has ended.\n" +
 					"Its password was removed. The people who used it no longer get in, and a visit made with it ends within a minute.\n"},
 			[]string{"already"}},
@@ -387,7 +387,7 @@ func TestAppAccessListsThePeopleInvited(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantContains(t, out, "app:        hello\naddress:    https://hello.latere.site\nvisibility: private\n\n"+
-		"Only people invited: you and the people you invite open it, each after signing in with a Latere account.\n\n")
+		"Only people invited: it opens for them and for you, each after signing in with a Latere account.\n\n")
 	wantLacks(t, out, "once it is private")
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 	table := lines[len(lines)-3:]
@@ -419,10 +419,10 @@ func TestAppAccessByVisibility(t *testing.T) {
 		want, lacks                     []string
 	}{
 		{"private with no one invited", "private", "personal", nobody,
-			[]string{"visibility: private\n", "Only people invited: you and the people you invite open it", "\nNo one is invited. Invite people by email with: latere apps share hello <email>...\n"},
+			[]string{"visibility: private\n", "Only people invited: it opens for them and for you", "\nNo one is invited. Invite people by email with: latere apps share hello <email>...\n"},
 			[]string{"EMAIL", "password"}},
 		{"an organization's", "private", "organization", "",
-			[]string{"Only people invited: the members of its organization and the people invited open it, each after signing in with a Latere account.\n", "ines@example.com"},
+			[]string{"Only people invited: it opens for them and for the members of its organization, each after signing in with a Latere account.\n", "ines@example.com"},
 			[]string{"once it is private", "password"}},
 		{"unlisted with people invited", "unlisted", "personal", "",
 			[]string{"visibility: unlisted\n\nAnyone with the link: it opens without signing in, and is kept out of search engines.\nThe people invited open it once it is private.\n\nEMAIL"},
@@ -447,7 +447,7 @@ func TestAppAccessByVisibility(t *testing.T) {
 				"Remove it with: latere apps password --remove hello\nThe people invited open it once it is private.\n\nEMAIL"},
 			[]string{"Anyone with the password"}},
 		{"a platform that sets no passwords", "private", "personal", stubAccessWithoutPasswords(),
-			[]string{"Only people invited: you and the people you invite open it"},
+			[]string{"Only people invited: it opens for them and for you"},
 			[]string{"password"}},
 		{"an accepted invitation named by the handle alone", "private", "personal",
 			`{"people":[{"id":"inv_1","email":"ines@example.com","state":"active","person":{"display_name":"","handle":"ines"},"invited_at":"2026-10-06T08:00:00Z"}]}`,

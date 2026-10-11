@@ -25,7 +25,7 @@ var generatedShape = regexp.MustCompile(`^[abcdefghjkmnpqrstuvwxyz23456789]{5}(-
 const (
 	stubPasswordChoice = "Anyone with the password: whoever types it at the app's address opens the app, with no Latere account.\n" +
 		"You and the people you invite still open the app by signing in with a Latere account.\n"
-	stubInvitedChoice = "Only people invited: you and the people you invite open it, each after signing in with a Latere account.\n"
+	stubInvitedChoice = "Only people invited: it opens for them and for you, each after signing in with a Latere account.\n"
 	stubSendIt        = "Send people the app's address and the password. Neither is emailed.\n"
 )
 

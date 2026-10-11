@@ -163,7 +163,7 @@ func TestAppAccessE2E(t *testing.T) {
 	if !slices.Equal(made, []string{"GET /v1/apps/apps/hello", "GET /v1/account/apps/" + appID + "/access", "PATCH /v1/apps/apps/hello"}) || len(patched) != 1 || patched["visibility"] != "private" {
 		t.Errorf("visibility private made %v with the body %v", made, patched)
 	}
-	wantAll("visibility private", out, "visibility: private", "Only people invited: you and the people you invite open it", "latere apps share hello <email>...")
+	wantAll("visibility private", out, "visibility: private", "Only people invited: it opens for them and for you", "latere apps share hello <email>...")
 
 	out, stderr, made, err = run("apps", "visibility", "public", "hello")
 	if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 {

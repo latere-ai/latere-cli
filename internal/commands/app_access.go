@@ -69,12 +69,13 @@ func checkVisibility(v string) error {
 }
 
 // whoSignsIn names the people a private app opens for once they sign in, by
-// whether an organization owns it.
-func whoSignsIn(a appResource) string {
+// whether an organization owns it: those it opens for without an invitation,
+// and the people invited.
+func whoSignsIn(a appResource) (owners, invited string) {
 	if a.Owner.Kind == "organization" {
-		return "the members of its organization and the people invited"
+		return "the members of its organization", "the people invited"
 	}
-	return "you and the people you invite"
+	return "you", "the people you invite"
 }
 
 // whoOpens says who can open an app, by the visibility its answer carries
@@ -84,7 +85,8 @@ func whoSignsIn(a appResource) string {
 func whoOpens(a appResource) string {
 	switch a.Visibility {
 	case visibilityPrivate:
-		return "only " + whoSignsIn(a) + " can open it, each after signing in with a Latere account"
+		owners, invited := whoSignsIn(a)
+		return "only " + owners + " and " + invited + " can open it, each after signing in with a Latere account"
 	case visibilityUnlisted:
 		return "anyone who has its address can open it without signing in, and it is kept out of search engines"
 	case visibilityPublic:
@@ -125,11 +127,12 @@ func generalAccess(a appResource, password *appPassword) string {
 	var listing string
 	switch a.Visibility {
 	case visibilityPrivate:
+		owners, invited := whoSignsIn(a)
 		if password == nil {
-			return fmt.Sprintf("%s: %s open it, each after signing in with a Latere account.\n", choiceInvited, whoSignsIn(a))
+			return fmt.Sprintf("%s: it opens for them and for %s, each after signing in with a Latere account.\n", choiceInvited, owners)
 		}
-		return fmt.Sprintf("%s%s: whoever types it at the app's address opens the app, with no Latere account.\n%s still open the app by signing in with a Latere account.\n",
-			choicePassword, password.since(", set "), upperFirst(whoSignsIn(a)))
+		return fmt.Sprintf("%s%s: whoever types it at the app's address opens the app, with no Latere account.\n%s and %s still open the app by signing in with a Latere account.\n",
+			choicePassword, password.since(", set "), upperFirst(owners), invited)
 	case visibilityUnlisted:
 		listing = "is kept out of search engines"
 	case visibilityPublic:

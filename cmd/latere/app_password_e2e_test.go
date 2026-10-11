@@ -323,7 +323,7 @@ func TestAppPasswordE2E(t *testing.T) {
 	if v, p := state(); v != "private" || p != "" || !slices.Equal(made, []string{readApp, readAccess, changeApp, dropIt}) {
 		t.Errorf("visibility private made %v and left the app %s, password set: %t", made, v, p != "")
 	}
-	wantAll("visibility private", out, "Only people invited: you and the people you invite open it", "It was private already.\nIts password was removed. The people who used it no longer get in")
+	wantAll("visibility private", out, "Only people invited: it opens for them and for you", "It was private already.\nIts password was removed. The people who used it no longer get in")
 
 	// --remove of a password that is set, then of none.
 	if _, stderr, _, err = run(piped+"\n", "apps", "password", "hello", "--stdin"); err != nil {
@@ -337,7 +337,7 @@ func TestAppPasswordE2E(t *testing.T) {
 		t.Errorf("password --remove made %v, password set: %t", made, p != "")
 	}
 	wantAll("password --remove", out, "Removed the password of hello. The people who used it no longer get in, and a visit made with it ends within a minute.",
-		"Only people invited: you and the people you invite open it")
+		"Only people invited: it opens for them and for you")
 	out, stderr, made, err = run("", "apps", "password", "hello", "--remove")
 	if err != nil {
 		t.Fatalf("password --remove of none: %v %q", err, stderr)
@@ -351,7 +351,7 @@ func TestAppPasswordE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("access after the removal: %v %q", err, stderr)
 	}
-	wantAll("access after the removal", out, "visibility: private", "Only people invited: you and the people you invite open it", "No one is invited.")
+	wantAll("access after the removal", out, "visibility: private", "Only people invited: it opens for them and for you", "No one is invited.")
 	if strings.Contains(out, "password") {
 		t.Errorf("access after the removal still says a password:\n%s", out)
 	}
