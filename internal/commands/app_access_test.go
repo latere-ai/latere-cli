@@ -542,6 +542,28 @@ func TestAppShareAndUnshareArguments(t *testing.T) {
 	}
 }
 
+// The daily bound's refusal says when the person can invite again: now plus
+// the wait the refusal names.
+func TestAppShareSaysWhenTheDailyBoundEnds(t *testing.T) {
+	s := newStubApps(t)
+	s.inviteStatus = 429
+	s.inviteBody = `{"error":{"code":"invite_limit","message":"You can't invite more people right now.","details":{"limit":"per_day","max":100,"retry_after":7200}}}`
+	before := time.Now().Add(2 * time.Hour).UTC().Truncate(time.Minute)
+	_, _, err := runApp(t, s, "share", "hello", "a@example.com")
+	after := time.Now().Add(2 * time.Hour).UTC()
+	if err == nil {
+		t.Fatal("want a refusal")
+	}
+	_, rest, ok := strings.Cut(err.Error(), "You can invite again from ")
+	if !ok {
+		t.Fatalf("share = %v", err)
+	}
+	at, parseErr := time.Parse("2006-01-02 15:04 UTC", strings.TrimSuffix(rest, "."))
+	if parseErr != nil || at.Before(before) || at.After(after) {
+		t.Errorf("invite again from %q (%v), want between %s and %s", rest, parseErr, before, after)
+	}
+}
+
 func TestAppShareRefusals(t *testing.T) {
 	envelope := func(code, message, details string) string {
 		return fmt.Sprintf(`{"error":{"code":%q,"message":%q,"details":%s}}`, code, message, details)
@@ -563,8 +585,8 @@ func TestAppShareRefusals(t *testing.T) {
 			[]string{"invite_limit: These invitations would give hello more people invited than an app can have (50). No one was invited. `latere apps unshare` takes an invitation back.",
 				"detail: an app has at most 50 people with access, pending invites included"}},
 		{"the day is full", envelope("invite_limit", "You can't invite more people right now.", `{"limit":"per_day","max":100,"retry_after":3600,"detail":"a person makes at most 100 invites in 24 hours, across their apps"}`), 429,
-			[]string{"invite_limit: You have made as many invitations as one person can for now (100). No one was invited. You can invite again from " + time.Now().Add(time.Hour).UTC().Format("2006-01-02 15:"),
-				"detail: a person makes at most 100 invites in 24 hours, across their apps"}},
+			[]string{"invite_limit: You have made as many invitations as one person can for now (100). No one was invited. You can invite again from 20",
+				" UTC.\ndetail: a person makes at most 100 invites in 24 hours, across their apps"}},
 		{"a bound this version does not know", envelope("invite_limit", "You can't invite more people right now.", `{"limit":"per_app_day"}`), 429,
 			[]string{"invite_limit: You can't invite more people right now."}},
 		{"not one who may share", envelope("role_insufficient", "Only the people who can change this app's settings can share it.", `{"reason":"not_owner"}`), 403,

@@ -223,8 +223,8 @@ func explainAccessRefusal(err error, slug string, emails []string) error {
 		}
 	case "invite_limit":
 		bound := ""
-		if max, ok := e.Details["max"].(float64); ok {
-			bound = fmt.Sprintf(" (%g)", max)
+		if most, ok := e.Details["max"].(float64); ok {
+			bound = fmt.Sprintf(" (%g)", most)
 		}
 		switch e.Details["limit"] {
 		case "people":
