@@ -125,8 +125,9 @@ git clone https://code.latere.ai/<owner>/<repo>.git
 `latere repos create <owner>/<name>` creates a repository to push to, and
 `latere repos list` shows the ones you can reach ([docs/repos.md](docs/repos.md)).
 `latere apps create` creates an app, whose repository you push to deploy it.
-The app is private until you open it with `latere apps visibility unlisted`
-or invite people with `latere apps share` ([docs/apps.md](docs/apps.md)).
+The app is private: `latere apps visibility unlisted` opens it to anyone who
+has its address, and `latere apps share` invites people to it by email
+([docs/apps.md](docs/apps.md)).
 
 The helper answers for that host only; every other host keeps the helpers
 you already have. Fetch and clone need read access, push needs write

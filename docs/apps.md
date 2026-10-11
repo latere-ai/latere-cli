@@ -4,8 +4,9 @@
 and shows what your pushes built. An app is a git repository and an address:
 a push to a branch builds a preview of it, and a pushed tag that starts with
 `v` releases that commit to the app's address. A new app is private until you
-open it or share it. Every command acts in your current context: your
-personal account, or the organization `latere org` selected.
+open it, and you can invite people to it by email. Every command acts in your
+current context: your personal account, or the organization `latere org`
+selected.
 
 Run `latere login` first (see the [main README](../README.md#sign-in)). It
 also lets git sign in to `code.latere.ai`, which is where you push.
