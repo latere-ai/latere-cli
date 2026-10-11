@@ -112,6 +112,16 @@ people who used the password no longer get in. An `unlisted` app opens for
 anyone with the link, where a password decides nothing, and one left set
 would open the app again the next time it is private.
 
+The visibility is changed whatever becomes of the password, which the
+platform keeps apart from it. When the platform cannot be asked whether the
+app has a password, or does not remove the one it has, the command says so
+in one line on standard error, with the command that removes a password,
+and exits 0:
+
+```text
+The password of hello, if it has one, could not be checked or removed (cannot authenticate to the platform: not logged in; run `latere login`). Remove one with: latere apps password --remove hello
+```
+
 A `public` app opens for anyone too, and search engines may list it. An app
 becomes `public` when it is shown in the gallery at latere.site. You ask for
 that from the app's Share in the chat, and it is reviewed first, so the
@@ -178,7 +188,7 @@ Setting a password makes the app private when it is not, and the command
 says so: an app that anyone with the link opened then opens with the
 password, or by signing in. Running the command again replaces the
 password. Replacing or removing it ends every visit made with the one
-before within a minute.
+before within about a minute.
 
 Nothing is emailed: send people the app's address and the password
 yourself. One password opens the app for everyone who has it, so to let in
@@ -345,8 +355,10 @@ your login token itself is never sent there.
 The people invited to an app and its password are kept by the platform, so
 `latere apps visibility`, `password`, `access`, `share` and `unshare` read
 the app at the Apps API and then call `https://platform.latere.ai`, with a
-token minted for the platform alone. `visibility` asks the platform whether
-the app has a password before it changes anything, so it needs both.
+token minted for the platform alone. `visibility` changes the app at the
+Apps API whatever the platform answers, so a script that holds a bearer for
+the Apps API alone still changes it, with one line on standard error for
+the password it could not check.
 
 | Variable | Default | What it does |
 |---|---|---|
