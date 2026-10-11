@@ -24,10 +24,11 @@ import (
 
 // TestAppAccessE2E drives the built binary through deciding who can open an
 // app, against a stub of the Apps API with auth's mint and a stub of the
-// platform on a server of its own: the visibility changes at the Apps API
-// once the platform has said whether the app has a password, public is
-// refused before any request, and an invitation is made, listed and taken
-// back at the platform, each API with a bearer minted for it alone.
+// platform on a server of its own: the visibility changes at the Apps API,
+// with the platform asked whether the app has a password and without it,
+// public is refused before any request, and an invitation is made, listed
+// and taken back at the platform, each API with a bearer minted for it
+// alone.
 func TestAppAccessE2E(t *testing.T) {
 	if testing.Short() {
 		t.Skip("binary e2e skipped with -short")
@@ -127,9 +128,10 @@ func TestAppAccessE2E(t *testing.T) {
 	env := append(os.Environ(), "LATERE_APPS_URL="+apps.URL+"/v1/apps", "LATERE_APPS_TOKEN=", "LATERE_PLATFORM_URL="+platform.URL, "LATERE_PLATFORM_TOKEN=",
 		"AUTH_URL="+apps.URL, "LATERE_AUTH_TOKEN_FILE="+authPath, "GIT_CEILING_DIRECTORIES="+root,
 		"LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+root)
-	// run answers stdout, stderr, the error, and the requests the command
-	// made at either API.
-	run := func(args ...string) (string, string, []string, error) {
+	// runWith runs the command under env with more appended, where a later
+	// value of a variable replaces an earlier one, and answers stdout,
+	// stderr, the error, and the requests the command made at either API.
+	runWith := func(more []string, args ...string) (string, string, []string, error) {
 		t.Helper()
 		mu.Lock()
 		requests = nil
@@ -137,13 +139,17 @@ func TestAppAccessE2E(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 		defer cancel()
 		command := exec.CommandContext(ctx, binary, args...)
-		command.Env, command.Dir = env, work
+		command.Env, command.Dir = append(slices.Clone(env), more...), work
 		var stdout, stderr bytes.Buffer
 		command.Stdout, command.Stderr = &stdout, &stderr
 		err := command.Run()
 		mu.Lock()
 		defer mu.Unlock()
 		return stdout.String(), stderr.String(), slices.Clone(requests), err
+	}
+	run := func(args ...string) (string, string, []string, error) {
+		t.Helper()
+		return runWith(nil, args...)
 	}
 	wantAll := func(what, got string, wants ...string) {
 		t.Helper()
@@ -158,8 +164,8 @@ func TestAppAccessE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("visibility private: %v %q", err, stderr)
 	}
-	// Whether the app has a password is read at the platform before the
-	// change, and this platform sets none.
+	// The platform is asked whether the app has a password before the
+	// change, and this one sets none.
 	if !slices.Equal(made, []string{"GET /v1/apps/apps/hello", "GET /v1/account/apps/" + appID + "/access", "PATCH /v1/apps/apps/hello"}) || len(patched) != 1 || patched["visibility"] != "private" {
 		t.Errorf("visibility private made %v with the body %v", made, patched)
 	}
@@ -206,4 +212,23 @@ func TestAppAccessE2E(t *testing.T) {
 		t.Fatalf("access after the removal: %v %q", err, stderr)
 	}
 	wantAll("access after the removal", out, "No one is invited.")
+
+	// A caller that holds a bearer for the Apps API and nothing for the
+	// platform, as a script that set LATERE_APPS_TOKEN alone: the visibility
+	// changes as it did before apps had passwords, with one line on standard
+	// error for the password it could not check, and the command succeeds.
+	appsAlone := []string{"LATERE_APPS_TOKEN=actor-for-insula", "LATERE_AUTH_TOKEN_FILE=" + filepath.Join(root, "no-login.json")}
+	out, stderr, made, err = runWith(appsAlone, "apps", "visibility", "unlisted", "hello")
+	if err != nil {
+		t.Fatalf("visibility with the Apps bearer alone: %v %q", err, stderr)
+	}
+	if !slices.Equal(made, []string{"GET /v1/apps/apps/hello", "PATCH /v1/apps/apps/hello"}) || patched["visibility"] != "unlisted" {
+		t.Errorf("visibility with the Apps bearer alone made %v with the body %v", made, patched)
+	}
+	wantAll("visibility with the Apps bearer alone", out, "visibility: unlisted", "Anyone who has its address can open it without signing in, and it is kept out of search engines.")
+	wantAll("visibility with the Apps bearer alone, stderr", stderr, "The password of hello, if it has one, could not be checked or removed (cannot authenticate to the platform: ",
+		"). Remove one with: latere apps password --remove hello\n")
+	if strings.Count(stderr, "\n") != 1 {
+		t.Errorf("visibility with the Apps bearer alone said %d lines on stderr, want one:\n%s", strings.Count(stderr, "\n"), stderr)
+	}
 }

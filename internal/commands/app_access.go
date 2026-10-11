@@ -403,6 +403,12 @@ password decides nothing, and one left set would open the app again once it
 is private. The third choice, anyone with the password, is 'latere apps
 password'.
 
+The visibility is changed whatever becomes of the password, which the
+platform keeps apart from it. When the platform cannot be asked whether the
+app has a password, or does not remove the one it has, the command says so
+in one line on standard error, with the command that removes a password,
+and exits 0: the change asked for was made.
+
 An app becomes public, which lets search engines list it, when it is shown in
 the gallery at latere.site. You ask for that from the app's Share in the
 chat, and it is reviewed first. Changing the visibility takes the app out of
@@ -414,7 +420,7 @@ app again once it is private.
 
 Changing it takes the app's owner, or an owner or admin of the organization
 that owns it. Without [slug], the slug is read from the git remote latere.
---json prints the app as the API answers it, and a password that was removed
+--json prints the app as the API answers it, and what became of a password
 is said on standard error.`,
 		Example: `  latere apps visibility unlisted
   latere apps visibility private hello
@@ -424,49 +430,69 @@ is said on standard error.`,
 			if err := checkVisibility(args[0]); err != nil {
 				return err
 			}
+			slug, fromRemote, err := resolveAppSlug(cmd, firstArg(args[1:]))
+			if err != nil {
+				return err
+			}
 			ctx := cmd.Context()
 			c := newAppClient(*apiURL, *authURL)
 			// The answer of the change carries the new visibility alone, and
 			// what the change ends depends on the one before it.
-			before, _, err := appForAccess(cmd, c, firstArg(args[1:]))
+			before, _, err := c.getApp(ctx, slug)
 			if err != nil {
-				return err
+				return withSlugSource(err, slug, fromRemote)
 			}
-			// Whether the app has a password is read before anything changes,
-			// so a platform that does not say leaves the app as it was.
-			access, _, err := readAccess(ctx, platformURL, *authURL, before)
-			if err != nil {
-				return fmt.Errorf("%s was left as it is, since whether it has a password could not be read: %w", before.Slug, err)
+			// Whether the app has a password is the platform's to say, and
+			// the visibility the Apps API's to change. A caller that reaches
+			// the Apps API alone changes the visibility as it did before
+			// apps had passwords, so a platform that does not say stops
+			// nothing: the change is made, and what could not be done for
+			// the password is said after it.
+			var access appAccess
+			var unread error
+			if before.ID == "" {
+				unread = fmt.Errorf("the Apps API's answer names no id for %s, and its password is kept under it", slug)
+			} else {
+				access, _, unread = readAccess(ctx, platformURL, *authURL, before)
 			}
-			a, raw, err := c.setVisibility(ctx, before.Slug, args[0])
+			a, raw, err := c.setVisibility(ctx, slug, args[0])
 			if err != nil {
 				return err
 			}
 			// Neither value is the choice a password makes, so a password
-			// goes with the change. One that stays is still the app's, and
-			// is said with the failure.
-			left, removed := access.Password, false
-			var failed error
-			if access.offersPasswords() && left != nil {
+			// goes with the change. One that could not be looked for, or
+			// that stays, is said on standard error with the command that
+			// removes it, and fails nothing: the change asked for was made.
+			who, removed, undone := generalAccess(a, access.Password), false, ""
+			if unread != nil {
+				// Without the platform's answer the command says what the
+				// visibility alone lets in, as one that reads no platform does.
+				if who = whoOpensSentence(a); who != "" {
+					who += "\n"
+				}
+				undone = fmt.Sprintf("The password of %s, if it has one, could not be checked or removed (%s). Remove one with: latere apps password --remove %s", slug, oneLine(unread.Error()), slug)
+			} else if access.offersPasswords() && access.Password != nil {
 				if err := platformCall(ctx, platformURL, *authURL, http.MethodDelete, accessPath(before.ID, "password"), nil, nil); err != nil {
-					failed = fmt.Errorf("%s is %s now, and its password is still set: removing it failed: %w", a.Slug, a.Visibility, explainAccessRefusal(err, a.Slug, nil))
+					undone = fmt.Sprintf("The password of %s could not be removed and is still set (%s). Remove it with: latere apps password --remove %s", slug, oneLine(explainAccessRefusal(err, slug, nil).Error()), slug)
 				} else {
-					left, removed = nil, true
+					who, removed = generalAccess(a, nil), true
 				}
 			}
+			out, notes := cmd.OutOrStdout(), cmd.ErrOrStderr()
 			if jsonF {
-				if err := printRawJSON(cmd.OutOrStdout(), raw); err != nil {
+				if err := printRawJSON(out, raw); err != nil {
 					return err
 				}
 				if removed {
-					fprintf(cmd.ErrOrStderr(), "Removed the password of %s. %s\n", a.Slug, passwordGone(a))
+					fprintf(notes, "Removed the password of %s. %s\n", slug, passwordGone(a))
 				}
-				return failed
-			}
-			if err := printVisibility(cmd.OutOrStdout(), before, a, left, removed); err != nil {
+			} else if err := printVisibility(out, before, a, who, removed); err != nil {
 				return err
 			}
-			return failed
+			if undone != "" {
+				fprintln(notes, undone)
+			}
+			return nil
 		},
 	}
 	cmd.Flags().StringVar(&platformURL, "platform-url", "", platformURLUsage)
@@ -499,13 +525,13 @@ func passwordGone(a appResource) string {
 
 // printVisibility says what a change of visibility left: the app, who can
 // open it, what the change ended, and whether the app's password went with
-// it. left is the password the app still has, nil for none.
-func printVisibility(out io.Writer, before, a appResource, left *appPassword, removed bool) error {
+// it. who is the lines that say who can open the app, "" for none.
+func printVisibility(out io.Writer, before, a appResource, who string, removed bool) error {
 	var b strings.Builder
 	b.WriteString(formatWrappedField("app", a.Slug))
 	b.WriteString(formatWrappedField("address", a.URL))
 	b.WriteString(formatWrappedField("visibility", a.Visibility))
-	if who := generalAccess(a, left); who != "" {
+	if who != "" {
 		b.WriteString("\n" + who)
 	}
 	switch before.Visibility {

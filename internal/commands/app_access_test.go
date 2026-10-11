@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -305,31 +306,147 @@ func TestAppVisibilityWhereThePlatformSetsNoPasswords(t *testing.T) {
 	}
 }
 
-// Whether the app has a password is read before the change, so a platform
-// that does not say leaves the app as it was.
-func TestAppVisibilityChangesNothingWithoutThePlatformsAnswer(t *testing.T) {
+// The visibility is the Apps API's and the password the platform's. A
+// platform that does not say whether the app has a password, for any reason,
+// stops no change: the command prints what it printed before apps had
+// passwords, says in one line on standard error what it could not check with
+// the command that removes a password, and succeeds.
+func TestAppVisibilityChangesWhateverThePlatformAnswers(t *testing.T) {
+	const (
+		changed = "app:        hello\naddress:    https://hello.latere.site\nvisibility: private\n\n" +
+			"Only you and the people you invite can open it, each after signing in with a Latere account.\n" +
+			"It was public before. If it was shown in the gallery, it has left the gallery.\n" +
+			"Invite people by email with: latere apps share hello <email>...\n"
+		unchecked = "The password of hello, if it has one, could not be checked or removed (%s). Remove one with: latere apps password --remove hello\n"
+	)
+	for _, tc := range []struct {
+		name, body string
+		status     int
+		cause      string
+	}{
+		{"sharing down", `{"error":{"code":"apps_unavailable","message":"Sharing could not be reached. Try again shortly.","details":{"detail":"read the access list failed"}}}`, 503,
+			"apps_unavailable: Sharing could not be reached. Try again shortly. detail: read the access list failed"},
+		{"a deployment that does not share apps", `{"error":{"code":"apps_unconfigured","message":"Apps is not available on this deployment.","details":{"detail":"sharing an app needs the database"}}}`, 503,
+			"apps_unconfigured: Apps is not available on this deployment. detail: sharing an app needs the database"},
+		{"not one who may share", `{"error":{"code":"role_insufficient","message":"Only the people who can change this app's settings can share it.","details":{"reason":"not_owner"}}}`, 403,
+			"role_insufficient: Only the people who can change this app's settings can share it."},
+		{"no such app at the platform", `{"error":{"code":"access_not_found","message":"We couldn't find that app.","details":{"app_id":"` + stubAppID + `"}}}`, 404,
+			"access_not_found: The platform found no app hello in your current context."},
+		{"a platform without the route", "404 page not found\n", 404, "404 page not found"},
+		{"a login the platform refuses", `{"error":{"code":"unauthorized","message":"Sign in to continue."}}`, 401,
+			"unauthorized: Sign in to continue. Run `latere login` and try again"},
+		{"no answer at all", "", 500, "the platform answered HTTP 500"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newStubApps(t)
+			s.accessStatus, s.accessBody = tc.status, tc.body
+			out, errOut, err := runApp(t, s, "visibility", "private", "hello")
+			if err != nil {
+				t.Fatalf("visibility = %v, want the change made", err)
+			}
+			if out != changed {
+				t.Errorf("visibility =\n%s", out)
+			}
+			if want := fmt.Sprintf(unchecked, tc.cause); errOut != want {
+				t.Errorf("stderr = %q, want %q", errOut, want)
+			}
+			if got := s.inOrder(); !slices.Equal(got, []string{"apps GET /v1/apps/apps/hello", "platform GET " + stubAccessPath, "apps PATCH /v1/apps/apps/hello"}) {
+				t.Errorf("requests in order = %v", got)
+			}
+			if len(s.patched) != 1 || s.patched["visibility"] != "private" {
+				t.Errorf("change body = %v, want the visibility alone", s.patched)
+			}
+		})
+	}
+	t.Run("a platform that cannot be reached", func(t *testing.T) {
+		s := newStubApps(t)
+		out, errOut, err := runApp(t, s, "visibility", "private", "hello", "--platform-url", "http://127.0.0.1:1")
+		if err != nil {
+			t.Fatalf("visibility = %v, want the change made", err)
+		}
+		if out != changed || s.patched["visibility"] != "private" {
+			t.Errorf("visibility =\n%s\nchange body = %v", out, s.patched)
+		}
+		wantContains(t, errOut, "The password of hello, if it has one, could not be checked or removed (reach the platform at http://127.0.0.1:1: ",
+			"). Remove one with: latere apps password --remove hello\n")
+		if strings.Count(errOut, "\n") != 1 || len(s.seenAtThePlatform()) != 0 {
+			t.Errorf("stderr = %q, requests at the platform = %v, want one line and none", errOut, s.seenAtThePlatform())
+		}
+	})
+	t.Run("as JSON", func(t *testing.T) {
+		s := newStubApps(t)
+		s.accessStatus = 500
+		out, errOut, err := runApp(t, s, "visibility", "private", "hello", "--json")
+		if err != nil {
+			t.Fatalf("visibility = %v, want the change made", err)
+		}
+		var got map[string]any
+		if err := json.Unmarshal([]byte(out), &got); err != nil || got["visibility"] != "private" || got["cluster"] == nil {
+			t.Errorf("json = %q (%v)", out, err)
+		}
+		if want := fmt.Sprintf(unchecked, "the platform answered HTTP 500"); errOut != want {
+			t.Errorf("stderr = %q, want %q", errOut, want)
+		}
+	})
+	// A change the Apps API refuses is the failure it was, and says nothing
+	// of a password: nothing was changed for one to matter.
+	t.Run("a refused change", func(t *testing.T) {
+		s := newStubApps(t)
+		s.accessStatus = 500
+		s.patchStatus, s.patchBody = 409, `{"error":{"code":"app_deleting","message":"This app is being deleted."}}`
+		out, errOut, err := runApp(t, s, "visibility", "private", "hello")
+		if err == nil || !strings.Contains(err.Error(), "app_deleting: This app is being deleted.") {
+			t.Errorf("visibility = %v", err)
+		}
+		if out != "" || errOut != "" {
+			t.Errorf("stdout = %q, stderr = %q, want neither", out, errOut)
+		}
+	})
+}
+
+// A caller that holds a bearer for the Apps API and nothing for the
+// platform, as a script that set LATERE_APPS_TOKEN alone, changes the
+// visibility as it did before apps had passwords.
+func TestAppVisibilityWithTheAppsBearerAlone(t *testing.T) {
 	s := newStubApps(t)
-	s.accessStatus = 503
-	s.accessBody = `{"error":{"code":"apps_unavailable","message":"Sharing could not be reached. Try again shortly.","details":{"detail":"read the access list failed"}}}`
-	out, _, err := runApp(t, s, "visibility", "unlisted", "hello")
-	if err == nil {
-		t.Fatal("want the failure")
+	t.Setenv("LATERE_APPS_URL", s.srv.URL+"/v1/apps")
+	t.Setenv("LATERE_APPS_TOKEN", "given-apps-bearer")
+	t.Setenv("LATERE_PLATFORM_URL", s.platform.URL)
+	t.Setenv("LATERE_PLATFORM_TOKEN", "")
+	t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(t.TempDir(), "no-login.json"))
+	t.Setenv("AUTH_URL", s.srv.URL)
+	t.Setenv("LATERE_NO_UPDATE_CHECK", "1")
+	t.Setenv("OTEL_SDK_DISABLED", "true")
+	t.Chdir(t.TempDir())
+	root := NewRoot("test")
+	var out, errOut bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&errOut)
+	root.SetArgs([]string{"apps", "visibility", "unlisted", "hello"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("visibility = %v, want the change made", err)
 	}
-	wantContains(t, err.Error(), "hello was left as it is, since whether it has a password could not be read: apps_unavailable: Sharing could not be reached. Try again shortly.\ndetail: read the access list failed")
-	if out != "" || s.patched != nil {
-		t.Errorf("stdout = %q, change body = %v, want neither", out, s.patched)
+	wantContains(t, out.String(), "visibility: unlisted\n\nAnyone who has its address can open it without signing in, and it is kept out of search engines.\n")
+	wantContains(t, errOut.String(), "The password of hello, if it has one, could not be checked or removed (cannot authenticate to the platform: ",
+		"). Remove one with: latere apps password --remove hello\n")
+	if strings.Count(errOut.String(), "\n") != 1 {
+		t.Errorf("stderr = %q, want one line", errOut.String())
 	}
-	if got := s.inOrder(); !slices.Equal(got, []string{"apps GET /v1/apps/apps/hello", "platform GET " + stubAccessPath}) {
-		t.Errorf("requests in order = %v, want the two reads alone", got)
+	if s.patched["visibility"] != "unlisted" || !slices.Equal(s.bearers, []string{"given-apps-bearer", "given-apps-bearer"}) {
+		t.Errorf("change body = %v, bearers at the Apps API = %v", s.patched, s.bearers)
 	}
-	if code := HandleExitError(&bytes.Buffer{}, err); code != 1 {
-		t.Errorf("exit = %d, want 1", code)
+	if len(s.seenAtThePlatform()) != 0 || len(s.audiences) != 0 {
+		t.Errorf("requests at the platform = %v, mints = %v, want neither", s.seenAtThePlatform(), s.audiences)
 	}
 }
 
-// A password that could not be removed is still the app's: the command says
-// what the change left, with the password, and then fails.
+// A password that could not be removed is still the app's. The change asked
+// for was made, so the command says what the change left, with the password,
+// says the removal that failed on standard error with the command to run,
+// and succeeds.
 func TestAppVisibilitySaysAPasswordItCouldNotRemove(t *testing.T) {
+	const stillSet = "The password of hello could not be removed and is still set (apps_unavailable: Sharing could not be reached. Try again shortly. detail: remove the password failed). " +
+		"Remove it with: latere apps password --remove hello\n"
 	for _, jsonF := range []bool{false, true} {
 		s := newStubApps(t)
 		s.apps["hello"] = stubAppAs("hello", "unlisted", "personal")
@@ -341,40 +458,58 @@ func TestAppVisibilitySaysAPasswordItCouldNotRemove(t *testing.T) {
 			args = append(args, "--json")
 		}
 		out, errOut, err := runApp(t, s, args...)
-		if err == nil {
-			t.Fatal("want the failure")
+		if err != nil {
+			t.Fatalf("visibility = %v, want the change made", err)
 		}
-		wantContains(t, err.Error(), "hello is private now, and its password is still set: removing it failed: apps_unavailable: Sharing could not be reached. Try again shortly.\ndetail: remove the password failed")
+		if errOut != stillSet {
+			t.Errorf("stderr = %q", errOut)
+		}
 		if jsonF {
 			var got map[string]any
 			if err := json.Unmarshal([]byte(out), &got); err != nil || got["visibility"] != "private" {
 				t.Errorf("json = %q (%v)", out, err)
 			}
-			if errOut != "" {
-				t.Errorf("stderr = %q, want nothing of a removal", errOut)
-			}
 		} else {
 			wantContains(t, out, "visibility: private\n\nAnyone with the password, set 2026-10-08 12:00 UTC: whoever types it at the app's address opens the app, with no Latere account.\n")
 			wantLacks(t, out, "password was removed", "Only people invited")
 		}
-		if code := HandleExitError(&bytes.Buffer{}, err); code != 1 {
-			t.Errorf("exit = %d, want 1", code)
+		if got := s.inOrder(); !slices.Equal(got, []string{"apps GET /v1/apps/apps/hello", "platform GET " + stubAccessPath,
+			"apps PATCH /v1/apps/apps/hello", "platform DELETE " + stubAccessPath + "/password"}) {
+			t.Errorf("requests in order = %v", got)
 		}
 	}
 }
 
-// The platform keeps a password under the app's id, so an answer without one
-// changes nothing.
+// The platform keeps a password under the app's id, so an app whose answer
+// names none has its visibility changed and its password left unchecked.
 func TestAppVisibilityOfAnAppWithoutAnID(t *testing.T) {
 	s := newStubApps(t)
 	s.apps["hello"] = `{"slug":"hello","visibility":"private"}`
-	_, _, err := runApp(t, s, "visibility", "unlisted", "hello")
-	if err == nil || !strings.Contains(err.Error(), "names no id for hello") {
-		t.Errorf("visibility = %v", err)
+	out, errOut, err := runApp(t, s, "visibility", "unlisted", "hello")
+	if err != nil {
+		t.Fatalf("visibility = %v, want the change made", err)
 	}
-	if s.patched != nil || len(s.seenAtThePlatform()) != 0 {
-		t.Errorf("change body = %v, requests at the platform = %v, want neither", s.patched, s.seenAtThePlatform())
+	wantContains(t, out, "visibility: unlisted\n")
+	if errOut != "The password of hello, if it has one, could not be checked or removed (the Apps API's answer names no id for hello, and its password is kept under it). "+
+		"Remove one with: latere apps password --remove hello\n" {
+		t.Errorf("stderr = %q", errOut)
 	}
+	if s.patched["visibility"] != "unlisted" || len(s.seenAtThePlatform()) != 0 {
+		t.Errorf("change body = %v, requests at the platform = %v, want the change and no request", s.patched, s.seenAtThePlatform())
+	}
+}
+
+// The help says that a password the platform does not answer for fails no
+// change.
+func TestAppVisibilityHelpSaysWhatBecomesOfAPassword(t *testing.T) {
+	out, err := executeForHelp(NewRoot("test"), "apps", "visibility", "--help")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantContains(t, out, "Both remove the app's password when it has one, and the command says so.",
+		"The visibility is changed whatever becomes of the password",
+		"in one line on standard error, with the command that removes a password,\nand exits 0: the change asked for was made.",
+		"--platform-url")
 }
 
 // ---- access ----
