@@ -316,12 +316,12 @@ func printVisibility(out io.Writer, before, a appResource) error {
 	// A change to unlisted or private deletes the app's place in the
 	// gallery: the card of a public app, or the request an unlisted app
 	// has waiting for review.
-	switch {
-	case before.Visibility == a.Visibility:
+	switch before.Visibility {
+	case a.Visibility:
 		fmt.Fprintf(&b, "It was %s already, so nothing changed.\n", a.Visibility)
-	case before.Visibility == visibilityPublic:
+	case visibilityPublic:
 		b.WriteString("It was public before. If it was shown in the gallery, it has left the gallery.\n")
-	case before.Visibility == visibilityUnlisted:
+	case visibilityUnlisted:
 		b.WriteString("If you had asked to show it in the gallery, that request has ended.\n")
 	}
 	if a.Visibility == visibilityPrivate {
