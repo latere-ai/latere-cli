@@ -92,7 +92,8 @@ A new app is private: only you, or the members of the organization that owns
 it, can open its address, each after signing in with a Latere account. Open
 it or share it:
 
-  latere apps visibility unlisted      anyone who has the address opens it
+  latere apps visibility unlisted      anyone with the link opens it
+  latere apps password                 anyone with the password opens it
   latere apps share ada@example.com    invites one person to a private app
   latere apps access                   shows who can open it
 
@@ -106,13 +107,14 @@ repository you run it in when you leave it out.
 The commands call https://api.latere.ai/v1/apps with a token minted for your
 login. LATERE_APPS_URL or --api-url overrides the address, and
 LATERE_APPS_TOKEN presents a bearer as given. The people invited to an app
-are kept by the platform, so access, share and unshare also call
-https://platform.latere.ai with a token of its own: LATERE_PLATFORM_URL or
---platform-url overrides that address, and LATERE_PLATFORM_TOKEN presents
-that bearer as given.`,
+and its password are kept by the platform, so visibility, password, access,
+share and unshare also call https://platform.latere.ai with a token of its
+own: LATERE_PLATFORM_URL or --platform-url overrides that address, and
+LATERE_PLATFORM_TOKEN presents that bearer as given.`,
 		Example: `  latere apps create hello
   git push latere main && latere apps logs -f
   latere apps visibility unlisted
+  latere apps password --generate
   latere apps share ada@example.com
   latere apps access
   latere apps list
@@ -134,6 +136,7 @@ that bearer as given.`,
 		newAppAccessCmd(&apiURL, &authURL),
 		newAppShareCmd(&apiURL, &authURL),
 		newAppUnshareCmd(&apiURL, &authURL),
+		newAppPasswordCmd(&apiURL, &authURL),
 		newAppDeploysCmd(&apiURL, &authURL),
 		newAppLogsCmd(&apiURL, &authURL),
 		newAppDeleteCmd(&apiURL, &authURL),
@@ -631,10 +634,11 @@ its newest preview, its push URL, and who can open it.
 A new app is private: only you, or the members of the organization that owns
 it, and the people you invite can open it, each after signing in with a
 Latere account. --visibility unlisted creates it open to anyone who has its
-address. 'latere apps visibility' changes that later, and 'latere apps share'
-invites people to a private app. An app becomes public, which lets search
-engines list it, when it is shown in the gallery. You ask for that from the
-app's Share in the chat, and it is reviewed first.
+address. 'latere apps visibility' changes that later, 'latere apps share'
+invites people to a private app, and 'latere apps password' opens one for
+anyone with a password. An app becomes public, which lets search engines
+list it, when it is shown in the gallery. You ask for that from the app's
+Share in the chat, and it is reviewed first.
 
 The slug is the app's address. --slug names it; without --slug it is derived
 from [name], or generated when there is no name. A slug is 1 to 40 lowercase
@@ -838,7 +842,9 @@ and the address.
 
 The visibility says who can open the app: private, only you and the people
 invited; unlisted, anyone who has the address; public, anyone, and search
-engines may list it. 'latere apps access' says it in full for one app.
+engines may list it. A private app may also open for anyone with its
+password, which the list does not read: 'latere apps access' says who can
+open one app in full.
 
 'latere org' switches the context. --json prints the apps as the API answers
 them.`,
@@ -961,7 +967,8 @@ func newAppShowCmd(apiURL, authURL *string) *cobra.Command {
 		Long: `Show one app: its visibility with who that lets open it, its address and
 the address of its newest preview, the release its address serves with that
 release's deploy, its newest preview deploy, and the URLs to push to and
-clone from. 'latere apps access' lists the people invited to it.
+clone from. 'latere apps access' lists the people invited to it, and says
+whether a private app also opens with a password.
 
 Without [slug], the slug is read from the git remote latere. --json prints
 an object with the app, the release production serves, and the newest

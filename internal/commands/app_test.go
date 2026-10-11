@@ -117,8 +117,12 @@ type stubApps struct {
 	platform         *httptest.Server
 	platformRequests []string
 	platformBearers  []string
-	// passwordRemoveStatus and passwordRemoveBody refuse a removal of the
-	// app's password.
+	// passwords is the body of every set of the password, in order.
+	// passwordStatus and passwordBody refuse a set, and passwordRemoveStatus
+	// and passwordRemoveBody a removal.
+	passwords            []map[string]string
+	passwordStatus       int
+	passwordBody         string
 	passwordRemoveStatus int
 	passwordRemoveBody   string
 	// access answers the read of the people invited; accessStatus and
@@ -346,6 +350,18 @@ func newStubApps(t *testing.T) *stubApps {
 		w.WriteHeader(http.StatusCreated)
 		_, _ = fmt.Fprintf(w, `{"people":[%s],"skipped":[]}`, strings.Join(rows, ","))
 	})
+	access.HandleFunc("PUT /v1/account/apps/{app_id}/access/password", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("password body: %v", err)
+		}
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.passwords = append(s.passwords, body)
+		if !refused(w, s.passwordStatus, s.passwordBody) {
+			w.WriteHeader(http.StatusNoContent)
+		}
+	})
 	access.HandleFunc("DELETE /v1/account/apps/{app_id}/access/password", func(w http.ResponseWriter, _ *http.Request) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
@@ -395,6 +411,19 @@ func (s *stubApps) inOrder() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.order...)
+}
+
+// passwordSent is the one password the platform was sent, and fails the
+// test unless exactly one set arrived, carrying the password and nothing
+// else.
+func (s *stubApps) passwordSent(t *testing.T) string {
+	t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.passwords) != 1 || len(s.passwords[0]) != 1 {
+		t.Fatalf("sets of the password = %d, want one that carries the password alone", len(s.passwords))
+	}
+	return s.passwords[0]["password"]
 }
 
 // runAppIn runs `latere apps …` in dir against the stub, with a saved login
@@ -1161,8 +1190,10 @@ func TestAppWithoutASubcommandShowsHelp(t *testing.T) {
 	}
 	wantContains(t, out, "git push latere main && latere apps logs -f", "create", "deploys", "logs",
 		"A new app is private", "latere apps visibility unlisted", "latere apps share ada@example.com", "latere apps access",
+		"latere apps password                 anyone with the password opens it", "latere apps password --generate",
+		"so visibility, password, access,\nshare and unshare also call https://platform.latere.ai",
 		"An app becomes public, which lets search engines list it, when it is shown\nin the gallery",
-		"visibility  ", "access  ", "share  ", "unshare  ")
+		"visibility  ", "access  ", "share  ", "unshare  ", "password  ")
 	// Public is never offered as something to choose.
 	for _, offer := range []string{"visibility public", "private|unlisted|public", "unlisted or public;"} {
 		if strings.Contains(out, offer) {
