@@ -188,7 +188,7 @@ func TestAppPasswordOfAnAppThatHasOneReplacesIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantContains(t, out, "\nThe password of hello is replaced. The one before stops opening the app within a minute.\n"+stubPasswordChoice)
+	wantContains(t, out, "\nThe password of hello is replaced. The one before stops opening the app within about a minute.\n"+stubPasswordChoice)
 	wantLacks(t, out, "is set.", "2026-10-08")
 	if got := s.seenAtThePlatform(); !slices.Equal(got, []string{"GET " + stubAccessPath, "PUT " + stubPasswordPath}) {
 		t.Errorf("requests at the platform = %v", got)
@@ -639,7 +639,7 @@ func TestAppPasswordRemove(t *testing.T) {
 		order                          []string
 	}{
 		{"a password that is set", "private", stubAccessWithPassword(),
-			"Removed the password of hello. The people who used it no longer get in, and a visit made with it ends within a minute.\n" + stubInvitedChoice,
+			"Removed the password of hello. The people who used it no longer get in, and a visit made with it ends within about a minute.\n" + stubInvitedChoice,
 			[]string{stubReadApp, stubReadAccess, stubDropPassword}},
 		{"none set", "private", stubAccessJSON(),
 			"hello has no password, so there was none to remove.\n" + stubInvitedChoice,

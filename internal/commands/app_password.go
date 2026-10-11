@@ -71,7 +71,7 @@ signing in.
 A password is for a private app, so setting one makes the app private when
 it is not: an app that anyone with the link opened then opens with the
 password, or by signing in. Replacing a password ends every visit made with
-the one before within a minute.
+the one before within about a minute.
 
 A password is never a flag's value or an argument, which a shell history
 would keep. It comes from the first of these that applies:
@@ -329,7 +329,7 @@ func printPasswordSet(out io.Writer, before, a appResource, replaced bool, gener
 	b.WriteString(formatWrappedField("address", a.URL))
 	b.WriteString(formatWrappedField("visibility", a.Visibility))
 	if replaced {
-		fmt.Fprintf(&b, "\nThe password of %s is replaced. The one before stops opening the app within a minute.\n", a.Slug)
+		fmt.Fprintf(&b, "\nThe password of %s is replaced. The one before stops opening the app within about a minute.\n", a.Slug)
 	} else {
 		fmt.Fprintf(&b, "\nThe password of %s is set.\n", a.Slug)
 	}

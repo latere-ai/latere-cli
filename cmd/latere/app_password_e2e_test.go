@@ -270,7 +270,7 @@ func TestAppPasswordE2E(t *testing.T) {
 	if _, p := state(); p != piped || !slices.Equal(made, []string{readApp, readAccess, setPassword}) {
 		t.Errorf("password --stdin made %v and set a password of %d characters, want the line piped", made, len(p))
 	}
-	wantAll("password --stdin", out, "The password of hello is replaced. The one before stops opening the app within a minute.")
+	wantAll("password --stdin", out, "The password of hello is replaced. The one before stops opening the app within about a minute.")
 	if strings.Contains(out+stderr, "harbor") || strings.Contains(out, "generated") {
 		t.Errorf("password --stdin printed the password, or a generated one:\n%s\n%s", out, stderr)
 	}
@@ -336,7 +336,7 @@ func TestAppPasswordE2E(t *testing.T) {
 	if _, p := state(); p != "" || !slices.Equal(made, []string{readApp, readAccess, dropIt}) {
 		t.Errorf("password --remove made %v, password set: %t", made, p != "")
 	}
-	wantAll("password --remove", out, "Removed the password of hello. The people who used it no longer get in, and a visit made with it ends within a minute.",
+	wantAll("password --remove", out, "Removed the password of hello. The people who used it no longer get in, and a visit made with it ends within about a minute.",
 		"Only people invited: it opens for them and for you")
 	out, stderr, made, err = run("", "apps", "password", "hello", "--remove")
 	if err != nil {

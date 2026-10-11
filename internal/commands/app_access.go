@@ -520,7 +520,7 @@ func passwordGone(a appResource) string {
 	if opensToAnyone(a) {
 		return "Anyone with the link opens the app, where a password decides nothing, and one left set would open the app again once it is private."
 	}
-	return "The people who used it no longer get in, and a visit made with it ends within a minute."
+	return "The people who used it no longer get in, and a visit made with it ends within about a minute."
 }
 
 // printVisibility says what a change of visibility left: the app, who can

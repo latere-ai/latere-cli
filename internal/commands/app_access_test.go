@@ -216,7 +216,7 @@ func TestAppVisibilityRemovesAPassword(t *testing.T) {
 		{"anyone with the password to only people invited", "private", "private",
 			[]string{"visibility: private\n\nOnly people invited: it opens for them and for you, each after signing in with a Latere account.\n" +
 				"It was private already.\n" +
-				"Its password was removed. The people who used it no longer get in, and a visit made with it ends within a minute.\n" +
+				"Its password was removed. The people who used it no longer get in, and a visit made with it ends within about a minute.\n" +
 				"Invite people by email with: latere apps share hello <email>...\n"},
 			[]string{"so nothing changed", "Anyone with the password"}},
 		{"anyone with the password to anyone with the link", "private", "unlisted",
@@ -226,7 +226,7 @@ func TestAppVisibilityRemovesAPassword(t *testing.T) {
 		{"a password left on an unlisted app, made private", "unlisted", "private",
 			[]string{"Only people invited: it opens for them and for you",
 				"If you had asked to show it in the gallery, that request has ended.\n" +
-					"Its password was removed. The people who used it no longer get in, and a visit made with it ends within a minute.\n"},
+					"Its password was removed. The people who used it no longer get in, and a visit made with it ends within about a minute.\n"},
 			[]string{"already"}},
 		{"a password left on an unlisted app that stays unlisted", "unlisted", "unlisted",
 			[]string{"It was unlisted already.\nIts password was removed. Anyone with the link opens the app"},
