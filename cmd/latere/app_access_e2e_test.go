@@ -24,9 +24,10 @@ import (
 
 // TestAppAccessE2E drives the built binary through deciding who can open an
 // app, against a stub of the Apps API with auth's mint and a stub of the
-// platform on a server of its own: the visibility changes at the Apps API,
-// public is refused before any request, and an invitation is made, listed
-// and taken back at the platform, each API with a bearer minted for it alone.
+// platform on a server of its own: the visibility changes at the Apps API
+// once the platform has said whether the app has a password, public is
+// refused before any request, and an invitation is made, listed and taken
+// back at the platform, each API with a bearer minted for it alone.
 func TestAppAccessE2E(t *testing.T) {
 	if testing.Short() {
 		t.Skip("binary e2e skipped with -short")
@@ -157,10 +158,12 @@ func TestAppAccessE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("visibility private: %v %q", err, stderr)
 	}
-	if !slices.Equal(made, []string{"GET /v1/apps/apps/hello", "PATCH /v1/apps/apps/hello"}) || len(patched) != 1 || patched["visibility"] != "private" {
+	// Whether the app has a password is read at the platform before the
+	// change, and this platform sets none.
+	if !slices.Equal(made, []string{"GET /v1/apps/apps/hello", "GET /v1/account/apps/" + appID + "/access", "PATCH /v1/apps/apps/hello"}) || len(patched) != 1 || patched["visibility"] != "private" {
 		t.Errorf("visibility private made %v with the body %v", made, patched)
 	}
-	wantAll("visibility private", out, "visibility: private", "Only you and the people you invite can open it", "latere apps share hello <email>...")
+	wantAll("visibility private", out, "visibility: private", "Only people invited: you and the people you invite open it", "latere apps share hello <email>...")
 
 	out, stderr, made, err = run("apps", "visibility", "public", "hello")
 	if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 {

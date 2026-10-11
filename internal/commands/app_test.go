@@ -46,15 +46,33 @@ func stubAppAs(slug, visibility, owner string) string {
 "created_at":"2026-09-22T12:00:00Z","updated_at":"2026-09-22T12:00:00Z"}`, slug, visibility, owner)
 }
 
-// stubAccessJSON is the people invited to the stub's app as the platform
-// answers them: one who accepted, and one who has not yet.
+// stubAccessJSON is who can open the stub's app as the platform answers it:
+// two people invited, one who accepted and one who has not yet, no password,
+// and a platform that sets one.
 func stubAccessJSON() string {
 	return fmt.Sprintf(`{"app_id":%q,"people":[
 {"id":"inv_01JA4S0000000000000000000A","role":"viewer","email":"ines@example.com","state":"active","person":{"display_name":"Ines Moreau","handle":"ines"},"invited_at":%q,"claimed_at":%q},
 {"id":"inv_01JA4T0000000000000000000B","role":"viewer","email":"pilot@harbor.example","state":"pending","invited_at":%q}],
-"organization":null,"actions":["invite","revoke"],"limits":{"max_people":50,"max_emails_per_invite":20}}`, stubAppID,
+"organization":null,"password":null,"actions":["invite","revoke","set_password"],
+"limits":{"max_people":50,"max_emails_per_invite":20,"min_password":8,"max_password":128}}`, stubAppID,
 		time.Now().Add(-5*24*time.Hour).UTC().Format(time.RFC3339), time.Now().Add(-4*24*time.Hour).UTC().Format(time.RFC3339),
 		time.Now().Add(-3*time.Hour).UTC().Format(time.RFC3339))
+}
+
+// stubPasswordSetAt is the moment the stub's app had its password set, when
+// a case gives it one.
+const stubPasswordSetAt = "2026-10-08T12:00:00Z"
+
+// stubAccessWithPassword is stubAccessJSON for an app that has a password.
+func stubAccessWithPassword() string {
+	return strings.Replace(stubAccessJSON(), `"password":null`, `"password":{"set_at":"`+stubPasswordSetAt+`"}`, 1)
+}
+
+// stubAccessWithoutPasswords is stubAccessJSON from a platform that sets no
+// app passwords: no set_password among the actions, and no password
+// whatever the app has.
+func stubAccessWithoutPasswords() string {
+	return strings.Replace(stubAccessJSON(), `,"set_password"`, "", 1)
 }
 
 func stubDeployJSON(id, status, ref string, preview bool, components string) string {
@@ -90,11 +108,19 @@ type stubApps struct {
 	patchStatus int
 	patchBody   string
 
+	// order is every request at either server as it arrived, each led by
+	// the server it reached.
+	order []string
+
 	// platform is the platform on a server of its own, with the people
-	// invited to the stub's app under the app's id.
+	// invited to the stub's app and its password under the app's id.
 	platform         *httptest.Server
 	platformRequests []string
 	platformBearers  []string
+	// passwordRemoveStatus and passwordRemoveBody refuse a removal of the
+	// app's password.
+	passwordRemoveStatus int
+	passwordRemoveBody   string
 	// access answers the read of the people invited; accessStatus and
 	// accessBody refuse it.
 	access       string
@@ -273,6 +299,7 @@ func newStubApps(t *testing.T) *stubApps {
 	s.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/actor-tokens" {
 			s.mu.Lock()
+			s.order = append(s.order, "apps "+r.Method+" "+r.URL.RequestURI())
 			s.requests = append(s.requests, r.Method+" "+r.URL.RequestURI())
 			s.bearers = append(s.bearers, strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
 			s.accepts = append(s.accepts, r.Header.Get("Accept"))
@@ -319,6 +346,13 @@ func newStubApps(t *testing.T) *stubApps {
 		w.WriteHeader(http.StatusCreated)
 		_, _ = fmt.Fprintf(w, `{"people":[%s],"skipped":[]}`, strings.Join(rows, ","))
 	})
+	access.HandleFunc("DELETE /v1/account/apps/{app_id}/access/password", func(w http.ResponseWriter, _ *http.Request) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if !refused(w, s.passwordRemoveStatus, s.passwordRemoveBody) {
+			w.WriteHeader(http.StatusNoContent)
+		}
+	})
 	access.HandleFunc("DELETE /v1/account/apps/{app_id}/access/{access_id}", func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		status, body, only := s.revokeStatus, s.revokeBody, s.revokeFailsOn
@@ -332,6 +366,7 @@ func newStubApps(t *testing.T) *stubApps {
 	})
 	s.platform = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
+		s.order = append(s.order, "platform "+r.Method+" "+r.URL.RequestURI())
 		s.platformRequests = append(s.platformRequests, r.Method+" "+r.URL.RequestURI())
 		s.platformBearers = append(s.platformBearers, strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
 		s.mu.Unlock()
@@ -353,6 +388,13 @@ func (s *stubApps) seenAtThePlatform() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.platformRequests...)
+}
+
+// inOrder is the requests both servers received, in the order they arrived.
+func (s *stubApps) inOrder() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.order...)
 }
 
 // runAppIn runs `latere apps …` in dir against the stub, with a saved login

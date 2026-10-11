@@ -793,7 +793,7 @@ func explainCreateRefusal(err error, asked string) error {
 	case "slug_held":
 		e.explained = fmt.Sprintf("The slug %s was released recently and is held for its previous owner.", slug)
 		if end, err := time.Parse(time.RFC3339, e.detail("hold_ends_at")); err == nil {
-			e.explained = fmt.Sprintf("The slug %s was released recently and is held for its previous owner until %s.", slug, end.UTC().Format("2006-01-02 15:04 UTC"))
+			e.explained = fmt.Sprintf("The slug %s was released recently and is held for its previous owner until %s.", slug, end.UTC().Format(utcMinute))
 		}
 	case "invalid_slug":
 		e.explained = fmt.Sprintf("The slug %s is not a valid address.", slug)

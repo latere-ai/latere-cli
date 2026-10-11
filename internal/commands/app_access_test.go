@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -46,6 +47,9 @@ func eachAPIItsOwnAudience(t *testing.T, s *stubApps) {
 	}
 }
 
+// stubAccessPath is the platform's path of who can open the stub's app.
+const stubAccessPath = "/v1/account/apps/" + stubAppID + "/access"
+
 // ---- visibility ----
 
 func TestAppVisibilityChangesWhoCanOpenTheApp(t *testing.T) {
@@ -54,18 +58,18 @@ func TestAppVisibilityChangesWhoCanOpenTheApp(t *testing.T) {
 		want, lacks             []string
 	}{
 		{"a private app opened to its address", "private", "unlisted", "personal",
-			[]string{"app:        hello\naddress:    https://hello.latere.site\nvisibility: unlisted\n\nAnyone who has its address can open it without signing in, and it is kept out of search engines.\n"},
+			[]string{"app:        hello\naddress:    https://hello.latere.site\nvisibility: unlisted\n\nAnyone with the link: it opens without signing in, and is kept out of search engines.\n"},
 			[]string{"gallery", "latere apps share", "already"}},
 		{"a public app leaves the gallery for its address", "public", "unlisted", "personal",
 			[]string{"visibility: unlisted\n", "It was public before. If it was shown in the gallery, it has left the gallery.\n"},
 			[]string{"latere apps share", "that request"}},
 		{"a public app made private", "public", "private", "personal",
-			[]string{"visibility: private\n\nOnly you and the people you invite can open it, each after signing in with a Latere account.\n",
+			[]string{"visibility: private\n\nOnly people invited: you and the people you invite open it, each after signing in with a Latere account.\n",
 				"It was public before. If it was shown in the gallery, it has left the gallery.\n",
 				"Invite people by email with: latere apps share hello <email>...\n"},
 			nil},
 		{"an unlisted app made private ends a request to be shown", "unlisted", "private", "organization",
-			[]string{"Only the members of its organization and the people invited can open it, each after signing in with a Latere account.\n",
+			[]string{"Only people invited: the members of its organization and the people invited open it, each after signing in with a Latere account.\n",
 				"If you had asked to show it in the gallery, that request has ended.\n", "latere apps share hello <email>..."},
 			[]string{"It was public before"}},
 		{"the visibility it already has", "unlisted", "unlisted", "personal",
@@ -87,10 +91,13 @@ func TestAppVisibilityChangesWhoCanOpenTheApp(t *testing.T) {
 				t.Errorf("change body = %v, want the visibility alone", s.patched)
 			}
 			wantContains(t, out, tc.want...)
-			wantLacks(t, out, tc.lacks...)
-			if len(s.seenAtThePlatform()) != 0 {
-				t.Errorf("requests at the platform = %v, want none", s.seenAtThePlatform())
+			wantLacks(t, out, append(tc.lacks, "password")...)
+			// Whether the app has a password is read before the change, and
+			// an app without one has nothing removed.
+			if got := s.inOrder(); !slices.Equal(got, []string{"apps GET /v1/apps/apps/hello", "platform GET " + stubAccessPath, "apps PATCH /v1/apps/apps/hello"}) {
+				t.Errorf("requests in order = %v", got)
 			}
+			eachAPIItsOwnAudience(t, s)
 		})
 	}
 }
@@ -198,6 +205,178 @@ func TestAppVisibilityOfAnUnknownApp(t *testing.T) {
 	}
 }
 
+// Neither value of a visibility is the choice a password makes, so both
+// remove a password the app has and say what that changes.
+func TestAppVisibilityRemovesAPassword(t *testing.T) {
+	for _, tc := range []struct {
+		name, before, to string
+		want, lacks      []string
+	}{
+		{"anyone with the password to only people invited", "private", "private",
+			[]string{"visibility: private\n\nOnly people invited: you and the people you invite open it, each after signing in with a Latere account.\n" +
+				"It was private already.\n" +
+				"Its password was removed. The people who used it no longer get in, and a visit made with it ends within a minute.\n" +
+				"Invite people by email with: latere apps share hello <email>...\n"},
+			[]string{"so nothing changed", "Anyone with the password"}},
+		{"anyone with the password to anyone with the link", "private", "unlisted",
+			[]string{"visibility: unlisted\n\nAnyone with the link: it opens without signing in, and is kept out of search engines.\n" +
+				"Its password was removed. Anyone with the link opens the app, where a password decides nothing, and one left set would open the app again once it is private.\n"},
+			[]string{"A password is set", "Remove it with", "no longer get in"}},
+		{"a password left on an unlisted app, made private", "unlisted", "private",
+			[]string{"Only people invited: you and the people you invite open it",
+				"If you had asked to show it in the gallery, that request has ended.\n" +
+					"Its password was removed. The people who used it no longer get in, and a visit made with it ends within a minute.\n"},
+			[]string{"already"}},
+		{"a password left on an unlisted app that stays unlisted", "unlisted", "unlisted",
+			[]string{"It was unlisted already.\nIts password was removed. Anyone with the link opens the app"},
+			[]string{"so nothing changed"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newStubApps(t)
+			s.apps["hello"] = stubAppAs("hello", tc.before, "personal")
+			s.access = stubAccessWithPassword()
+			out, errOut, err := runApp(t, s, "visibility", tc.to, "hello")
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantContains(t, out, tc.want...)
+			wantLacks(t, out, tc.lacks...)
+			if errOut != "" {
+				t.Errorf("stderr = %q, want nothing", errOut)
+			}
+			if got := s.inOrder(); !slices.Equal(got, []string{"apps GET /v1/apps/apps/hello", "platform GET " + stubAccessPath,
+				"apps PATCH /v1/apps/apps/hello", "platform DELETE " + stubAccessPath + "/password"}) {
+				t.Errorf("requests in order = %v", got)
+			}
+			if len(s.patched) != 1 || s.patched["visibility"] != tc.to {
+				t.Errorf("change body = %v, want the visibility alone", s.patched)
+			}
+			eachAPIItsOwnAudience(t, s)
+		})
+	}
+}
+
+// --json keeps standard output the app as the API answers it, so a password
+// that went with the change is said on standard error.
+func TestAppVisibilityJSONSaysARemovedPasswordOnStderr(t *testing.T) {
+	s := newStubApps(t)
+	s.apps["hello"] = stubAppAs("hello", "private", "personal")
+	s.access = stubAccessWithPassword()
+	out, errOut, err := runApp(t, s, "visibility", "unlisted", "hello", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("%v: %q", err, out)
+	}
+	if got["visibility"] != "unlisted" || got["slug"] != "hello" {
+		t.Errorf("json = %v", got)
+	}
+	if errOut != "Removed the password of hello. Anyone with the link opens the app, where a password decides nothing, and one left set would open the app again once it is private.\n" {
+		t.Errorf("stderr = %q", errOut)
+	}
+	// An app without a password leaves standard error empty.
+	s = newStubApps(t)
+	if _, errOut, err := runApp(t, s, "visibility", "unlisted", "hello", "--json"); err != nil || errOut != "" {
+		t.Errorf("without a password: stderr = %q, err = %v", errOut, err)
+	}
+}
+
+// A platform that sets no passwords says of every app that it has none, and
+// has no route to remove one, so the change is the visibility alone.
+func TestAppVisibilityWhereThePlatformSetsNoPasswords(t *testing.T) {
+	for _, access := range []string{stubAccessWithoutPasswords(),
+		// The same platform answering a password all the same has none removed.
+		strings.Replace(stubAccessWithPassword(), `,"set_password"`, "", 1),
+		// A platform from before passwords names neither the password nor its bounds.
+		`{"app_id":"` + stubAppID + `","people":[],"organization":null,"actions":["invite","revoke"],"limits":{"max_people":50,"max_emails_per_invite":20}}`} {
+		s := newStubApps(t)
+		s.access = access
+		out, _, err := runApp(t, s, "visibility", "private", "hello")
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantContains(t, out, "visibility: private\n")
+		wantLacks(t, out, "password was removed")
+		if got := s.seenAtThePlatform(); !slices.Equal(got, []string{"GET " + stubAccessPath}) {
+			t.Errorf("requests at the platform = %v, want the read alone", got)
+		}
+	}
+}
+
+// Whether the app has a password is read before the change, so a platform
+// that does not say leaves the app as it was.
+func TestAppVisibilityChangesNothingWithoutThePlatformsAnswer(t *testing.T) {
+	s := newStubApps(t)
+	s.accessStatus = 503
+	s.accessBody = `{"error":{"code":"apps_unavailable","message":"Sharing could not be reached. Try again shortly.","details":{"detail":"read the access list failed"}}}`
+	out, _, err := runApp(t, s, "visibility", "unlisted", "hello")
+	if err == nil {
+		t.Fatal("want the failure")
+	}
+	wantContains(t, err.Error(), "hello was left as it is, since whether it has a password could not be read: apps_unavailable: Sharing could not be reached. Try again shortly.\ndetail: read the access list failed")
+	if out != "" || s.patched != nil {
+		t.Errorf("stdout = %q, change body = %v, want neither", out, s.patched)
+	}
+	if got := s.inOrder(); !slices.Equal(got, []string{"apps GET /v1/apps/apps/hello", "platform GET " + stubAccessPath}) {
+		t.Errorf("requests in order = %v, want the two reads alone", got)
+	}
+	if code := HandleExitError(&bytes.Buffer{}, err); code != 1 {
+		t.Errorf("exit = %d, want 1", code)
+	}
+}
+
+// A password that could not be removed is still the app's: the command says
+// what the change left, with the password, and then fails.
+func TestAppVisibilitySaysAPasswordItCouldNotRemove(t *testing.T) {
+	for _, jsonF := range []bool{false, true} {
+		s := newStubApps(t)
+		s.apps["hello"] = stubAppAs("hello", "unlisted", "personal")
+		s.access = stubAccessWithPassword()
+		s.passwordRemoveStatus = 503
+		s.passwordRemoveBody = `{"error":{"code":"apps_unavailable","message":"Sharing could not be reached. Try again shortly.","details":{"detail":"remove the password failed"}}}`
+		args := []string{"visibility", "private", "hello"}
+		if jsonF {
+			args = append(args, "--json")
+		}
+		out, errOut, err := runApp(t, s, args...)
+		if err == nil {
+			t.Fatal("want the failure")
+		}
+		wantContains(t, err.Error(), "hello is private now, and its password is still set: removing it failed: apps_unavailable: Sharing could not be reached. Try again shortly.\ndetail: remove the password failed")
+		if jsonF {
+			var got map[string]any
+			if err := json.Unmarshal([]byte(out), &got); err != nil || got["visibility"] != "private" {
+				t.Errorf("json = %q (%v)", out, err)
+			}
+			if errOut != "" {
+				t.Errorf("stderr = %q, want nothing of a removal", errOut)
+			}
+		} else {
+			wantContains(t, out, "visibility: private\n\nAnyone with the password, set 2026-10-08 12:00 UTC: whoever types it at the app's address opens the app, with no Latere account.\n")
+			wantLacks(t, out, "password was removed", "Only people invited")
+		}
+		if code := HandleExitError(&bytes.Buffer{}, err); code != 1 {
+			t.Errorf("exit = %d, want 1", code)
+		}
+	}
+}
+
+// The platform keeps a password under the app's id, so an answer without one
+// changes nothing.
+func TestAppVisibilityOfAnAppWithoutAnID(t *testing.T) {
+	s := newStubApps(t)
+	s.apps["hello"] = `{"slug":"hello","visibility":"private"}`
+	_, _, err := runApp(t, s, "visibility", "unlisted", "hello")
+	if err == nil || !strings.Contains(err.Error(), "names no id for hello") {
+		t.Errorf("visibility = %v", err)
+	}
+	if s.patched != nil || len(s.seenAtThePlatform()) != 0 {
+		t.Errorf("change body = %v, requests at the platform = %v, want neither", s.patched, s.seenAtThePlatform())
+	}
+}
+
 // ---- access ----
 
 func TestAppAccessListsThePeopleInvited(t *testing.T) {
@@ -208,7 +387,7 @@ func TestAppAccessListsThePeopleInvited(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantContains(t, out, "app:        hello\naddress:    https://hello.latere.site\nvisibility: private\n\n"+
-		"Only you and the people you invite can open it, each after signing in with a Latere account.\n\n")
+		"Only people invited: you and the people you invite open it, each after signing in with a Latere account.\n\n")
 	wantLacks(t, out, "once it is private")
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 	table := lines[len(lines)-3:]
@@ -224,7 +403,7 @@ func TestAppAccessListsThePeopleInvited(t *testing.T) {
 	if got := s.seen(); !slices.Equal(got, []string{"GET /v1/apps/apps/hello"}) {
 		t.Errorf("requests at the Apps API = %v", got)
 	}
-	if got := s.seenAtThePlatform(); !slices.Equal(got, []string{"GET /v1/account/apps/" + stubAppID + "/access"}) {
+	if got := s.seenAtThePlatform(); !slices.Equal(got, []string{"GET " + stubAccessPath}) {
 		t.Errorf("requests at the platform = %v", got)
 	}
 	eachAPIItsOwnAudience(t, s)
@@ -240,20 +419,36 @@ func TestAppAccessByVisibility(t *testing.T) {
 		want, lacks                     []string
 	}{
 		{"private with no one invited", "private", "personal", nobody,
-			[]string{"visibility: private\n", "Only you and the people you invite can open it", "\nNo one is invited. Invite people by email with: latere apps share hello <email>...\n"},
-			[]string{"EMAIL"}},
+			[]string{"visibility: private\n", "Only people invited: you and the people you invite open it", "\nNo one is invited. Invite people by email with: latere apps share hello <email>...\n"},
+			[]string{"EMAIL", "password"}},
 		{"an organization's", "private", "organization", "",
-			[]string{"Only the members of its organization and the people invited can open it, each after signing in with a Latere account.\n", "ines@example.com"},
-			[]string{"once it is private"}},
+			[]string{"Only people invited: the members of its organization and the people invited open it, each after signing in with a Latere account.\n", "ines@example.com"},
+			[]string{"once it is private", "password"}},
 		{"unlisted with people invited", "unlisted", "personal", "",
-			[]string{"visibility: unlisted\n\nAnyone who has its address can open it without signing in, and it is kept out of search engines.\nThe people invited open it once it is private.\n\nEMAIL"},
-			nil},
+			[]string{"visibility: unlisted\n\nAnyone with the link: it opens without signing in, and is kept out of search engines.\nThe people invited open it once it is private.\n\nEMAIL"},
+			[]string{"password"}},
 		{"public", "public", "personal", "",
-			[]string{"visibility: public\n\nAnyone can open it, and search engines may list it.\nThe people invited open it once it is private.\n\nEMAIL", "pilot@harbor.example"},
-			nil},
+			[]string{"visibility: public\n\nAnyone with the link: it opens without signing in, and search engines may list it.\nThe people invited open it once it is private.\n\nEMAIL", "pilot@harbor.example"},
+			[]string{"password"}},
 		{"public with no one invited", "public", "personal", nobody,
-			[]string{"Anyone can open it, and search engines may list it.\n\nNo one is invited."},
+			[]string{"Anyone with the link: it opens without signing in, and search engines may list it.\n\nNo one is invited."},
 			[]string{"once it is private"}},
+		{"private with a password", "private", "personal", stubAccessWithPassword(),
+			[]string{"visibility: private\n\nAnyone with the password, set 2026-10-08 12:00 UTC: whoever types it at the app's address opens the app, with no Latere account.\n" +
+				"You and the people you invite still open the app by signing in with a Latere account.\n\nEMAIL"},
+			[]string{"Only people invited", "Anyone with the link", "Remove it with"}},
+		{"an organization's with a password", "private", "organization", stubAccessWithPassword(),
+			[]string{"Anyone with the password, set 2026-10-08 12:00 UTC: whoever types it",
+				"The members of its organization and the people invited still open the app by signing in with a Latere account.\n"},
+			nil},
+		{"unlisted with a password left on it", "unlisted", "personal", stubAccessWithPassword(),
+			[]string{"Anyone with the link: it opens without signing in, and is kept out of search engines.\n" +
+				"A password is set since 2026-10-08 12:00 UTC. It decides nothing while anyone with the link opens the app, and opens the app again once it is private.\n" +
+				"Remove it with: latere apps password --remove hello\nThe people invited open it once it is private.\n\nEMAIL"},
+			[]string{"Anyone with the password"}},
+		{"a platform that sets no passwords", "private", "personal", stubAccessWithoutPasswords(),
+			[]string{"Only people invited: you and the people you invite open it"},
+			[]string{"password"}},
 		{"an accepted invitation named by the handle alone", "private", "personal",
 			`{"people":[{"id":"inv_1","email":"ines@example.com","state":"active","person":{"display_name":"","handle":"ines"},"invited_at":"2026-10-06T08:00:00Z"}]}`,
 			[]string{"active  ines  "}, nil},
@@ -301,6 +496,44 @@ func TestAppAccessJSONIsTheAppAndItsAccessList(t *testing.T) {
 	}
 	if got.Access.AppID != stubAppID || len(got.Access.People) != 2 || got.Access.People[0]["claimed_at"] == nil || got.Access.Limits["max_people"] != float64(50) {
 		t.Errorf("access = %+v", got.Access)
+	}
+}
+
+// Whether a password is set reaches a program as the platform answers it:
+// the moment, or null, with the bounds of a password and the action that
+// says the platform sets one.
+func TestAppAccessJSONSaysWhetherAPasswordIsSet(t *testing.T) {
+	for _, tc := range []struct {
+		name, access string
+		want         any
+	}{
+		{"set", stubAccessWithPassword(), map[string]any{"set_at": stubPasswordSetAt}},
+		{"none", stubAccessJSON(), nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newStubApps(t)
+			s.access = tc.access
+			out, _, err := runApp(t, s, "access", "hello", "--json")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got struct {
+				Access struct {
+					Password any            `json:"password"`
+					Actions  []string       `json:"actions"`
+					Limits   map[string]any `json:"limits"`
+				} `json:"access"`
+			}
+			if err := json.Unmarshal([]byte(out), &got); err != nil {
+				t.Fatalf("%v: %q", err, out)
+			}
+			if !reflect.DeepEqual(got.Access.Password, tc.want) {
+				t.Errorf("password = %v, want %v", got.Access.Password, tc.want)
+			}
+			if !slices.Contains(got.Access.Actions, "set_password") || got.Access.Limits["min_password"] != float64(8) || got.Access.Limits["max_password"] != float64(128) {
+				t.Errorf("access = %+v", got.Access)
+			}
+		})
 	}
 }
 
