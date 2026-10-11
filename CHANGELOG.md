@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.17.1 - 2026-10-11
+
 ### Changed
 
 - **Install with the platform's address alone: `curl -fsSL https://platform.latere.ai | sh`.** platform.latere.ai answers curl and wget with the installer at its front page. `latere upgrade` gives this command when it cannot replace a binary it may not write, and the README uses it. `https://latere.ai/install.sh`, the address before it, is removed. Pinning a version and a system-wide install are unchanged: `| sh -s -- vX.Y.Z` and `| PREFIX=/usr/local sh`.
