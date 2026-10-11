@@ -25,14 +25,36 @@ const (
 	stubReleaseID = "0b1c2d3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e"
 )
 
-// stubAppJSON is an App as the API answers it, for slug.
+// stubAppID is the id of every app the stub answers, which the platform
+// keeps the people invited under.
+const stubAppID = "123e4567-e89b-42d3-a456-426614174000"
+
+// stubAppJSON is an App as the API answers it, for slug: a person's own app
+// that is public, as an app made before apps started private is.
 func stubAppJSON(slug string) string {
-	return fmt.Sprintf(`{"id":"123e4567-e89b-42d3-a456-426614174000","slug":%[1]q,"name":"Hello","owner":{"kind":"personal","id":"u-1"},
-"visibility":"public","state":"active","health":"ready","url":"https://%[1]s.latere.site","preview_url":"https://next--%[1]s.latere.site",
+	return stubAppAs(slug, "public", "personal")
+}
+
+// stubAppAs is the App of slug with the visibility and the kind of owner
+// given.
+func stubAppAs(slug, visibility, owner string) string {
+	return fmt.Sprintf(`{"id":"123e4567-e89b-42d3-a456-426614174000","slug":%[1]q,"name":"Hello","owner":{"kind":%[3]q,"id":"u-1"},
+"visibility":%[2]q,"state":"active","health":"ready","url":"https://%[1]s.latere.site","preview_url":"https://next--%[1]s.latere.site",
 "current_deploy":null,"latest_preview":null,"settings":{"sleep_after_seconds":1800,"always_on":false,"previews":{"visibility":"inherit"}},
 "repository":{"clone_url":"https://code.latere.ai/r/123e4567-e89b-42d3-a456-426614174000.git","push_url":"https://code.latere.ai/u-1/%[1]s.git"},
 "cluster":{"dockerfile_builds":false},"env_pending":false,"pending_deploy":false,"slug_generated":false,
-"created_at":"2026-09-22T12:00:00Z","updated_at":"2026-09-22T12:00:00Z"}`, slug)
+"created_at":"2026-09-22T12:00:00Z","updated_at":"2026-09-22T12:00:00Z"}`, slug, visibility, owner)
+}
+
+// stubAccessJSON is the people invited to the stub's app as the platform
+// answers them: one who accepted, and one who has not yet.
+func stubAccessJSON() string {
+	return fmt.Sprintf(`{"app_id":%q,"people":[
+{"id":"inv_01JA4S0000000000000000000A","role":"viewer","email":"ines@example.com","state":"active","person":{"display_name":"Ines Moreau","handle":"ines"},"invited_at":%q,"claimed_at":%q},
+{"id":"inv_01JA4T0000000000000000000B","role":"viewer","email":"pilot@harbor.example","state":"pending","invited_at":%q}],
+"organization":null,"actions":["invite","revoke"],"limits":{"max_people":50,"max_emails_per_invite":20}}`, stubAppID,
+		time.Now().Add(-5*24*time.Hour).UTC().Format(time.RFC3339), time.Now().Add(-4*24*time.Hour).UTC().Format(time.RFC3339),
+		time.Now().Add(-3*time.Hour).UTC().Format(time.RFC3339))
 }
 
 func stubDeployJSON(id, status, ref string, preview bool, components string) string {
@@ -59,6 +81,40 @@ type stubApps struct {
 
 	createStatus int
 	createBody   string
+	// visibility is what the platform gives a create that names none, and
+	// owner the kind of owner a created app has.
+	visibility, owner string
+	// patched is the body of the last change of an app; patchStatus and
+	// patchBody refuse it.
+	patched     map[string]string
+	patchStatus int
+	patchBody   string
+
+	// platform is the platform on a server of its own, with the people
+	// invited to the stub's app under the app's id.
+	platform         *httptest.Server
+	platformRequests []string
+	platformBearers  []string
+	// access answers the read of the people invited; accessStatus and
+	// accessBody refuse it.
+	access       string
+	accessStatus int
+	accessBody   string
+	// invited is the body of the last invite. inviteStatus and inviteBody
+	// answer it; a zero status answers 201 with one invitation for each
+	// address.
+	invited struct {
+		Emails []string `json:"emails"`
+		Role   string   `json:"role"`
+	}
+	inviteStatus int
+	inviteBody   string
+	// revokeStatus and revokeBody refuse a removal; revokeFailsOn limits the
+	// refusal to that one invitation.
+	revokeStatus  int
+	revokeBody    string
+	revokeFailsOn string
+
 	// pages answer GET /apps in turn, the first for no cursor.
 	pages    []string
 	apps     map[string]string
@@ -82,7 +138,10 @@ type stubApps struct {
 func newStubApps(t *testing.T) *stubApps {
 	t.Helper()
 	s := &stubApps{
-		apps: map[string]string{"hello": stubAppJSON("hello")},
+		visibility: "private",
+		owner:      "personal",
+		access:     stubAccessJSON(),
+		apps:       map[string]string{"hello": stubAppJSON("hello")},
 		deploys: map[string]string{"hello": `{"deploys":[` +
 			stubDeployJSON(stubPreviewID, "ready", "refs/heads/main", true, oneComponent) + `,` +
 			stubDeployJSON(stubReleaseID, "live", "refs/tags/v1.0.0", false, oneComponent) + `]}`},
@@ -117,6 +176,7 @@ func newStubApps(t *testing.T) *stubApps {
 		s.mu.Lock()
 		s.created = body
 		status, answer := s.createStatus, s.createBody
+		visibility, owner := defaultStr(body["visibility"], s.visibility), s.owner
 		s.mu.Unlock()
 		if status != 0 {
 			w.WriteHeader(status)
@@ -125,7 +185,26 @@ func newStubApps(t *testing.T) *stubApps {
 		}
 		slug := defaultStr(body["slug"], "brave-otter-2041")
 		w.WriteHeader(http.StatusCreated)
-		_, _ = io.WriteString(w, stubAppJSON(slug))
+		_, _ = io.WriteString(w, stubAppAs(slug, visibility, owner))
+	})
+	mux.HandleFunc("PATCH /v1/apps/apps/{slug}", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("change body: %v", err)
+		}
+		slug := r.PathValue("slug")
+		s.mu.Lock()
+		s.patched = body
+		status, answer := s.patchStatus, s.patchBody
+		if status == 0 {
+			s.apps[slug] = stubAppAs(slug, body["visibility"], s.owner)
+			answer = s.apps[slug]
+		}
+		s.mu.Unlock()
+		if status != 0 {
+			w.WriteHeader(status)
+		}
+		_, _ = io.WriteString(w, answer)
 	})
 	mux.HandleFunc("GET /v1/apps/apps", func(w http.ResponseWriter, r *http.Request) {
 		i := 0
@@ -203,6 +282,63 @@ func newStubApps(t *testing.T) *stubApps {
 		mux.ServeHTTP(w, r)
 	}))
 	t.Cleanup(s.srv.Close)
+
+	access := http.NewServeMux()
+	// refused writes the refusal a case set for a route, and reports whether
+	// it did.
+	refused := func(w http.ResponseWriter, status int, body string) bool {
+		if status == 0 {
+			return false
+		}
+		w.WriteHeader(status)
+		_, _ = io.WriteString(w, body)
+		return true
+	}
+	access.HandleFunc("GET /v1/account/apps/{app_id}/access", func(w http.ResponseWriter, _ *http.Request) {
+		s.mu.Lock()
+		status, body, list := s.accessStatus, s.accessBody, s.access
+		s.mu.Unlock()
+		if !refused(w, status, body) {
+			_, _ = io.WriteString(w, list)
+		}
+	})
+	access.HandleFunc("POST /v1/account/apps/{app_id}/access/invites", func(w http.ResponseWriter, r *http.Request) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.invited.Emails, s.invited.Role = nil, ""
+		if err := json.NewDecoder(r.Body).Decode(&s.invited); err != nil {
+			t.Errorf("invite body: %v", err)
+		}
+		if refused(w, s.inviteStatus, s.inviteBody) {
+			return
+		}
+		var rows []string
+		for i, email := range s.invited.Emails {
+			rows = append(rows, fmt.Sprintf(`{"id":"inv_01JA4V000000000000000000%02d","role":"viewer","email":%q,"state":"pending","invited_at":"2026-10-07T10:10:00Z"}`, i, strings.ToLower(email)))
+		}
+		w.WriteHeader(http.StatusCreated)
+		_, _ = fmt.Fprintf(w, `{"people":[%s],"skipped":[]}`, strings.Join(rows, ","))
+	})
+	access.HandleFunc("DELETE /v1/account/apps/{app_id}/access/{access_id}", func(w http.ResponseWriter, r *http.Request) {
+		s.mu.Lock()
+		status, body, only := s.revokeStatus, s.revokeBody, s.revokeFailsOn
+		s.mu.Unlock()
+		if only != "" && only != r.PathValue("access_id") {
+			status = 0
+		}
+		if !refused(w, status, body) {
+			w.WriteHeader(http.StatusNoContent)
+		}
+	})
+	s.platform = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.mu.Lock()
+		s.platformRequests = append(s.platformRequests, r.Method+" "+r.URL.RequestURI())
+		s.platformBearers = append(s.platformBearers, strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+		s.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		access.ServeHTTP(w, r)
+	}))
+	t.Cleanup(s.platform.Close)
 	return s
 }
 
@@ -210,6 +346,13 @@ func (s *stubApps) seen() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.requests...)
+}
+
+// seenAtThePlatform is the requests the platform received, in order.
+func (s *stubApps) seenAtThePlatform() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.platformRequests...)
 }
 
 // runAppIn runs `latere apps …` in dir against the stub, with a saved login
@@ -222,6 +365,8 @@ func runAppIn(t *testing.T, s *stubApps, dir, stdin string, args ...string) (str
 	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir))
 	t.Setenv("LATERE_APPS_URL", s.srv.URL+"/v1/apps")
 	t.Setenv("LATERE_APPS_TOKEN", "")
+	t.Setenv("LATERE_PLATFORM_URL", s.platform.URL)
+	t.Setenv("LATERE_PLATFORM_TOKEN", "")
 	t.Setenv("AUTH_URL", s.srv.URL)
 	t.Setenv("LATERE_NO_UPDATE_CHECK", "1")
 	t.Setenv("OTEL_SDK_DISABLED", "true")
@@ -284,10 +429,12 @@ func TestAppCreateOutsideARepository(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.created["visibility"] != "public" || s.created["name"] != "Hello World" || s.created["slug"] != "hello" || len(s.created) != 3 {
-		t.Errorf("create body = %v", s.created)
+	if s.created["name"] != "Hello World" || s.created["slug"] != "hello" || len(s.created) != 2 {
+		t.Errorf("create body = %v, want the name and the slug and no visibility", s.created)
 	}
 	wantContains(t, out, "https://hello.latere.site", "https://next--hello.latere.site", "https://code.latere.ai/u-1/hello.git",
+		"visibility: private\n\nOnly you and the people you invite can open it, each after signing in with a Latere account.\n"+
+			"Open it to anyone who has its address, or invite people by email:\n  latere apps visibility unlisted hello\n  latere apps share hello <email>...\n",
 		"not a git repository, so no remote was added",
 		"Next:\n  git remote add latere https://code.latere.ai/u-1/hello.git && git push latere main\n")
 	for i, aud := range s.audiences {
@@ -303,16 +450,102 @@ func TestAppCreateOutsideARepository(t *testing.T) {
 	}
 }
 
-func TestAppCreateWithoutANameSendsVisibilityAlone(t *testing.T) {
+// A create that names nothing sends an empty body, so the platform decides
+// the slug and who can open the app.
+func TestAppCreateWithoutANameSendsAnEmptyBody(t *testing.T) {
 	s := newStubApps(t)
 	out, _, err := runApp(t, s, "create")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(s.created) != 1 || s.created["visibility"] != "public" {
-		t.Errorf("create body = %v", s.created)
+	if s.created == nil || len(s.created) != 0 {
+		t.Errorf("create body = %v, want an empty object", s.created)
 	}
-	wantContains(t, out, "brave-otter-2041")
+	wantContains(t, out, "brave-otter-2041", "visibility: private\n")
+}
+
+func TestAppCreateSendsTheVisibilityNamed(t *testing.T) {
+	for _, tc := range []struct {
+		visibility string
+		want       []string
+		share      bool
+	}{
+		{"unlisted", []string{"visibility: unlisted\n\nAnyone who has its address can open it without signing in, and it is kept out of search engines.\n"}, false},
+		{"private", []string{"visibility: private\n\nOnly you and the people you invite can open it"}, true},
+	} {
+		t.Run(tc.visibility, func(t *testing.T) {
+			s := newStubApps(t)
+			// The platform would give another one, so the flag is what the
+			// answer carries.
+			s.visibility = "public"
+			out, _, err := runApp(t, s, "create", "--slug", "hello", "--visibility", tc.visibility)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if s.created["visibility"] != tc.visibility || len(s.created) != 2 {
+				t.Errorf("create body = %v", s.created)
+			}
+			wantContains(t, out, tc.want...)
+			if strings.Contains(out, "latere apps share") != tc.share {
+				t.Errorf("the commands that open or share a private app are printed: %t, want %t:\n%s", !tc.share, tc.share, out)
+			}
+		})
+	}
+}
+
+// The visibility printed is the one the answer carries, whatever a new app
+// starts as: a platform that still creates a personal app public is read as
+// it answers.
+func TestAppCreatePrintsTheVisibilityOfTheAnswer(t *testing.T) {
+	for _, tc := range []struct {
+		name, visibility, owner string
+		want                    string
+	}{
+		{"public", "public", "personal", "visibility: public\n\nAnyone can open it, and search engines may list it.\n"},
+		{"an organization's", "private", "organization", "visibility: private\n\nOnly the members of its organization and the people invited can open it, each after signing in with a Latere account.\n"},
+		{"a visibility this version does not know", "members", "personal", "visibility: members\n\nThis directory is not a git repository"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newStubApps(t)
+			s.visibility, s.owner = tc.visibility, tc.owner
+			out, _, err := runApp(t, s, "create", "--slug", "hello")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, sent := s.created["visibility"]; sent {
+				t.Errorf("create body = %v, want no visibility", s.created)
+			}
+			wantContains(t, out, tc.want)
+			if (tc.visibility == "private") != strings.Contains(out, "latere apps share hello <email>...") {
+				t.Errorf("output:\n%s", out)
+			}
+		})
+	}
+}
+
+// Public is the platform's to give, and a value that is neither choice is a
+// typing mistake: both are refused before any request.
+func TestAppCreateRefusesAVisibilityAPersonCannotChoose(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		want  []string
+	}{
+		{"public", []string{"public cannot be chosen here", "an app becomes public when it is shown in the gallery", "the app's Share in the chat", "reviewed first"}},
+		{"publik", []string{`"publik" is not a visibility; choose private or unlisted`}},
+		{"", []string{`"" is not a visibility; choose private or unlisted`}},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			s := newStubApps(t)
+			out, _, err := runApp(t, s, "create", "--slug", "hello", "--visibility", tc.value)
+			if err == nil {
+				t.Fatal("want a refusal")
+			}
+			wantContains(t, err.Error(), tc.want...)
+			if len(s.seen()) != 0 || out != "" {
+				t.Errorf("requests = %v, stdout = %q, want neither", s.seen(), out)
+			}
+		})
+	}
 }
 
 func TestAppCreateAddsTheRemote(t *testing.T) {
@@ -501,25 +734,30 @@ func TestAppAudienceMismatchKeepsTheAPIsHint(t *testing.T) {
 
 func TestAppListShowsWhatProductionServes(t *testing.T) {
 	s := newStubApps(t)
-	s.apps["quiet"] = stubAppJSON("quiet")
+	s.apps["quiet"] = stubAppAs("quiet", "private", "personal")
 	s.releases["quiet"] = `{"releases":[]}`
+	s.apps["link"] = stubAppAs("link", "unlisted", "personal")
+	s.releases["link"] = `{"releases":[]}`
 	s.pages = []string{
 		`{"items":[` + stubAppJSON("hello") + `],"has_more":true,"next_cursor":"page-1"}`,
-		`{"items":[` + stubAppJSON("quiet") + `],"has_more":false,"next_cursor":null}`,
+		`{"items":[` + s.apps["quiet"] + `,` + s.apps["link"] + `],"has_more":false,"next_cursor":null}`,
 	}
 	out, _, err := runApp(t, s, "list")
 	if err != nil {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(out), "\n")
-	if len(lines) != 3 || strings.Fields(lines[0])[2] != "PRODUCTION" {
+	if len(lines) != 4 || strings.Join(strings.Fields(lines[0]), " ") != "SLUG STATE VISIBILITY PRODUCTION ADDRESS" {
 		t.Fatalf("list =\n%s", out)
 	}
-	if got := strings.Fields(lines[1]); strings.Join(got, " ") != "hello active v1.0.0 https://hello.latere.site" {
+	if got := strings.Fields(lines[1]); strings.Join(got, " ") != "hello active public v1.0.0 https://hello.latere.site" {
 		t.Errorf("hello row = %q", got)
 	}
-	if got := strings.Fields(lines[2]); strings.Join(got, " ") != "quiet active - https://quiet.latere.site" {
+	if got := strings.Fields(lines[2]); strings.Join(got, " ") != "quiet active private - https://quiet.latere.site" {
 		t.Errorf("quiet row = %q", got)
+	}
+	if got := strings.Fields(lines[3]); strings.Join(got, " ") != "link active unlisted - https://link.latere.site" {
+		t.Errorf("link row = %q", got)
 	}
 	seen := s.seen()
 	if seen[0] != "GET /v1/apps/apps?limit=200" || seen[1] != "GET /v1/apps/apps?cursor=page-1&limit=200" {
@@ -584,6 +822,35 @@ func TestAppShow(t *testing.T) {
 		"push:       https://code.latere.ai/u-1/hello.git\n",
 		"clone:      https://code.latere.ai/r/123e4567-e89b-42d3-a456-426614174000.git\n",
 		"name:       Hello\n")
+}
+
+// Each visibility reads as its value and who that lets open the app, wrapped
+// under its label, and a value this version does not know reads as it is.
+func TestAppShowSaysWhoCanOpenTheApp(t *testing.T) {
+	for _, tc := range []struct {
+		visibility, owner, want string
+	}{
+		{"private", "personal", "visibility: private (only you and the people you invite can open it, each after signing in with a Latere account) health:"},
+		{"private", "organization", "visibility: private (only the members of its organization and the people invited can open it, each after signing in with a Latere account) health:"},
+		{"unlisted", "personal", "visibility: unlisted (anyone who has its address can open it without signing in, and it is kept out of search engines) health:"},
+		{"public", "personal", "visibility: public (anyone can open it, and search engines may list it) health:"},
+		{"members", "personal", "visibility: members health:"},
+	} {
+		t.Run(tc.visibility+" "+tc.owner, func(t *testing.T) {
+			s := newStubApps(t)
+			s.apps["hello"] = stubAppAs("hello", tc.visibility, tc.owner)
+			out, _, err := runApp(t, s, "show", "hello")
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantContains(t, oneLine(out), tc.want)
+			for line := range strings.SplitSeq(out, "\n") {
+				if len(line) > 88 {
+					t.Errorf("a line is wider than a record's 88 columns: %q", line)
+				}
+			}
+		})
+	}
 }
 
 func TestAppShowOfAnAppWithNothingYet(t *testing.T) {
@@ -654,16 +921,27 @@ func TestAppSlugFromAStaleRemoteSaysWhereItCameFrom(t *testing.T) {
 }
 
 func TestAppWithoutASlugOrARemote(t *testing.T) {
-	for _, args := range [][]string{{"show"}, {"deploys"}, {"logs"}} {
-		t.Run(args[0], func(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"show"}, "run `latere apps show <slug>`"},
+		{[]string{"deploys"}, "run `latere apps deploys <slug>`"},
+		{[]string{"logs"}, "run `latere apps logs <slug> [deploy]`"},
+		{[]string{"access"}, "run `latere apps access <slug>`"},
+		{[]string{"visibility", "unlisted"}, "run `latere apps visibility <private|unlisted> <slug>`"},
+		{[]string{"share", "ada@example.com"}, "run `latere apps share <slug> <email>...`"},
+		{[]string{"unshare", "ada@example.com"}, "run `latere apps unshare <slug> <email>...`"},
+	} {
+		t.Run(tc.args[0], func(t *testing.T) {
 			s := newStubApps(t)
-			_, _, err := runApp(t, s, args...)
+			_, _, err := runApp(t, s, tc.args...)
 			if err == nil {
 				t.Fatal("want a refusal")
 			}
-			wantContains(t, err.Error(), "missing the [slug] argument", "no git remote named latere", "latere apps "+args[0]+" <slug>")
-			if len(s.seen()) != 0 {
-				t.Errorf("requests = %v, want none", s.seen())
+			wantContains(t, err.Error(), "missing the [slug] argument", "no git remote named latere", tc.want)
+			if len(s.seen()) != 0 || len(s.seenAtThePlatform()) != 0 {
+				t.Errorf("requests = %v and %v, want none", s.seen(), s.seenAtThePlatform())
 			}
 		})
 	}
@@ -839,5 +1117,14 @@ func TestAppWithoutASubcommandShowsHelp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantContains(t, out, "git push latere main && latere apps logs -f", "create", "deploys", "logs")
+	wantContains(t, out, "git push latere main && latere apps logs -f", "create", "deploys", "logs",
+		"A new app is private", "latere apps visibility unlisted", "latere apps share ada@example.com", "latere apps access",
+		"An app becomes public, which lets search engines list it, when it is shown\nin the gallery",
+		"visibility  ", "access  ", "share  ", "unshare  ")
+	// Public is never offered as something to choose.
+	for _, offer := range []string{"visibility public", "private|unlisted|public", "unlisted or public;"} {
+		if strings.Contains(out, offer) {
+			t.Errorf("the help offers public as a choice (%q):\n%s", offer, out)
+		}
+	}
 }

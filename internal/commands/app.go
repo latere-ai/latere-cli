@@ -72,9 +72,9 @@ func newAppCmd() *cobra.Command {
 	var apiURL, authURL string
 	cmd := &cobra.Command{
 		Use:   "apps",
-		Short: "Create apps, see their deploys, and follow their builds.",
-		Long: `Create apps on the Latere platform, see their deploys, and follow their
-builds.
+		Short: "Create apps, decide who can open them, and follow their builds.",
+		Long: `Create apps on the Latere platform, decide who can open them, see their
+deploys, and follow their builds.
 
 An app is a git repository and an address. 'latere apps create' makes one in
 your current context, your personal account or the organization 'latere org'
@@ -88,14 +88,33 @@ push, which 'latere login' already lets git sign in for:
 0 when it succeeds and 1 when it fails or is canceled, so
 'git push latere main && latere apps logs -f' is the whole loop.
 
+A new app is private: only you, or the members of the organization that owns
+it, can open its address, each after signing in with a Latere account. Open
+it or share it:
+
+  latere apps visibility unlisted      anyone who has the address opens it
+  latere apps share ada@example.com    invites one person to a private app
+  latere apps access                   shows who can open it
+
+An app becomes public, which lets search engines list it, when it is shown
+in the gallery at latere.site. You ask for that from the app's Share in the
+chat, and it is reviewed first.
+
 A command that takes [slug] reads it from the git remote latere of the
 repository you run it in when you leave it out.
 
 The commands call https://api.latere.ai/v1/apps with a token minted for your
 login. LATERE_APPS_URL or --api-url overrides the address, and
-LATERE_APPS_TOKEN presents a bearer as given.`,
+LATERE_APPS_TOKEN presents a bearer as given. The people invited to an app
+are kept by the platform, so access, share and unshare also call
+https://platform.latere.ai with a token of its own: LATERE_PLATFORM_URL or
+--platform-url overrides that address, and LATERE_PLATFORM_TOKEN presents
+that bearer as given.`,
 		Example: `  latere apps create hello
   git push latere main && latere apps logs -f
+  latere apps visibility unlisted
+  latere apps share ada@example.com
+  latere apps access
   latere apps list
   latere apps show
   latere apps deploys --json
@@ -111,6 +130,10 @@ LATERE_APPS_TOKEN presents a bearer as given.`,
 		newAppCreateCmd(&apiURL, &authURL),
 		newAppListCmd(&apiURL, &authURL),
 		newAppShowCmd(&apiURL, &authURL),
+		newAppVisibilityCmd(&apiURL, &authURL),
+		newAppAccessCmd(&apiURL, &authURL),
+		newAppShareCmd(&apiURL, &authURL),
+		newAppUnshareCmd(&apiURL, &authURL),
 		newAppDeploysCmd(&apiURL, &authURL),
 		newAppLogsCmd(&apiURL, &authURL),
 		newAppDeleteCmd(&apiURL, &authURL),
@@ -124,9 +147,12 @@ LATERE_APPS_TOKEN presents a bearer as given.`,
 // prints the API's own bytes, so a field read nowhere here still reaches a
 // program.
 type appResource struct {
-	ID         string `json:"id"`
-	Slug       string `json:"slug"`
-	Name       string `json:"name"`
+	ID    string `json:"id"`
+	Slug  string `json:"slug"`
+	Name  string `json:"name"`
+	Owner struct {
+		Kind string `json:"kind"`
+	} `json:"owner"`
 	Visibility string `json:"visibility"`
 	State      string `json:"state"`
 	Health     string `json:"health"`
@@ -555,7 +581,10 @@ func resolveAppSlug(cmd *cobra.Command, arg string) (slug string, fromRemote boo
 	if arg != "" {
 		return arg, false, nil
 	}
-	missing := fmt.Errorf("missing the [slug] argument: there is no git remote named %s here to read it from; run `%s <slug>`", appRemote, cmd.CommandPath())
+	// The command as it is written with the slug given: its own arguments
+	// with [slug] made required, since the slug is not always the first.
+	withSlug := strings.TrimSuffix(cmd.CommandPath(), cmd.Name()) + strings.Replace(cmd.Use, "[slug]", "<slug>", 1)
+	missing := fmt.Errorf("missing the [slug] argument: there is no git remote named %s here to read it from; run `%s`", appRemote, withSlug)
 	dir, err := os.Getwd()
 	if err != nil {
 		return "", false, fmt.Errorf("find the current directory: %w", err)
@@ -572,7 +601,7 @@ func resolveAppSlug(cmd *cobra.Command, arg string) (slug string, fromRemote boo
 	}
 	slug = slugFromRemote(u)
 	if slug == "" {
-		return "", false, fmt.Errorf("missing the [slug] argument: the git remote %s (%s) names no app; run `%s <slug>`", appRemote, u, cmd.CommandPath())
+		return "", false, fmt.Errorf("missing the [slug] argument: the git remote %s (%s) names no app; run `%s`", appRemote, u, withSlug)
 	}
 	return slug, true, nil
 }
@@ -590,14 +619,22 @@ func withSlugSource(err error, slug string, fromRemote bool) error {
 
 func newAppCreateCmd(apiURL, authURL *string) *cobra.Command {
 	var (
-		slug, remote    string
-		noRemote, jsonF bool
+		slug, remote, visibility string
+		noRemote, jsonF          bool
 	)
 	cmd := &cobra.Command{
 		Use:   "create [name]",
 		Short: "Create an app and add its git remote.",
 		Long: `Create an app in your current context and print its address, the address of
-its newest preview, and its push URL. The app is public.
+its newest preview, its push URL, and who can open it.
+
+A new app is private: only you, or the members of the organization that owns
+it, and the people you invite can open it, each after signing in with a
+Latere account. --visibility unlisted creates it open to anyone who has its
+address. 'latere apps visibility' changes that later, and 'latere apps share'
+invites people to a private app. An app becomes public, which lets search
+engines list it, when it is shown in the gallery. You ask for that from the
+app's Share in the chat, and it is reviewed first.
 
 The slug is the app's address. --slug names it; without --slug it is derived
 from [name], or generated when there is no name. A slug is 1 to 40 lowercase
@@ -611,12 +648,18 @@ exists for another app the command refuses and creates nothing.`,
 		Example: `  latere apps create
   latere apps create "Hello World"
   latere apps create --slug hello
+  latere apps create hello --visibility unlisted
   latere apps create hello --remote deploy
   latere apps create --no-remote --json`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if strings.TrimSpace(remote) == "" {
 				return errors.New("--remote needs a name")
+			}
+			if cmd.Flags().Changed("visibility") {
+				if err := checkVisibility(visibility); err != nil {
+					return err
+				}
 			}
 			ctx := cmd.Context()
 			dir, err := os.Getwd()
@@ -638,7 +681,12 @@ exists for another app the command refuses and creates nothing.`,
 					return fmt.Errorf("this repository already has a git remote named %s, at %s; nothing was created.\nPass --remote <name> to add the new app's push URL under another name, or --no-remote to create the app without one", remote, existing)
 				}
 			}
-			body := map[string]string{"visibility": "public"}
+			// A create that names no visibility leaves it to the platform, which
+			// decides what a new app starts as.
+			body := map[string]string{}
+			if cmd.Flags().Changed("visibility") {
+				body["visibility"] = visibility
+			}
 			if len(args) == 1 {
 				body["name"] = args[0]
 			}
@@ -690,6 +738,7 @@ exists for another app the command refuses and creates nothing.`,
 	}
 	f := cmd.Flags()
 	f.StringVar(&slug, "slug", "", "the app's slug, which is its address; derived from [name] or generated without it")
+	f.StringVar(&visibility, "visibility", "", "who can open the app, "+visibilityPrivate+" or "+visibilityUnlisted+"; without it the platform decides, and a new app starts private")
 	f.StringVar(&remote, "remote", appRemote, "the name of the git remote to add")
 	f.BoolVar(&noRemote, "no-remote", false, "do not add a git remote")
 	f.BoolVar(&jsonF, "json", false, "print the created app as JSON")
@@ -702,6 +751,13 @@ func printCreatedApp(out io.Writer, a appResource) error {
 	b.WriteString(formatWrappedField("address", a.URL))
 	b.WriteString(formatWrappedField("preview", a.PreviewURL))
 	b.WriteString(formatWrappedField("push", a.Repository.PushURL))
+	b.WriteString(formatWrappedField("visibility", a.Visibility))
+	if who := whoOpensSentence(a); who != "" {
+		fmt.Fprintf(&b, "\n%s\n", who)
+	}
+	if a.Visibility == visibilityPrivate {
+		fmt.Fprintf(&b, "Open it to anyone who has its address, or invite people by email:\n  latere apps visibility %s %s\n  latere apps share %s <email>...\n", visibilityUnlisted, a.Slug, a.Slug)
+	}
 	if a.Restored {
 		fmt.Fprintf(&b, "\nRestored the deleted app %s. It serves nothing until the next push builds it.\n", a.Slug)
 	}
@@ -777,7 +833,12 @@ func newAppListCmd(apiURL, authURL *string) *cobra.Command {
 		Use:   "list",
 		Short: "List the apps of your current context.",
 		Long: `List the apps of your current context, newest first, one line each: the
-slug, the state, the release tag the app's address serves, and the address.
+slug, the state, the visibility, the release tag the app's address serves,
+and the address.
+
+The visibility says who can open the app: private, only you and the people
+invited; unlisted, anyone who has the address; public, anyone, and search
+engines may list it. 'latere apps access' says it in full for one app.
 
 'latere org' switches the context. --json prints the apps as the API answers
 them.`,
@@ -878,9 +939,9 @@ func printAppList(out io.Writer, apps []appResource, production []string) error 
 		b.WriteString("No apps in your current context. Create one with: latere apps create\n")
 	} else {
 		w := tabwriter.NewWriter(&b, 0, 4, 2, ' ', 0)
-		fprintln(w, "SLUG\tSTATE\tPRODUCTION\tADDRESS")
+		fprintln(w, "SLUG\tSTATE\tVISIBILITY\tPRODUCTION\tADDRESS")
 		for i, a := range apps {
-			fprintf(w, "%s\t%s\t%s\t%s\n", a.Slug, a.State, production[i], a.URL)
+			fprintf(w, "%s\t%s\t%s\t%s\t%s\n", a.Slug, a.State, defaultStr(a.Visibility, "-"), production[i], a.URL)
 		}
 		_ = w.Flush()
 	}
@@ -896,10 +957,11 @@ func newAppShowCmd(apiURL, authURL *string) *cobra.Command {
 	var jsonF bool
 	cmd := &cobra.Command{
 		Use:   "show [slug]",
-		Short: "Show an app: its addresses, production, newest preview and push URL.",
-		Long: `Show one app: its address and the address of its newest preview, the
-release its address serves with that release's deploy, its newest preview
-deploy, and the URLs to push to and clone from.
+		Short: "Show an app: its addresses, who can open it, production, newest preview and push URL.",
+		Long: `Show one app: its visibility with who that lets open it, its address and
+the address of its newest preview, the release its address serves with that
+release's deploy, its newest preview deploy, and the URLs to push to and
+clone from. 'latere apps access' lists the people invited to it.
 
 Without [slug], the slug is read from the git remote latere. --json prints
 an object with the app, the release production serves, and the newest
@@ -964,7 +1026,11 @@ func printApp(out io.Writer, a appResource, releases []appRelease, live int, dep
 		b.WriteString(formatWrappedField("name", a.Name))
 	}
 	b.WriteString(formatWrappedField("state", a.State))
-	b.WriteString(formatWrappedField("visibility", a.Visibility))
+	visibility := a.Visibility
+	if who := whoOpens(a); who != "" {
+		visibility += " (" + who + ")"
+	}
+	b.WriteString(formatWrappedField("visibility", visibility))
 	b.WriteString(formatWrappedField("health", a.Health))
 	b.WriteString(formatWrappedField("address", a.URL))
 	b.WriteString(formatWrappedField("previews", a.PreviewURL))

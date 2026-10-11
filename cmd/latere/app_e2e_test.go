@@ -23,9 +23,9 @@ import (
 
 // TestAppE2E drives the built binary against a stub of the Apps API under
 // its origin base path and of auth's mint: a create from the saved login
-// prints where to push, and a followed build log exits 0 when the build
-// ends built and 1, with the failure's code and message on stderr, when it
-// ends failed.
+// names no visibility, prints where to push and who can open the app, and a
+// followed build log exits 0 when the build ends built and 1, with the
+// failure's code and message on stderr, when it ends failed.
 func TestAppE2E(t *testing.T) {
 	if testing.Short() {
 		t.Skip("binary e2e skipped with -short")
@@ -38,7 +38,7 @@ func TestAppE2E(t *testing.T) {
 		created   map[string]string
 		end       string
 	)
-	app := `{"id":"123e4567-e89b-42d3-a456-426614174000","slug":"hello","name":"hello","visibility":"public","state":"active","health":"none",
+	app := `{"id":"123e4567-e89b-42d3-a456-426614174000","slug":"hello","name":"hello","owner":{"kind":"personal","id":"u-1"},"visibility":"private","state":"active","health":"none",
 "url":"https://hello.latere.site","preview_url":"https://next--hello.latere.site","current_deploy":null,"latest_preview":null,
 "repository":{"clone_url":"https://code.latere.ai/r/123e4567-e89b-42d3-a456-426614174000.git","push_url":"https://code.latere.ai/u-1/hello.git"}}`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -116,10 +116,11 @@ func TestAppE2E(t *testing.T) {
 	mu.Lock()
 	body := created
 	mu.Unlock()
-	if body["slug"] != "hello" || body["visibility"] != "public" {
-		t.Errorf("create body = %v", body)
+	if body["slug"] != "hello" || len(body) != 1 {
+		t.Errorf("create body = %v, want the slug alone, so the platform decides who can open the app", body)
 	}
-	for _, want := range []string{"https://hello.latere.site", "https://next--hello.latere.site", "https://code.latere.ai/u-1/hello.git", "git push latere main"} {
+	for _, want := range []string{"https://hello.latere.site", "https://next--hello.latere.site", "https://code.latere.ai/u-1/hello.git", "git push latere main",
+		"visibility: private", "Only you and the people you invite can open it", "latere apps visibility unlisted hello", "latere apps share hello <email>..."} {
 		if !strings.Contains(out, want) {
 			t.Errorf("create output lacks %q:\n%s", want, out)
 		}
