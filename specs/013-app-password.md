@@ -9,7 +9,7 @@ depends_on:
   - "CROSS-REPO: platform docs/apps/sharing.md, the three choices of who can open an app and the words for them"
 affects:
   - internal/commands/app_password.go (new: password)
-  - internal/commands/app_access.go (access says the choice and the password; visibility asks the platform and removes a password)
+  - internal/commands/app_access.go (access says the choice and the password; visibility asks the platform and removes a password, and changes the app whatever the platform answers)
   - internal/commands/app.go (the group's help)
   - cmd/latere/app_password_e2e_test.go (new), cmd/latere/app_access_e2e_test.go
   - docs/apps.md, docs/configuration.md, docs/login-and-tokens.md, README.md, CHANGELOG.md
@@ -49,7 +49,7 @@ words. This records the CLI's part.
 | `password [slug]` with `--generate`, `--stdin` or a prompt, and `--json` | `GET /apps/{slug}`, `GET .../access`, `PATCH /apps/{slug}` with `{visibility: private}` when the app is not private, then `PUT .../access/password` | sets or replaces the password; prints the app, that the password is set or replaced, who can open the app, that the app was made private when it was, and the generated password alone on the last line |
 | `password --remove [slug]` with `--json` | `GET /apps/{slug}`, `GET .../access`, then `DELETE .../access/password` when one is set | says the password was removed and what that changes, or that the app had none, exit 0 either way |
 | `access [slug]` | as 012 | the first lines name the choice the app is on; a password is said with the moment it was set |
-| `visibility <value> [slug]` | `GET /apps/{slug}`, `GET .../access`, `PATCH /apps/{slug}`, then `DELETE .../access/password` when one is set | as 012, and removes a password the app has, saying so; with `--json` the removal is said on standard error |
+| `visibility <value> [slug]` | `GET /apps/{slug}`, `GET .../access`, `PATCH /apps/{slug}`, then `DELETE .../access/password` when one is set | as 012, and removes a password the app has, saying so; with `--json` the removal is said on standard error. The change is made whatever the platform answers, and what could not be done for a password is one line on standard error, exit 0 |
 | `list`, `show` | as 012 | unchanged: neither reads the platform, so neither says a password |
 
 ### Where the password comes from
@@ -107,14 +107,27 @@ again.
 
 `private` means Only people invited and `unlisted` means Anyone with the
 link. Neither is the choice a password makes, so both remove a password the
-app has. `visibility` therefore asks the platform before it changes
-anything, and a platform that does not answer leaves the app as it was. The
-password is removed after the change. A removal that fails is reported after
-the command has printed what the change left, with the password still named
-as the app's, exit 1.
+app has: `visibility` asks the platform whether the app has one, changes the
+visibility, and removes the password after the change.
+
+The visibility is the Apps API's and the password the platform's, and
+`visibility` worked with the Apps API alone before apps had passwords. So
+the platform's answer is never a condition of the change. When the read
+cannot be made or fails, for any reason, a missing platform credential, a
+deployment that does not share apps, a refusal, a network error, an app
+whose answer names no id, the visibility is changed all the same. The
+command then prints what it printed in 012, the sentence of the visibility
+alone, since it cannot name the choice, and one line on standard error:
+that the app's password, if it has one, could not be checked or removed,
+the cause on the same line, and the command that removes a password. A
+removal that fails after the change is said the same way, with the password
+still named as the app's in what the command prints. Both exit 0: the
+change asked for was made. A change the Apps API refuses is exit 1 as in
+012, and says nothing of a password.
 
 On a platform that sets no passwords the access answer says of every app
-that it has none, and `visibility` changes the visibility alone.
+that it has none, and `visibility` changes the visibility alone and says
+nothing on standard error.
 
 ### What `access` says
 
@@ -141,7 +154,8 @@ private when there was one.
 | When a typed password is asked for | first, before any request | after the two reads, which could say that the platform sets no passwords before anything was typed: the terminal shows what is typed until the prompt reads, and the reads take long enough to type ahead of |
 | The bounds of a password | read from `limits` of the access answer | constants in the CLI: a second copy of the platform's two numbers |
 | `--remove` of no password | no request, exit 0, says there was none | exit 1: the state the person asked for already holds |
-| `visibility` when the platform does not answer | nothing changes | changing the visibility and reporting the password afterwards: `private` would report success on an app a password still opens |
+| `visibility` when the platform does not answer | the visibility is changed, with one line on standard error for the password, exit 0 | changing nothing: a script that holds the Apps API's bearer alone, and a deployment whose platform does not serve the access routes, would fail where they succeeded before apps had passwords |
+| A password `visibility` could not remove | one line on standard error with the command that removes it, exit 0 | exit 1: the change asked for was made, and a script that reads the exit status would take a changed visibility for a failed one |
 | When the password is removed by `visibility` | after the change | before it: a refused change would have removed the password of an app that stays as it was |
 | A removed password under `visibility --json` | one line on standard error | a field in the output: standard output is the app as the API answers it |
 | `show` and `list` | say nothing of a password | one platform read for each row of `list`, and a second API for `show`, to print one word |
@@ -164,7 +178,7 @@ private when there was one.
 | 11 | `--json` carries a password only when `--generate` made it, once | `TestAppPasswordJSON` |
 | 12 | `access` names the choice the app is on, a password with its moment, and one left on an app anyone with the link opens; `--json` carries the platform's `password` | `TestAppAccessByVisibility`, `TestAppAccessJSONSaysWhetherAPasswordIsSet` |
 | 13 | `visibility` removes a password with either value and says so, on standard error under `--json` | `TestAppVisibilityRemovesAPassword`, `TestAppVisibilityJSONSaysARemovedPasswordOnStderr`, `TestAppPasswordE2E` |
-| 14 | `visibility` changes nothing without the platform's answer, changes the visibility alone where the platform sets no passwords, and reports a password it could not remove | `TestAppVisibilityChangesNothingWithoutThePlatformsAnswer`, `TestAppVisibilityWhereThePlatformSetsNoPasswords`, `TestAppVisibilitySaysAPasswordItCouldNotRemove` |
+| 14 | `visibility` changes the app whatever the platform answers, with the output of 012, one line on standard error and exit 0; it changes the visibility alone where the platform sets no passwords, and says a password it could not remove on standard error, exit 0 | `TestAppVisibilityChangesWhateverThePlatformAnswers`, `TestAppVisibilityWithTheAppsBearerAlone`, `TestAppVisibilityOfAnAppWithoutAnID`, `TestAppVisibilityWhereThePlatformSetsNoPasswords`, `TestAppVisibilitySaysAPasswordItCouldNotRemove`, `TestAppVisibilityHelpSaysWhatBecomesOfAPassword`, `TestAppAccessE2E` |
 | 15 | The help says the generated password is printed once and names the words of no mechanism | `TestAppPasswordHelp`, `TestAppWithoutASubcommandShowsHelp` |
 
 ## Outcome
@@ -173,10 +187,9 @@ Built on 2026-10-11, not released. Every criterion has a passing test, and
 the prompt was run once on a real terminal with the built binary: nothing
 typed was shown, and two answers that differed set nothing.
 
-`visibility` now reads the platform before it changes an app, where 012 had
-it reach the Apps API alone. A script that gives it `LATERE_APPS_TOKEN`
-needs `LATERE_PLATFORM_TOKEN` or a saved login as well, and a deployment
-whose platform does not serve the access routes refuses the change.
+The first build had `visibility` change nothing without the platform's
+answer. That made a caller of 012 fail, so the order of trust was reversed:
+the platform is asked, and the change is made whatever it answers.
 
 `show` prints who a private app's visibility lets in and cannot say that a
 password opens it too. Its help and the documentation point at `access`.

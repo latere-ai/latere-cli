@@ -78,8 +78,9 @@ Every spec in the tree has shipped:
   platformd's password routes beside the access list. The password is typed
   at a prompt, read from standard input or generated, never a flag's value
   or an argument, and printed only when the command generated it. `access`
-  names which of the three choices an app is on, and `visibility` asks the
-  platform first and removes a password with either of its values.
+  names which of the three choices an app is on, and `visibility` removes a
+  password with either of its values, changing the app whatever the platform
+  answers.
 
 Two surfaces shipped without a dedicated design record: the token-lifecycle
 work, which [docs/login-and-tokens.md](../docs/login-and-tokens.md) documents,

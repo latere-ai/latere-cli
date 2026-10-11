@@ -16,16 +16,17 @@ committed: the commit log already holds that.
   either value, and says so. `private` means only people invited, so the
   people who used the password no longer get in. An `unlisted` app opens for
   anyone with the link, where a password decides nothing, and one left set
-  would open the app again the next time it is private. The command asks the
-  platform whether the app has a password before it changes anything, and
-  leaves the app as it is when the platform does not answer. It takes
-  `--platform-url`, and a script that gives it `LATERE_APPS_TOKEN` needs
-  `LATERE_PLATFORM_TOKEN` or a saved login as well.
+  would open the app again the next time it is private. The password is kept
+  by the platform, which the command now asks as well, at `--platform-url`.
+  The visibility is changed whatever the platform answers: when it cannot be
+  asked, or does not remove the password, the command says so in one line on
+  standard error, with the command that removes a password, and exits 0.
 - `latere apps visibility` and `latere apps access` name who can open an app
   by the same three choices the console and the chat offer: `Only people
   invited`, `Anyone with the password` and `Anyone with the link`. The
   sentence each prints starts with the choice, so a script that matched the
-  sentence of v0.18.0 needs the new one. `--json` is unchanged.
+  sentence of v0.18.0 needs the new one. `visibility` prints the sentence of
+  v0.18.0 when the platform cannot be asked, and `--json` is unchanged.
 
 ### Added
 
