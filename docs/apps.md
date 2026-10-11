@@ -4,9 +4,9 @@
 and shows what your pushes built. An app is a git repository and an address:
 a push to a branch builds a preview of it, and a pushed tag that starts with
 `v` releases that commit to the app's address. A new app is private until you
-open it, and you can invite people to it by email. Every command acts in your
-current context: your personal account, or the organization `latere org`
-selected.
+open it, and you can invite people to it by email or give it a password.
+Every command acts in your current context: your personal account, or the
+organization `latere org` selected.
 
 Run `latere login` first (see the [main README](../README.md#sign-in)). It
 also lets git sign in to `code.latere.ai`, which is where you push.
@@ -80,20 +80,22 @@ When a create is refused, the command says why and exits 1:
 
 ## Who can open an app
 
-An app's visibility decides who can open its address and its previews:
+Who can open an app's address and its previews is one of three choices:
 
-| Visibility | Who can open the app |
-|---|---|
-| `private` | You, or the members of the organization that owns the app, and the people you invite by email. Each signs in with a Latere account first. |
-| `unlisted` | Anyone who has the address, without signing in. The app is kept out of search engines. |
-| `public` | Anyone, and search engines may list it. |
+| Who can open it | What the app is | Who opens the app |
+|---|---|---|
+| Only people invited | `private`, without a password | You, or the members of the organization that owns the app, and the people you invite by email. Each signs in with a Latere account first. |
+| Anyone with the password | `private`, with a password | The same people, signed in, and anyone who types the app's password at its address, with no Latere account. |
+| Anyone with the link | `unlisted` | Anyone who has the address, without signing in. The app is kept out of search engines. |
 
-A new app is private. You choose between `private` and `unlisted`, when you
-create the app or at any time after:
+A new app starts on Only people invited. You choose between `private` and
+`unlisted` when you create the app or at any time after, and a password is
+set with a command of its own:
 
 ```sh
-latere apps visibility unlisted          # open the app to anyone who has its address
-latere apps visibility private hello     # only you and the people you invite
+latere apps visibility unlisted          # anyone with the link
+latere apps visibility private hello     # only people invited
+latere apps password hello               # anyone with the password
 ```
 
 ```text
@@ -101,17 +103,93 @@ app:        hello
 address:    https://hello.latere.site
 visibility: unlisted
 
-Anyone who has its address can open it without signing in, and it is kept out of search engines.
+Anyone with the link: it opens without signing in, and is kept out of search engines.
 ```
 
-An app becomes `public` when it is shown in the gallery at latere.site. You
-ask for that from the app's Share in the chat, and it is reviewed first, so
-the command line does not take `public`. An app that is public reads as
-public in every command. Changing the visibility takes the app out of the
-gallery, and ends a request to show it there that still waits for its review.
+`latere apps visibility` removes the app's password when it has one, with
+either value, and says so. `private` means only people invited, so the
+people who used the password no longer get in. An `unlisted` app opens for
+anyone with the link, where a password decides nothing, and one left set
+would open the app again the next time it is private.
 
-Changing the visibility takes the app's owner, or an owner or admin of the
-organization that owns it.
+A `public` app opens for anyone too, and search engines may list it. An app
+becomes `public` when it is shown in the gallery at latere.site. You ask for
+that from the app's Share in the chat, and it is reviewed first, so the
+command line does not take `public`. An app that is public reads as public
+in every command. Changing the visibility takes the app out of the gallery,
+and ends a request to show it there that still waits for its review.
+
+Changing who can open an app takes the app's owner, or an owner or admin of
+the organization that owns it.
+
+### Open a private app with a password
+
+A password lets people open a private app without a Latere account: a
+class, a client, a family. Whoever opens the app's address or one of its
+previews is asked for the password, and whoever types it opens the app. You,
+your organization's members and the people you invited keep opening it by
+signing in.
+
+```sh
+latere apps password                              # asks for it twice, without showing it
+latere apps password hello --generate             # makes one and prints it once
+latere apps password hello --stdin < password.txt # reads one line of standard input
+latere apps password hello --remove               # removes it
+```
+
+```text
+app:        hello
+address:    https://hello.latere.site
+visibility: private
+
+The password of hello is set.
+Anyone with the password: whoever types it at the app's address opens the app, with no Latere account.
+You and the people you invite still open the app by signing in with a Latere account.
+Send people the app's address and the password. Neither is emailed.
+
+The generated password, printed this once:
+k7m2p-9xw4h-tq3bn-8fjyc
+```
+
+The password is never a flag's value or an argument, which a shell history
+would keep. It comes from the first of these that applies:
+
+| From | What is read |
+|---|---|
+| `--generate` | The command makes one: 20 letters and digits in four groups, without the ones that look alike. |
+| `--stdin` | One line of standard input. Its line ending is removed and nothing else, so a space is part of the password. |
+| A prompt | On a terminal, the command asks twice before it does anything else, and shows nothing you type. The two answers must be the same. |
+
+Without a terminal the command needs `--stdin` or `--generate`, and says so.
+
+A generated password is printed once, on the last line of the output. The
+platform keeps no password in a form it can show again, so copy it then; a
+lost password is replaced, never recovered. `--json` prints an object with
+`app` and `password`: `{"set": true}`, with `"generated"` holding the value
+only when `--generate` made it. A password you typed or piped is in no
+output.
+
+The platform says how short and how long a password may be, and the command
+holds a password to that before it sends it: one outside the bounds is
+refused with the bound it missed, and nothing changes. Any characters count,
+and nothing is trimmed.
+
+Setting a password makes the app private when it is not, and the command
+says so: an app that anyone with the link opened then opens with the
+password, or by signing in. Running the command again replaces the
+password. Replacing or removing it ends every visit made with the one
+before within a minute.
+
+Nothing is emailed: send people the app's address and the password
+yourself. One password opens the app for everyone who has it, so to let in
+one person and not another, invite them by email instead.
+
+`--remove` removes the password and leaves the visibility as it is, and it
+is no error when the app has none. `latere apps access` says whether a
+password is set, and since when.
+
+Where the platform does not offer passwords yet, the command says so, exits
+1 and changes nothing.
 
 ### Invite people to a private app
 
@@ -159,17 +237,22 @@ app:        hello
 address:    https://hello.latere.site
 visibility: private
 
-Only you and the people you invite can open it, each after signing in with a Latere account.
+Anyone with the password, set 2026-10-08 12:00 UTC: whoever types it at the app's address opens the app, with no Latere account.
+You and the people you invite still open the app by signing in with a Latere account.
 
 EMAIL                 STATE    NAME         INVITED
 ines@example.com      active   Ines Moreau  5d
 pilot@harbor.example  pending  -            3h
 ```
 
-An invitation is `pending` until the person signs in at the app with the
-invited address, and `active` from then on, with their name. `--json` prints
-an object with `app` and `access`, the app and its list of people, each as
-its API answers it.
+The first lines say which of the three choices the app is on. A password is
+said with the moment it was set, never the password itself, and an app
+without one reads `Only people invited`. An invitation is `pending` until
+the person signs in at the app with the invited address, and `active` from
+then on, with their name. `--json` prints an object with `app` and `access`,
+the app and what the platform keeps of who can open it, each as its API
+answers it: the list of people, and `password`, which is the moment a
+password was set or `null`.
 
 ### Take an invitation back
 
@@ -183,6 +266,7 @@ reported, and the others are still taken back.
 
 Inviting, listing and taking back take whoever may change the app's
 settings: its owner, or an owner or admin of the organization that owns it.
+The same people set and remove its password.
 
 ## See what you have
 
@@ -191,6 +275,9 @@ latere apps list              # slug, state, visibility, the release production 
 latere apps show              # one app: who can open it, addresses, production, newest preview, push URL
 latere apps deploys           # the deploys, newest first: id, ref, status, preview address, age
 ```
+
+`list` and `show` print the app's visibility, and do not read whether a
+private app also has a password: `latere apps access` says that.
 
 Each takes `--json` and prints the API's own objects. `show --json` prints an
 object with `app`, `release` (the release production serves, or null) and
@@ -255,9 +342,11 @@ your login token itself is never sent there.
 | `LATERE_APPS_URL` | `https://api.latere.ai/v1/apps` | The Apps API's address, including its `/v1/apps` path. `--api-url` overrides it. |
 | `LATERE_APPS_TOKEN` | none | A bearer to present as given instead of minting one. |
 
-The people invited to an app are kept by the platform, so `latere apps
-access`, `share` and `unshare` read the app at the Apps API and then call
-`https://platform.latere.ai`, with a token minted for the platform alone.
+The people invited to an app and its password are kept by the platform, so
+`latere apps visibility`, `password`, `access`, `share` and `unshare` read
+the app at the Apps API and then call `https://platform.latere.ai`, with a
+token minted for the platform alone. `visibility` asks the platform whether
+the app has a password before it changes anything, so it needs both.
 
 | Variable | Default | What it does |
 |---|---|---|
