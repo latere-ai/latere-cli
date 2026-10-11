@@ -133,12 +133,15 @@ type reposContext struct {
 // sentence written for a person, and the detail written for a developer.
 // The repository routes answer {"error": "<code>", "message", "detail"};
 // the shared envelope {"error": {"code", "message", "details"}} is read as
-// well, so a refusal in either shape keeps its code and sentence.
+// well, so a refusal in either shape keeps its code, its sentence and its
+// detail. Details is what the shared envelope names besides: the field, the
+// index, the bound a refusal is about.
 type platformError struct {
 	Status  int
 	Code    string
 	Message string
 	Detail  string
+	Details map[string]any
 }
 
 func (e *platformError) Error() string {
@@ -180,9 +183,12 @@ func parsePlatformError(status int, body []byte) *platformError {
 		case json.Unmarshal(flat.Error, &code) == nil:
 			e.Code = code
 		case json.Unmarshal(flat.Error, &nested) == nil:
-			e.Code = nested.Code
+			e.Code, e.Details = nested.Code, nested.Details
 			if nested.Message != "" {
 				e.Message = nested.Message
+			}
+			if detail, ok := nested.Details["detail"].(string); ok && e.Detail == "" {
+				e.Detail = detail
 			}
 		}
 		if e.Code != "" || e.Message != "" {

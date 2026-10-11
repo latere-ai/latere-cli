@@ -196,6 +196,12 @@ func TestReposRefusalsCarryTheServersCodeAndSentence(t *testing.T) {
 			want:   []string{"confirmation_required: This create needs a person's confirmation."},
 		},
 		{
+			name:   "shared envelope with its detail",
+			status: http.StatusBadRequest,
+			body:   `{"error":{"code":"invalid_field","message":"The request could not be read.","details":{"field":"slug","detail":"slug is at most 64 characters"}}}`,
+			want:   []string{"invalid_field: The request could not be read.", "detail: slug is at most 64 characters"},
+		},
+		{
 			name:   "an expired token",
 			status: http.StatusUnauthorized,
 			body:   `{"error":"unauthorized","message":"invalid token","detail":"token is expired"}`,
@@ -234,6 +240,19 @@ func TestReposRefusalsCarryTheServersCodeAndSentence(t *testing.T) {
 				t.Errorf("error %q carries the login hint", err)
 			}
 		})
+	}
+}
+
+// What the shared envelope names besides its sentence reaches a command that
+// explains a refusal by it.
+func TestPlatformErrorKeepsTheSharedEnvelopesDetails(t *testing.T) {
+	e := parsePlatformError(http.StatusBadRequest, []byte(`{"error":{"code":"invalid_field","message":"The request could not be read.","details":{"field":"emails","index":1,"detail":"emails[1] is not an email address"}}}`))
+	if e.Details["field"] != "emails" || e.Details["index"] != float64(1) || e.Detail != "emails[1] is not an email address" {
+		t.Errorf("details = %v, detail = %q", e.Details, e.Detail)
+	}
+	flat := parsePlatformError(http.StatusForbidden, []byte(`{"error":"forbidden","message":"That owner name is not yours to create under.","detail":"a repository lives under your handle"}`))
+	if flat.Details != nil || flat.Detail != "a repository lives under your handle" {
+		t.Errorf("details = %v, detail = %q", flat.Details, flat.Detail)
 	}
 }
 
