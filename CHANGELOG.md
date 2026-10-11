@@ -10,6 +10,54 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Changed
+
+- **A new app is private.** `latere apps create` no longer makes every app
+  public. It names no visibility, so the platform decides, and a new app
+  starts private: only you, or the members of the organization that owns it,
+  and the people you invite can open it, each after signing in with a Latere
+  account. The command prints the visibility the app was created with, who
+  can open it, and for a private app the two commands that open it or share
+  it. `latere apps create --visibility unlisted` creates an app open to
+  anyone who has its address, which is what a script that relied on a
+  created app being open needs now. The apps you already have keep their
+  visibility.
+- `latere apps list` has a `VISIBILITY` column, and `latere apps show` says
+  who the app's visibility lets open it.
+- A refusal from the platform prints the detail it carries, for
+  `latere repos` as well as for the commands below.
+
+### Added
+
+- `latere apps visibility <private|unlisted> [slug]` changes who can open an
+  app at its address and its previews. `unlisted` opens it to anyone who has
+  the address, without signing in, and keeps it out of search engines.
+  `private` closes it to everyone but you and the people you invite. The
+  command line does not take `public`: an app becomes public when it is
+  shown in the gallery, which you ask for from the app's Share in the chat
+  and which is reviewed first. An app that is public already reads as public
+  in every command, and making it unlisted or private takes it out of the
+  gallery.
+- `latere apps share [slug] <email>...` invites people to a private app by
+  email. Invitations are not emailed: the command prints the app's address
+  for you to send, and each person opens it after signing in with a Latere
+  account whose verified email is the address you invited. Your own address
+  and an address already invited are skipped, and the command says so. On an
+  unlisted or public app it says the app is already open to anyone who has
+  its address, and that the invitations decide who opens it once it is
+  private.
+- `latere apps unshare [slug] <email>...` takes invitations back by address.
+  An address that is not invited is reported and does not fail the others.
+- `latere apps access [slug]` shows who can open an app and lists the people
+  invited: the address, whether the invitation is pending or active, the
+  person's name once they accepted it, and how long ago they were invited.
+  `--json` prints the app and its access list as the APIs answer them.
+- `share`, `unshare` and `access` take the slug from the git remote `latere`
+  when it is left out, like the other `latere apps` commands. They keep the
+  people invited at the platform, `https://platform.latere.ai`, with a token
+  minted for it alone: `--platform-url`, `LATERE_PLATFORM_URL` and
+  `LATERE_PLATFORM_TOKEN` apply as they do to `latere repos`.
+
 ## v0.17.1 - 2026-10-11
 
 ### Changed

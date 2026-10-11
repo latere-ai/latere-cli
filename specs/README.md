@@ -19,6 +19,7 @@ specs/
   009-repos-command.md               (implemented: latere repos create, list and get on platformd's repository routes)
   010-app-command.md                 (implemented: latere app create, list, show, deploys, logs and delete on the Apps API)
   011-capability-commands.md         (implemented: latere environments and latere agents replace cella, topos and review)
+  012-app-access.md                  (implemented: a new app is private; latere apps visibility, access, share and unshare)
 ```
 
 ## Status
@@ -64,6 +65,13 @@ Every spec in the tree has shipped:
   and `latere agents run`, `provider` and `review` replace `latere topos
   --local`, `latere topos login` and `latere review`; the old words are
   refused with their replacement for one release.
+- `012-app-access.md`: `latere apps create` names no visibility, so a new
+  app is private unless `--visibility unlisted` is given.
+  `latere apps visibility` changes it between `private` and `unlisted` on
+  the Apps API, and `access`, `share` and `unshare` list, invite and remove
+  the people invited to an app on platformd's access routes at
+  `https://platform.latere.ai`, with the token `latere repos` mints. The CLI
+  never sets `public`, which only a listing in the gallery gives.
 
 Two surfaces shipped without a dedicated design record: the token-lifecycle
 work, which [docs/login-and-tokens.md](../docs/login-and-tokens.md) documents,

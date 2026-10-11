@@ -14,7 +14,7 @@ affects:
   - .lateregate.yaml (the identity block's audience)
   - docs/app.md, docs/configuration.md, docs/login-and-tokens.md, README.md, CHANGELOG.md
 created: 2026-10-03
-updated: 2026-10-03
+updated: 2026-10-11
 author: changkun
 ---
 
@@ -49,7 +49,7 @@ Apps API is not also a token for platformd's own routes.
 
 | Command | Routes | Behavior |
 |---|---|---|
-| `create [name] [--slug] [--remote] [--no-remote] [--json]` | `POST /apps` with `{name?, slug?, visibility: public}` | prints the address, the newest-preview address and the push URL; in a git repository adds the push URL as the remote `latere`; ends with the next command, `git push latere main` |
+| `create [name] [--slug] [--remote] [--no-remote] [--json]` | `POST /apps` with `{name?, slug?}`; the visibility is 012's | prints the address, the newest-preview address and the push URL; in a git repository adds the push URL as the remote `latere`; ends with the next command, `git push latere main` |
 | `list [--json]` | `GET /apps` every page, `GET /apps/{slug}/releases` per app | slug, state, the tag of the newest `released` release or `-`, address |
 | `show [slug] [--json]` | `GET /apps/{slug}`, `/releases`, `/deploys` | addresses, the live release and its deploy, the newest preview deploy, push and clone URLs |
 | `deploys [slug] [--json]` | `GET /apps/{slug}/deploys` | short id, ref without `refs/heads/` or `refs/tags/`, status, the deploy's preview address, age |
@@ -118,7 +118,7 @@ adds the line that says to run `latere login`.
 
 | # | Criterion | How it is checked |
 |---|---|---|
-| 1 | `create` sends `visibility: public` with the name and slug given, and prints the addresses, the push URL and the next command | `TestAppCreateOutsideARepository`, `TestAppCreateWithoutANameSendsVisibilityAlone`, `TestAppE2E` |
+| 1 | `create` sends the name and slug given, and prints the addresses, the push URL and the next command | `TestAppCreateOutsideARepository`, `TestAppCreateWithoutANameSendsAnEmptyBody`, `TestAppE2E` |
 | 2 | `create` adds the remote, under `--remote` when given, skips it with `--no-remote`, refuses a remote of another app before any request, and keeps a remote it would overwrite | `TestAppCreateAddsTheRemote`, `TestAppCreateNoRemoteLeavesTheRepositoryAlone`, `TestAppCreateRefusesARemoteOfAnotherApp`, `TestAppCreateRestoreKeepsTheSameRemote`, `TestAppCreateKeepsADifferentRemoteOfTheSameSlug` |
 | 3 | Every refusal the API lists for a create reads as a sentence naming what its details carry | `TestAppCreateRefusals`, `TestAppAudienceMismatchKeepsTheAPIsHint` |
 | 4 | `list`, `show` and `deploys` print what production serves, the newest preview and the deploys, and `--json` prints the API's resources | `TestAppListShowsWhatProductionServes`, `TestAppListJSONIsTheAPIsApps`, `TestAppShow`, `TestAppShowJSON`, `TestAppDeploys` |
@@ -133,3 +133,8 @@ adds the line that says to run `latere login`.
 ## Outcome
 
 Built on 2026-10-03, not released. Every criterion has a passing test.
+
+Amended on 2026-10-11 by 012: a create sent `visibility: public`, and now
+names no visibility unless `--visibility` is given. The commands are
+`latere apps` since 011, and 012 adds `visibility`, `access`, `share` and
+`unshare`.
