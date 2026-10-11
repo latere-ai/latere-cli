@@ -1,10 +1,11 @@
 # Apps
 
-`latere apps` creates apps on the Latere platform and shows what your pushes
-built. An app is a git repository and an address: a push to a branch builds a
-preview of it, and a pushed tag that starts with `v` releases that commit to
-the app's address. Every command acts in your current context: your personal
-account, or the organization `latere org` selected.
+`latere apps` creates apps on the Latere platform, decides who can open them,
+and shows what your pushes built. An app is a git repository and an address:
+a push to a branch builds a preview of it, and a pushed tag that starts with
+`v` releases that commit to the app's address. A new app is private until you
+open it or share it. Every command acts in your current context: your
+personal account, or the organization `latere org` selected.
 
 Run `latere login` first (see the [main README](../README.md#sign-in)). It
 also lets git sign in to `code.latere.ai`, which is where you push.
@@ -19,13 +20,19 @@ git push latere v1.0.0                    # release that commit to the address
 ```
 
 `latere apps create` prints the app's address, the address of its newest
-preview, and its push URL, then the next command to run:
+preview, its push URL and who can open it, then the next command to run:
 
 ```text
 app:        hello
 address:    https://hello.latere.site
 preview:    https://next--hello.latere.site
 push:       https://code.latere.ai/u-9b2c1d6e/hello.git
+visibility: private
+
+Only you and the people you invite can open it, each after signing in with a Latere account.
+Open it to anyone who has its address, or invite people by email:
+  latere apps visibility unlisted hello
+  latere apps share hello <email>...
 
 Added the git remote latere.
 
@@ -36,16 +43,22 @@ Next:
 ## Create an app
 
 ```sh
-latere apps create                     # a generated slug
-latere apps create "Hello World"       # a slug derived from the name: hello-world
-latere apps create --slug hello        # this slug or a refusal
-latere apps create --remote deploy     # add the remote under another name
-latere apps create --no-remote --json  # no remote; the app as JSON
+latere apps create                               # a generated slug
+latere apps create "Hello World"                 # a slug derived from the name: hello-world
+latere apps create --slug hello                  # this slug or a refusal
+latere apps create hello --visibility unlisted   # open to anyone who has the address
+latere apps create --remote deploy               # add the remote under another name
+latere apps create --no-remote --json            # no remote; the app as JSON
 ```
 
 The slug is the app's address. It is 1 to 40 lowercase letters, digits and
 single hyphens, and a slug under three characters needs a plan that allows
-short slugs. An app is public.
+short slugs.
+
+A new app is private. `--visibility unlisted` creates it open to anyone who
+has its address instead, and [Who can open an app](#who-can-open-an-app)
+covers both and how to change them later. The command prints the visibility
+the app was created with.
 
 In a git repository the command adds the push URL as the remote `latere`. If
 the repository already has a remote of that name for another app, the command
@@ -64,11 +77,117 @@ When a create is refused, the command says why and exits 1:
 | `repository_create_failed`, `repository_unavailable` | the app's repository could not be created or restored, and nothing was created; run the command again |
 | `forbidden` | your current context may not create an app; `latere org` switches it |
 
+## Who can open an app
+
+An app's visibility decides who can open its address and its previews:
+
+| Visibility | Who can open the app |
+|---|---|
+| `private` | You, or the members of the organization that owns the app, and the people you invite by email. Each signs in with a Latere account first. |
+| `unlisted` | Anyone who has the address, without signing in. The app is kept out of search engines. |
+| `public` | Anyone, and search engines may list it. |
+
+A new app is private. You choose between `private` and `unlisted`, when you
+create the app or at any time after:
+
+```sh
+latere apps visibility unlisted          # open the app to anyone who has its address
+latere apps visibility private hello     # only you and the people you invite
+```
+
+```text
+app:        hello
+address:    https://hello.latere.site
+visibility: unlisted
+
+Anyone who has its address can open it without signing in, and it is kept out of search engines.
+```
+
+An app becomes `public` when it is shown in the gallery at latere.site. You
+ask for that from the app's Share in the chat, and it is reviewed first, so
+the command line does not take `public`. An app that is public reads as
+public in every command. Changing the visibility takes the app out of the
+gallery, and ends a request to show it there that still waits for its review.
+
+Changing the visibility takes the app's owner, or an owner or admin of the
+organization that owns it.
+
+### Invite people to a private app
+
+```sh
+latere apps share ada@example.com grace@example.com   # inside the app's repository
+latere apps share hello ada@example.com               # by slug
+```
+
+```text
+Invited to hello:
+  ada@example.com
+
+Invitations are not emailed. Send the people you invited the app's address:
+  https://hello.latere.site
+Each of them opens it after signing in with a Latere account whose verified email is the address you invited.
+```
+
+Each person you invite opens the app at its address and at its previews, and
+sees nothing else of it: not its deploys, its logs or its settings.
+Invitations are not emailed, so send the address yourself. The person opens
+it and signs in with a Latere account whose verified email is the address
+you invited, or creates an account with that address. The first sign-in with
+that address accepts the invitation, and from then on the app opens for that
+account.
+
+An argument without an `@` in first position is the slug, and every other
+argument is an address. Your own address and an address already invited are
+skipped, and the command says so. The platform bounds how many people one app
+can have invited and how many invitations one person makes in a day, and a
+refusal names the bound.
+
+An unlisted or public app is already open to anyone who has its address. You
+can still invite people to one: they stay invited, and open the app once it
+is private.
+
+### See who can open it
+
+```sh
+latere apps access            # who can open the app, and the people invited
+latere apps access hello --json
+```
+
+```text
+app:        hello
+address:    https://hello.latere.site
+visibility: private
+
+Only you and the people you invite can open it, each after signing in with a Latere account.
+
+EMAIL                 STATE    NAME         INVITED
+ines@example.com      active   Ines Moreau  5d
+pilot@harbor.example  pending  -            3h
+```
+
+An invitation is `pending` until the person signs in at the app with the
+invited address, and `active` from then on, with their name. `--json` prints
+an object with `app` and `access`, the app and its list of people, each as
+its API answers it.
+
+### Take an invitation back
+
+```sh
+latere apps unshare hello pilot@harbor.example
+```
+
+An invitation no one accepted is gone at once, and a person who already
+opened the app is refused shortly after. An address that is not invited is
+reported, and the others are still taken back.
+
+Inviting, listing and taking back take whoever may change the app's
+settings: its owner, or an owner or admin of the organization that owns it.
+
 ## See what you have
 
 ```sh
-latere apps list              # slug, state, the release production serves, address
-latere apps show              # one app: addresses, production, newest preview, push URL
+latere apps list              # slug, state, visibility, the release production serves, address
+latere apps show              # one app: who can open it, addresses, production, newest preview, push URL
 latere apps deploys           # the deploys, newest first: id, ref, status, preview address, age
 ```
 
@@ -134,3 +253,12 @@ your login token itself is never sent there.
 |---|---|---|
 | `LATERE_APPS_URL` | `https://api.latere.ai/v1/apps` | The Apps API's address, including its `/v1/apps` path. `--api-url` overrides it. |
 | `LATERE_APPS_TOKEN` | none | A bearer to present as given instead of minting one. |
+
+The people invited to an app are kept by the platform, so `latere apps
+access`, `share` and `unshare` read the app at the Apps API and then call
+`https://platform.latere.ai`, with a token minted for the platform alone.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `LATERE_PLATFORM_URL` | `https://platform.latere.ai` | The platform's address. `--platform-url` overrides it. |
+| `LATERE_PLATFORM_TOKEN` | none | A bearer to present to the platform as given instead of minting one. |
