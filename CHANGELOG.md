@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.19.0 - 2026-10-12
+
 ### Changed
 
 - `latere apps visibility` removes the app's password when it has one, with
