@@ -1,7 +1,7 @@
 # Apps
 
 `latere apps` creates apps on the Latere platform, decides who can open them,
-and shows what your pushes built. An app is a git repository and an address:
+changes their address, and shows what your pushes built. An app is a git repository and an address:
 a push to a branch builds a preview of it, and a pushed tag that starts with
 `v` releases that commit to the app's address. A new app is private until you
 open it, and you can invite people to it by email or give it a password.
@@ -329,6 +329,67 @@ Deploy 02c415ed released v1.0.0 from preview cbc11a51 without a build; its build
 
 Color codes in the log are printed as they are on a terminal and removed when
 the output goes to a file or a pipe.
+
+## Change an app's address
+
+```sh
+latere apps rename hello-world          # the app of this repository
+latere apps rename hello-world hello    # the app hello, from anywhere
+latere apps rename hello-world --json   # the app as JSON
+```
+
+An app's slug is its address, so a new slug moves the app: it and its
+previews answer at `https://hello-world.latere.site` at once. The command
+prints the new address and push URL, and what became of the old one:
+
+```text
+app:        hello-world
+address:    https://hello-world.latere.site
+preview:    https://next--hello-world.latere.site
+push:       https://code.latere.ai/u-9b2c1d6e/hello-world.git
+
+https://hello.latere.site stopped working, and the app's previews moved with it. Nothing sends a visitor on to the new address, so links to the old one stop working.
+The slug hello stays held for your account for seven days: nobody else can take it, and `latere apps rename hello hello-world` takes it back.
+
+Set the git remote latere to the new push URL.
+```
+
+The old address stops working at once and is not redirected, so tell the
+people who have a link to it. The old slug is held for seven days: nobody
+else can take it in that time, and renaming the app back takes it again.
+The app is the same app: its repository and history, its deploys and
+releases, the people invited to it and its password stay as they were.
+
+The push URL changes with the slug. In a git repository whose remote
+`latere` is the app's old push URL, the command sets that remote to the new
+one. A remote `latere` that points anywhere else is left as it is, and the
+command prints the line that sets it; so does a run outside a repository:
+
+```text
+git remote set-url latere https://code.latere.ai/u-9b2c1d6e/hello-world.git
+```
+
+Run that line in every other project that pushes to the app.
+
+The new slug follows the rules of [a slug at a create](#create-an-app). One
+that breaks a rule is refused before anything is sent, and the app's own
+slug changes nothing. Renaming takes the app's owner, or an owner or admin
+of the organization that owns it, and the command asks no question first: a
+rename is undone by renaming back within the hold.
+
+When a rename is refused, nothing has changed. The command says why and
+exits 1:
+
+| Code | What it means |
+|---|---|
+| `slug_taken` | another app has the slug, or it is held for the account that gave it up |
+| `slug_reserved` | the platform keeps the slug for itself |
+| `slug_held` | the slug is the name of a repository deleted recently, which is still held |
+| `invalid_slug` | the slug breaks a rule, or is under three characters on a plan that does not allow short slugs; the message names the rule |
+| `repository_name_taken` | the app's owner already has a repository with the slug as its name, which the app's repository would take |
+| `repository_unavailable` | the app's repository could not be renamed; run the command again in a few minutes |
+| `forbidden` | you may not rename this app |
+| `app_not_found` | your current context has no app with this slug; `latere org` switches it |
 
 ## Delete an app
 

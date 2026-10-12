@@ -127,7 +127,8 @@ git clone https://code.latere.ai/<owner>/<repo>.git
 `latere apps create` creates an app, whose repository you push to deploy it.
 The app is private: `latere apps visibility unlisted` opens it to anyone with
 the link, `latere apps password` to anyone with a password, and
-`latere apps share` invites people to it by email
+`latere apps share` invites people to it by email.
+`latere apps rename <new-slug>` changes its address
 ([docs/apps.md](docs/apps.md)).
 
 The helper answers for that host only; every other host keeps the helpers
@@ -152,7 +153,7 @@ git clone https://code.latere.ai/<owner>/<repo>.git
 | Command | What it does | Guide |
 |---------|--------------|-------|
 | `latere environments` | Workloads in Latere Environments: create one from a manifest, run commands, open a shell, read logs, and move files in and out. | [docs/environments.md](docs/environments.md) |
-| `latere apps` | Apps on the platform: create one and add its git remote, decide who can open it, give it a password and invite people by email, list your apps, show one, list its deploys, follow a build to its outcome, and delete one. A new app is private, and a `git push` deploys. | [docs/apps.md](docs/apps.md) |
+| `latere apps` | Apps on the platform: create one and add its git remote, decide who can open it, give it a password and invite people by email, change its address, list your apps, show one, list its deploys, follow a build to its outcome, and delete one. A new app is private, and a `git push` deploys. | [docs/apps.md](docs/apps.md) |
 | `latere repos` | Git repositories on Latere Code: create one under your handle or your organization, list your context's repositories and the ones shared with you, and look one up by name. | [docs/repos.md](docs/repos.md) |
 | `latere models` | Call language models through the Latere API with a model key the CLI creates and keeps: list the models your key reaches, point a stock SDK at the API, and check a model with one call. | [docs/models.md](docs/models.md) |
 | `latere agents` | Latere Agents on this machine: `run` runs the agent in your directory against your files, interactively or on one prompt; `provider` chooses its model; `review` runs an adversarial review of your latest Claude Code session, whose unresolved attacks set the exit code. | [docs/agents.md](docs/agents.md) |
