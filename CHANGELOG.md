@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.20.0 - 2026-10-12
+
 ### Added
 
 - `latere apps rename <new-slug> [slug]` changes an app's address. The app
