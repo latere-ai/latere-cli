@@ -10,6 +10,22 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Added
+
+- `latere apps rename <new-slug> [slug]` changes an app's address. The app
+  and its previews answer at `https://<new-slug>.latere.site` at once, and
+  the command prints the new address and the new push URL. The old address
+  stops working at once and is not redirected, so links to it stop working.
+  The old slug stays held for your account for seven days: nobody else can
+  take it in that time, and renaming the app back takes it again. In a git
+  repository whose remote `latere` is the app's old push URL, the command
+  sets that remote to the new one; a remote that points anywhere else is
+  left as it is, and the command prints the `git remote set-url` line to
+  run. A slug that breaks a rule is refused before anything is sent, each
+  refusal of the platform says its code and its reason and exits 1, and
+  `--json` prints the app as the API answers it. Without `[slug]` the app is
+  the one the `latere` remote names, as for the other `apps` commands.
+
 ## v0.19.0 - 2026-10-12
 
 ### Changed

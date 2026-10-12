@@ -21,6 +21,7 @@ specs/
   011-capability-commands.md         (implemented: latere environments and latere agents replace cella, topos and review)
   012-app-access.md                  (implemented: a new app is private; latere apps visibility, access, share and unshare)
   013-app-password.md                (implemented: latere apps password; access says a password, and visibility removes one)
+  014-app-rename.md                  (implemented: latere apps rename; the app moves to a new slug and the latere remote follows)
 ```
 
 ## Status
@@ -81,6 +82,13 @@ Every spec in the tree has shipped:
   names which of the three choices an app is on, and `visibility` removes a
   password with either of its values, changing the app whatever the platform
   answers.
+- `014-app-rename.md`: `latere apps rename <new-slug> [slug]` moves an app
+  to a new slug on the Apps API, which is its address and the name of its
+  repository. The command checks the slug's form before it sends anything,
+  says that the old address stopped working with no redirect and that the
+  old slug is held for seven days, and sets the git remote `latere` when it
+  held the app's old push URL, leaving any other remote with the line to
+  run. Built on 2026-10-12, not released.
 
 Two surfaces shipped without a dedicated design record: the token-lifecycle
 work, which [docs/login-and-tokens.md](../docs/login-and-tokens.md) documents,
