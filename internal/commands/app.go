@@ -108,6 +108,9 @@ An app becomes public, which lets search engines list it, when it is shown
 in the gallery at latere.site. You ask for that from the app's Share in the
 chat, and it is reviewed first.
 
+An app's slug is its address, https://<slug>.latere.site, and 'latere apps
+rename <new-slug>' changes it. The old address stops working at once.
+
 A command that takes [slug] reads it from the git remote latere of the
 repository you run it in when you leave it out.
 
@@ -124,6 +127,7 @@ LATERE_PLATFORM_TOKEN presents that bearer as given.`,
   latere apps password --generate
   latere apps share ada@example.com
   latere apps access
+  latere apps rename hello-world
   latere apps list
   latere apps show
   latere apps deploys --json
@@ -139,6 +143,7 @@ LATERE_PLATFORM_TOKEN presents that bearer as given.`,
 		newAppCreateCmd(&apiURL, &authURL),
 		newAppListCmd(&apiURL, &authURL),
 		newAppShowCmd(&apiURL, &authURL),
+		newAppRenameCmd(&apiURL, &authURL),
 		newAppVisibilityCmd(&apiURL, &authURL),
 		newAppAccessCmd(&apiURL, &authURL),
 		newAppShareCmd(&apiURL, &authURL),
@@ -651,7 +656,8 @@ The slug is the app's address. --slug names it; without --slug it is derived
 from [name], or generated when there is no name. A slug is
 ` + appSlugGrammar + `, and
 ` + invalidSlugReasons[slugRuleShort] + `.
-A slug you deleted within the last ` + appSlugHold + ` restores that app.
+A slug you deleted within the last ` + appSlugHold + ` restores that app, and
+'latere apps rename' changes an app's slug later.
 
 In a git repository the command adds the push URL as the remote latere, or
 the name --remote gives; --no-remote skips that. When the remote already
@@ -800,6 +806,27 @@ var invalidSlugReasons = map[string]string{
 
 // appSlugGrammar says what a slug is made of, for a command's help.
 var appSlugGrammar = fmt.Sprintf("1 to %d lowercase letters, digits and single hyphens", appSlugMax)
+
+// brokenSlugRule is the rule a slug breaks whatever the account's plan, as
+// invalid_slug names it, or "" for a slug that breaks none. The platform
+// checks the rules in this order and counts a slug in bytes, so the answer
+// here is the one it would give. A short slug is a plan's to allow, so only
+// the platform refuses one.
+func brokenSlugRule(slug string) string {
+	switch {
+	case slug == "" || len(slug) > appSlugMax:
+		return slugRuleLength
+	case strings.ContainsFunc(slug, func(r rune) bool {
+		return (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-'
+	}):
+		return slugRuleCharset
+	case strings.HasPrefix(slug, "-") || strings.HasSuffix(slug, "-"):
+		return slugRuleBoundary
+	case strings.Contains(slug, "--"):
+		return slugRuleDoubleHyphen
+	}
+	return ""
+}
 
 // explainSlugRefusal puts what a refusal of a slug names into its sentence:
 // the slug, the hold's end, the rule broken. It reports whether the code is

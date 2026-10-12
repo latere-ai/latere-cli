@@ -103,7 +103,8 @@ type stubApps struct {
 	// owner the kind of owner a created app has.
 	visibility, owner string
 	// patched is the body of the last change of an app; patchStatus and
-	// patchBody refuse it.
+	// patchBody refuse it. A change that names a slug moves the app to it,
+	// as it was.
 	patched     map[string]string
 	patchStatus int
 	patchBody   string
@@ -226,7 +227,15 @@ func newStubApps(t *testing.T) *stubApps {
 		s.mu.Lock()
 		s.patched = body
 		status, answer := s.patchStatus, s.patchBody
-		if status == 0 {
+		if to := body["slug"]; status == 0 && to != "" {
+			var was appResource
+			if err := json.Unmarshal([]byte(s.apps[slug]), &was); err != nil {
+				t.Errorf("the stub's app %s: %v", slug, err)
+			}
+			delete(s.apps, slug)
+			s.apps[to] = stubAppAs(to, was.Visibility, s.owner)
+			answer = s.apps[to]
+		} else if status == 0 {
 			s.apps[slug] = stubAppAs(slug, body["visibility"], s.owner)
 			answer = s.apps[slug]
 		}
@@ -1001,6 +1010,7 @@ func TestAppWithoutASlugOrARemote(t *testing.T) {
 		{[]string{"logs"}, "run `latere apps logs <slug> [deploy]`"},
 		{[]string{"access"}, "run `latere apps access <slug>`"},
 		{[]string{"visibility", "unlisted"}, "run `latere apps visibility <private|unlisted> <slug>`"},
+		{[]string{"rename", "hello-world"}, "run `latere apps rename <new-slug> <slug>`"},
 		{[]string{"share", "ada@example.com"}, "run `latere apps share <slug> <email>...`"},
 		{[]string{"unshare", "ada@example.com"}, "run `latere apps unshare <slug> <email>...`"},
 	} {
