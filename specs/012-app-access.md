@@ -152,7 +152,7 @@ line, which every platform command gains.
 
 ## Outcome
 
-Built on 2026-10-11, not released. Every criterion has a passing test, and
+Built on 2026-10-11, released in v0.18.0. Every criterion has a passing test, and
 `access` was read against the platform with the built binary.
 
 The first design offered all three values. The owner's decision that only

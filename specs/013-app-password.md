@@ -183,7 +183,7 @@ private when there was one.
 
 ## Outcome
 
-Built on 2026-10-11, not released. Every criterion has a passing test, and
+Built on 2026-10-11, released in v0.19.0. Every criterion has a passing test, and
 the prompt was run once on a real terminal with the built binary: nothing
 typed was shown, and two answers that differed set nothing.
 
