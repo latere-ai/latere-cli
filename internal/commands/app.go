@@ -50,6 +50,13 @@ const appURLUsage = "Apps API base URL, including its /v1/apps path (default " +
 // takes [slug] reads the slug from.
 const appRemote = "latere"
 
+// appSlugMax is the most characters an app's slug has.
+const appSlugMax = 40
+
+// appSlugHold is how long the platform keeps a slug for the account that gave
+// it up, by renaming its app or deleting it, as a sentence says it.
+const appSlugHold = "seven days"
+
 // appTimeout bounds one JSON request. A create holds its answer until the
 // app's repository exists, which is one round trip to the git host.
 const appTimeout = 60 * time.Second
@@ -641,10 +648,10 @@ list it, when it is shown in the gallery. You ask for that from the app's
 Share in the chat, and it is reviewed first.
 
 The slug is the app's address. --slug names it; without --slug it is derived
-from [name], or generated when there is no name. A slug is 1 to 40 lowercase
-letters, digits and single hyphens, and a slug under three characters needs a
-plan that allows short slugs. A slug you deleted within the last seven days
-restores that app.
+from [name], or generated when there is no name. A slug is
+` + appSlugGrammar + `, and
+` + invalidSlugReasons[slugRuleShort] + `.
+A slug you deleted within the last ` + appSlugHold + ` restores that app.
 
 In a git repository the command adds the push URL as the remote latere, or
 the name --remote gives; --no-remote skips that. When the remote already
@@ -771,23 +778,33 @@ func printCreatedApp(out io.Writer, a appResource) error {
 	return nil
 }
 
+// The rules of a slug, as invalid_slug names the one a slug breaks in its
+// reason.
+const (
+	slugRuleLength       = "length"
+	slugRuleCharset      = "charset"
+	slugRuleBoundary     = "boundary"
+	slugRuleDoubleHyphen = "double_hyphen"
+	slugRuleShort        = "short"
+)
+
 // invalidSlugReasons says each rule a slug can break, by the reason
 // invalid_slug names.
 var invalidSlugReasons = map[string]string{
-	"length":        "a slug is 1 to 40 characters",
-	"charset":       "a slug takes only lowercase letters, digits and hyphens",
-	"boundary":      "a slug starts and ends with a letter or a digit",
-	"double_hyphen": "a slug has no two hyphens in a row",
-	"short":         "a slug under three characters needs a plan that allows short slugs",
+	slugRuleLength:       fmt.Sprintf("a slug is 1 to %d characters", appSlugMax),
+	slugRuleCharset:      "a slug takes only lowercase letters, digits and hyphens",
+	slugRuleBoundary:     "a slug starts and ends with a letter or a digit",
+	slugRuleDoubleHyphen: "a slug has no two hyphens in a row",
+	slugRuleShort:        "a slug under three characters needs a plan that allows short slugs",
 }
 
-// explainCreateRefusal puts what each refusal of a create names into its
-// sentence: the slug, the hold's end, the rule broken.
-func explainCreateRefusal(err error, asked string) error {
-	e, ok := errors.AsType[*appError](err)
-	if !ok {
-		return err
-	}
+// appSlugGrammar says what a slug is made of, for a command's help.
+var appSlugGrammar = fmt.Sprintf("1 to %d lowercase letters, digits and single hyphens", appSlugMax)
+
+// explainSlugRefusal puts what a refusal of a slug names into its sentence:
+// the slug, the hold's end, the rule broken. It reports whether the code is
+// one a slug earns, at a create and at a rename alike.
+func explainSlugRefusal(e *appError, asked string) bool {
 	slug := defaultStr(e.detail("slug"), asked)
 	switch e.Code {
 	case "slug_taken":
@@ -804,6 +821,24 @@ func explainCreateRefusal(err error, asked string) error {
 		if rule, ok := invalidSlugReasons[e.detail("reason")]; ok {
 			e.explained = fmt.Sprintf("The slug %s is not a valid address: %s.", slug, rule)
 		}
+	default:
+		return false
+	}
+	return true
+}
+
+// explainCreateRefusal puts what each refusal of a create names into its
+// sentence: what a slug earns, the stage a repository failed at, the reason
+// a create is not allowed.
+func explainCreateRefusal(err error, asked string) error {
+	e, ok := errors.AsType[*appError](err)
+	if !ok {
+		return err
+	}
+	if explainSlugRefusal(e, asked) {
+		return e
+	}
+	switch e.Code {
 	case "slug_generation_failed":
 		e.explained = fmt.Sprintf("The platform could not find a free address in %s tries. Run the command again, or name a slug with --slug.", defaultStr(e.detail("attempts"), "several"))
 	case "repository_create_failed":
@@ -1138,7 +1173,7 @@ func newAppDeleteCmd(apiURL, authURL *string) *cobra.Command {
 removes the files of its deploys and its repository.
 
 The command asks for the slug typed back unless --yes is given. The slug
-stays held for your account for seven days after the deletion, and creating
+stays held for your account for ` + appSlugHold + ` after the deletion, and creating
 an app with that slug within them restores the app and its repository.`,
 		Example: `  latere apps delete hello
   latere apps delete hello --yes`,
@@ -1158,7 +1193,7 @@ an app with that slug within them restores the app and its repository.`,
 			if _, err := newAppClient(*apiURL, *authURL).call(cmd.Context(), http.MethodDelete, appPath(slug), nil); err != nil {
 				return err
 			}
-			fprintf(cmd.OutOrStdout(), "Deleting %s. Its address no longer serves it.\nThe slug stays held for your account for seven days; `latere apps create --slug %s` restores the app until then.\n", slug, slug)
+			fprintf(cmd.OutOrStdout(), "Deleting %s. Its address no longer serves it.\nThe slug stays held for your account for %s; `latere apps create --slug %s` restores the app until then.\n", slug, appSlugHold, slug)
 			return nil
 		},
 	}
