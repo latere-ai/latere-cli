@@ -274,6 +274,11 @@ A manifest in YAML or JSON:
     lifecycle:
       autoStop: 15m                 # Stop after this much idle time.
 
+The CLI adds your account's labels (platform.latere.ai/tenant, /principal
+and, in an organization, /org) for your current context before it sends
+the manifest, as the console does; the platform refuses a create without
+them. The manifest's own labels and comments are kept.
+
 The answer is the workload as soon as it is recorded, usually Pending.
 --wait holds it until the workload runs or fails, ten minutes unless
 --wait=DURATION says otherwise, and a workload that fails exits 1 with
@@ -297,6 +302,9 @@ Field reference: https://platform.latere.ai/docs/environments/manifest`,
 			}
 			c, err := cellaClient(apiURL)
 			if err != nil {
+				return err
+			}
+			if body, err = labeledManifest(cmd.Context(), body); err != nil {
 				return err
 			}
 			var opts []cellaclient.CreateOption
@@ -651,9 +659,10 @@ interrupted. Both --ephemeral and --rm are required, so the deletion is
 never implied. To run a command in a workload you keep, use
 'latere environments exec'.
 
-The workload takes the platform's default egress boundary. It also stops
-after 15 minutes idle and is deleted two hours after its creation, so
-one the CLI could not delete does not linger.`,
+The workload carries your account's labels for your current context and
+takes the platform's default egress boundary. It also stops after 15
+minutes idle and is deleted two hours after its creation, so one the CLI
+could not delete does not linger.`,
 		Example: `  latere environments run --ephemeral --rm -- python -c 'print("hello")'
   latere environments run --ephemeral --rm --cpu 2 --memory 4Gi -- make test
   latere environments run --ephemeral --rm --json -- uname -a`,
@@ -681,7 +690,12 @@ one the CLI could not delete does not linger.`,
 			if err != nil {
 				return err
 			}
+			labels, err := tenantLabels(cmd.Context())
+			if err != nil {
+				return err
+			}
 			spec := oneShotSpec(image, cpu, memory, diskGB)
+			spec.Metadata.Labels = labels
 			return runOneShot(cmd.Context(), c, spec, req, jsonOut, cmd.OutOrStdout(), cmd.ErrOrStderr())
 		},
 	}

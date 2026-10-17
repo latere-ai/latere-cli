@@ -32,7 +32,8 @@ func writeManifest(t *testing.T, body string) string {
 }
 
 // A create answers at once with the sandbox Pending; the CLI prints it and
-// says how to wait, and sends the manifest as written.
+// says how to wait, and sends the manifest as written with the account's
+// labels added.
 func TestCellaApplyAnswersPendingWithoutWait(t *testing.T) {
 	f := newFakeCore(t)
 	out, errOut, err := f.runCella("", "apply", "-f", writeManifest(t, unnamedManifest))
@@ -43,8 +44,8 @@ func TestCellaApplyAnswersPendingWithoutWait(t *testing.T) {
 		t.Fatalf("requests = %v, want one unheld create", got)
 	}
 	req := f.last("POST", "/sandboxes")
-	if string(req.Body) != unnamedManifest || req.ContentType != "application/json" {
-		t.Errorf("create body %q as %q, want the manifest unchanged as JSON", req.Body, req.ContentType)
+	if want := `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"labels":{"platform.latere.ai/principal":"0042","platform.latere.ai/tenant":"p-0123456789abcdef0123456789abcdef"}},"spec":{"image":"gui"}}`; string(req.Body) != want || req.ContentType != "application/json" {
+		t.Errorf("create body %q as %q, want the manifest as JSON with the account's labels", req.Body, req.ContentType)
 	}
 	for _, want := range []string{"workload:", "generated", "phase:", "Pending", "sbx-generated", "cpu=2 memory=4Gi"} {
 		if !strings.Contains(out, want) {
@@ -75,8 +76,9 @@ func TestCellaApplyByNameHoldsWithWait(t *testing.T) {
 			if got := f.seen(); !slices.Equal(got, []string{want}) {
 				t.Fatalf("requests = %v, want %s", got, want)
 			}
-			if req := f.last("PUT", "/sandboxes/dev"); string(req.Body) != namedManifest || req.ContentType != "application/yaml" {
-				t.Errorf("apply body %q as %q, want the manifest unchanged as YAML", req.Body, req.ContentType)
+			labeled := strings.Replace(namedManifest, "  name: dev\n", "  name: dev\n  labels:\n    platform.latere.ai/principal: \"0042\"\n    platform.latere.ai/tenant: \"p-0123456789abcdef0123456789abcdef\"\n", 1)
+			if req := f.last("PUT", "/sandboxes/dev"); string(req.Body) != labeled || req.ContentType != "application/yaml" {
+				t.Errorf("apply body %q as %q, want the manifest as YAML with the account's labels", req.Body, req.ContentType)
 			}
 			if !strings.Contains(out, "Running") || errOut != "" {
 				t.Errorf("stdout=%q stderr=%q, want a running sandbox and no hint", out, errOut)

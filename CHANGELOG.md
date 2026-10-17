@@ -10,6 +10,21 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Fixed
+
+- `latere environments apply` and `latere environments run --ephemeral`
+  add your account's labels to every workload they create. The platform
+  refuses a create without them, so `run --ephemeral` could create nothing
+  and `apply` worked only with labels copied into the manifest by hand.
+  The CLI reads the labels for your current context from the platform at
+  `/v1/account/environments/context` and sets them in the manifest before
+  it sends it, keeping the manifest's own labels, comments and syntax; a
+  value the manifest gave one of the three is replaced. When the platform
+  cannot answer them, the command stops before it creates anything.
+  `LATERE_PLATFORM_URL` and `LATERE_PLATFORM_TOKEN` select the platform
+  and its bearer, as for `latere repos`. Needs the platform release that
+  serves the labels read.
+
 ## v0.20.0 - 2026-10-12
 
 ### Added

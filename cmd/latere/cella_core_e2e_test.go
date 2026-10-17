@@ -35,13 +35,27 @@ type e2eCore struct {
 	mu   sync.Mutex
 	seen []string
 	file string
+	// created is the body of each create, which carries the account's
+	// labels the platform answered.
+	created [][]byte
 }
+
+// e2eLabels is what the platform's labels read answers the binary.
+const e2eLabels = `{"tenant":{"labels":{"platform.latere.ai/tenant":"p-0123456789abcdef0123456789abcdef","platform.latere.ai/principal":"p1"}}}`
 
 func newE2ECore(t *testing.T) *e2eCore {
 	t.Helper()
 	c := &e2eCore{}
 	upgrader := websocket.Upgrader{Subprotocols: []string{"cella.exec.v1"}}
 	c.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/account/environments/context" {
+			if r.Header.Get("Authorization") != "Bearer e2e-platform-token" {
+				t.Errorf("labels read with %q, want the platform's bearer", r.Header.Get("Authorization"))
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, e2eLabels)
+			return
+		}
 		rest, ok := strings.CutPrefix(r.URL.Path, "/v1/environments/sandboxes")
 		if !ok || r.Header.Get("Authorization") != "Bearer e2e-token" {
 			t.Errorf("unexpected request %s %s (%q)", r.Method, r.URL.Path, r.Header.Get("Authorization"))
@@ -64,6 +78,10 @@ func newE2ECore(t *testing.T) *e2eCore {
 		case rest == "" && r.Method == http.MethodGet:
 			answer(http.StatusOK, map[string]any{"items": []any{sandbox("dev", "Running")}})
 		case len(parts) == 1 && r.Method == http.MethodPut:
+			body, _ := io.ReadAll(r.Body)
+			c.mu.Lock()
+			c.created = append(c.created, body)
+			c.mu.Unlock()
 			phase := "Pending"
 			if r.URL.Query().Get("wait") == "1" {
 				phase = "Running"
@@ -120,7 +138,8 @@ func (c *e2eCore) requests() []string {
 // code.
 func (c *e2eCore) run(t *testing.T, stdin string, args ...string) (stdout, stderr string, code int) {
 	t.Helper()
-	return c.runWith(t, stdin, []string{"LATERE_ENVIRONMENTS_URL=" + c.srv.URL + "/v1/environments", "LATERE_ENVIRONMENTS_TOKEN=e2e-token"}, args...)
+	return c.runWith(t, stdin, []string{"LATERE_ENVIRONMENTS_URL=" + c.srv.URL + "/v1/environments", "LATERE_ENVIRONMENTS_TOKEN=e2e-token",
+		"LATERE_PLATFORM_URL=" + c.srv.URL, "LATERE_PLATFORM_TOKEN=e2e-platform-token"}, args...)
 }
 
 // runWith is run with the given variables in place of the control plane's
@@ -185,6 +204,23 @@ func TestEnvironmentsOnTheCoreE2E(t *testing.T) {
 	if got := c.requests(); !slices.Equal(got, want) {
 		t.Errorf("requests = %v, want %v", got, want)
 	}
+	c.hasLabels(t)
+}
+
+// hasLabels fails the test unless every create carried the account's
+// labels, which the platform refuses a create without.
+func (c *e2eCore) hasLabels(t *testing.T) {
+	t.Helper()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.created) == 0 {
+		t.Fatal("no create was made")
+	}
+	for _, body := range c.created {
+		if !strings.Contains(string(body), "platform.latere.ai/tenant") || !strings.Contains(string(body), "p-0123456789abcdef0123456789abcdef") || !strings.Contains(string(body), "platform.latere.ai/principal") {
+			t.Errorf("create body %q carries no account labels", body)
+		}
+	}
 }
 
 // run --ephemeral --rm creates, runs and deletes, and exits with the
@@ -203,6 +239,7 @@ func TestEnvironmentsOneShotOnTheCoreE2E(t *testing.T) {
 	if len(got) != 3 || !strings.HasPrefix(got[0], "PUT /run-") || !strings.HasSuffix(got[1], "/exec") || !strings.HasPrefix(got[2], "DELETE /run-") {
 		t.Errorf("requests = %v, want create, exec, delete", got)
 	}
+	c.hasLabels(t)
 }
 
 // A command of the retired API exits 1 and says why it is gone.

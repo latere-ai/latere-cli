@@ -48,12 +48,22 @@ func TestApplyConfiguredManifestInputE2E(t *testing.T) {
 				}
 				var requests atomic.Int32
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					// An Environments create reads the account's labels
+					// from the platform first, here on the same server.
+					if r.URL.Path == "/v1/account/environments/context" {
+						_, _ = io.WriteString(w, `{"tenant":{"labels":{"platform.latere.ai/tenant":"p-1","platform.latere.ai/principal":"p1"}}}`)
+						return
+					}
 					requests.Add(1)
 					if r.Method != http.MethodPost || r.Header.Get("Content-Type") != "application/yaml" || r.Header.Get("Authorization") != "Bearer synthetic-token" {
 						t.Errorf("request=%s %s", r.Method, r.URL)
 					}
 					data, err := io.ReadAll(r.Body)
-					if err != nil || string(data) != manifest {
+					want := manifest
+					if product == "environments" {
+						want += "metadata:\n  labels:\n    platform.latere.ai/principal: \"p1\"\n    platform.latere.ai/tenant: \"p-1\"\n"
+					}
+					if err != nil || string(data) != want {
 						t.Errorf("wrong manifest applied: %q %v", data, err)
 					}
 					if product == "eval" {
@@ -80,7 +90,7 @@ func TestApplyConfiguredManifestInputE2E(t *testing.T) {
 				defer cancel()
 				command := exec.CommandContext(ctx, binary, args...)
 				command.Stdin = strings.NewReader("suite: wrong\n")
-				command.Env = append(os.Environ(), "LATERE_ENVIRONMENTS_TOKEN=synthetic-token", "LATERE_AUTH_TOKEN_FILE="+filepath.Join(dir, "absent-auth.json"), "XDG_CONFIG_HOME="+dir, "EVAL_ADMIN_TOKEN=synthetic-token", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "LATERE_TEST_CONFIGURED_INPUT="+source)
+				command.Env = append(os.Environ(), "LATERE_ENVIRONMENTS_TOKEN=synthetic-token", "LATERE_PLATFORM_URL="+server.URL, "LATERE_PLATFORM_TOKEN=synthetic-token", "LATERE_AUTH_TOKEN_FILE="+filepath.Join(dir, "absent-auth.json"), "XDG_CONFIG_HOME="+dir, "EVAL_ADMIN_TOKEN=synthetic-token", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "LATERE_TEST_CONFIGURED_INPUT="+source)
 				out, err := command.CombinedOutput()
 				if wantError == "" {
 					if err != nil || requests.Load() != 1 {

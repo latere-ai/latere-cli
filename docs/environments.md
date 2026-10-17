@@ -34,8 +34,9 @@ latere environments shell demo
 The manifest's `kind: Sandbox` and `apiVersion: cella.latere.ai/v1beta1`
 are the API's names for a workload. The
 [manifest reference](https://platform.latere.ai/docs/environments/manifest)
-lists every field. `apply` sends the manifest as written, YAML or JSON, and
-reads it from stdin with `-f -`. A manifest that names its workload is
+lists every field. `apply` sends the manifest as written, YAML or JSON,
+with your account's labels added (see [Your account's labels](#your-accounts-labels)),
+and reads it from stdin with `-f -`. A manifest that names its workload is
 applied under that name, so applying it again updates the same workload
 rather than creating a second one.
 
@@ -66,6 +67,22 @@ phase, and `latere environments get` reads it later.
 A workload's phase is one of `Pending`, `Queued`, `Starting`, `Running`,
 `Stopped`, `Failed`, `Lost`, `Recovering` and `Deleting`, shown with its
 reason when it has one.
+
+## Your account's labels
+
+The platform admits a create only when the manifest carries your
+account's labels: `platform.latere.ai/tenant`, `platform.latere.ai/principal`
+and, in an organization, `platform.latere.ai/org`. You do not write them.
+`apply` and `run` read them from the platform for your current context,
+your personal account or the organization `latere org` selected, and add
+them before they send the manifest, as the console does. A value the
+manifest gave one of these three is replaced; the manifest's own labels,
+its comments and every other field are kept. When the platform cannot
+answer them, the command stops before it creates anything and says why.
+
+A script that calls the API itself reads the same labels from
+`GET https://api.latere.ai/v1/account/environments/context`; see
+[API](https://platform.latere.ai/docs/environments/api#create).
 
 ## Images and egress
 
@@ -249,6 +266,8 @@ not a background command.
 |---------|---------|
 | `--api-url` / `LATERE_ENVIRONMENTS_URL` | The Environments API base URL, including its `/v1/environments` path. `https://api.latere.ai/v1/environments` by default. |
 | `LATERE_ENVIRONMENTS_TOKEN` | Present this bearer to the Environments API instead of minting one from your login. |
+| `LATERE_PLATFORM_URL` | The platform your account's labels are read from, `https://platform.latere.ai` by default. |
+| `LATERE_PLATFORM_TOKEN` | Present this bearer to the platform for the labels read instead of minting one from your login. |
 | `AUTH_URL` | The issuer that mints the Environments token. By default it is inferred from the API's host: `api.latere.ai` gives `auth.latere.ai`. |
 
 Both variables had other names before v0.16. An old name set without its

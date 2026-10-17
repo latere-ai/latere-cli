@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestApplyConfiguredManifestInput(t *testing.T) {
@@ -59,12 +61,28 @@ func TestApplyConfiguredManifestInput(t *testing.T) {
 				}
 				var requests atomic.Int32
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					// An Environments create reads the account's labels
+					// from the platform first, here on the same server.
+					if r.URL.Path == labelsPath {
+						_, _ = io.WriteString(w, `{"tenant":{"labels":{"platform.latere.ai/tenant":"p-1","platform.latere.ai/principal":"p1"}}}`)
+						return
+					}
 					requests.Add(1)
 					if r.Method != http.MethodPost || r.Header.Get("Content-Type") != "application/yaml" {
 						t.Errorf("request=%s %s", r.Method, r.URL)
 					}
 					body, err := io.ReadAll(r.Body)
-					if err != nil || string(body) != manifest {
+					if product == "environments" {
+						// The manifest read is the one applied, carrying the
+						// account's labels beside it.
+						var applied struct {
+							Suite    string
+							Metadata struct{ Labels map[string]string }
+						}
+						if err != nil || yaml.Unmarshal(body, &applied) != nil || applied.Suite != "intended" || applied.Metadata.Labels["platform.latere.ai/tenant"] != "p-1" {
+							t.Errorf("wrong manifest applied: %q %v", body, err)
+						}
+					} else if err != nil || string(body) != manifest {
 						t.Errorf("wrong manifest applied: %q %v", body, err)
 					}
 					if product == "eval" {
@@ -80,6 +98,8 @@ func TestApplyConfiguredManifestInput(t *testing.T) {
 					}
 				}))
 				defer server.Close()
+				t.Setenv("LATERE_PLATFORM_URL", server.URL)
+				t.Setenv("LATERE_PLATFORM_TOKEN", "synthetic-token")
 				path := "-"
 				if mode == "file" {
 					path = filepath.Join(t.TempDir(), "manifest.yaml")

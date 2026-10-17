@@ -31,6 +31,20 @@ const corePrefix = "/v1/environments"
 // coreToken is the bearer every command presents through LATERE_ENVIRONMENTS_TOKEN.
 const coreToken = "core-token"
 
+// labelsPath is the platform's read of the labels a create carries, which
+// the fake core's server answers beside the core's routes.
+const labelsPath = "/v1/account/environments/context"
+
+// platformToken is the bearer the labels read presents through
+// LATERE_PLATFORM_TOKEN.
+const platformToken = "platform-token"
+
+// fakeLabels are the labels the fake platform answers for the caller.
+var fakeLabels = map[string]string{
+	"platform.latere.ai/tenant":    "p-0123456789abcdef0123456789abcdef",
+	"platform.latere.ai/principal": "0042",
+}
+
 // coreRequest is one request the fake core received.
 type coreRequest struct {
 	Method, Path, ContentType, Auth string
@@ -79,6 +93,13 @@ type fakeCore struct {
 	exportFailure string
 	// attach runs the server's side of the attach socket.
 	attach func(*websocket.Conn)
+	// labels are what the platform's labels read answers, and
+	// labelsStatus refuses that read with its status when set.
+	labels       map[string]string
+	labelsStatus int
+	// labelReads is the bearer of each labels read, kept apart from the
+	// core's requests.
+	labelReads []string
 
 	mu       sync.Mutex
 	requests []coreRequest
@@ -88,10 +109,35 @@ func newFakeCore(t *testing.T) *fakeCore {
 	t.Helper()
 	t.Setenv("LATERE_ENVIRONMENTS_TOKEN", coreToken)
 	t.Setenv("LATERE_ENVIRONMENTS_URL", "")
-	f := &fakeCore{t: t, heldPhase: cellaRunning, pageSize: 200}
+	f := &fakeCore{t: t, heldPhase: cellaRunning, pageSize: 200, labels: fakeLabels}
 	f.srv = httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.srv.Close)
+	t.Setenv("LATERE_PLATFORM_URL", f.srv.URL)
+	t.Setenv("LATERE_PLATFORM_TOKEN", platformToken)
 	return f
+}
+
+// reads is the bearer of each labels read so far.
+func (f *fakeCore) reads() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.labelReads...)
+}
+
+// serveLabels is the platform's labels read for the caller.
+func (f *fakeCore) serveLabels(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	f.labelReads = append(f.labelReads, r.Header.Get("Authorization"))
+	f.mu.Unlock()
+	if r.Method != http.MethodGet {
+		f.refuse(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use GET.")
+		return
+	}
+	if f.labelsStatus != 0 {
+		f.refuse(w, f.labelsStatus, "unauthorized", "A valid bearer token is required.")
+		return
+	}
+	f.answer(w, http.StatusOK, map[string]any{"tenant": map[string]any{"id": f.labels["platform.latere.ai/tenant"], "labels": f.labels}, "default_environment": "default"})
 }
 
 // url is the base the commands are pointed at.
@@ -159,6 +205,10 @@ func (f *fakeCore) refuse(w http.ResponseWriter, status int, code, message strin
 }
 
 func (f *fakeCore) serve(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == labelsPath {
+		f.serveLabels(w, r)
+		return
+	}
 	rest, ok := strings.CutPrefix(r.URL.Path, corePrefix+"/")
 	if !ok {
 		f.t.Errorf("request outside %s: %s %s", corePrefix, r.Method, r.URL.Path)

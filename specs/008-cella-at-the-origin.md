@@ -16,7 +16,7 @@ affects:
   - .lateregate.yaml (the identity block's audience)
   - docs/cella.md, docs/configuration.md, docs/login-and-tokens.md, README.md, CHANGELOG.md
 created: 2026-09-26
-updated: 2026-09-26
+updated: 2026-10-17
 author: changkun
 ---
 
@@ -70,7 +70,13 @@ a shell profile would point every command at it.
 | `cat`, `write`, `ls`, `mkdir`, `rm`, `mv` | the one-file routes | one file operation each; relative paths resolve under `/workspace` |
 
 The manifest is sent as written, JSON or YAML, and the core decodes it
-strictly, so a manifest names `apiVersion: cella.latere.ai/v1beta1`. Applying
+strictly, so a manifest names `apiVersion: cella.latere.ai/v1beta1`. On the
+platform the one change the CLI makes is the account's labels: the
+platform's decider admits a create only when it carries the tenant,
+principal and organization labels of the caller's context, so `apply` and
+`run` read them from the platform's `GET /v1/account/environments/context`
+and set them under `metadata.labels`, keeping the manifest's syntax, its
+comments and its own labels (added 2026-10-17). Applying
 a manifest that names a sandbox twice updates it rather than creating a
 second, which is what `--idempotency-key` bought on the retired API.
 
