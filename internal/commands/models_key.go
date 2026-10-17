@@ -52,6 +52,7 @@ func modelKeyLogin(ctx context.Context, modelsURL, authURL string) (modelkey.Log
 // key for its context, created on first use.
 func modelKey(ctx context.Context, modelsURL, authURL string) (*modelkey.Keys, modelkey.Login, modelkey.Result, error) {
 	keys := newModelKeys()
+	keys.MayCreate = personalKeyMayBeMade
 	if res, ok := modelkey.FromEnv(); ok {
 		return keys, modelkey.Login{}, res, nil
 	}
@@ -64,6 +65,42 @@ func modelKey(ctx context.Context, modelsURL, authURL string) (*modelkey.Keys, m
 		return nil, modelkey.Login{}, modelkey.Result{}, err
 	}
 	return keys, l, res, nil
+}
+
+// accountWalletPath is the platform's read of the wallet of the token's
+// context, which answers whether it has held bought credit.
+const accountWalletPath = "/v1/account/wallet"
+
+// personalKeyMayBeMade is the platform's rule for a personal key, asked
+// before one is created at auth: the platform makes a personal key only
+// once the person's wallet has held bought credit, a top-up or a platform
+// administrator's grant. The console's create refuses one before then
+// (bought_credit_required), and a key made at auth before then reaches no
+// model, so the CLI makes none and says why. The platform's wallet read
+// answers the fact the console's create decides on, for the same wallet.
+// A key of an organization's context spends the organization's wallet and
+// is not held to it, and a deployment that keeps no wallets has no rule.
+func personalKeyMayBeMade(ctx context.Context, l modelkey.Login) error {
+	if l.OrgID != "" {
+		return nil
+	}
+	var wallet struct {
+		Bought *bool `json:"bought"`
+	}
+	err := platformCall(ctx, "", l.AuthBase, http.MethodGet, accountWalletPath, nil, &wallet)
+	if pe, ok := errors.AsType[*platformError](err); ok && pe.Code == "wallet_unconfigured" {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("cannot read your wallet before making a model key: %w", wrapReposErr(err))
+	}
+	if wallet.Bought == nil {
+		return errors.New("the platform's wallet read did not say whether your wallet has held bought credit, which a personal model key needs")
+	}
+	if !*wallet.Bought {
+		return modelkey.ErrNoBoughtCredit
+	}
+	return nil
 }
 
 // modelKeyProvenance is what `models env` says about the key it prints.

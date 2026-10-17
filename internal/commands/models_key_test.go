@@ -48,7 +48,19 @@ type keyWorld struct {
 	accept func(bearer string, call int32) bool
 	calls  atomic.Int32
 	n      int
+	// wallet is what the platform's wallet read answers, and walletReads
+	// the bearer of each read.
+	wallet      string
+	walletReads []string
 }
+
+// walletBought is the platform's wallet read of a person whose wallet has
+// held bought credit, and walletGiven one whose wallet holds only credit
+// Latere gave.
+const (
+	walletBought = `{"state":"active","spendable_micro":5000000,"bought":true}`
+	walletGiven  = `{"state":"active","spendable_micro":1000000,"bought":false}`
+)
 
 // modelsURL is the stub core's base, the one the origin serves at
 // /v1/models.
@@ -66,7 +78,7 @@ func newKeyWorld(t *testing.T, orgID string) *keyWorld {
 	t.Setenv("LATERE_NO_UPDATE_CHECK", "1")
 	t.Setenv(modelkey.EnvKey, "")
 	t.Setenv("LATERE_MODELS_URL", "")
-	w := &keyWorld{status: "active", accept: func(string, int32) bool { return true }}
+	w := &keyWorld{status: "active", accept: func(string, int32) bool { return true }, wallet: walletBought}
 	w.store = modelkey.File{Path: filepath.Join(t.TempDir(), "model-keys.json")}
 	w.srv = httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		switch {
@@ -97,12 +109,23 @@ func newKeyWorld(t *testing.T, orgID string) *keyWorld {
 			rw.WriteHeader(http.StatusNoContent)
 		case strings.HasPrefix(r.URL.Path, "/v1/models/openai/v1/"):
 			w.serveCore(t, rw, r)
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/account/wallet":
+			w.mu.Lock()
+			w.walletReads = append(w.walletReads, r.Header.Get("Authorization"))
+			answer := w.wallet
+			w.mu.Unlock()
+			if strings.Contains(answer, `"error"`) {
+				rw.WriteHeader(http.StatusServiceUnavailable)
+			}
+			_, _ = io.WriteString(rw, answer)
 		default:
 			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
 			http.NotFound(rw, r)
 		}
 	}))
 	t.Cleanup(w.srv.Close)
+	t.Setenv("LATERE_PLATFORM_URL", w.srv.URL)
+	t.Setenv("LATERE_PLATFORM_TOKEN", "platform-token")
 
 	claims := map[string]any{"sub": "u1", "principal_type": "user", "org_id": orgID,
 		"exp": time.Now().Add(time.Hour).Unix()}
@@ -395,4 +418,67 @@ func TestModelKeySourceReportsARefusedHandedKey(t *testing.T) {
 	if len(w.requests) != 0 || w.calls.Load() != 1 {
 		t.Fatalf("created %d keys, %d core calls; want none and one", len(w.requests), w.calls.Load())
 	}
+}
+
+// The platform makes a personal key only once the person's wallet has held
+// credit they bought: the console refuses one before, and a key made at
+// auth before then reaches no model. So in the personal context the CLI
+// asks the platform's wallet read first, makes no key at auth when the
+// wallet has held none, and says why and where to add credit; in an
+// organization's context, whose keys spend the organization's wallet, it
+// asks nothing, and a deployment without wallets has no such rule.
+func TestNoPersonalModelKeyBeforeBoughtCredit(t *testing.T) {
+	t.Run("never bought", func(t *testing.T) {
+		w := newKeyWorld(t, "")
+		w.wallet = walletGiven
+		out, _, err := w.run(t, "models")
+		if err == nil || !strings.Contains(err.Error(), "credit you bought") || !strings.Contains(err.Error(), "/console/billing") || out != "" {
+			t.Fatalf("models = %q %v, want why no key was made and where to add credit", out, err)
+		}
+		if len(w.requests) != 0 {
+			t.Fatalf("auth was asked for a key: %v", w.requests)
+		}
+		if len(w.walletReads) != 1 || w.walletReads[0] != "Bearer platform-token" {
+			t.Fatalf("wallet reads = %v, want one with the platform's bearer", w.walletReads)
+		}
+	})
+	t.Run("bought", func(t *testing.T) {
+		w := newKeyWorld(t, "")
+		if _, _, err := w.run(t, "models"); err != nil {
+			t.Fatal(err)
+		}
+		if len(w.requests) != 1 || len(w.walletReads) != 1 {
+			t.Fatalf("keys %v, wallet reads %v; want one each", w.requests, w.walletReads)
+		}
+	})
+	t.Run("organization", func(t *testing.T) {
+		w := newKeyWorld(t, "org-1")
+		w.wallet = walletGiven
+		if _, _, err := w.run(t, "models"); err != nil {
+			t.Fatal(err)
+		}
+		if len(w.requests) != 1 || len(w.walletReads) != 0 {
+			t.Fatalf("keys %v, wallet reads %v; want a key and no wallet read", w.requests, w.walletReads)
+		}
+	})
+	t.Run("no wallets on the deployment", func(t *testing.T) {
+		w := newKeyWorld(t, "")
+		w.wallet = `{"error":{"code":"wallet_unconfigured","message":"The wallet is not available on this deployment."}}`
+		if _, _, err := w.run(t, "models"); err != nil {
+			t.Fatal(err)
+		}
+		if len(w.requests) != 1 {
+			t.Fatalf("keys %v, want one", w.requests)
+		}
+	})
+	t.Run("wallet unreadable", func(t *testing.T) {
+		w := newKeyWorld(t, "")
+		w.wallet = `{"error":{"code":"wallet_unavailable","message":"The wallet cannot be read right now. Try again shortly."}}`
+		if _, _, err := w.run(t, "models"); err == nil || !strings.Contains(err.Error(), "Try again shortly") {
+			t.Fatalf("models = %v, want the platform's sentence", err)
+		}
+		if len(w.requests) != 0 {
+			t.Fatalf("auth was asked for a key: %v", w.requests)
+		}
+	})
 }

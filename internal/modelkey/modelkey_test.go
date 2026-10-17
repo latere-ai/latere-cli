@@ -237,3 +237,62 @@ func TestFresh(t *testing.T) {
 		t.Fatal("Fresh is wrong at its edges")
 	}
 }
+
+// A key the platform would not make is not asked of auth: MayCreate's
+// refusal ends Ensure with nothing created. A renewal it refuses answers
+// the stored key, unrevoked, which works until its end; once that end has
+// passed, the refusal is the answer. A replacement of a key the core
+// refused is refused too, and the dead key is not answered again.
+func TestMayCreateRefusesBeforeAuthIsAsked(t *testing.T) {
+	fa := &fakeAuth{}
+	st := fileStore(t)
+	now := time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC)
+	k := testKeys(t, st, fa, now)
+	refusal := errors.New("no bought credit")
+	k.MayCreate = func(context.Context, Login) error { return refusal }
+	if _, err := k.Ensure(context.Background(), login); !errors.Is(err, refusal) {
+		t.Fatalf("err = %v, want the refusal", err)
+	}
+	if len(fa.created) != 0 {
+		t.Fatalf("auth was asked for %+v", fa.created)
+	}
+
+	k.MayCreate = nil
+	first, err := k.Ensure(context.Background(), login)
+	if err != nil {
+		t.Fatal(err)
+	}
+	k.MayCreate = func(context.Context, Login) error { return refusal }
+	k.Now = func() time.Time { return first.Record.ExpiresAt.Add(-RenewBefore + time.Hour) }
+	renewed, err := k.Ensure(context.Background(), login)
+	if err != nil || renewed.Created || renewed.Record.ID != first.Record.ID {
+		t.Fatalf("renewal = %+v, %v; want the key it would have replaced", renewed, err)
+	}
+	if len(fa.revoked) != 0 || len(fa.created) != 1 {
+		t.Fatalf("revoked %v, created %v: a refused renewal changed the key", fa.revoked, fa.created)
+	}
+	if kept, ok, err := st.Get(login.Slot()); err != nil || !ok || kept.ID != first.Record.ID {
+		t.Fatalf("kept = %+v %t %v, want the old key", kept, ok, err)
+	}
+
+	k.Now = func() time.Time { return first.Record.ExpiresAt.Add(time.Hour) }
+	if _, err := k.Ensure(context.Background(), login); !errors.Is(err, refusal) {
+		t.Fatalf("past its end: err = %v, want the refusal", err)
+	}
+	k.Now = func() time.Time { return now }
+	if _, err := k.Replace(context.Background(), login, first.Record); !errors.Is(err, refusal) {
+		t.Fatalf("replacing a refused key: err = %v, want the refusal", err)
+	}
+	if len(fa.revoked) != 0 {
+		t.Fatalf("revoked %v: a refused replacement revoked the key", fa.revoked)
+	}
+}
+
+// auth's own refusal for want of bought credit reads as the platform's.
+func TestEnsureExplainsBoughtCreditRequired(t *testing.T) {
+	fa := &fakeAuth{createEr: &api.KeyError{Status: 403, Code: "bought_credit_required"}}
+	k := testKeys(t, fileStore(t), fa, time.Now())
+	if _, err := k.Ensure(context.Background(), login); err == nil || !strings.Contains(err.Error(), "credit you bought") {
+		t.Fatalf("err = %v, want the sentence about bought credit", err)
+	}
+}

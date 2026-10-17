@@ -32,6 +32,14 @@ committed: the commit log already holds that.
   its exports pointed an SDK at nothing it could call. Naming it now exits 1
   and says to use `--provider openai` or `--provider anthropic`, which reach
   every catalog model, Google's included.
+- A model command makes no personal model key before your wallet has held
+  credit you bought, as the console's Keys section makes none. It asks the
+  platform's wallet read first, and when the wallet holds only credit Latere
+  gave, it says so, makes nothing at auth, and points at the console's
+  Billing section; before, it made a key that showed Waiting for credit and
+  reached no model. A key nearing its end is replaced only when a new one
+  may be made; until then the CLI keeps using it, notes when it ends, and
+  says why it is not replaced. In an organization's context nothing changes.
 
 ## v0.20.0 - 2026-10-12
 

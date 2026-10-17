@@ -59,6 +59,8 @@ An interrupted response, or one larger than 8 MiB, is an error, and nothing is p
 
 The CLI creates the key at auth the first time a model command runs in your current context, allowed to use models and nothing else. It keeps the key in your system keychain, or in `~/.config/latere/model-keys.json` (readable by you alone) on a machine with no keychain, and uses it from then on.
 
+In your personal account the CLI makes the key only once your wallet has held credit you bought, as the console's Keys section does: the credit Latere gives you is spent through agent sessions. Until then a model command makes no key, says why, and points at the console's Billing section. A key of an organization spends the organization's credit and needs none of yours.
+
 ```sh
 latere models key          # the key: prefix, context, status, expiry, where it is kept
 latere models key revoke   # revoke it; the next model call creates a new one
