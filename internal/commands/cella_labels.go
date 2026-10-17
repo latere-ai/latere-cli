@@ -65,7 +65,7 @@ func stampJSON(body []byte, labels map[string]string) ([]byte, error) {
 	dec.UseNumber()
 	var doc map[string]any
 	if err := dec.Decode(&doc); err != nil || doc == nil {
-		return body, nil
+		return body, nil //nolint:nilerr // a manifest this cannot read is sent as written, so the control plane names the field
 	}
 	var ok bool
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
@@ -115,7 +115,7 @@ func stampYAML(body []byte, labels map[string]string) ([]byte, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(body))
 	var doc yaml.Node
 	if err := dec.Decode(&doc); err != nil {
-		return body, nil
+		return body, nil //nolint:nilerr // a manifest this cannot read is sent as written, so the control plane names the field
 	}
 	// A second document is the control plane's to refuse; re-encoding the
 	// first alone would drop it.

@@ -197,7 +197,10 @@ func TestProviderConfigMovesFromLegacyName(t *testing.T) {
 		t.Errorf("the choice was not moved to agent-provider.json: %v", err)
 	}
 
-	// The retired variable alone is refused, not read and not ignored.
+	// The retired variable alone is refused, not read and not ignored. An
+	// explicit API key wins before the provider file is read, so the case
+	// clears one the environment running the suite may hold.
+	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("LATERE_TOPOS_PROVIDER_FILE", filepath.Join(config, "elsewhere.json"))
 	if _, err := loadProviderConfig(); err == nil || !strings.Contains(err.Error(), "LATERE_TOPOS_PROVIDER_FILE is now LATERE_AGENT_PROVIDER_FILE") {
 		t.Errorf("retired variable: %v, want a refusal naming the new one", err)
