@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.20.1 - 2026-10-17
+
 ### Fixed
 
 - `latere environments apply` and `latere environments run --ephemeral`
