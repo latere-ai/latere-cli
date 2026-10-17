@@ -20,7 +20,7 @@ kind: Sandbox
 metadata:
   name: demo                    # Optional; the server picks one if omitted.
 spec:
-  image: base                   # base, or gui for a desktop.
+  image: base                   # base, gui or science.
   resources: {cpu: "2", memory: 4Gi, disk: 20Gi}
   lifecycle:
     autoStop: 15m               # Stop the compute after this much idle time.
@@ -86,8 +86,15 @@ A script that calls the API itself reads the same labels from
 
 ## Images and egress
 
-A workload runs an image from the platform's catalog: `base`, the default,
-or `gui` for a desktop. The platform enforces each workload's egress
+A workload runs an image from the platform's catalog:
+
+| Image | What it holds |
+|---|---|
+| `base` | Ubuntu with development tooling. The default. |
+| `gui` | The same, with a desktop for computer use. |
+| `science` | The same as `base`, with the statistics libraries of Python and R. |
+
+The platform enforces each workload's egress
 boundary, and holds an organization's workloads to its allowlist. A
 manifest sets the boundary under `spec.network.egress`:
 

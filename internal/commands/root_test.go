@@ -94,7 +94,7 @@ func TestHelpIncludesUserExamples(t *testing.T) {
 			want: []string{
 				"Run one command in a disposable workload.",
 				"latere environments run --ephemeral --rm -- python -c 'print(\"hello\")'",
-				"catalog image: base (the default) or gui",
+				"catalog image: base, gui or science (default base)",
 			},
 		},
 		{

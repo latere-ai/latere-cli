@@ -24,6 +24,9 @@ committed: the commit log already holds that.
   `LATERE_PLATFORM_URL` and `LATERE_PLATFORM_TOKEN` select the platform
   and its bearer, as for `latere repos`. Needs the platform release that
   serves the labels read.
+- The help of `latere environments`, `apply` and `run --image` names all
+  three images of the platform's catalog, `base`, `gui` and `science`,
+  where it named only `base` and `gui`.
 
 ## v0.20.0 - 2026-10-12
 

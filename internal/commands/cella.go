@@ -43,6 +43,17 @@ const cellaURLUsage = "Environments API base URL, including its /v1/environments
 // the URL selects the deployment, the audience is what the issuer stamps.
 const cellaAudience = "cella"
 
+// The images of the platform's catalog, as its Environments posture page
+// states them, in the words each command's help uses. The platform's
+// catalog read is the console's alone, so the CLI cannot ask it; admission
+// decides what a name means.
+const (
+	catalogImageNames = "base, gui or science"
+	catalogImageList  = `  base     Ubuntu with development tooling. The default.
+  gui      The same, with a desktop for computer use.
+  science  The same as base, with the statistics libraries of Python and R.`
+)
+
 // cellaWorkspace is where a sandbox's workspace is mounted unless its
 // manifest moves it. A relative path given to a file command is resolved
 // under it, because the control plane takes absolute paths alone.
@@ -83,7 +94,9 @@ func newEnvironmentsCmd() *cobra.Command {
 A workload is an isolated Linux machine with a persistent workspace at
 /workspace. It runs at https://api.latere.ai/v1/environments, reaches only
 the hosts its egress boundary admits, and runs an image from the platform's
-catalog: base, or gui for a desktop.
+catalog:
+
+` + catalogImageList + `
 
 A create answers as soon as the workload is recorded, usually Pending.
 'latere environments apply --wait' holds the answer until it runs or fails.`,
@@ -266,7 +279,7 @@ A manifest in YAML or JSON:
   metadata:
     name: dev                       # Optional. The server names it if omitted.
   spec:
-    image: base                     # base, or gui for a desktop.
+    image: base                     # ` + catalogImageNames + `.
     resources: {cpu: "2", memory: 4Gi, disk: 20Gi}
     network:
       egress:
@@ -705,7 +718,7 @@ could not delete does not linger.`,
 	f.StringVar(&cwd, "cwd", "", "working directory; a relative path is under /workspace")
 	f.BoolVar(&ephemeral, "ephemeral", false, "create a disposable workload for this command; required")
 	f.BoolVar(&rm, "rm", false, "delete the workload after the command; required")
-	f.StringVar(&image, "image", "", "catalog image: base (the default) or gui")
+	f.StringVar(&image, "image", "", "catalog image: "+catalogImageNames+" (default base)")
 	f.IntVar(&diskGB, "disk", 0, "workspace size in GiB (default: the platform's)")
 	f.StringVar(&cpu, "cpu", "", "CPU limit as a Kubernetes quantity, e.g. 1.5 or 1500m")
 	f.StringVar(&memory, "memory", "", "memory limit as a Kubernetes quantity, e.g. 4Gi or 2048Mi")
