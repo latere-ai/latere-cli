@@ -27,6 +27,11 @@ committed: the commit log already holds that.
 - The help of `latere environments`, `apply` and `run --image` names all
   three images of the platform's catalog, `base`, `gui` and `science`,
   where it named only `base` and `gui`.
+- `latere models env` no longer offers `--provider gemini`. The Gemini door
+  reaches no model of the catalog, which is served in the OpenAI dialect, so
+  its exports pointed an SDK at nothing it could call. Naming it now exits 1
+  and says to use `--provider openai` or `--provider anthropic`, which reach
+  every catalog model, Google's included.
 
 ## v0.20.0 - 2026-10-12
 

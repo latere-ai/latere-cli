@@ -120,11 +120,16 @@ func TestDocsDescribeModels(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"latere models", "latere models --json", "models env", "--provider anthropic",
-		"--provider gemini", "--raw", "models invoke", "latere models key", "latere models key revoke",
+		"--raw", "models invoke", "latere models key", "latere models key revoke",
 		"LATERE_MODELS_URL", "LATERE_MODEL_KEY", "console's Models section"} {
 		if !bytes.Contains(guide, []byte(want)) {
 			t.Errorf("docs/models.md does not name %q", want)
 		}
+	}
+	// The Gemini door reaches no catalog model, so the guide offers it to
+	// no SDK.
+	if bytes.Contains(guide, []byte("--provider gemini")) || bytes.Contains(guide, []byte("GEMINI_API_KEY")) {
+		t.Error("docs/models.md still offers the Gemini door")
 	}
 	if _, err := os.Stat(filepath.Join(root, "docs", "lux.md")); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("docs/lux.md still exists: %v", err)
@@ -261,7 +266,6 @@ func TestModelsEnvExportsEachDoor(t *testing.T) {
 		{"", "OPENAI_BASE_URL=" + w.modelsURL() + "/openai/v1", "OPENAI_API_KEY=pat_k1.value"},
 		{"openai", "OPENAI_BASE_URL=" + w.modelsURL() + "/openai/v1", "OPENAI_API_KEY=pat_k1.value"},
 		{"anthropic", "ANTHROPIC_BASE_URL=" + w.modelsURL() + "/anthropic", "ANTHROPIC_API_KEY=pat_k1.value"},
-		{"gemini", "GOOGLE_GEMINI_BASE_URL=" + w.modelsURL() + "/gemini", "GEMINI_API_KEY=pat_k1.value"},
 	} {
 		args := []string{"models", "env"}
 		if tc.provider != "" {
@@ -280,11 +284,34 @@ func TestModelsEnvExportsEachDoor(t *testing.T) {
 		}
 	}
 	created := len(w.requests)
-	if _, _, err := w.run(t, "models", "env", "--provider", "cohere"); err == nil || !strings.Contains(err.Error(), "openai, anthropic, gemini") {
+	if _, _, err := w.run(t, "models", "env", "--provider", "cohere"); err == nil || !strings.Contains(err.Error(), "one of: openai, anthropic") || strings.Contains(err.Error(), "gemini") {
 		t.Fatalf("unknown provider = %v", err)
 	}
 	if len(w.requests) != created {
 		t.Fatal("an unknown provider created a key")
+	}
+}
+
+// The Gemini door reaches no model of the catalog: every catalog model is
+// served in the OpenAI dialect, and the Gemini door is never translated.
+// models env offers it no longer, and someone who names it reads why and
+// which door to use, before any key is made.
+func TestModelsEnvSaysWhyThereIsNoGeminiDoor(t *testing.T) {
+	w := newKeyWorld(t, "")
+	created := len(w.requests)
+	out, _, err := w.run(t, "models", "env", "--provider", "gemini")
+	if err == nil || !strings.Contains(err.Error(), "reaches no model") || !strings.Contains(err.Error(), "--provider openai") || out != "" {
+		t.Fatalf("gemini = %q %v, want the reason and the doors to use", out, err)
+	}
+	if len(w.requests) != created {
+		t.Fatal("naming the Gemini door created a key")
+	}
+	help, err := executeForHelp(NewRoot("test"), "models", "env", "--help")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(help, "GEMINI") || strings.Contains(help, "--provider gemini") {
+		t.Errorf("models env --help still offers the Gemini door:\n%s", help)
 	}
 }
 
@@ -342,7 +369,7 @@ func TestModelsHelpText(t *testing.T) {
 		want []string
 	}{
 		{[]string{"models", "--help"}, []string{"https://api.latere.ai/v1/models", "LATERE_MODELS_URL", "latere login", "model key"}},
-		{[]string{"models", "env", "--help"}, []string{"OPENAI_BASE_URL", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "--raw"}},
+		{[]string{"models", "env", "--help"}, []string{"OPENAI_BASE_URL", "ANTHROPIC_API_KEY", "--raw"}},
 		{[]string{"models", "invoke", "--help"}, []string{"not an assistant", "latere agents run", "--model"}},
 		{[]string{"models", "list", "--help"}, []string{"console's Models section"}},
 	}

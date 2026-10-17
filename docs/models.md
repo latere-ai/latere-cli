@@ -22,18 +22,16 @@ The list carries names only. Prices per million tokens are in the console's Mode
 ```sh
 eval "$(latere models env)"                       # OpenAI SDK: OPENAI_BASE_URL, OPENAI_API_KEY
 eval "$(latere models env --provider anthropic)"  # Anthropic SDK: ANTHROPIC_BASE_URL, ANTHROPIC_API_KEY
-eval "$(latere models env --provider gemini)"     # Gemini SDK: GOOGLE_GEMINI_BASE_URL, GEMINI_API_KEY
 ```
 
 | `--provider` | Base URL | Key variable |
 |---|---|---|
 | `openai` (the default) | `https://api.latere.ai/v1/models/openai/v1` | `OPENAI_API_KEY` |
 | `anthropic` | `https://api.latere.ai/v1/models/anthropic` | `ANTHROPIC_API_KEY` |
-| `gemini` | `https://api.latere.ai/v1/models/gemini` | `GEMINI_API_KEY` |
 
-`--provider` picks the SDK's dialect, not who serves the model. Every door reaches every model in the catalog, and a call to a model whose provider speaks another dialect is translated both ways. So the Anthropic SDK can call `openai/gpt-4.1-mini`, and the OpenAI SDK can call `anthropic/claude-sonnet-4.6`.
+`--provider` picks the SDK's dialect, not who serves the model. Both doors reach every model in the catalog, and a call to a model whose provider speaks another dialect is translated both ways. So the Anthropic SDK can call `openai/gpt-4.1-mini`, and the OpenAI SDK can call `anthropic/claude-sonnet-4.6`.
 
-The Gemini JavaScript SDK and the Gemini CLI read `GOOGLE_GEMINI_BASE_URL`; the Python SDK takes the base URL in code, through its HTTP options. The Google SDKs prefer `GOOGLE_API_KEY` over `GEMINI_API_KEY`, so unset `GOOGLE_API_KEY` in a shell that uses these exports.
+There is no `gemini` choice. The Latere API has a Gemini door, but it is never translated and every catalog model is served in the OpenAI dialect, so it reaches none of them, and naming `gemini` says so and exits 1. Call Google's models, such as `google/gemini-2.5-flash`, through the OpenAI or the Anthropic SDK.
 
 stdout carries the exports alone, so it is safe to `eval`; stderr says which key they carry. Values are shell-quoted where needed, so spaces and shell metacharacters stay literal. `--raw` prints the bare key, for curl and scripts:
 

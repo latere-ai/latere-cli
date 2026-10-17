@@ -24,8 +24,11 @@ import (
 
 // The model commands reach the Lux core behind the platform origin, at
 // https://api.latere.ai/v1/models. The core serves one door per wire
-// dialect under that base, and every door reaches every Model in the
-// catalog. The credential of every call is the model key (models_key.go).
+// dialect under that base. The OpenAI and Anthropic doors reach every
+// Model in the catalog, translated where its provider speaks the other
+// dialect; the Gemini door is never translated, and the catalog serves no
+// Model in that dialect, so it reaches none. The credential of every call
+// is the model key (models_key.go).
 
 // defaultModelsURL is the base of the core's doors at the origin.
 const defaultModelsURL = "https://api.latere.ai/v1/models"
@@ -56,20 +59,26 @@ func resolveModelsURL(flagURL string) string {
 // sdkDoor is what a stock SDK reads to call a door: the base URL variable,
 // the key variable, and the door's path under the base, as the SDK expects
 // it (the OpenAI SDK appends /chat/completions to a base ending in /v1; the
-// Anthropic and Gemini SDKs append their own version segment).
+// Anthropic SDK appends its own version segment).
 type sdkDoor struct {
 	name, baseVar, keyVar, suffix string
 }
 
-// sdkDoors are the doors `models env` exports, in the order it names them.
-// The Anthropic key goes in ANTHROPIC_API_KEY, which the SDK sends as
-// x-api-key; the core accepts the key in x-api-key, x-goog-api-key or
-// Authorization. GOOGLE_GEMINI_BASE_URL is read by the Gemini JavaScript
-// SDK and the Gemini CLI.
+// sdkDoors are the doors `models env` exports, in the order it names them:
+// the doors that reach the catalog. The Anthropic key goes in
+// ANTHROPIC_API_KEY, which the SDK sends as x-api-key; the core accepts the
+// key in x-api-key, x-goog-api-key or Authorization.
 var sdkDoors = []sdkDoor{
 	{name: "openai", baseVar: "OPENAI_BASE_URL", keyVar: "OPENAI_API_KEY", suffix: openAIDoor + "/v1"},
 	{name: "anthropic", baseVar: "ANTHROPIC_BASE_URL", keyVar: "ANTHROPIC_API_KEY", suffix: "/anthropic"},
-	{name: "gemini", baseVar: "GOOGLE_GEMINI_BASE_URL", keyVar: "GEMINI_API_KEY", suffix: "/gemini"},
+}
+
+// unreachingDoors are the doors the core serves that reach no Model of the
+// catalog, each with the sentence a person who names it reads. The Gemini
+// door is never translated, and every catalog Model is served in the
+// OpenAI dialect.
+var unreachingDoors = map[string]string{
+	"gemini": "the Gemini door reaches no model of the Latere catalog, which is served in the OpenAI dialect; use --provider openai or --provider anthropic, which reach every catalog model, Google's included",
 }
 
 func sdkDoorNames() []string {
@@ -221,12 +230,12 @@ API, with your model key as the SDK's API key.
 
     latere models env                      # OpenAI SDK: OPENAI_BASE_URL, OPENAI_API_KEY
     latere models env --provider anthropic # Anthropic SDK: ANTHROPIC_BASE_URL, ANTHROPIC_API_KEY
-    latere models env --provider gemini    # Gemini SDK: GOOGLE_GEMINI_BASE_URL, GEMINI_API_KEY
 
---provider names the SDK's dialect, not who serves the model: every door
-reaches every model in the catalog, translated when the model's provider
+--provider names the SDK's dialect, not who serves the model: both doors
+reach every model in the catalog, translated when the model's provider
 speaks another dialect. Name the model as the catalog does, e.g.
-"openai/gpt-4.1-mini" through the Anthropic SDK.
+"openai/gpt-4.1-mini" through the Anthropic SDK. There is no Gemini
+door here: it reaches no catalog model.
 
 stdout carries the exports alone, so it is safe to eval; stderr says which
 key they carry. --raw prints the bare key.`,
@@ -240,6 +249,9 @@ key they carry. --raw prints the bare key.`,
 				if d.name == provider {
 					door = d
 				}
+			}
+			if reason, ok := unreachingDoors[provider]; door.name == "" && ok {
+				return errors.New(reason)
 			}
 			if door.name == "" {
 				return fmt.Errorf("unknown --provider %q; one of: %s", provider, strings.Join(sdkDoorNames(), ", "))
