@@ -22,6 +22,7 @@ specs/
   012-app-access.md                  (implemented: a new app is private; latere apps visibility, access, share and unshare)
   013-app-password.md                (implemented: latere apps password; access says a password, and visibility removes one)
   014-app-rename.md                  (implemented: latere apps rename; the app moves to a new slug and the latere remote follows)
+  015-evals-commands.md              (in-progress: latere evals replaces latere eval; suites, experiments, comparisons, harness lease and import, publishing)
 ```
 
 ## Status
@@ -89,6 +90,12 @@ Every spec in the tree has shipped:
   old slug is held for seven days, and sets the git remote `latere` when it
   held the app's old push URL, leaving any other remote with the line to
   run. Built on 2026-10-12, not released.
+- `015-evals-commands.md`: `latere evals` on Evals at the platform origin,
+  replacing the retired `latere eval` group: manifests applied from YAML,
+  experiments run and followed, comparisons in the terminal, an external
+  harness's lease, renewal and submit, a harness's past runs imported as
+  declared trials, reports, benchmarks and datasets published and shared,
+  and bar checks for CI with fixed exit codes.
 
 Two surfaces shipped without a dedicated design record: the token-lifecycle
 work, which [docs/login-and-tokens.md](../docs/login-and-tokens.md) documents,
