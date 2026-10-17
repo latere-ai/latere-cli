@@ -27,7 +27,7 @@ affects:
   - ".lateregate.yaml (the identity block's audiences gain examen)"
   - "docs/evals.md (new), docs/configuration.md, docs/login-and-tokens.md, README.md, CHANGELOG.md"
 created: 2026-10-17
-updated: 2026-10-17
+updated: 2026-10-18
 author: changkun
 ---
 
@@ -220,7 +220,7 @@ id (Examen spec 003, References).
 | `reports create <experiment> [--comparison <id>]...`, `reports list <experiment>`, `reports show <report>` | `POST /experiments/{id}/reports`, `GET /experiments/{id}/reports`, `GET /reports/{id}` | freezes a report of the named final comparisons, every final automatic comparison when none is named, and prints its id; lists and shows reports |
 | `publish report <report>\|--experiment <id>`, `publish benchmark <suite>`, `publish dataset`, each with `[--name] [--title] [--description]` on a first version or `--to <publication>` for a new one, and `[--evidence] [--exclude <path>]... [--visibility] [--wait]` | `POST /publications`, `POST /publications/{id}/versions`, `GET /publications/{id}/versions/{n}` | publishes an immutable version and prints its publication's id, the version's number, state and digest, and, when unlisted, the link (Publishing and sharing, below) |
 | `publish submit <benchmark key> --report <publication>[@<n>] --candidate <ref>` | `POST /submissions` | enters one candidate of a report version in a benchmark's results table, and prints `accepted` or `pending` |
-| `publish results <benchmark> [--version <n>]` | `GET /publications/{id}/results` | the benchmark version's results table as Examen groups it |
+| `publish results <benchmark> [--version <n>]` | `GET /publications/{id}/results` | the benchmark version's results table as Examen answers it: entries in order with their rank intervals and their comparison with the reference entry |
 | `publish list [--kind] [--all]`, `publish show <publication> [--versions]` | `GET /publications`, `GET /publications/{id}` | each publication's kind, name, visibility, latest version and link; with `--versions`, every version and its state |
 | `submissions list [--benchmark <publication>] [--state] [--all]`, `submissions show <id>`, `submissions withdraw <id>`, `submissions accept <id>`, `submissions reject <id>` | `GET /submissions` or, with `--benchmark`, `GET /publications/{id}/submissions`; `GET /submissions/{id}`; `POST /submissions/{id}/withdraw`, `/accept`, `/reject` | the caller's submissions, or a benchmark owner's review queue; withdraws one's own; accepts or rejects one submitted to one's own benchmark |
 | `share <publication> [--visibility] [--invite <owner>]... [--revoke <owner>]... [--replace-link] [--request-listing --line <text> [--note <text>]] [--withdraw [--version <n>] [--yes]]` | `PATCH /publications/{id}`, `PUT` and `DELETE /publications/{id}/shares/{grantee}`, `POST /publications/{id}/link`, `POST /publications/{id}/versions/{n}/withdraw`, and the platform's listing route | changes who can read a publication (below) |
@@ -559,9 +559,14 @@ invites; `unlisted`, for anyone with the link, signed out; and
   link can open, the report must be `unlisted` too. It prints `accepted`
   or `pending`, the latter for a `reviewed` benchmark of another owner.
   **`publish results <benchmark>`** prints the results table as Examen
-  groups it: entries whose intervals overlap in one group, never ranked
-  bare, and entries without an interval or below coverage after the
-  groups. **`submissions`** lists the caller's submissions, or with
+  answers it: the entries in its order, each with its primary metric and
+  interval, its rank interval as `rank 2 to 4` (`rank 1` when the two
+  ends meet), never a place number alone, and its difference from the
+  reference entry with its interval, verdict and reason, the reference
+  entry's row marked `reference`; then the entries without enough
+  trials or tasks to rank, each with why; and a last line naming
+  Examen's `method`: the test, the adjustment, the level, the
+  resamples and the seed. **`submissions`** lists the caller's submissions, or with
   `--benchmark` the review queue of a benchmark the caller owns, and
   withdraws, accepts or rejects one.
 - **`publish dataset --license <spdx> [--citation <CITATION.cff>] (--export <id> | --experiment <id>...) [--evidence]`**
