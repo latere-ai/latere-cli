@@ -10,8 +10,9 @@ one binary reaches every capability with your identity: workloads in
 [Environments](docs/environments.md), [apps](docs/apps.md) you deploy with a
 git push, [models](docs/models.md) through the Latere API, the Latere
 [agent](docs/agents.md) on your machine and an adversarial review of a
-Claude Code session, and [repositories](docs/repos.md) on Latere Code
-(`code.latere.ai`). There is no API key to allocate and no
+Claude Code session, [repositories](docs/repos.md) on Latere Code
+(`code.latere.ai`), and your own computer as a [device](docs/devices.md)
+the sessions you start can work on. There is no API key to allocate and no
 second credential to manage.
 
 ```sh
@@ -20,6 +21,7 @@ latere environments apply -f workload.yaml
 latere apps create hello && git push latere main && latere apps logs -f
 latere models invoke --model openai/gpt-4.1-mini "Say hi"
 latere agents run
+latere devices connect --folder ~/code/site
 git clone https://code.latere.ai/<owner>/<repo>.git
 ```
 
@@ -112,7 +114,8 @@ latere whoami                 # the principal the saved login names
 latere org                    # the active context
 latere org <org-uuid>         # switch to an organization, without signing in again
 latere org --personal         # switch to your personal account
-latere logout                 # revoke the session and the model keys it created, then clear the login
+latere logout                 # revoke the session and the model keys it created, then clear the login;
+                              # on a connected computer, remove it from your devices first
 
 latere login --token <token>  # save a token issued elsewhere, for CI
 latere print-token            # print the login token, for scripts that call auth
@@ -163,6 +166,7 @@ git clone https://code.latere.ai/<owner>/<repo>.git
 | `latere apps` | Apps on the platform: create one and add its git remote, decide who can open it, give it a password and invite people by email, change its address, list your apps, show one, list its deploys, follow a build to its outcome, and delete one. A new app is private, and a `git push` deploys. | [docs/apps.md](docs/apps.md) |
 | `latere repos` | Git repositories on Latere Code: create one under your handle or your organization, list your context's repositories and the ones shared with you, and look one up by name. | [docs/repos.md](docs/repos.md) |
 | `latere models` | Call language models through the Latere API with a model key the CLI creates and keeps: list the models your key reaches, point a stock SDK at the API, and check a model with one call. | [docs/models.md](docs/models.md) |
+| `latere devices` | Your own computer as one of your environments: `connect` lets the sessions you start run commands and edit files in the folders you share, each session approved on the computer first, and serves it until Ctrl-C; `list`, `rename` and `remove` manage your devices; `policy` and `activity` show what the computer allows and what it was asked to do. macOS and Linux. | [docs/devices.md](docs/devices.md) |
 | `latere agents` | Latere Agents on this machine: `run` runs the agent in your directory against your files, interactively or on one prompt; `provider` chooses its model; `review` runs an adversarial review of your latest Claude Code session, whose unresolved attacks set the exit code. | [docs/agents.md](docs/agents.md) |
 
 [`docs/configuration.md`](docs/configuration.md) lists every environment

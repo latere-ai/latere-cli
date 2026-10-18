@@ -63,6 +63,7 @@ Every sign-in also configures git for Latere Code unless you pass
 |-------|------------|----------|
 | `~/.config/latere/auth-token.json` | The **login token**: an access token issued by `auth.latere.ai`, and its refresh token. | Presented to auth alone: to refresh itself, and to mint every product token. |
 | The system keychain, or `~/.config/latere/model-keys.json` | **Model keys** for the Latere API, one per context, created on first use. | Presented to the model endpoints of the Latere API. See [Models](models.md#your-model-key). |
+| The system keychain, or `~/.config/latere/device-keys.json` | The **device key** of a computer connected with `latere devices connect`, lasting 30 days and replaced weekly. | Presented by the computer, while it serves, to the Environments API alone. See [Devices](devices.md#the-key). |
 
 Product tokens are never written to disk. Each lives in memory for one
 command and lapses within five minutes, so saving it beside the login
@@ -87,6 +88,8 @@ model call, which presents the model key.
 | Command | What is sent | Where it comes from |
 |---|---|---|
 | `latere environments ...` | a token with audience `cella`, valid 5 minutes | minted per command at auth |
+| `latere devices connect`, `serve` | a token with audience `cella` to create the device's environment and mint, renew and revoke its key; the device key while it serves; a token with audience `api.latere.ai` to name the device | minted at auth; the device key is minted at the Environments API and kept, as above |
+| `latere devices list`, `rename`, `remove` | a token with audience `api.latere.ai`, the platform's, valid 5 minutes | minted per command at auth |
 | `latere models ...`, `latere agents review`, `latere agents run` through the Latere API | the model key | created at auth on first use and kept, as above |
 | `latere repos ...` | a token with audience `api.latere.ai`, the platform's, valid 5 minutes | minted per command at auth |
 | `latere apps ...` | a token with audience `insula`, the Apps API's, valid 5 minutes | minted per command at auth |
@@ -195,10 +198,13 @@ latere logout
 
 Logout revokes your session on the server, not only the local file:
 
-1. It revokes the model keys this login created on this machine.
-2. It revokes the refresh token at auth (`POST /revoke`, RFC 7009), so the
+1. On a computer connected with `latere devices connect`, it says that
+   signing out removes the computer from your devices, asks, and removes
+   it. If it cannot, you stay signed in. `--yes` answers for you.
+2. It revokes the model keys this login created on this machine.
+3. It revokes the refresh token at auth (`POST /revoke`, RFC 7009), so the
    login can mint nothing further.
-3. It deletes the local copies of those keys and `auth-token.json`.
+4. It deletes the local copies of those keys and `auth-token.json`.
 
 Tokens already minted for a product are not recalled; each lapses within
 five minutes.
@@ -219,7 +225,7 @@ The CLI keeps one rule, which is the platform's:
 In CLI terms: you sign in once, and every product call mints its
 credential from that login. A `cella` token is only ever presented to the
 Environments API, an `origo` token only to Latere Code, an `api.latere.ai` token
-only to the platform, an `insula` token only to the Apps API, and the model key only to the model endpoints. Whichever
+only to the platform, an `insula` token only to the Apps API, the model key only to the model endpoints, and the device key only to the Environments API. Whichever
 credential is on the wire, the person it acts for is you.
 
 ## Scripting
