@@ -57,6 +57,7 @@ environment variables**, so a green `go test ./...` does not mean they ran:
 | `internal/modelkey` | the model key for the Latere API: creation at auth, and storage in the keychain or a file |
 | `internal/reviews` | where `latere agents review` writes its logs, and their retention |
 | `internal/upgrade` | release discovery, verification, self-replacement, and the daily check |
+| `tools/sign` | the signer GoReleaser runs over `checksums.txt`, and the key generator for a rotation |
 
 A product command never presents the login token. It asks auth for a token
 addressed to that one product, through one function in `internal/api`, so a
@@ -85,6 +86,23 @@ race detector on Linux and macOS, then GoReleaser builds the archives from
 and the changelog section as its body. The installer the platform serves and
 `latere upgrade` both install the newest published release, so a tag whose workflow failed
 reaches nobody.
+
+GoReleaser also runs `tools/sign` over `checksums.txt`, writing
+`checksums.txt.sig`, the standard base64 of its Ed25519 signature.
+`latere upgrade` and auto-upgrade verify that signature against the public
+keys in `internal/upgrade/keys.go` before they read any checksum. The
+private key is the repository secret `RELEASE_SIGNING_KEY`, the standard
+base64 of a 32-byte Ed25519 seed, which the shared pipeline passes to the
+GoReleaser step alone. The signer fails, and the release with it, when the
+secret is unset or malformed or `keys.go` does not hold its public half.
+
+To rotate the key, run `go run ./tools/sign -keygen <file>`, which writes a
+new private key to a file only you can read and prints its public key. Add
+that public key to `keys.go` beside the current one and release. Then set
+`RELEASE_SIGNING_KEY` to the new private key and release again: that
+release is signed by the new key, which every CLI from the previous release
+holds. In the release after it, remove the old key from `keys.go`. `keys.go`
+never holds more than two keys.
 
 ## Writing
 

@@ -54,8 +54,9 @@ restrictive proxy, pin one with the `sh -s -- vX.Y.Z` form. It checks the
 archive against the release's `checksums.txt` when `shasum` is available.
 
 Every [release](https://github.com/latere-ai/latere-cli/releases) carries
-archives for Linux, macOS, and Windows on amd64 and arm64, and a
-`checksums.txt`. On Windows, download the `.zip` from the releases page.
+archives for Linux, macOS, and Windows on amd64 and arm64, a
+`checksums.txt`, and, from v0.21.0, `checksums.txt.sig`, Latere's signature
+of the checksums. On Windows, download the `.zip` from the releases page.
 
 ## Stay up to date
 
@@ -72,11 +73,17 @@ latere upgrade --auto on  # turn it back on
 ```
 
 If a release is broken, roll back with `latere upgrade <previous-version>`
-and add `latere upgrade --auto off` to stay there. Every upgrade verifies
-the archive against the release's checksum and its gzip integrity before it
-replaces the binary. An empty binary, an archive or a binary over 200 MiB,
-and an archive that expands past 400 MiB are refused, and the installed
-executable is left as it was.
+and add `latere upgrade --auto off` to stay there. Every release from
+v0.21.0 is signed by Latere, and every upgrade, automatic or not, checks
+that signature against the keys built into `latere` before it trusts the
+release's checksums. A release that is not signed by Latere is refused with
+"this release is not signed by Latere; nothing was changed", and there is
+no option to skip the check. Releases before v0.21.0 carry no signature, so
+`latere upgrade` cannot roll back to one; to run one, download it from the
+releases page by hand. The upgrade then verifies the archive against its
+checksum and its gzip integrity before it replaces the binary. An empty
+binary, an archive or a binary over 200 MiB, and an archive that expands
+past 400 MiB are refused, and the installed executable is left as it was.
 
 The daily check and auto-upgrade are skipped for `go install` and
 development builds, when `CI` is set, when stderr is not a terminal, and

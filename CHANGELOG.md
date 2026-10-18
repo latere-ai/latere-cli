@@ -10,6 +10,20 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Changed
+
+- Releases are signed. Every release from this one carries
+  `checksums.txt.sig`, Latere's Ed25519 signature of `checksums.txt`, and
+  `latere upgrade` and auto-upgrade check it against the keys built into
+  `latere` before they trust any checksum. A release whose signature is
+  missing or does not verify is refused with "this release is not signed by
+  Latere; nothing was changed", and the installed binary stays as it was.
+  There is no option to skip the check. When auto-upgrade refuses a
+  release, it says so once and tries that release again a day later.
+- `latere upgrade vX.Y.Z` refuses a release before v0.21.0, the first
+  signed release, so a rollback stops there. To run an older release,
+  download it from the releases page.
+
 ## v0.20.1 - 2026-10-17
 
 ### Fixed

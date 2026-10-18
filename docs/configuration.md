@@ -48,6 +48,13 @@ macOS.
 | `CI` | unset | Any value turns them off as well, so a build never upgrades itself. |
 | `XDG_STATE_HOME` | `~/.local/state` | The base of the directory `latere agents review` writes its logs to, `$XDG_STATE_HOME/latere/reviews`. |
 
+Every upgrade, automatic or with `latere upgrade`, checks the release's
+signature against the Latere keys built into `latere` before it trusts any
+checksum, and refuses a release that is not signed by Latere, or one older
+than v0.21.0, the first signed release. No variable or flag turns the check
+off. When auto-upgrade refuses a release, it says so once and tries that
+release again a day later.
+
 ## Files
 
 In `$XDG_CONFIG_HOME/latere`, or `~/.config/latere`:
@@ -57,7 +64,7 @@ In `$XDG_CONFIG_HOME/latere`, or `~/.config/latere`:
 | `auth-token.json` | The login token and its refresh token, readable by you alone. `latere logout` deletes it. |
 | `model-keys.json` | Model keys for the Latere API, only on a machine with no system keychain. Elsewhere they are in the keychain under `latere-cli model key`. |
 | `config.json` | Your auto-upgrade choice. |
-| `update-check.json` | When the CLI last checked for a release, and what it found. |
+| `update-check.json` | When the CLI last checked for a release, what it found, and the last release auto-upgrade refused for its signature. |
 
 In your user configuration directory, under `latere/`:
 
