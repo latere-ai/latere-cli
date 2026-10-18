@@ -108,6 +108,7 @@ func TestDownloadBinaryVerifiesChecksum(t *testing.T) {
 	asset := assetName("v9.9.9")
 	sum := sha256.Sum256(archive)
 	checksums := fmt.Sprintf("%s  %s\n", hex.EncodeToString(sum[:]), asset)
+	private := useTestKey(t)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/"+repoSlug+"/releases/download/v9.9.9/"+asset, func(w http.ResponseWriter, r *http.Request) {
@@ -115,6 +116,9 @@ func TestDownloadBinaryVerifiesChecksum(t *testing.T) {
 	})
 	mux.HandleFunc("/"+repoSlug+"/releases/download/v9.9.9/checksums.txt", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, checksums)
+	})
+	mux.HandleFunc("/"+repoSlug+"/releases/download/v9.9.9/checksums.txt.sig", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, signSums(private, checksums))
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
@@ -156,6 +160,7 @@ func TestDownloadBinaryHonorsContextDeadline(t *testing.T) {
 	// delay, so the field is read from a server goroutine while the test
 	// writes it. Atomic, not a plain variable: the race detector reports the
 	// plain form and `make test-race` is the gate that runs it.
+	private := useTestKey(t)
 	var delay atomic.Int64
 	mux := http.NewServeMux()
 	mux.HandleFunc("/"+repoSlug+"/releases/download/v9.9.9/"+asset, func(w http.ResponseWriter, r *http.Request) {
@@ -164,6 +169,9 @@ func TestDownloadBinaryHonorsContextDeadline(t *testing.T) {
 	})
 	mux.HandleFunc("/"+repoSlug+"/releases/download/v9.9.9/checksums.txt", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprint(w, checksums)
+	})
+	mux.HandleFunc("/"+repoSlug+"/releases/download/v9.9.9/checksums.txt.sig", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, signSums(private, checksums))
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
@@ -195,13 +203,18 @@ func TestDownloadBinaryHonorsContextDeadline(t *testing.T) {
 func TestDownloadBinaryRejectsBadChecksum(t *testing.T) {
 	archive := makeTarGz(t, map[string]string{"latere": "NEW-BINARY"})
 	asset := assetName("v9.9.9")
+	checksums := fmt.Sprintf("%s  %s\n", "deadbeef", asset)
+	private := useTestKey(t)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/"+repoSlug+"/releases/download/v9.9.9/"+asset, func(w http.ResponseWriter, r *http.Request) {
 		w.Write(archive)
 	})
 	mux.HandleFunc("/"+repoSlug+"/releases/download/v9.9.9/checksums.txt", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "%s  %s\n", "deadbeef", asset)
+		fmt.Fprint(w, checksums)
+	})
+	mux.HandleFunc("/"+repoSlug+"/releases/download/v9.9.9/checksums.txt.sig", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, signSums(private, checksums))
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
@@ -209,8 +222,9 @@ func TestDownloadBinaryRejectsBadChecksum(t *testing.T) {
 	githubBase = srv.URL
 	defer func() { githubBase = old }()
 
-	if _, err := DownloadBinary(context.Background(), srv.Client(), "v9.9.9"); err == nil {
-		t.Fatal("expected checksum mismatch error")
+	_, err := DownloadBinary(context.Background(), srv.Client(), "v9.9.9")
+	if err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
+		t.Fatalf("DownloadBinary error = %v, want a checksum mismatch", err)
 	}
 }
 
@@ -285,6 +299,8 @@ func TestDownloadBinaryDrawsProgress(t *testing.T) {
 	archive := makeTarGz(t, map[string]string{"latere": string(bin)})
 	sum := sha256.Sum256(archive)
 	asset := assetName("v9.9.9")
+	checksums := fmt.Sprintf("%s  %s\n", hex.EncodeToString(sum[:]), asset)
+	private := useTestKey(t)
 
 	mux := http.NewServeMux()
 	srv := httptest.NewServer(mux)
@@ -294,7 +310,10 @@ func TestDownloadBinaryDrawsProgress(t *testing.T) {
 		_, _ = w.Write(archive)
 	})
 	mux.HandleFunc("/latere-ai/latere-cli/releases/download/v9.9.9/checksums.txt", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "%s  %s\n", hex.EncodeToString(sum[:]), asset)
+		fmt.Fprint(w, checksums)
+	})
+	mux.HandleFunc("/latere-ai/latere-cli/releases/download/v9.9.9/checksums.txt.sig", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, signSums(private, checksums))
 	})
 
 	oldBase := githubBase

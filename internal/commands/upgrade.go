@@ -30,9 +30,12 @@ itself the next time it runs. Turn it off with --auto off; if a release is
 bad, roll back with 'latere upgrade <previous-version>' and (optionally)
 'latere upgrade --auto off' to stay put.
 
-The release is resolved from github.com/latere-ai/latere-cli, the archive's
-checksum is verified, and the running binary is replaced in place. If latere
-was installed somewhere you cannot write, run the installer again:
+The release is resolved from github.com/latere-ai/latere-cli. Its signature
+is checked against the Latere keys built into latere, then the archive's
+checksum, and only then is the running binary replaced in place. A release
+that is not signed by Latere is refused and nothing changes; releases before
+v0.21.0 carry no signature, so latere cannot go back to one. If latere was
+installed somewhere you cannot write, run the installer again:
 curl -fsSL https://platform.latere.ai | sh
 
 Set LATERE_NO_UPDATE_CHECK=1 to silence the passive update check.`,

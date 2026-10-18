@@ -110,26 +110,44 @@ func assetName(tag string) string {
 	return fmt.Sprintf("latere_%s_%s_%s.%s", version, runtime.GOOS, runtime.GOARCH, ext)
 }
 
-// DownloadBinary fetches the release archive for tag, verifies it against the
-// release checksums.txt, and returns the extracted latere binary.
+// DownloadBinary fetches the release for tag and returns its latere binary.
+// It verifies the signature of the release's checksums.txt against the
+// built-in release keys before it reads any line of it, and only then
+// downloads the archive and checks it against its checksum. A release that
+// is older than the first signed one, has no signature, or has one that does
+// not verify returns an *unsignedError, and nothing is downloaded after that.
 func DownloadBinary(ctx context.Context, client *http.Client, tag string) ([]byte, error) {
+	keys, err := releaseKeysFor(tag)
+	if err != nil {
+		return nil, err
+	}
 	if client == nil {
 		client = downloadClient()
 	}
 	asset := assetName(tag)
 	base := githubBase + "/" + repoSlug + "/releases/download/" + tag + "/"
 
-	archive, err := fetch(ctx, client, base+asset, "Downloading "+asset)
-	if err != nil {
-		return nil, fmt.Errorf("download %s: %w", asset, err)
-	}
-	sums, err := fetch(ctx, client, base+"checksums.txt", "")
+	sums, err := fetch(ctx, client, base+"checksums.txt", "", maxArchiveBytes)
 	if err != nil {
 		return nil, fmt.Errorf("download checksums: %w", err)
+	}
+	sig, err := fetch(ctx, client, base+signatureAsset, "", maxSignatureBytes)
+	if status, ok := errors.AsType[*statusError](err); ok && status.code == http.StatusNotFound {
+		return nil, &unsignedError{detail: "the release has no " + signatureAsset}
+	}
+	if err != nil {
+		return nil, fmt.Errorf("download %s: %w", signatureAsset, err)
+	}
+	if err := VerifySignature(sums, sig, keys); err != nil {
+		return nil, &unsignedError{detail: err.Error()}
 	}
 	want := checksumFor(string(sums), asset)
 	if want == "" {
 		return nil, fmt.Errorf("no checksum for %s in checksums.txt", asset)
+	}
+	archive, err := fetch(ctx, client, base+asset, "Downloading "+asset, maxArchiveBytes)
+	if err != nil {
+		return nil, fmt.Errorf("download %s: %w", asset, err)
 	}
 	got := sha256.Sum256(archive)
 	if hex.EncodeToString(got[:]) != want {
@@ -142,9 +160,19 @@ func DownloadBinary(ctx context.Context, client *http.Client, tag string) ([]byt
 // capture it; the isTerminalStderr gate decides whether it draws at all.
 var progressDst io.Writer = os.Stderr
 
-// fetch GETs url. With a non-empty label and an interactive stderr it
-// renders a single-line progress bar while the body streams.
-func fetch(ctx context.Context, client *http.Client, url, label string) ([]byte, error) {
+// statusError is a release download answered with a status other than 200.
+// A 404 for checksums.txt.sig means the release carries no signature.
+type statusError struct {
+	url  string
+	code int
+}
+
+func (e *statusError) Error() string { return fmt.Sprintf("GET %s: status %d", e.url, e.code) }
+
+// fetch GETs url and reads at most limit bytes of its body. With a non-empty
+// label and an interactive stderr it renders a single-line progress bar while
+// the body streams.
+func fetch(ctx context.Context, client *http.Client, url, label string, limit int64) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -156,9 +184,9 @@ func fetch(ctx context.Context, client *http.Client, url, label string) ([]byte,
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GET %s: status %d", url, resp.StatusCode)
+		return nil, &statusError{url: url, code: resp.StatusCode}
 	}
-	body := io.LimitReader(resp.Body, maxArchiveBytes)
+	body := io.LimitReader(resp.Body, limit)
 	if label != "" && isTerminalStderr() {
 		p := &progressReader{r: body, w: progressDst, label: label, total: resp.ContentLength}
 		defer p.clear()

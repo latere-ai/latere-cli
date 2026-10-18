@@ -8,7 +8,9 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/ed25519"
 	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -25,6 +27,7 @@ import (
 	"time"
 
 	"github.com/latere-ai/latere-cli/internal/commands"
+	"github.com/latere-ai/latere-cli/internal/upgrade"
 )
 
 func TestUpgradeRejectsInvalidArchiveE2E(t *testing.T) {
@@ -80,6 +83,8 @@ func testUpgradeRejectsInvalidArchive(t *testing.T, binary, want string, edit fu
 	payload := edit(archive.Bytes())
 	checksum := sha256.Sum256(payload)
 	asset := fmt.Sprintf("latere_9.9.9_%s_%s.tar.gz", runtime.GOOS, runtime.GOARCH)
+	sums := fmt.Sprintf("%x  %s\n", checksum, asset)
+	keyEnv, sign := upgradeTestKey(t)
 	var downloads atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		downloads.Add(1)
@@ -90,7 +95,9 @@ func testUpgradeRejectsInvalidArchive(t *testing.T, binary, want string, edit fu
 		case "/latere-ai/latere-cli/releases/download/v9.9.9/" + asset:
 			_, _ = w.Write(payload)
 		case "/latere-ai/latere-cli/releases/download/v9.9.9/checksums.txt":
-			_, _ = fmt.Fprintf(w, "%x  %s\n", checksum, asset)
+			_, _ = fmt.Fprint(w, sums)
+		case "/latere-ai/latere-cli/releases/download/v9.9.9/checksums.txt.sig":
+			_, _ = fmt.Fprint(w, sign(sums))
 		default:
 			t.Errorf("unexpected release path=%s", r.URL.Path)
 			w.WriteHeader(404)
@@ -100,7 +107,7 @@ func testUpgradeRejectsInvalidArchive(t *testing.T, binary, want string, edit fu
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, disposable, "-test.run=^TestUpgradeEmptyBinaryHelperProcess$", "--", "upgrade", "v9.9.9")
-	command.Env = append(os.Environ(), "LATERE_TEST_UPGRADE_SERVER="+server.URL, "LATERE_TEST_UPGRADE_COPY="+disposable, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+dir, "LATERE_AUTH_TOKEN_FILE="+filepath.Join(dir, "absent-auth.json"))
+	command.Env = append(os.Environ(), keyEnv, "LATERE_TEST_UPGRADE_SERVER="+server.URL, "LATERE_TEST_UPGRADE_COPY="+disposable, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+dir, "LATERE_AUTH_TOKEN_FILE="+filepath.Join(dir, "absent-auth.json"))
 	output, runErr := command.CombinedOutput()
 	if exit, ok := errors.AsType[*exec.ExitError](runErr); !ok || exit.ExitCode() != 1 || !strings.Contains(string(output), want) || strings.Contains(string(output), "Now on") {
 		t.Errorf("upgrade error=%v output=%q", runErr, output)
@@ -109,8 +116,8 @@ func testUpgradeRejectsInvalidArchive(t *testing.T, binary, want string, edit fu
 	if err != nil || sha256.Sum256(installed) != originalHash {
 		t.Errorf("executable changed: size=%d error=%v", len(installed), err)
 	}
-	if downloads.Load() != 2 {
-		t.Errorf("downloads=%d, want archive and checksum", downloads.Load())
+	if downloads.Load() != 3 {
+		t.Errorf("downloads=%d, want the checksums, their signature and the archive", downloads.Load())
 	}
 	leftovers, err := filepath.Glob(filepath.Join(dir, ".latere-upgrade-*"))
 	if err != nil || len(leftovers) != 0 {
@@ -148,6 +155,15 @@ func TestUpgradeEmptyBinaryHelperProcess(t *testing.T) {
 		t.Fatal("expected loopback fixture")
 	}
 	http.DefaultTransport = upgradeFixtureTransport{target: target, base: &http.Transport{Proxy: nil}}
+	// The fixture release is signed by a throwaway key the test passes in;
+	// without one the binary trusts only the built-in release key.
+	if encoded := os.Getenv("LATERE_TEST_UPGRADE_KEY"); encoded != "" {
+		key, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil || len(key) != ed25519.PublicKeySize {
+			t.Fatal("LATERE_TEST_UPGRADE_KEY is not a base64 Ed25519 public key")
+		}
+		upgrade.SetReleaseKeysForTest(key)
+	}
 	root := commands.NewRoot("v1.0.0")
 	root.SetArgs(os.Args[3:])
 	root.SetOut(os.Stdout)

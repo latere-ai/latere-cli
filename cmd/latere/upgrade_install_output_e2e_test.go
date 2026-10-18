@@ -54,6 +54,8 @@ func TestUpgradeInstallOutputE2E(t *testing.T) {
 	}
 	checksum := sha256.Sum256(archive.Bytes())
 	asset := fmt.Sprintf("latere_9.9.9_%s_%s.tar.gz", runtime.GOOS, runtime.GOARCH)
+	sums := fmt.Sprintf("%x  %s\n", checksum, asset)
+	keyEnv, sign := upgradeTestKey(t)
 	for _, failure := range []string{"", "progress", "confirmation"} {
 		t.Run("failure="+failure, func(t *testing.T) {
 			dir := t.TempDir()
@@ -71,7 +73,9 @@ func TestUpgradeInstallOutputE2E(t *testing.T) {
 				case "/latere-ai/latere-cli/releases/download/v9.9.9/" + asset:
 					_, _ = w.Write(archive.Bytes())
 				case "/latere-ai/latere-cli/releases/download/v9.9.9/checksums.txt":
-					_, _ = fmt.Fprintf(w, "%x  %s\n", checksum, asset)
+					_, _ = fmt.Fprint(w, sums)
+				case "/latere-ai/latere-cli/releases/download/v9.9.9/checksums.txt.sig":
+					_, _ = fmt.Fprint(w, sign(sums))
 				default:
 					t.Errorf("unexpected release path=%s", r.URL.Path)
 					w.WriteHeader(http.StatusNotFound)
@@ -81,11 +85,11 @@ func TestUpgradeInstallOutputE2E(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()
 			command := exec.CommandContext(ctx, disposable, "-test.run=^TestUpgradeEmptyBinaryHelperProcess$", "--", "upgrade", "v9.9.9")
-			command.Env = append(os.Environ(), "LATERE_TEST_UPGRADE_SERVER="+server.URL, "LATERE_TEST_UPGRADE_COPY="+disposable, "LATERE_TEST_UPGRADE_OUTPUT_FAILURE="+failure, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+dir, "LATERE_AUTH_TOKEN_FILE="+filepath.Join(dir, "absent-auth.json"))
+			command.Env = append(os.Environ(), keyEnv, "LATERE_TEST_UPGRADE_SERVER="+server.URL, "LATERE_TEST_UPGRADE_COPY="+disposable, "LATERE_TEST_UPGRADE_OUTPUT_FAILURE="+failure, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+dir, "LATERE_AUTH_TOKEN_FILE="+filepath.Join(dir, "absent-auth.json"))
 			var out, diagnostic bytes.Buffer
 			command.Stdout, command.Stderr = &out, &diagnostic
 			err := command.Run()
-			wantDownloads := int32(2)
+			wantDownloads := int32(3)
 			wantBinary := []byte(replacement)
 			wantOut := "Upgrading to latere v9.9.9...\nNow on latere v9.9.9.\n"
 			wantError := ""

@@ -5,6 +5,7 @@ package upgrade
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -50,7 +51,7 @@ func OnStart(current string, w io.Writer) {
 	st := loadState()
 	updateKnown := Newer(current, st.LatestVersion)
 
-	if updateKnown && autoUpgradeWanted() {
+	if updateKnown && autoUpgradeWanted() && !st.refusedRecently(st.LatestVersion, now) {
 		// performAutoUpgrade re-execs on success and does not return.
 		performAutoUpgrade(current, w)
 	}
@@ -86,7 +87,8 @@ func printNotice(w io.Writer, current, latest string) {
 // performAutoUpgrade resolves the latest release fresh (the cache is only the
 // trigger, never the source of truth), installs it, and re-execs the original
 // command. On any failure it prints a short note and returns so the current
-// command can still run.
+// command can still run. A release refused for its signature is recorded, so
+// it is tried again once a day rather than on every command.
 func performAutoUpgrade(current string, w io.Writer) {
 	// Re-resolve with a tight timeout: this runs synchronously before the
 	// user's command, so a black-holed network must not stall it for long.
@@ -107,6 +109,13 @@ func performAutoUpgrade(current string, w io.Writer) {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 	bin, err := DownloadBinary(ctx, downloadClient(), tag)
+	if _, ok := errors.AsType[*unsignedError](err); ok {
+		fprintln(w, err)
+		st := loadState()
+		st.RefusedVersion, st.RefusedAt = tag, time.Now()
+		_ = saveState(st)
+		return
+	}
 	if err != nil {
 		fprintf(w, "auto-upgrade failed: %v\n", err)
 		return
@@ -175,6 +184,9 @@ func Run(ctx context.Context, current, target string, checkOnly bool, out io.Wri
 		}
 		return nil
 	}
+	if _, err := releaseKeysFor(tag); err != nil {
+		return err
+	}
 	if !replaceSupported() {
 		return fmt.Errorf("in-place upgrade is not supported on this platform; "+
 			"download latere %s from https://github.com/%s/releases", display(tag), repoSlug)
@@ -183,6 +195,9 @@ func Run(ctx context.Context, current, target string, checkOnly bool, out io.Wri
 		return fmt.Errorf("write upgrade progress: %w", err)
 	}
 	bin, err := DownloadBinary(ctx, downloadClient(), tag)
+	if _, ok := errors.AsType[*unsignedError](err); ok {
+		return err
+	}
 	if err != nil {
 		return fmt.Errorf("install latere %s: %w (does that release exist? see https://github.com/%s/releases)",
 			display(tag), err, repoSlug)

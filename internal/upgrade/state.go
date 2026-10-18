@@ -82,14 +82,17 @@ func SaveConfig(c Config) error {
 	return writeFileAtomic(p, b, 0o600)
 }
 
-// checkState caches the result of the most recent release lookup and when the
-// user was last reminded, so the notice repeats at most once per interval per
-// version rather than on every command.
+// checkState caches the result of the most recent release lookup, when the
+// user was last reminded, and the release auto-upgrade last refused for its
+// signature, so neither the notice nor a refused auto-upgrade repeats more
+// than once per interval per version.
 type checkState struct {
 	CheckedAt       time.Time `json:"checked_at"`
 	LatestVersion   string    `json:"latest_version"`
 	NotifiedVersion string    `json:"notified_version,omitempty"`
 	NotifiedAt      time.Time `json:"notified_at,omitzero"`
+	RefusedVersion  string    `json:"refused_version,omitempty"`
+	RefusedAt       time.Time `json:"refused_at,omitzero"`
 }
 
 // shouldNotify reports whether to print the upgrade notice now: always for a
@@ -99,6 +102,14 @@ func (s checkState) shouldNotify(latest string, now time.Time) bool {
 		return true
 	}
 	return now.Sub(s.NotifiedAt) >= checkInterval
+}
+
+// refusedRecently reports whether auto-upgrade refused latest for its
+// signature less than checkInterval ago. A refused release is tried again
+// after that, which also recovers from a refusal seen while the release was
+// still uploading its files.
+func (s checkState) refusedRecently(latest string, now time.Time) bool {
+	return s.RefusedVersion == latest && now.Sub(s.RefusedAt) < checkInterval
 }
 
 func statePath() string {
