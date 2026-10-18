@@ -28,3 +28,6 @@ func fprintf(w io.Writer, format string, a ...any) { _, _ = fmt.Fprintf(w, forma
 
 // fprintln is fmt.Fprintln with the write error discarded.
 func fprintln(w io.Writer, a ...any) { _, _ = fmt.Fprintln(w, a...) }
+
+// fprint is fmt.Fprint with the write error discarded.
+func fprint(w io.Writer, a ...any) { _, _ = fmt.Fprint(w, a...) }

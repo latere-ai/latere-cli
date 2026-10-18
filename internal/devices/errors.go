@@ -67,6 +67,9 @@ const (
 	CodeRefused            = "device_refused"
 	CodeUnsupported        = "device_unsupported"
 	CodeServeFailed        = "device_serve_failed"
+	CodeLogoutCancelled    = "device_logout_cancelled"
+	CodeRemoveFailed       = "device_remove_failed"
+	CodeLogoutBlocked      = "device_logout_blocked"
 
 	// The platform's own refusals of a device's create (platform spec 220),
 	// which reach the CLI as Cella's forbidden with the reason in its
@@ -155,6 +158,18 @@ var refusals = map[string]struct{ message, hint string }{
 	CodeServeFailed: {
 		"This computer stopped serving.",
 		"",
+	},
+	CodeLogoutCancelled: {
+		"Nothing was changed: you are still signed in, and this computer is still connected.",
+		"",
+	},
+	CodeRemoveFailed: {
+		"The device could not be removed.",
+		"Try again, or remove it from the console.",
+	},
+	CodeLogoutBlocked: {
+		"This computer could not be removed from your devices, so you are still signed in.",
+		"Try again, or remove it with `latere devices remove` and then sign out.",
 	},
 	CodePersonalOnly: {
 		"A device is personal, and this sign-in is in an organization's context.",

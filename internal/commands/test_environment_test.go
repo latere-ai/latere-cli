@@ -39,7 +39,11 @@ func runIsolatedCommandTests(m *testing.M) int {
 	}
 	defer os.RemoveAll(root)
 	for key, value := range map[string]string{
-		"XDG_CONFIG_HOME":           root,
+		"XDG_CONFIG_HOME": root,
+		// The devices engine keeps its state and its sandboxes here; a test
+		// that opens the control socket picks a shorter state directory.
+		"XDG_STATE_HOME":            filepath.Join(root, "state"),
+		"XDG_CACHE_HOME":            filepath.Join(root, "cache"),
 		"LATERE_AUTH_TOKEN_FILE":    filepath.Join(root, "latere", "auth-token.json"),
 		"LATERE_ENVIRONMENTS_TOKEN": "",
 		"LATERE_ENVIRONMENTS_URL":   "",
