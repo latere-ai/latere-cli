@@ -19,7 +19,8 @@ builds:
 
 # The installer platform.latere.ai serves (latere-ai/platform, spec 186) downloads
 # an archive by this name and checksums.txt beside it, as `latere upgrade`
-# does. A release that renames either breaks every install.
+# does, which also downloads checksums.txt.sig. A release that renames any of
+# them breaks every install.
 archives:
   - id: default
     name_template: "latere_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
@@ -33,6 +34,20 @@ archives:
 
 checksum:
   name_template: "checksums.txt"
+
+# checksums.txt names every archive's SHA-256, so signing it covers them all.
+# tools/sign writes checksums.txt.sig, the base64 of its Ed25519 signature,
+# with the key in RELEASE_SIGNING_KEY, which the release workflow passes from
+# the repository's secret. `latere upgrade` and auto-upgrade verify it against
+# internal/upgrade/keys.go before they read any checksum. The signer fails,
+# and the release with it, when the key is unset or keys.go does not hold its
+# public half, so a release is never published unsigned.
+signs:
+  - id: checksums
+    artifacts: checksum
+    cmd: go
+    args: ["run", "./tools/sign", "${artifact}", "${signature}"]
+    signature: "${artifact}.sig"
 
 # No changelog block: the release body is the tag's CHANGELOG.md section,
 # passed by the pipeline as --release-notes.
