@@ -638,3 +638,23 @@ func TestCleanDeviceName(t *testing.T) {
 		t.Error("the computer has no name")
 	}
 }
+
+func TestConnectReadsLabelsFromTheFlaggedPlatform(t *testing.T) {
+	_, project := deviceHome(t)
+	sandboxStandIn(t)
+	p := newDevicePlatform(t)
+	signIn(t, "")
+	t.Setenv("LATERE_PLATFORM_URL", "http://127.0.0.1:1")
+	_, errOut, err := runDevices(t, "yes\n", "devices", "connect", "--folder", project, "--platform-url", p.srv.URL)
+	if devices.CodeOf(err) != devices.CodeWorkerReplaced {
+		t.Fatalf("connect with --platform-url returned %v:\n%s", err, errOut)
+	}
+	labels, renamed := false, false
+	for _, r := range p.seen() {
+		labels = labels || r == "GET /v1/account/environments/context"
+		renamed = renamed || strings.HasPrefix(r, "PATCH /v1/account/devices/")
+	}
+	if !labels || !renamed {
+		t.Errorf("the flagged platform saw %v; want the labels read and the name set there", p.seen())
+	}
+}

@@ -277,7 +277,7 @@ func enrollDevice(ctx context.Context, cmd *cobra.Command, paths devices.Paths, 
 	if err = devices.SavePolicy(paths.PolicyFile(), p); err != nil {
 		return devices.Policy{}, devices.Fail(devices.CodePolicyInvalid, "write the host policy file", err)
 	}
-	labels, err := tenantLabels(ctx)
+	labels, err := tenantLabels(ctx, platformURL)
 	if err != nil {
 		return devices.Policy{}, devices.Fail(devices.CodeRefused, "", err)
 	}

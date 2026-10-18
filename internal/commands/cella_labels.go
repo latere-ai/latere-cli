@@ -28,15 +28,16 @@ import (
 const tenantLabelsPath = "/v1/account/environments/context"
 
 // tenantLabels reads the labels of the login's current context from the
-// platform, with a bearer for the platform's audience. A read the platform
-// refuses ends the command: without the labels a create is refused.
-func tenantLabels(ctx context.Context) (map[string]string, error) {
+// platform at platformURL ("" for the default), with a bearer for the
+// platform's audience. A read the platform refuses ends the command: without
+// the labels a create is refused.
+func tenantLabels(ctx context.Context, platformURL string) (map[string]string, error) {
 	var answer struct {
 		Tenant struct {
 			Labels map[string]string `json:"labels"`
 		} `json:"tenant"`
 	}
-	if err := platformCall(ctx, "", "", http.MethodGet, tenantLabelsPath, nil, &answer); err != nil {
+	if err := platformCall(ctx, platformURL, "", http.MethodGet, tenantLabelsPath, nil, &answer); err != nil {
 		return nil, fmt.Errorf("cannot read your account's labels for the workload from the platform: %w", wrapReposErr(err))
 	}
 	if len(answer.Tenant.Labels) == 0 {
@@ -191,7 +192,7 @@ func valueOf(m *yaml.Node, key string) *yaml.Node {
 
 // labeledManifest reads the login's labels and answers body carrying them.
 func labeledManifest(ctx context.Context, body []byte) ([]byte, error) {
-	labels, err := tenantLabels(ctx)
+	labels, err := tenantLabels(ctx, "")
 	if err != nil {
 		return nil, err
 	}

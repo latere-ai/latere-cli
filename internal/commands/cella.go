@@ -703,7 +703,7 @@ could not delete does not linger.`,
 			if err != nil {
 				return err
 			}
-			labels, err := tenantLabels(cmd.Context())
+			labels, err := tenantLabels(cmd.Context(), "")
 			if err != nil {
 				return err
 			}
