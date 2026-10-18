@@ -10,6 +10,44 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Added
+
+- `latere devices connect` connects your own computer as one of your
+  environments, so the sessions you start can run commands and read and
+  edit files in the folders you share, with your own tools. The first time,
+  it shows the folders, the network and what the agent reads, and connects
+  only after you type `yes`; it then serves the computer in the foreground
+  until Ctrl-C, which stops every command a session started there. Each
+  session asks for your approval on the computer before it starts; a
+  trigger that fires on a schedule can be remembered for 30 days, and one
+  that fires on delivered events always asks. Commands run in the sandbox
+  of `srt`, confined to the folders you share, with your credentials,
+  keychains, browser profiles and `latere`'s own files denied even inside
+  them. macOS and Linux, from your personal context, never as root, and
+  only on a build that verifies its own upgrades.
+- The host policy file `~/.config/latere/device.yaml` holds what sessions
+  may use: the folders, read-write or read-only, the network (an allowlist
+  of hosts, or none), read paths, and remembered triggers. `latere devices
+  policy` prints and checks it and forgets a remembered trigger.
+- Every operation a session asks of the computer, and every approval, is
+  written to an activity log with no file content or output, rotated at
+  10 MB. `latere devices activity` prints it and follows it with `-f`.
+- `latere devices serve` serves the computer with no terminal, for a
+  desktop application or a background service, which answer approvals and
+  read the status and the activity through a local socket only your own
+  user can open.
+- `latere devices list`, `rename` and `remove` manage your devices.
+- The computer's key is kept in the keychain, or in
+  `~/.config/latere/device-keys.json` where there is none, lasts 30 days,
+  and is replaced weekly. `LATERE_DEVICE_KEYS_FILE` keeps it in a file of
+  your choice instead.
+
+### Changed
+
+- `latere logout` on a connected computer says that signing out removes it
+  from your devices, asks, and removes it before it signs out. If the
+  device cannot be removed, you stay signed in. `--yes` answers for you.
+
 ## v0.21.0 - 2026-10-18
 
 ### Changed

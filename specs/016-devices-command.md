@@ -1,6 +1,6 @@
 ---
 title: "`latere devices`: connect this computer as one of the person's environments and serve it in the foreground through Cella's embedded worker and local driver, the host policy file of granted folders, network and remembered scheduled triggers, the person approving each session in the terminal or through the engine's control socket, `latere devices serve` for a desktop application or a background service, an activity log of every operation, the environment key in the keychain and rotated, and list, rename, remove, policy and activity"
-status: in-progress
+status: implemented
 depends_on:
   - specs/001-auth-unification-migration.md
   - specs/008-cella-at-the-origin.md
@@ -11,14 +11,14 @@ depends_on:
   - "CROSS-REPO: latere-ai/cella specs/082-the-worker-as-a-library.md: `worker.Run`, `HostPolicy`, `Record`"
   - "CROSS-REPO: latere-ai/cella specs/083-environments-a-subject-owns.md: an environment the person owns, key `ttl`, `serve_refused`, `key_revoked`"
   - "CROSS-REPO: latere-ai/platform specs/220-devices.md: what platformd allows at create, `/v1/account/devices`, removal, `device_limit`"
-  - "CROSS-REPO: latere-ai/auth specs/097-a-sign-in-names-its-device.md: `device_name` at sign-in and `sid` on the token"
 affects:
-  - internal/commands/devices.go (new), devices_connect.go (new), devices_approve.go (new)
-  - internal/devices/ (new: the host policy file, the key store, the activity log)
-  - internal/commands/auth.go (`device_name` at sign-in; `logout` warns on a connected computer)
+  - internal/commands/devices.go, devices_connect.go, devices_records.go, devices_other.go (new)
+  - internal/devices/ (new: the engine, the host policy file, the key store, the activity log, the approvals, the terminal client, the control socket, the lock)
+  - internal/commands/auth.go (`logout` warns, asks and removes the device on a connected computer)
   - internal/commands/root.go (the `devices` group)
-  - go.mod (`latere.ai/x/cella` at the release with `worker` and `runtime/local`)
-  - docs/devices.md (new), README.md, CHANGELOG.md
+  - cmd/latere/devices_e2e_test.go (new: the end-to-end run against a real cellad)
+  - go.mod (`latere.ai/x/cella` v0.17.1, with `worker` and `runtime/local`)
+  - docs/devices.md (new), docs/configuration.md, docs/login-and-tokens.md, README.md, CHANGELOG.md
 effort: large
 created: 2026-10-18
 updated: 2026-10-18
@@ -67,9 +67,9 @@ each session itself, and it is confined to the folders its owner grants.
 2. **Personal context.** A device is personal. When the login is in an
    organization's context, the command stops and prints `latere org
    --personal`.
-3. **A sign-in that names the computer.** When the saved login has no
-   `sid`, the command signs in again with the device-code grant, sending
-   `device_name` (the computer's name, or `--name`).
+3. **The saved login.** The person's saved login, in their personal
+   context, is what connects the computer; there is no fresh sign-in. With
+   no saved login the command stops and prints `latere login`.
 4. **The connect screen.** Before anything is created, it shows what the
    person is about to allow, and asks for a typed `yes`:
    - the folders sessions may use, read-only or read-write, and that
@@ -85,7 +85,7 @@ each session itself, and it is confined to the folders its owner grants.
      organization.
 5. **The host policy file** is written (below).
 6. **The environment** is created at Cella as the person, with the Cella
-   token the CLI already mints (it carries the sign-in's `sid`): named
+   token the CLI already mints: named
    `dev-` and 16 random lowercase base32 characters, `mode: worker`,
    `isolation: process`, `workers.max: 1`, the person's tenant labels and
    the device kind. `platformd` records the device on the allow, and the
@@ -216,9 +216,13 @@ the saved login has expired, which revokes nothing, the current key
 serves until it expires, and then the command stops with "sign in again
 with `latere login`".
 
-`latere logout` on a connected computer revokes the sign-in that
-connected it, which removes the device (auth spec 097, platform spec
-220). It says so and asks before it signs out.
+`latere logout` on a connected computer says that signing out removes the
+computer from the person's devices, and asks. On a yes it removes the
+device itself with `DELETE /v1/account/devices/{id}`, deletes the key, and
+only then revokes the login. A removal the platform refuses leaves the
+person signed in. Removal does not depend on auth telling the platform
+that a sign-in ended (the owner's decision of 2026-10-18 that auth stays a
+standard OpenID Connect provider).
 
 ### Answers from the platform
 
@@ -315,7 +319,10 @@ apply" once a day, in the terminal or in `/v1/status`.
 10. `TestRemovedDeviceStops`: `serve_refused` and `key_revoked` stop the
    command and delete the key; `worker_replaced` stops it and keeps the
    key.
-11. `TestLogoutWarnsOnAConnectedComputer`.
+11. `TestLogoutWarnsOnAConnectedComputer`: a no keeps the login and the
+   device; a yes removes the device at the platform and deletes its key
+   before the login is revoked; a removal the platform refuses keeps the
+   login.
 12. `TestControlSocket`: the socket is 0600 in a 0700 directory; a
    connection from another user is refused; a stage's command cannot
    open it; an approval answered over it admits the create; with no
@@ -325,3 +332,109 @@ apply" once a day, in the terminal or in `/v1/status`.
    real `cellad` with an embedded worker on the `local` driver, a stub
    authorizer allowing the owner, a sandbox on a granted folder, an
    approved exec, and a removal that stops the command.
+
+## Outcome
+
+Built on 2026-10-18, not released, on Cella v0.17.1. Every verification
+item has its test, and items 5, 12 (its stage half) and 13 ran against the
+real `srt` on macOS. The live run waits for platform spec 220 and Topos
+spec 080 to be released.
+
+| Item | Test | Where |
+|---|---|---|
+| 1 | `TestConnectRefusesRoot`, `TestConnectRefusesOrgContext`, `TestConnectRefusesUnverifiedBuild` | `internal/commands/devices_test.go` |
+| 2 | `TestConnectScreenNeedsYes` | same |
+| 3 | `TestConnectCreatesTheEnvironment` | same |
+| 4 | `TestApprovePrompt` | `internal/devices/terminal_test.go` |
+| 5 | `TestOwnPathsDenied`, skipped where `srt` is missing | `internal/devices/engine_test.go` |
+| 6 | `TestStopEndsBackgroundCommands` | same |
+| 7 | `TestSecondConnectRefusedLocally` | `internal/commands/devices_test.go` |
+| 8 | `TestActivityLogHasNoContent`, `TestActivityLogRotates` | `internal/devices/engine_test.go`, `activity_test.go` |
+| 9 | `TestKeyRotation` | `internal/devices/engine_test.go` |
+| 10 | `TestRemovedDeviceStops` (at registration and on the stream) | same |
+| 11 | `TestLogoutWarnsOnAConnectedComputer` | `internal/commands/logout_device_test.go` |
+| 12 | `TestControlSocket`; `TestStageCannotReachTheControlSocket`, skipped where `srt` is missing | `internal/devices/control_test.go` |
+| 13 | `TestDevicesConnectEndToEnd` | `cmd/latere/devices_e2e_test.go` |
+
+The CI runners have no `srt`. There, the end-to-end run and the engine's
+tests run the local driver under a stand-in `srt` that runs each command
+unconfined, so the whole flow (connect, approve, exec, removal) is proved
+on every runner, and confinement is proved only where the real `srt` is,
+which today is a developer's Mac. Linux confinement is not exercised by
+any test here, nor by Cella's: a Linux CI job with `srt`, bubblewrap and
+socat is a follow-up the maintainer logged.
+
+Where the build differs from the design, or adds to it:
+
+- **No fresh sign-in, no `sid`, no `device_name`.** On 2026-10-18 the owner
+  decided auth stays a standard OpenID Connect provider and auth spec 097
+  was reverted. Connecting takes the saved login in personal context, and
+  `latere logout` removes the device itself before it revokes the login
+  (Design now says so). `logout --yes` answers its question.
+- **One engine in `internal/devices`.** The engine, the terminal client
+  (`devices.Terminal`, which prints the status, the operations and the
+  prompt), the control socket and the lock live there; `internal/commands`
+  wires them (`devices.go`, `devices_connect.go`, and `devices_records.go`
+  for the platform's routes, which builds on every platform for `logout`).
+  There is no `devices_approve.go`. On Windows `latere devices` refuses
+  with `device_unsupported`.
+- **The create declares a capacity,** `spec.capacity.sandboxes` 8, one
+  sandbox per session: Cella refuses an environment without one, which the
+  end-to-end run found.
+- **The key is minted when the engine starts.** Enrollment ends with the
+  name; the engine mints a key wherever none is kept, so a computer that
+  lost its key mints one at the next start. A key that expires while the
+  engine serves is renewed when the person's sign-in still works, and the
+  engine stops with `device_sign_in_expired` when it does not.
+- **A key refused at registration asks about the device.** Cella retries a
+  registration refused with 401, so the engine asks, as the person, whether
+  the environment is still theirs: gone or refused as removed stops the
+  engine as removed (the device was removed while the computer was away);
+  still theirs gets a new key.
+- **Removal keeps the host policy's folders.** A refusal that removes the
+  device deletes the key and clears `device` in the file, keeping folders,
+  network and remembered triggers, so the next connect proposes them.
+  `latere devices remove` on this computer deletes the file, as Design
+  says; `logout` clears `device` and keeps it.
+- **The approval rules in practice.** `n` refuses with "the owner of this
+  computer refused this session". With no client attached a create is
+  refused at once with "no one is here to approve on this computer", and
+  when the last client detaches every create still waiting is refused the
+  same way. Each answer, and each admission of a remembered trigger, is a
+  line of the activity log of type `approval`. The facts come from the
+  labels; the agent's name from the annotation reaches the worker from
+  Cella v0.17.0 on, with the agent ref shown where there is none.
+- **The terminal.** The status line is printed when it changes rather than
+  redrawn in place. Operations that only read the sandbox's state for the
+  control plane (Inspect, List, Watch, Touch) are logged, not printed.
+- **The activity log** keeps the current file and five older ones.
+  `latere devices activity --device ID` reads the log of a device the
+  computer was before, and `--json` prints each line as it is kept.
+- **`LATERE_DEVICE_KEYS_FILE`** keeps the key in a file and never asks the
+  keychain, for a computer whose keychain needs a person to unlock it; the
+  end-to-end run uses it, so no test reaches the macOS keychain. That file
+  is denied to sessions like the configuration directory.
+- **Flags on a connected computer are refused** with
+  `device_already_connected`: the host policy file is where a change is
+  made. Without `--folder` the current directory is shared, `--host`
+  replaces the default list, and `--network none` empties it.
+- **The local API.** `POST /v1/approvals/{op}` takes an optional `client`,
+  the name the other clients read beside the answer; `op` is an approval id
+  the engine mints. `/v1/status` answers the device, `state` (`starting`,
+  `online`, `offline`, `paused`), `sessions`, `waiting`, `version` and
+  `upgrade`. A reload of a file that names another device, or that the
+  driver's rules refuse, is refused and the engine keeps serving. A socket
+  path longer than a socket address holds (103 bytes) is refused with
+  `device_control_unavailable`, naming `XDG_STATE_HOME`.
+- **Online and offline** are read from the worker's registration answers
+  and from its log line when the stream ends, which
+  `TestEngineReadsTheWorkerLines` pins to the Cella this build uses. A
+  typed hook in `worker.Options` is a Cella follow-up.
+- **`device_limit`** keeps its fixed sentence; the next step names how many
+  devices the person has and the limit `GET /v1/account/devices` answers.
+- **Two Cella gaps this build found:** a stage could not stat its own
+  output when the sandboxes sit under the home directory, which broke
+  `cat` on macOS (fixed in Cella v0.17.1, which this build pins); and an
+  exec naming a directory in the person's folder is refused by Cella's exec
+  route (fixed in Cella v0.17.2, not yet pinned). Until then the end-to-end
+  run execs with no workdir, which is the folder.
