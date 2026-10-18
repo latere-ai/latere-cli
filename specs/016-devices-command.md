@@ -17,7 +17,7 @@ affects:
   - internal/commands/auth.go (`logout` warns, asks and removes the device on a connected computer)
   - internal/commands/root.go (the `devices` group)
   - cmd/latere/devices_e2e_test.go (new: the end-to-end run against a real cellad)
-  - go.mod (`latere.ai/x/cella` v0.17.1, with `worker` and `runtime/local`)
+  - go.mod (`latere.ai/x/cella` v0.17.2, with `worker` and `runtime/local`)
   - docs/devices.md (new), docs/configuration.md, docs/login-and-tokens.md, README.md, CHANGELOG.md
 effort: large
 created: 2026-10-18
@@ -335,7 +335,7 @@ apply" once a day, in the terminal or in `/v1/status`.
 
 ## Outcome
 
-Built on 2026-10-18, not released, on Cella v0.17.1. Every verification
+Built on 2026-10-18, not released, on Cella v0.17.2. Every verification
 item has its test, and items 5, 12 (its stage half) and 13 ran against the
 real `srt` on macOS. The live run waits for platform spec 220 and Topos
 spec 080 to be released.
@@ -432,9 +432,10 @@ Where the build differs from the design, or adds to it:
   typed hook in `worker.Options` is a Cella follow-up.
 - **`device_limit`** keeps its fixed sentence; the next step names how many
   devices the person has and the limit `GET /v1/account/devices` answers.
-- **Two Cella gaps this build found:** a stage could not stat its own
-  output when the sandboxes sit under the home directory, which broke
-  `cat` on macOS (fixed in Cella v0.17.1, which this build pins); and an
-  exec naming a directory in the person's folder is refused by Cella's exec
-  route (fixed in Cella v0.17.2, not yet pinned). Until then the end-to-end
-  run execs with no workdir, which is the folder.
+- **Three Cella gaps this build found, each fixed in Cella:** a worker's
+  host policy saw no annotations, so the agent's name could not reach the
+  prompt (v0.17.0); a stage could not stat its own output when the
+  sandboxes sit under the home directory, which broke `cat` on macOS
+  (v0.17.1); and an exec naming a directory in the person's folder was
+  refused by Cella's exec route (v0.17.2). The end-to-end run covers all
+  three.

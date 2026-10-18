@@ -370,6 +370,16 @@ func TestDevicesConnectEndToEnd(t *testing.T) {
 	if note, err := os.ReadFile(filepath.Join(project, "note.txt")); err != nil || string(note) != "from-the-session\n" {
 		t.Errorf("the granted folder holds %q, %v", note, err)
 	}
+	// A command may start in a directory of the person's folder.
+	if err = os.MkdirAll(filepath.Join(project, "sub"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	result, _, err = cella.Exec(context.Background(), sandbox, cellaclient.ExecRequest{
+		Command: []string{"/bin/sh", "-c", "pwd"}, Workdir: filepath.Join(project, "sub"),
+	})
+	if err != nil || result.ExitCode != 0 || strings.TrimSpace(result.Stdout) != filepath.Join(project, "sub") {
+		t.Errorf("an exec in a directory of the folder answered %+v, %v", result, err)
+	}
 	waitForText(t, &stderr, "ses_e2e  exec  /bin/sh -c", exited)
 
 	// Removing the device stops the command and forgets the device here.
