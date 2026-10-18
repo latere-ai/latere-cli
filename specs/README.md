@@ -23,11 +23,13 @@ specs/
   013-app-password.md                (implemented: latere apps password; access says a password, and visibility removes one)
   014-app-rename.md                  (implemented: latere apps rename; the app moves to a new slug and the latere remote follows)
   015-evals-commands.md              (in-progress: latere evals replaces latere eval; suites, experiments, comparisons, harness lease and import, publishing)
+  016-devices-command.md             (in-progress: latere devices connects this computer as an environment the person's sessions work on, approved here)
+  017-signed-upgrades.md             (in-progress: releases sign their checksums; upgrade and the installer verify the signature)
 ```
 
 ## Status
 
-Every spec in the tree has shipped:
+Where each spec stands:
 
 - `001-auth-unification-migration.md`: the shared device-code client and file
   token store are in use.
@@ -96,6 +98,18 @@ Every spec in the tree has shipped:
   harness's lease, renewal and submit, a harness's past runs imported as
   declared trials, reports, benchmarks and datasets published and shared,
   and bar checks for CI with fixed exit codes.
+- `016-devices-command.md`: `latere devices connect` connects this computer
+  as one of the person's environments and serves it in the foreground as a
+  Cella worker on the local driver, confined to the folders the person
+  grants. The person approves each session in the terminal, every
+  operation goes to an activity log on the computer, and the environment
+  key is kept in the keychain. `latere devices serve` runs the same engine
+  with no terminal, driven through a local control socket, which is what
+  a desktop application builds on. Designed on 2026-10-18, not built.
+- `017-signed-upgrades.md`: each release signs `checksums.txt` with an
+  Ed25519 key, and `latere upgrade`, auto-upgrade and the installer verify
+  it against keys built into the binary. It comes before 016, since a
+  connected computer upgrades itself. Designed on 2026-10-18, not built.
 
 Two surfaces shipped without a dedicated design record: the token-lifecycle
 work, which [docs/login-and-tokens.md](../docs/login-and-tokens.md) documents,
