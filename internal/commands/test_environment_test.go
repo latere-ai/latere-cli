@@ -44,6 +44,7 @@ func runIsolatedCommandTests(m *testing.M) int {
 		// that opens the control socket picks a shorter state directory.
 		"XDG_STATE_HOME":            filepath.Join(root, "state"),
 		"XDG_CACHE_HOME":            filepath.Join(root, "cache"),
+		"LATERE_DEVICE_KEYS_FILE":   "",
 		"LATERE_AUTH_TOKEN_FILE":    filepath.Join(root, "latere", "auth-token.json"),
 		"LATERE_ENVIRONMENTS_TOKEN": "",
 		"LATERE_ENVIRONMENTS_URL":   "",

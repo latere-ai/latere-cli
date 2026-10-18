@@ -171,6 +171,17 @@ type Keys struct {
 	inFile bool
 }
 
+// errNoKeychain is the keychain declining, when the key is kept in a file
+// by the person's choice.
+var errNoKeychain = errors.New("the keychain is not used: " + EnvKeysFile + " names the file the key is kept in")
+
+// noKeychain is a keychain that declines everything.
+type noKeychain struct{}
+
+func (noKeychain) Get(string) (Key, bool, error) { return Key{}, false, errNoKeychain }
+func (noKeychain) Put(Key) error                 { return errNoKeychain }
+func (noKeychain) Delete(string) error           { return errNoKeychain }
+
 // OpenKeys is the store the engine uses: the keychain, falling back to the
 // file at path.
 func OpenKeys(path string) *Keys { return &Keys{Keychain: Keychain{}, File: KeyFile{Path: path}} }
@@ -201,7 +212,7 @@ func (k *Keys) Get(environment string) (Key, bool, error) {
 		k.inFile = true
 		return key, true, nil
 	}
-	if kerr != nil {
+	if kerr != nil && !errors.Is(kerr, errNoKeychain) {
 		// No keychain answered and the file holds nothing: the keychain's
 		// failure is what the person needs to read.
 		return Key{}, false, kerr

@@ -356,7 +356,7 @@ func serveDevice(ctx context.Context, cmd *cobra.Command, paths devices.Paths, a
 		return err
 	}
 	engine := devices.New(devices.Config{
-		Paths: paths, URL: base, Keys: devices.OpenKeys(paths.KeyFile()),
+		Paths: paths, URL: base, Keys: paths.Keys(),
 		Account: deviceAccount{apiURL: apiURL}, Version: version, NewDriver: deviceDriver,
 		Upgrade: upgradeAvailable(version),
 	})

@@ -69,7 +69,7 @@ func removeDevice(ctx context.Context, platformURL, id string) error {
 // connect proposes them again.
 func forgetThisDevice(paths devices.Paths, id string, dropFile bool) error {
 	var errs []error
-	if err := devices.OpenKeys(paths.KeyFile()).Delete(id); err != nil {
+	if err := paths.Keys().Delete(id); err != nil {
 		errs = append(errs, fmt.Errorf("delete the key: %w", err))
 	}
 	path := paths.PolicyFile()

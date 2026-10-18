@@ -130,3 +130,44 @@ func TestKeyFileRefusesWhatItCannotRead(t *testing.T) {
 		t.Error("a malformed keychain entry reads")
 	}
 }
+
+func TestKeysFileAlone(t *testing.T) {
+	keyring.MockInit()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "elsewhere", "keys.json")
+	t.Setenv("HOME", dir)
+	t.Setenv(EnvKeysFile, path)
+	paths, err := DefaultPaths()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if paths.KeyFile() != path {
+		t.Errorf("the key file is %s, want %s", paths.KeyFile(), path)
+	}
+	keys := paths.Keys()
+	if _, ok, err := keys.Get("dev-a"); ok || err != nil {
+		t.Errorf("an empty file reads %v, %v", ok, err)
+	}
+	if err = keys.Put(testKey("dev-a")); err != nil {
+		t.Fatal(err)
+	}
+	if !keys.InFile() {
+		t.Error("a key kept by LATERE_DEVICE_KEYS_FILE reads as in the keychain")
+	}
+	if _, err := keyring.Get(keychainService, "dev-a"); err == nil {
+		t.Error("the keychain was written although the key is kept in a file")
+	}
+	if got, ok, err := keys.Get("dev-a"); err != nil || !ok || got.Token != "secret-dev-a" {
+		t.Errorf("the key reads back as %+v, %v, %v", got, ok, err)
+	}
+	if err = keys.Delete("dev-a"); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, d := range paths.Deny("linux") {
+		found = found || d == path
+	}
+	if !found {
+		t.Errorf("the key file outside the configuration directory is not denied: %v", paths.Deny("linux"))
+	}
+}

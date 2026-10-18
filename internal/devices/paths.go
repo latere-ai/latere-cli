@@ -40,7 +40,15 @@ type Paths struct {
 	// Cache is $XDG_CACHE_HOME/latere, or the operating system's cache
 	// directory: the sandboxes' scratch directories.
 	Cache string
+	// KeysFile, when set, is the file the environment key is kept in
+	// instead of the keychain: LATERE_DEVICE_KEYS_FILE, for a host whose
+	// keychain cannot answer without a person at it.
+	KeysFile string
 }
+
+// EnvKeysFile names the file the environment key is kept in instead of the
+// keychain.
+const EnvKeysFile = "LATERE_DEVICE_KEYS_FILE"
 
 // DefaultPaths resolves the paths from the environment: XDG_CONFIG_HOME,
 // XDG_STATE_HOME and XDG_CACHE_HOME when set, the platform's defaults
@@ -50,7 +58,7 @@ func DefaultPaths() (Paths, error) {
 	if err != nil {
 		return Paths{}, err
 	}
-	p := Paths{Home: home, Config: config.Dir(), Token: api.AuthTokenPath()}
+	p := Paths{Home: home, Config: config.Dir(), Token: api.AuthTokenPath(), KeysFile: os.Getenv(EnvKeysFile)}
 	if p.Config == "" {
 		return Paths{}, errors.New("the configuration directory cannot be resolved")
 	}
@@ -72,8 +80,23 @@ func DefaultPaths() (Paths, error) {
 // PolicyFile is the host policy file, device.yaml beside the login token.
 func (p Paths) PolicyFile() string { return filepath.Join(p.Config, "device.yaml") }
 
-// KeyFile is where the environment key is kept when no keychain answers.
-func (p Paths) KeyFile() string { return filepath.Join(p.Config, "device-keys.json") }
+// KeyFile is where the environment key is kept when no keychain answers,
+// or always when KeysFile names a file.
+func (p Paths) KeyFile() string {
+	if p.KeysFile != "" {
+		return p.KeysFile
+	}
+	return filepath.Join(p.Config, "device-keys.json")
+}
+
+// Keys is the store of the environment key: the keychain with the file as
+// its fallback, or the file alone when KeysFile names one.
+func (p Paths) Keys() *Keys {
+	if p.KeysFile != "" {
+		return &Keys{Keychain: noKeychain{}, File: KeyFile{Path: p.KeysFile}}
+	}
+	return OpenKeys(p.KeyFile())
+}
 
 // Devices is the engine's own state directory, mode 0700: the lock, the
 // control socket, and one directory of activity per environment.
@@ -104,8 +127,10 @@ func (p Paths) DataDir(environment string) string {
 // there.
 func (p Paths) Deny(goos string) []string {
 	deny := []string{p.Config, p.State}
-	if p.Token != "" && filepath.Dir(p.Token) != p.Config {
-		deny = append(deny, p.Token)
+	for _, own := range []string{p.Token, p.KeysFile} {
+		if own != "" && filepath.Dir(own) != p.Config {
+			deny = append(deny, own)
+		}
 	}
 	home := func(elem ...string) string { return filepath.Join(append([]string{p.Home}, elem...)...) }
 	switch goos {
