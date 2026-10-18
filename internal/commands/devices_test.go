@@ -320,6 +320,9 @@ func TestConnectCreatesTheEnvironment(t *testing.T) {
 			Workers   struct {
 				Max int `json:"max"`
 			} `json:"workers"`
+			Capacity struct {
+				Sandboxes int `json:"sandboxes"`
+			} `json:"capacity"`
 		} `json:"spec"`
 	}
 	if err := json.Unmarshal(created, &env); err != nil {
@@ -327,7 +330,7 @@ func TestConnectCreatesTheEnvironment(t *testing.T) {
 	}
 	id := env.Metadata.Name
 	if !regexp.MustCompile(`^dev-[a-z2-7]{16}$`).MatchString(id) || env.Kind != "Environment" || env.Spec.Mode != "worker" ||
-		env.Spec.Isolation != "process" || env.Spec.Workers.Max != 1 {
+		env.Spec.Isolation != "process" || env.Spec.Workers.Max != 1 || env.Spec.Capacity.Sandboxes != deviceSandboxes {
 		t.Errorf("the create was %s", created)
 	}
 	for k, v := range map[string]string{"platform.latere.ai/tenant": "p-0123", "platform.latere.ai/principal": "p1", "platform.latere.ai/kind": "device"} {

@@ -46,6 +46,11 @@ const (
 // maxDeviceName is the longest name the platform keeps for a device.
 const maxDeviceName = 64
 
+// deviceSandboxes is how many sandboxes a device environment holds at once,
+// one per session working on the computer. Cella requires an environment to
+// declare a capacity, and placement admits against it.
+const deviceSandboxes = 8
+
 // What a test replaces: the effective user, whether stdin is a person's
 // terminal, the computer's own name, and the driver the engine runs.
 var (
@@ -281,6 +286,7 @@ func enrollDevice(ctx context.Context, cmd *cobra.Command, paths devices.Paths, 
 		Metadata: v1.Metadata{Name: id, Labels: labels},
 		Spec: v1.EnvironmentSpec{
 			Mode: v1.EnvironmentWorker, Isolation: v1.IsolationProcess, Workers: v1.WorkersSpec{Max: 1},
+			Capacity: v1.Capacity{Sandboxes: deviceSandboxes},
 		},
 	})
 	if err != nil {
