@@ -10,6 +10,11 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Changed
+
+- No change for people using `latere`. v0.22.0's release did not publish, so
+  this release carries its changes, listed under v0.22.0 below.
+
 ## v0.22.0 - 2026-10-19
 
 ### Added
