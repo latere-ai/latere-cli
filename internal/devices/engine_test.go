@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"net/http"
 	"os"
@@ -836,5 +837,66 @@ func TestLockRefusesASecondEngine(t *testing.T) {
 	}
 	if info, err := os.Stat(filepath.Dir(path)); err != nil || info.Mode().Perm() != 0o700 {
 		t.Errorf("the state directory is %v, %v; want 0700", info, err)
+	}
+}
+
+func TestKeyExpiresWhileServing(t *testing.T) {
+	sandboxRuntime(t)
+	expiring := func(t *testing.T, account *fakeAccount) (*stubPlane, *Engine, KeyStore) {
+		t.Helper()
+		paths := testPaths(t)
+		keys := OpenKeys(paths.KeyFile())
+		connected(t, paths, keys)
+		now := time.Now().UTC()
+		if err := keys.Put(Key{Environment: testEnv, Token: "key-1", JTI: "jti-1", MintedAt: now, ExpiresAt: now.Add(1500 * time.Millisecond)}); err != nil {
+			t.Fatal(err)
+		}
+		p := newStubPlane(t)
+		return p, engineOn(paths, p, account, keys), keys
+	}
+	t.Run("a sign-in that still works renews it", func(t *testing.T) {
+		p, e, keys := expiring(t, &fakeAccount{exists: true})
+		running(t, e)
+		waitFor(t, "a registration with the renewed key", func() bool {
+			got := p.bearersNow()
+			return len(got) > 0 && got[len(got)-1] == "key-2"
+		})
+		if k, _, _ := keys.Get(testEnv); k.Token != "key-2" {
+			t.Errorf("the store holds %+v", k)
+		}
+	})
+	t.Run("one that cannot stops with the sign-in refusal", func(t *testing.T) {
+		account := &fakeAccount{exists: true}
+		p, e, _ := expiring(t, account)
+		stop, done := running(t, e)
+		p.waitConnected(t)
+		account.mu.Lock()
+		account.mintErr = errors.New("the saved login expired")
+		account.mu.Unlock()
+		select {
+		case <-done:
+		case <-time.After(15 * time.Second):
+			t.Fatal("the engine kept serving with an expired key")
+		}
+		if err := stop(); CodeOf(err) != CodeSignInExpired {
+			t.Errorf("Run returned %v, want %s", err, CodeSignInExpired)
+		}
+	})
+}
+
+func TestErrorRendering(t *testing.T) {
+	cause := errors.New("underneath")
+	err := Fail(CodeRemoved, "", cause)
+	if !errors.Is(err, cause) || err.Detail != "underneath" || CodeOf(fmt.Errorf("wrapped: %w", err)) != CodeRemoved || CodeOf(cause) != "" {
+		t.Errorf("the refusal reads %+v", err)
+	}
+	want := "device_removed: This computer was removed from your devices.\nRun `latere devices connect` to connect it again.\ndetail: underneath"
+	if err.Error() != want {
+		t.Errorf("the refusal renders %q", err.Error())
+	}
+	for code, r := range refusals {
+		if r.message == "" || strings.ContainsAny(r.message+r.hint, "–—") {
+			t.Errorf("%s has an empty sentence or a dash: %+v", code, r)
+		}
 	}
 }

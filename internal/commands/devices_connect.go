@@ -52,15 +52,17 @@ const maxDeviceName = 64
 const deviceSandboxes = 8
 
 // What a test replaces: the effective user, whether stdin is a person's
-// terminal, the computer's own name, and the driver the engine runs.
+// terminal, the computer's own name, the driver the engine runs, and the
+// lookup of the newest release.
 var (
 	deviceEUID        = os.Geteuid
 	deviceInteractive = func(in io.Reader) bool {
 		f, ok := in.(*os.File)
 		return ok && term.IsTerminal(int(f.Fd()))
 	}
-	computerName = defaultComputerName
-	deviceDriver = func(o local.Options) (runtime.Driver, error) { return local.New(o) }
+	computerName  = defaultComputerName
+	deviceDriver  = func(o local.Options) (runtime.Driver, error) { return local.New(o) }
+	latestRelease = upgrade.ResolveLatest
 )
 
 func newDevicesConnectCmd(version string) *cobra.Command {
@@ -397,7 +399,7 @@ func serveDevice(ctx context.Context, cmd *cobra.Command, paths devices.Paths, a
 // upgradeAvailable is the engine's daily question for a newer release.
 func upgradeAvailable(version string) func(context.Context) (string, bool) {
 	return func(ctx context.Context) (string, bool) {
-		latest, err := upgrade.ResolveLatest(ctx, nil)
+		latest, err := latestRelease(ctx, nil)
 		if err != nil {
 			return "", false
 		}
