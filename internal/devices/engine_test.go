@@ -895,7 +895,7 @@ func TestErrorRendering(t *testing.T) {
 		t.Errorf("the refusal renders %q", err.Error())
 	}
 	for code, r := range refusals {
-		if r.message == "" || strings.ContainsAny(r.message+r.hint, "–—") {
+		if r.message == "" || strings.ContainsAny(r.message+r.hint, "\u2013\u2014") {
 			t.Errorf("%s has an empty sentence or a dash: %+v", code, r)
 		}
 	}

@@ -24,7 +24,7 @@ import (
 	"github.com/latere-ai/latere-cli/internal/devices"
 )
 
-// newDevicesCmd is the `latere devices …` command tree (spec 016): this
+// newDevicesCmd is the `latere devices ...` command tree (spec 016): this
 // computer as one of the person's environments, which the sessions they
 // start can work on, and the person's devices at the platform.
 func newDevicesCmd(version string) *cobra.Command {
