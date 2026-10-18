@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.22.0 - 2026-10-19
+
 ### Added
 
 - `latere devices connect` connects your own computer as one of your
