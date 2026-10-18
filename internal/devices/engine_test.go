@@ -211,12 +211,13 @@ func TestOwnPathsDenied(t *testing.T) {
 	if _, err := p.driver.Create(t.Context(), deviceCreate("sbx_own", granted, sessionLabels("ses_own"))); err != nil {
 		t.Fatal(err)
 	}
-	// The files are read with the shell's own read, which writes to the
-	// stage's output without the stat a program such as cat makes of it.
-	readFile := `IFS= read -r line < "$1" && printf '%s' "$line"`
-	if code, out := run(t, p.driver, "sbx_own", "sh", "-c", readFile, "sh", other); code != 0 || out != "readable" {
-		t.Fatalf("a file of the granted folder is not readable: %d %q", code, out)
+	// A program that stats its own output, such as cat, runs with the
+	// sandboxes under the home directory, as they are on a person's
+	// computer.
+	if code, out := run(t, p.driver, "sbx_own", "cat", other); code != 0 || out != "readable\n" {
+		t.Fatalf("cat of a file in the granted folder answered %d %q", code, out)
 	}
+	readFile := `IFS= read -r line < "$1" && printf '%s' "$line"`
 	for _, denied := range []string{paths.Token, paths.PolicyFile()} {
 		if code, out := run(t, p.driver, "sbx_own", "sh", "-c", readFile, "sh", denied); code == 0 || strings.Contains(out, "LOGIN-TOKEN") {
 			t.Errorf("a stage read %s: %d %q", denied, code, out)

@@ -358,9 +358,9 @@ func TestDevicesConnectEndToEnd(t *testing.T) {
 		t.Fatalf("the approved create failed: %v", err)
 	}
 	result, _, err := cella.Exec(context.Background(), sandbox, cellaclient.ExecRequest{
-		Command: []string{"/bin/sh", "-c", "echo from-the-session > note.txt && echo wrote"},
+		Command: []string{"/bin/sh", "-c", "echo from-the-session > note.txt && cat note.txt"},
 	})
-	if err != nil || result.ExitCode != 0 || !strings.Contains(result.Stdout, "wrote") {
+	if err != nil || result.ExitCode != 0 || result.Stdout != "from-the-session\n" {
 		var ce *cellaclient.Error
 		if errors.As(err, &ce) {
 			t.Fatalf("the exec answered %s: %s", ce.Code, ce.Detail)
