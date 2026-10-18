@@ -514,7 +514,7 @@ func TestEngineReadsTheWorkerLines(t *testing.T) {
 	p.endStream("")
 	var states []string
 	deadline := time.After(20 * time.Second)
-	for !(slices.Contains(states, StateOffline) && states[len(states)-1] == StateOnline) {
+	for !slices.Contains(states, StateOffline) || states[len(states)-1] != StateOnline {
 		select {
 		case ev := <-events:
 			if ev.Kind == EventStatus {

@@ -341,11 +341,11 @@ func createRefusal(ctx context.Context, err error, platformURL string) error {
 // reads "forbidden: environment.create: device_limit": the last word, when
 // it is a code.
 func platformReason(detail string) string {
-	i := strings.LastIndex(detail, ": ")
-	if i < 0 {
+	_, word, ok := strings.CutLast(detail, ": ")
+	if !ok {
 		return ""
 	}
-	word := strings.TrimSpace(detail[i+2:])
+	word = strings.TrimSpace(word)
 	for _, r := range word {
 		if !unicode.IsLower(r) && r != '_' {
 			return ""
@@ -465,7 +465,9 @@ func removedOr(err error) error {
 // its sharing settings, or the host name without its local domain.
 func defaultComputerName() string {
 	if goruntime.GOOS == "darwin" {
-		if out, err := exec.Command("/usr/sbin/scutil", "--get", "ComputerName").Output(); err == nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if out, err := exec.CommandContext(ctx, "/usr/sbin/scutil", "--get", "ComputerName").Output(); err == nil {
 			if name := strings.TrimSpace(string(out)); name != "" {
 				return name
 			}

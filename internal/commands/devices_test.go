@@ -199,9 +199,9 @@ func (p *devicePlatform) seen() []string {
 	return append([]string(nil), p.requests...)
 }
 
-// runDevices runs the CLI with stdin, and answers its error, stdout and
-// stderr.
-func runDevices(t *testing.T, stdin string, args ...string) (error, string, string) {
+// runDevices runs the CLI with stdin, and answers its stdout, its stderr
+// and its error.
+func runDevices(t *testing.T, stdin string, args ...string) (string, string, error) {
 	t.Helper()
 	root := NewRoot("test")
 	var out, errOut bytes.Buffer
@@ -210,7 +210,7 @@ func runDevices(t *testing.T, stdin string, args ...string) (error, string, stri
 	root.SetErr(&errOut)
 	root.SetArgs(args)
 	err := root.Execute()
-	return err, out.String(), errOut.String()
+	return out.String(), errOut.String(), err
 }
 
 func TestConnectRefusesRoot(t *testing.T) {
@@ -220,7 +220,7 @@ func TestConnectRefusesRoot(t *testing.T) {
 	previous := deviceEUID
 	deviceEUID = func() int { return 0 }
 	t.Cleanup(func() { deviceEUID = previous })
-	err, _, _ := runDevices(t, "yes\n", "devices", "connect")
+	_, _, err := runDevices(t, "yes\n", "devices", "connect")
 	if devices.CodeOf(err) != devices.CodeRunsAsRoot {
 		t.Fatalf("connect as root returned %v", err)
 	}
@@ -234,7 +234,7 @@ func TestConnectRefusesUnverifiedBuild(t *testing.T) {
 	p := newDevicePlatform(t)
 	signIn(t, "")
 	t.Cleanup(upgrade.SetReleaseKeysForTest())
-	err, _, _ := runDevices(t, "yes\n", "devices", "connect")
+	_, _, err := runDevices(t, "yes\n", "devices", "connect")
 	if devices.CodeOf(err) != devices.CodeUnverifiedBuild {
 		t.Fatalf("connect on a build with no release key returned %v", err)
 	}
@@ -247,7 +247,7 @@ func TestConnectRefusesOrgContext(t *testing.T) {
 	deviceHome(t)
 	p := newDevicePlatform(t)
 	signIn(t, "org-1")
-	err, _, _ := runDevices(t, "yes\n", "devices", "connect")
+	_, _, err := runDevices(t, "yes\n", "devices", "connect")
 	if devices.CodeOf(err) != devices.CodeOrgContext || !strings.Contains(err.Error(), "latere org --personal") {
 		t.Fatalf("connect in an organization's context returned %v", err)
 	}
@@ -259,7 +259,7 @@ func TestConnectRefusesOrgContext(t *testing.T) {
 func TestConnectNeedsASignIn(t *testing.T) {
 	deviceHome(t)
 	newDevicePlatform(t)
-	err, _, _ := runDevices(t, "yes\n", "devices", "connect")
+	_, _, err := runDevices(t, "yes\n", "devices", "connect")
 	if devices.CodeOf(err) != devices.CodeNoSignIn || !strings.Contains(err.Error(), "latere login") {
 		t.Fatalf("connect with no login returned %v", err)
 	}
@@ -271,7 +271,7 @@ func TestConnectScreenNeedsYes(t *testing.T) {
 	p := newDevicePlatform(t)
 	signIn(t, "")
 	for _, answer := range []string{"no\n", "y\n", ""} {
-		err, _, errOut := runDevices(t, answer, "devices", "connect", "--folder", project, "--name", "Test Mac")
+		_, errOut, err := runDevices(t, answer, "devices", "connect", "--folder", project, "--name", "Test Mac")
 		if devices.CodeOf(err) != devices.CodeNotConfirmed {
 			t.Fatalf("connect answered %q returned %v", answer, err)
 		}
@@ -300,7 +300,7 @@ func TestConnectCreatesTheEnvironment(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(project, "sub"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	err, out, errOut := runDevices(t, "yes\n", "devices", "connect", "--folder", project, "--folder", project+"/sub:ro",
+	out, errOut, err := runDevices(t, "yes\n", "devices", "connect", "--folder", project, "--folder", project+"/sub:ro",
 		"--name", "Test Mac", "--host", "github.com")
 	if devices.CodeOf(err) != devices.CodeWorkerReplaced {
 		t.Fatalf("connect returned %v; stderr:\n%s", err, errOut)
@@ -381,7 +381,7 @@ func TestSecondConnectRefusedLocally(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = lock.Release() })
-	err, _, _ = runDevices(t, "yes\n", "devices", "connect")
+	_, _, err = runDevices(t, "yes\n", "devices", "connect")
 	if devices.CodeOf(err) != devices.CodeAlreadyServed || !strings.Contains(err.Error(), "already being served") {
 		t.Fatalf("a second connect returned %v", err)
 	}
@@ -396,7 +396,7 @@ func TestConnectedComputerServesWithoutTheScreen(t *testing.T) {
 	p := newDevicePlatform(t)
 	signIn(t, "")
 	connectedHere(t, paths, project)
-	err, _, errOut := runDevices(t, "", "devices", "connect")
+	_, errOut, err := runDevices(t, "", "devices", "connect")
 	if devices.CodeOf(err) != devices.CodeWorkerReplaced {
 		t.Fatalf("connect returned %v", err)
 	}
@@ -408,10 +408,10 @@ func TestConnectedComputerServesWithoutTheScreen(t *testing.T) {
 			t.Errorf("a connected computer created another environment: %v", p.seen())
 		}
 	}
-	if err, _, _ := runDevices(t, "", "devices", "connect", "--folder", project); devices.CodeOf(err) != devices.CodeAlreadyConnected {
+	if _, _, err := runDevices(t, "", "devices", "connect", "--folder", project); devices.CodeOf(err) != devices.CodeAlreadyConnected {
 		t.Errorf("flags on a connected computer returned %v", err)
 	}
-	if err, _, _ := runDevices(t, "", "devices", "serve"); devices.CodeOf(err) != devices.CodeWorkerReplaced {
+	if _, _, err := runDevices(t, "", "devices", "serve"); devices.CodeOf(err) != devices.CodeWorkerReplaced {
 		t.Errorf("serve returned %v", err)
 	}
 }
@@ -437,7 +437,7 @@ func connectedHere(t *testing.T, paths devices.Paths, project string) string {
 func TestServeRefusesAComputerNotConnected(t *testing.T) {
 	deviceHome(t)
 	newDevicePlatform(t)
-	if err, _, _ := runDevices(t, "", "devices", "serve"); devices.CodeOf(err) != devices.CodeNotConnected {
+	if _, _, err := runDevices(t, "", "devices", "serve"); devices.CodeOf(err) != devices.CodeNotConnected {
 		t.Errorf("serve on a computer not connected returned %v", err)
 	}
 }
@@ -460,7 +460,7 @@ func TestConnectRefusalsFromThePlatform(t *testing.T) {
 			p.refuseCreate = tc.detail
 			p.devices = []map[string]any{{"id": "dev-a"}, {"id": "dev-b"}}
 			signIn(t, "")
-			err, _, _ := runDevices(t, "yes\n", "devices", "connect", "--folder", project)
+			_, _, err := runDevices(t, "yes\n", "devices", "connect", "--folder", project)
 			if devices.CodeOf(err) != tc.code || !strings.Contains(err.Error(), tc.hint) {
 				t.Errorf("a create refused with %q returned %v", tc.detail, err)
 			}
@@ -478,7 +478,7 @@ func TestDevicesList(t *testing.T) {
 			"folders": []map[string]any{{"path": "/Users/p/site", "write": true}, {"path": "/Users/p/notes"}}},
 		{"id": "dev-zzzzzzzzzzzzzzzz", "name": "Desktop", "status": "offline", "folders": []map[string]any{}},
 	}
-	err, out, _ := runDevices(t, "", "devices", "list")
+	out, _, err := runDevices(t, "", "devices", "list")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -488,12 +488,12 @@ func TestDevicesList(t *testing.T) {
 			t.Errorf("the list lacks %q:\n%s", want, out)
 		}
 	}
-	err, out, _ = runDevices(t, "", "devices", "list", "--json")
+	out, _, err = runDevices(t, "", "devices", "list", "--json")
 	if err != nil || !strings.Contains(out, `"limit": 10`) {
 		t.Errorf("the JSON list is %s, %v", out, err)
 	}
 	p.devices = nil
-	if err, out, _ = runDevices(t, "", "devices", "list"); err != nil || !strings.Contains(out, "You have no devices") {
+	if out, _, err = runDevices(t, "", "devices", "list"); err != nil || !strings.Contains(out, "You have no devices") {
 		t.Errorf("an empty list reads %q, %v", out, err)
 	}
 }
@@ -502,23 +502,23 @@ func TestDevicesRenameAndRemove(t *testing.T) {
 	paths, project := deviceHome(t)
 	p := newDevicePlatform(t)
 	id := connectedHere(t, paths, project)
-	if err, _, _ := runDevices(t, "", "devices", "rename", "New Name"); err != nil {
+	if _, _, err := runDevices(t, "", "devices", "rename", "New Name"); err != nil {
 		t.Fatal(err)
 	}
-	if err, _, _ := runDevices(t, "", "devices", "rename", "Other", "dev-zzzzzzzzzzzzzzzz"); err != nil {
+	if _, _, err := runDevices(t, "", "devices", "rename", "Other", "dev-zzzzzzzzzzzzzzzz"); err != nil {
 		t.Fatal(err)
 	}
 	policy, _, _ := devices.LoadPolicy(paths.PolicyFile())
 	if p.renamed[id] != "New Name" || p.renamed["dev-zzzzzzzzzzzzzzzz"] != "Other" || policy.Name != "New Name" {
 		t.Errorf("renamed %v, and the file names %q", p.renamed, policy.Name)
 	}
-	if err, _, _ := runDevices(t, "", "devices", "remove", "dev-zzzzzzzzzzzzzzzz"); err != nil {
+	if _, _, err := runDevices(t, "", "devices", "remove", "dev-zzzzzzzzzzzzzzzz"); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok, _ := devices.OpenKeys(paths.KeyFile()).Get(id); !ok {
 		t.Error("removing another device deleted this computer's key")
 	}
-	if err, _, _ := runDevices(t, "", "devices", "remove"); err != nil {
+	if _, _, err := runDevices(t, "", "devices", "remove"); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Join(p.removed, ",") != "dev-zzzzzzzzzzzzzzzz,"+id {
@@ -531,7 +531,7 @@ func TestDevicesRenameAndRemove(t *testing.T) {
 		t.Error("removing this computer kept its host policy file")
 	}
 	for _, args := range [][]string{{"devices", "remove"}, {"devices", "rename", "x"}, {"devices", "activity"}} {
-		if err, _, _ := runDevices(t, "", args...); devices.CodeOf(err) != devices.CodeNotConnected {
+		if _, _, err := runDevices(t, "", args...); devices.CodeOf(err) != devices.CodeNotConnected {
 			t.Errorf("%v on a computer not connected returned %v", args, err)
 		}
 	}
@@ -539,7 +539,7 @@ func TestDevicesRenameAndRemove(t *testing.T) {
 
 func TestDevicesPolicy(t *testing.T) {
 	paths, project := deviceHome(t)
-	if err, _, _ := runDevices(t, "", "devices", "policy"); devices.CodeOf(err) != devices.CodeNotConnected {
+	if _, _, err := runDevices(t, "", "devices", "policy"); devices.CodeOf(err) != devices.CodeNotConnected {
 		t.Errorf("policy with no file returned %v", err)
 	}
 	connectedHere(t, paths, project)
@@ -549,7 +549,7 @@ func TestDevicesPolicy(t *testing.T) {
 	if err := devices.SavePolicy(paths.PolicyFile(), policy); err != nil {
 		t.Fatal(err)
 	}
-	err, out, _ := runDevices(t, "", "devices", "policy")
+	out, _, err := runDevices(t, "", "devices", "policy")
 	if err != nil {
 		t.Fatalf("policy returned %v:\n%s", err, out)
 	}
@@ -558,21 +558,21 @@ func TestDevicesPolicy(t *testing.T) {
 			t.Errorf("policy lacks %q:\n%s", want, out)
 		}
 	}
-	if err, _, _ = runDevices(t, "", "devices", "policy", "--forget", "trg_1"); err != nil {
+	if _, _, err = runDevices(t, "", "devices", "policy", "--forget", "trg_1"); err != nil {
 		t.Fatal(err)
 	}
 	policy, _, _ = devices.LoadPolicy(paths.PolicyFile())
 	if policy.Remembers("trg_1", "4", time.Now()) {
 		t.Error("a forgotten trigger is still remembered")
 	}
-	if err, _, _ = runDevices(t, "", "devices", "policy", "--forget", "trg_none"); devices.CodeOf(err) != devices.CodePolicyInvalid {
+	if _, _, err = runDevices(t, "", "devices", "policy", "--forget", "trg_none"); devices.CodeOf(err) != devices.CodePolicyInvalid {
 		t.Errorf("forgetting an unknown trigger returned %v", err)
 	}
 	policy.Folders = append(policy.Folders, devices.Folder{Path: paths.Home})
 	if err := devices.SavePolicy(paths.PolicyFile(), policy); err != nil {
 		t.Fatal(err)
 	}
-	if err, _, _ = runDevices(t, "", "devices", "policy"); devices.CodeOf(err) != devices.CodePolicyInvalid || !strings.Contains(err.Error(), "home directory") {
+	if _, _, err = runDevices(t, "", "devices", "policy"); devices.CodeOf(err) != devices.CodePolicyInvalid || !strings.Contains(err.Error(), "home directory") {
 		t.Errorf("a policy granting the home directory returned %v", err)
 	}
 }
@@ -596,15 +596,15 @@ func TestDevicesActivity(t *testing.T) {
 	if err = log.Close(); err != nil {
 		t.Fatal(err)
 	}
-	err, out, _ := runDevices(t, "", "devices", "activity")
+	out, _, err := runDevices(t, "", "devices", "activity")
 	if err != nil || !strings.Contains(out, "ses_old  exec  make") || !strings.Contains(out, "ses_new  write  ~/project/a.go") {
 		t.Errorf("activity printed %q, %v", out, err)
 	}
-	err, out, _ = runDevices(t, "", "devices", "activity", "--since", "1h", "--json")
+	out, _, err = runDevices(t, "", "devices", "activity", "--since", "1h", "--json")
 	if err != nil || strings.Contains(out, "ses_old") || !strings.Contains(out, `"session":"ses_new"`) {
 		t.Errorf("activity since an hour printed %q, %v", out, err)
 	}
-	if err, _, _ = runDevices(t, "", "devices", "activity", "--since", "soon"); err == nil {
+	if _, _, err = runDevices(t, "", "devices", "activity", "--since", "soon"); err == nil {
 		t.Error("a bad --since was taken")
 	}
 }

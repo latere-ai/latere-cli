@@ -391,7 +391,7 @@ func (e *Engine) serveOnce(ctx context.Context) (bool, error) {
 		return true, nil
 	case errors.Is(cause, errGone):
 		detail := "the environment " + policy.Device + " is gone and its key is refused"
-		if err := deleteAll(d); err != nil {
+		if err := deleteAll(ctx, d); err != nil {
 			detail += "; " + err.Error()
 		}
 		return false, e.removed(detail)
@@ -412,8 +412,8 @@ func (e *Engine) serveOnce(ctx context.Context) (bool, error) {
 // deleteAll stops and deletes every sandbox the driver holds, for a device
 // that was removed while the worker could not hear it. A failure on one
 // sandbox does not keep the others.
-func deleteAll(d runtime.Driver) error {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+func deleteAll(parent context.Context, d runtime.Driver) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), time.Minute)
 	defer cancel()
 	states, err := d.List(ctx, runtime.Filter{})
 	if err != nil {
@@ -648,7 +648,7 @@ func (e *Engine) unauthorized() {
 // registrationClient is the worker's registration client, with a transport
 // that tells the engine what each registration answered.
 func (e *Engine) registrationClient() *http.Client {
-	base := http.RoundTripper(otel.Transport(nil))
+	base := otel.Transport(nil)
 	timeout := 30 * time.Second
 	if e.cfg.HTTPClient != nil {
 		if e.cfg.HTTPClient.Transport != nil {
