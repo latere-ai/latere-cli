@@ -46,12 +46,17 @@ func TestActivityLogHasNoContent(t *testing.T) {
 	project := connected(t, paths, keys)
 	p := newStubPlane(t)
 	e := engineOn(paths, p, &fakeAccount{exists: true}, keys)
-	answering(t, e, AnswerAllow)
+	seen := answering(t, e, AnswerAllow)
 	stop, _ := running(t, e)
 	p.waitConnected(t)
 
 	if _, err := p.driver.Create(t.Context(), deviceCreate("sbx_1", project, sessionLabels("ses_1"))); err != nil {
 		t.Fatal(err)
+	}
+	// The agent's name reaches the approval from the create's annotation,
+	// through the worker.
+	if got := seen.all(); len(got) != 1 || got[0].Agent != "Site helper" || got[0].Session != "ses_1" || !got[0].Write {
+		t.Errorf("the person was asked about %+v", got)
 	}
 	if code, out := run(t, p.driver, "sbx_1", "sh", "-c", "echo OUTPUT-WORDS"); code != 0 || !strings.Contains(out, "OUTPUT-WORDS") {
 		t.Fatalf("the exec answered %d %q", code, out)
@@ -544,7 +549,7 @@ func TestEngineAdmits(t *testing.T) {
 	if v := e.Admit(t.Context(), create(scheduled)); !v.Allow {
 		t.Fatalf("a remembered answer did not admit: %+v", v)
 	}
-	a := (*seen)[0]
+	a := seen.all()[0]
 	if a.Agent != "Site helper" || a.AgentRef != "agt_1" || a.AgentVersion != "4" || !a.Write || !a.Rememberable ||
 		a.StartedBy() != "by trigger trg_1 (on a schedule)" {
 		t.Errorf("the approval's facts are %+v", a)
@@ -553,14 +558,14 @@ func TestEngineAdmits(t *testing.T) {
 	if !policy.Remembers("trg_1", "4", time.Now()) {
 		t.Fatalf("the trigger was not written to the host policy: %+v", policy.RememberedTriggers)
 	}
-	if v := e.Admit(t.Context(), create(scheduled)); !v.Allow || len(*seen) != 1 {
-		t.Errorf("a remembered trigger was asked again: %+v, asked %d times", v, len(*seen))
+	if v := e.Admit(t.Context(), create(scheduled)); !v.Allow || len(seen.all()) != 1 {
+		t.Errorf("a remembered trigger was asked again: %+v, asked %d times", v, len(seen.all()))
 	}
 	changed := map[string]string{}
 	maps.Copy(changed, scheduled)
 	changed[LabelVersion] = "5"
 	e.Admit(t.Context(), create(changed))
-	if len(*seen) != 2 {
+	if len(seen.all()) != 2 {
 		t.Error("a remembered trigger whose agent changed was not asked")
 	}
 	policy, _, _ = LoadPolicy(paths.PolicyFile())
@@ -575,8 +580,8 @@ func TestEngineAdmits(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.Admit(t.Context(), create(changed))
-	if len(*seen) != 3 {
-		t.Errorf("a forgotten trigger was admitted without asking; asked %d times", len(*seen))
+	if len(seen.all()) != 3 {
+		t.Errorf("a forgotten trigger was admitted without asking; asked %d times", len(seen.all()))
 	}
 }
 

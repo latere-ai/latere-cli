@@ -354,14 +354,25 @@ func running(t *testing.T, e *Engine) (stop func() error, done <-chan struct{}) 
 	return stop, finished
 }
 
+// asked is what an answering client saw, read under its lock.
+type asked struct {
+	mu   sync.Mutex
+	list []Approval
+}
+
+func (a *asked) all() []Approval {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]Approval(nil), a.list...)
+}
+
 // answering attaches a client that gives answer to every create asked, and
 // records each approval it saw.
-func answering(t *testing.T, e *Engine, answer string) *[]Approval {
+func answering(t *testing.T, e *Engine, answer string) *asked {
 	t.Helper()
 	events, unsubscribe := e.Subscribe()
 	detach := e.Attach()
-	var mu sync.Mutex
-	seen := &[]Approval{}
+	seen := &asked{}
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -369,9 +380,9 @@ func answering(t *testing.T, e *Engine, answer string) *[]Approval {
 			if ev.Kind != EventAsked {
 				continue
 			}
-			mu.Lock()
-			*seen = append(*seen, *ev.Approval)
-			mu.Unlock()
+			seen.mu.Lock()
+			seen.list = append(seen.list, *ev.Approval)
+			seen.mu.Unlock()
 			_ = e.Answer(ev.Approval.ID, answer, "the test")
 		}
 	}()
@@ -387,7 +398,8 @@ func answering(t *testing.T, e *Engine, answer string) *[]Approval {
 func deviceCreate(id, folder string, labels map[string]string) runtime.CreateSpec {
 	return runtime.CreateSpec{
 		ID: id, Name: id, Owner: "alice", Isolation: v1.IsolationProcess,
-		Labels: labels, Workspace: runtime.Workspace{Host: folder, Path: folder},
+		Labels: labels, Annotations: map[string]string{AnnotationAgent: "Site helper"},
+		Workspace: runtime.Workspace{Host: folder, Path: folder},
 	}
 }
 
