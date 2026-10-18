@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.21.0 - 2026-10-18
+
 ### Changed
 
 - Releases are signed. Every release from this one carries
