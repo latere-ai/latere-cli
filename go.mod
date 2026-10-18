@@ -17,8 +17,8 @@ require (
 	golang.org/x/sync v0.23.0
 	golang.org/x/term v0.46.0
 	gopkg.in/yaml.v3 v3.0.1
-	latere.ai/x/cella v0.6.3
-	latere.ai/x/pkg v0.90.2
+	latere.ai/x/cella v0.16.1-0.20261018160816-ba441cfdfca4
+	latere.ai/x/pkg v0.102.0
 	latere.ai/x/topos v0.7.0
 )
 
@@ -48,7 +48,6 @@ require (
 	github.com/gorilla/css v1.0.1 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
-	github.com/kr/text v0.2.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.3.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-localereader v0.0.1 // indirect

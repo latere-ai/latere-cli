@@ -41,7 +41,6 @@ github.com/clipperhouse/stringish v0.1.1/go.mod h1:v/WhFtE1q0ovMta2+m+UbpZ+2/HEX
 github.com/clipperhouse/uax29/v2 v2.5.0 h1:x7T0T4eTHDONxFJsL94uKNKPHrclyFI0lm7+w94cO8U=
 github.com/clipperhouse/uax29/v2 v2.5.0/go.mod h1:Wn1g7MK6OoeDT0vL+Q0SQLDz/KpfsVRgg6W7ihQeh4g=
 github.com/cpuguy83/go-md2man/v2 v2.0.6/go.mod h1:oOW0eioCTA6cOiMLiUPZOpcVxMig6NIQQ7OS05n1F4g=
-github.com/creack/pty v1.1.9/go.mod h1:oKZEueFk5CKHvIhNR5MUki03XCEU+Q6VDXinZuGJ33E=
 github.com/danieljoos/wincred v1.2.3 h1:v7dZC2x32Ut3nEfRH+vhoZGvN72+dQ/snVXo/vMFLdQ=
 github.com/danieljoos/wincred v1.2.3/go.mod h1:6qqX0WNrS4RzPZ1tnroDzq9kY3fu1KwE7MRLQK4X0bs=
 github.com/dlclark/regexp2 v1.11.0 h1:G/nrcoOa7ZXlpoa/91N3X7mM3r8eIlMBBJZvsz/mxKI=
@@ -201,11 +200,11 @@ gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c h1:Hei/4ADfdWqJk1ZMxUNpqntN
 gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c/go.mod h1:JHkPIbrfpd72SG/EVd6muEfDQjcINNoR0C8j2r3qZ4Q=
 gopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=
 gopkg.in/yaml.v3 v3.0.1/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
-latere.ai/x/cella v0.6.3 h1:/lSNTT0HGIFCftdHp+tMHH8Y0i5clZzfa8Tbssx5L4E=
-latere.ai/x/cella v0.6.3/go.mod h1:54gHBOSxN14khmpHX5ZO7K+tYYG9F/5vXU4u4lZeZM4=
+latere.ai/x/cella v0.16.1-0.20261018160816-ba441cfdfca4 h1:3YrI722tQx06TZWEGkwLNtzWWP4sdyP++Pveqa8iLjU=
+latere.ai/x/cella v0.16.1-0.20261018160816-ba441cfdfca4/go.mod h1:MuGm1m+Ql58yY9XCeitUQ2eJyuzqcitg1fYJgOLyrc0=
 latere.ai/x/ci-gate v0.54.0 h1:LnrEu0GZbSSInCYZZxRoG3vwUHXO0M8zlbt9YtB9Nrg=
 latere.ai/x/ci-gate v0.54.0/go.mod h1:zDYdDAkxB9ahnbjcbdgtDup4ruowqmGLBqMu29B6wXg=
-latere.ai/x/pkg v0.90.2 h1:W3QFzuf9ujTdmD4zIbeitO3tcP1dDXPZ09etVlEM5pc=
-latere.ai/x/pkg v0.90.2/go.mod h1:3E3SkHqudqH1mka1Rt7N8aExh+EJvvDqtNYKb25Ond4=
+latere.ai/x/pkg v0.102.0 h1:WZhGCVHlVe1yaXB7uYpUYcbmNRcRCYSaXt7h8c5bOj4=
+latere.ai/x/pkg v0.102.0/go.mod h1:DXPSAq+ILbgrwTe960LC79dzaU8Hn+HAsvLMVqmAuV4=
 latere.ai/x/topos v0.7.0 h1:nqvWI4DRdM6ioYS4cAHM8XjURqJQG+PszsM8m5R8Ucs=
 latere.ai/x/topos v0.7.0/go.mod h1:yFaKFboXLknferFSAbHTWumOtZs2TrFuljZJtqshOFM=
