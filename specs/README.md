@@ -24,7 +24,7 @@ specs/
   014-app-rename.md                  (implemented: latere apps rename; the app moves to a new slug and the latere remote follows)
   015-evals-commands.md              (in-progress: latere evals replaces latere eval; suites, experiments, comparisons, harness lease and import, publishing)
   016-devices-command.md             (in-progress: latere devices connects this computer as an environment the person's sessions work on, approved here)
-  017-signed-upgrades.md             (in-progress: releases sign their checksums; upgrade and the installer verify the signature)
+  017-signed-upgrades.md             (implemented: releases sign their checksums; upgrade and auto-upgrade verify the signature, the installer to follow)
 ```
 
 ## Status
@@ -107,9 +107,11 @@ Where each spec stands:
   with no terminal, driven through a local control socket, which is what
   a desktop application builds on. Designed on 2026-10-18, not built.
 - `017-signed-upgrades.md`: each release signs `checksums.txt` with an
-  Ed25519 key, and `latere upgrade`, auto-upgrade and the installer verify
-  it against keys built into the binary. It comes before 016, since a
-  connected computer upgrades itself. Designed on 2026-10-18, not built.
+  Ed25519 key through `tools/sign`, and `latere upgrade` and auto-upgrade
+  verify it against keys built into the binary before they read any
+  checksum, refusing a release before v0.21.0. It comes before 016, since
+  a connected computer upgrades itself. Built on 2026-10-18, not released;
+  the installer's verification is the platform's to build.
 
 Two surfaces shipped without a dedicated design record: the token-lifecycle
 work, which [docs/login-and-tokens.md](../docs/login-and-tokens.md) documents,
