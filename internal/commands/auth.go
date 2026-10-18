@@ -691,7 +691,10 @@ func scopesClaim(claims map[string]any) []string {
 }
 
 func newAuthLogoutCmd() *cobra.Command {
-	var authURL string
+	var (
+		authURL string
+		yes     bool
+	)
 	cmd := &cobra.Command{
 		Use:   "logout",
 		Args:  cobra.NoArgs,
@@ -703,10 +706,18 @@ refresh token at auth (RFC 7009 /revoke), then deletes the keys' local
 copies and ~/.config/latere/auth-token.json. Revocation is best-effort: an
 unreachable or older server prints a warning and the local sign-out
 still completes. Tokens already minted for a product are not recalled;
-each lapses within five minutes.`,
+each lapses within five minutes.
+
+On a computer connected with 'latere devices connect', signing out first
+removes the computer from your devices. It says so and asks; --yes
+answers for you. If the device cannot be removed, you stay signed in.`,
 		Example: `  latere logout
+  latere logout --yes
   latere login`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := leaveBeforeLogout(cmd.Context(), cmd.InOrStdin(), cmd.ErrOrStderr(), "", yes); err != nil {
+				return err
+			}
 			forgetModelKeys(cmd.Context(), authURL, cmd.ErrOrStderr())
 			revokeAuthRefreshToken(cmd.Context(), authURL, cmd.ErrOrStderr())
 			if err := api.ClearAuthToken(); err != nil {
@@ -717,6 +728,7 @@ each lapses within five minutes.`,
 		},
 	}
 	cmd.Flags().StringVar(&authURL, "auth-url", "", "override auth base URL (default $AUTH_URL or https://auth.latere.ai)")
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "on a connected computer, remove it from your devices without asking")
 	return cmd
 }
 
