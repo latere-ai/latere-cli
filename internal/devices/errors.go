@@ -100,8 +100,8 @@ var refusals = map[string]struct{ message, hint string }{
 		"Run `latere org --personal`, then connect again.",
 	},
 	CodeNoSignIn: {
-		"Your sign-in does not name this computer, so it cannot be connected.",
-		"Sign in again with `latere login`, then connect again.",
+		"You are not signed in, and connecting this computer needs your sign-in.",
+		"Run `latere login`, then connect again.",
 	},
 	CodeNotConfirmed: {
 		"Nothing was connected.",
