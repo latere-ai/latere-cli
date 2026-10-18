@@ -708,9 +708,13 @@ func TestEnginePauseResumeReload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state, err := check.Inspect(t.Context(), "sbx_p"); err != nil || state.Phase != runtime.Stopped {
-		t.Errorf("a pause left the sandbox %s, %v; want Stopped", state.Phase, err)
-	}
+	// The worker stops its sandboxes before its run returns, which can come
+	// a moment after the stream closes, so the stop is waited for, not read
+	// once.
+	waitFor(t, "a pause to stop the sandbox", func() bool {
+		state, err := check.Inspect(t.Context(), "sbx_p")
+		return err == nil && state.Phase == runtime.Stopped
+	})
 	if err = e.Resume(); err != nil {
 		t.Fatal(err)
 	}
