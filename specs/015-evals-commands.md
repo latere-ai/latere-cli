@@ -1,23 +1,23 @@
 ---
-title: "`latere evals`: suites, tasks, metrics, graders and candidates applied from YAML, experiments run, changed, followed, re-graded, closed and deleted, baselines and taxonomies, comparisons in the terminal and on request, trials, an external harness's lease, renewal and submit, a harness's past runs imported as declared trials, reports, benchmarks and datasets published and shared by visibility and evidence level, bar checks for CI and dataset exports, on Evals at the platform origin; `latere eval` removed"
+title: "`latere evals`: suites, tasks, metrics, graders and candidates applied from YAML, experiments run, changed, followed, re-graded, closed and deleted, baselines and taxonomies, comparisons in the terminal and on request, trials, an external harness's lease, renewal and submit, its past trials imported with their provenance declared, reports, benchmarks and datasets published and shared by visibility and evidence level, benchmark submissions, bar checks for CI and dataset exports, on Evals at the platform origin, in Examen's build order; `latere eval` removed"
 status: in-progress
 depends_on:
   - specs/001-auth-unification-migration.md
   - specs/010-app-command.md
   - specs/011-capability-commands.md
-  - "CROSS-REPO: latere-ai/examen specs/003-api.md: every route the group calls, the progress stream, idempotency and the errors it branches on, the external harness's lease, renewal and submit, imports of an external harness's past runs, taxonomies, reports, publications, submissions and shares"
+  - "CROSS-REPO: latere-ai/examen specs/003-api.md: every route the group calls, the progress stream, idempotency and the errors it branches on, the external harness's lease, renewal and submit, imports of an external harness's past trials, the v0.1 profile and its build order, taxonomies, reports, publications, submissions and shares"
   - "CROSS-REPO: latere-ai/examen specs/005-execution.md: directory outputs as archives with their output manifest, an external trial's declared harness version and image, and its service versions and usage"
   - "CROSS-REPO: latere-ai/examen specs/009-bars.md: the bar check's outcomes and the exit code a command-line client maps each to"
   - "CROSS-REPO: latere-ai/examen specs/010-reports.md: the presentation rules and formats every figure obeys"
-  - "CROSS-REPO: latere-ai/platform specs/214-evals-hosted.md: Evals at https://api.latere.ai/v1/evals, and `sign_in_not_kept` for an experiment created from the command line"
+  - "CROSS-REPO: latere-ai/platform specs/214-evals-hosted.md: Evals at https://api.latere.ai/v1/evals, an experiment of external candidates created from the command line, and `sign_in_not_kept` for any other"
   - "CROSS-REPO: latere-ai/platform specs/215-evals-in-the-console.md: the prefilled create address the refusal links to"
   - "CROSS-REPO: latere-ai/platform specs/217-the-evals-api-at-the-origin.md: who may call the API at the origin, and the grants a key carries, among them an external harness's lease and submit"
   - "CROSS-REPO: latere-ai/auth deploy/base/clients.yaml: the latere-cli row's actor_audiences, which must list examen"
   - "CROSS-REPO: latere-ai/examen specs/013-publishing.md: reports, benchmarks and datasets published as numbered versions with a digest, `private`, `unlisted`, and `public` only through a listing, the evidence levels `aggregates`, `outputs` and `full` with a secret scan, share grants, withdrawal, and benchmark submissions"
-  - "CROSS-REPO: latere-ai/platform specs/218-evals-results-shared.md: the gallery listing request at the platform's account route, reviewed where app listings are"
+  - "CROSS-REPO: latere-ai/platform specs/218-evals-results-shared.md: the Evals gallery listing request at the platform's account route, reviewed where app listings are"
   - "CROSS-REPO: latere-ai/platform specs/219-evals-end-to-end-the-goalless-study.md: the goalless study, the first user of `harness import`, of the adapter's lease, renewal and submit, and of `publish` and `share`"
 affects:
-  - "internal/commands/evals.go, evals_apply.go, evals_watch.go, evals_compare.go, evals_harness.go, evals_import.go, evals_upload.go, evals_publish.go (new: the group, its client, manifests, the stream, the terminal comparison, the harness, the import, the archive upload of a directory output, reports, publications, submissions and sharing)"
+  - "internal/commands/evals.go, evals_apply.go, evals_watch.go, evals_compare.go, evals_harness.go, evals_import.go, evals_upload.go, evals_publish.go (new: the group, its client, manifests, the stream, the terminal comparison, the harness, the import, the upload of an external trial's outputs, reports, publications, submissions and sharing)"
   - "internal/commands/root.go (the group added, `eval` removed)"
   - "internal/commands/exit.go (the group's exit codes)"
   - "internal/commands/retired.go, capability_scan_test.go (`eval`, `EVAL_API_URL` and `EVAL_ADMIN_TOKEN` retired)"
@@ -41,9 +41,10 @@ programs built on models, run on the Examen core at
 spec 214). The console is where a person starts and reads most
 experiments (platform spec 215). The command line is where the same
 person keeps a suite in files under version control and applies it,
-reads a comparison in a terminal, runs trials on their own harness,
-brings that harness's past runs in, publishes reports, benchmarks and
-datasets for others to read, and holds a release to a bar in CI.
+reads a comparison in a terminal, creates an experiment their own
+external harness runs and leases its trials, brings that external
+harness's past trials in, publishes reports, benchmarks and datasets
+for others to read, and holds a release to a bar in CI.
 
 This spec designs the `latere evals` group and removes `latere eval`,
 the command group of the retired Eval service.
@@ -94,9 +95,9 @@ the command group of the retired Eval service.
 - **What Examen defines for the new commands.** Examen's specs 003,
   005 and 013 define what the commands below call and nothing on this
   side exists yet: `POST /experiments/{id}/imports` with `executor:
-  external`, which takes an external harness's past run with declared
+  external`, which takes an external harness's past trial with declared
   times, harness version and image into an experiment in mode `import`
-  (a lease on such an experiment is `409 wrong_mode`, so past runs
+  (a lease on such an experiment is `409 wrong_mode`, so past trials
   cannot go through lease and submit); `POST /experiments/{id}/close`;
   lease renewal; directory outputs, carried as a tar archive in the
   owner's Storage and never inline; taxonomies; reports; and
@@ -116,7 +117,7 @@ the command group of the retired Eval service.
 |---|---|
 | Base URL | `https://api.latere.ai/v1/evals`; `LATERE_EVALS_URL` or `--api-url` overrides it |
 | Bearer | an actor token minted at auth for the audience `examen`, one per command and renewed when a long command outlives it; `LATERE_EVALS_TOKEN` presents a bearer as given |
-| Other audiences | an actor token for `arca`, to upload a directory output into the context's Storage space, and one for `api.latere.ai`, for the platform's listing route; each minted like the bearer, and both already among this client's actor audiences |
+| Other audiences | an actor token for `arca`, to upload an external trial's outputs into the context's Storage space, and one for `api.latere.ai`, for the platform's listing route; each minted like the bearer, and both already among this client's actor audiences |
 | Issuer | inferred from the base URL's host, or `AUTH_URL`, or `--auth-url` |
 | Context | the saved login's, personal or an organization's, as `latere org` sets it; Examen resolves names in it |
 | Console | `LATERE_PLATFORM_URL`, `https://platform.latere.ai` by default, for the links the group prints |
@@ -216,13 +217,12 @@ id (Examen spec 003, References).
 | `trials list <experiment> [--task] [--candidate] [--state] [--outcome] [--imported] [--metric <name> --value <v\|missing>] [--retried] [--all]` | `GET /experiments/{id}/trials` | trial, task, candidate, index, outcome, one column per metric's current value, duration, cost |
 | `trials show <trial>` | `GET /trials/{id}`, `GET /trials/{id}/measurements` | the outcome, times, each check run, each judgment, every current value with its rationale, the configured, sent and observed layers unmerged, what an external harness declared, the outputs summary, the evidence with its Storage paths, and the console link |
 | `harness lease`, `harness lease --renew`, `harness submit` | `POST /experiments/{id}/work/lease`, `POST /trials/{id}/submit` | below |
-| `harness import --experiment <id> -f <runs.jsonl> [--plan]` | `POST /experiments/{id}/imports` with `executor: external` | submits a harness's past runs as declared trials (Importing a harness's past runs, below) |
+| `harness import --experiment <id> -f <trials.jsonl> [--plan]` | `POST /experiments/{id}/imports` with `executor: external` | submits an external harness's past trials with their provenance declared (Importing past trials, below) |
 | `reports create <experiment> [--comparison <id>]...`, `reports list <experiment>`, `reports show <report>` | `POST /experiments/{id}/reports`, `GET /experiments/{id}/reports`, `GET /reports/{id}` | freezes a report of the named final comparisons, every final automatic comparison when none is named, and prints its id; lists and shows reports |
 | `publish report <report>\|--experiment <id>`, `publish benchmark <suite>`, `publish dataset`, each with `[--name] [--title] [--description]` on a first version or `--to <publication>` for a new one, and `[--evidence] [--exclude <path>]... [--visibility] [--wait]` | `POST /publications`, `POST /publications/{id}/versions`, `GET /publications/{id}/versions/{n}` | publishes an immutable version and prints its publication's id, the version's number, state and digest, and, when unlisted, the link (Publishing and sharing, below) |
-| `publish submit <benchmark key> --report <publication>[@<n>] --candidate <ref>` | `POST /submissions` | enters one candidate of a report version in a benchmark's results table, and prints `accepted` or `pending` |
 | `publish results <benchmark> [--version <n>]` | `GET /publications/{id}/results` | the benchmark version's results table as Examen answers it: entries in order with their rank intervals and their comparison with the reference entry |
 | `publish list [--kind] [--all]`, `publish show <publication> [--versions]` | `GET /publications`, `GET /publications/{id}` | each publication's kind, name, visibility, latest version and link; with `--versions`, every version and its state |
-| `submissions list [--benchmark <publication>] [--state] [--all]`, `submissions show <id>`, `submissions withdraw <id>`, `submissions accept <id>`, `submissions reject <id>` | `GET /submissions` or, with `--benchmark`, `GET /publications/{id}/submissions`; `GET /submissions/{id}`; `POST /submissions/{id}/withdraw`, `/accept`, `/reject` | the caller's submissions, or a benchmark owner's review queue; withdraws one's own; accepts or rejects one submitted to one's own benchmark |
+| `submissions create <benchmark key> --report <publication>[@<n>] --candidate <ref>`, `submissions list [--benchmark <publication>] [--state] [--all]`, `submissions show <id>`, `submissions withdraw <id>`, `submissions accept <id>`, `submissions reject <id>` | `POST /submissions`; `GET /submissions` or, with `--benchmark`, `GET /publications/{id}/submissions`; `GET /submissions/{id}`; `POST /submissions/{id}/withdraw`, `/accept`, `/reject` | enters one candidate of a report version in a benchmark's results table and prints `accepted` or `pending`; lists the caller's submissions, or a benchmark owner's review queue; withdraws one's own; accepts or rejects one submitted to one's own benchmark |
 | `share <publication> [--visibility] [--invite <owner>]... [--revoke <owner>]... [--replace-link] [--request-listing --line <text> [--note <text>]] [--withdraw [--version <n>] [--yes]]` | `PATCH /publications/{id}`, `PUT` and `DELETE /publications/{id}/shares/{grantee}`, `POST /publications/{id}/link`, `POST /publications/{id}/versions/{n}/withdraw`, and the platform's listing route | changes who can read a publication (below) |
 | `bars apply -f <file> --suite <name>`, `bars list --suite <name>` | `PUT /suites/{suite}/bars/{name}`, `GET /suites/{suite}/bars` | applies and lists a suite's bars |
 | `bars check --suite <name> --bar <ref> --experiment <id> --candidate <ref> [--comparison] [--wait] [--meta k=v]...` | `POST /suites/{suite}/bars/{ref}/evaluate`, `GET /evaluations/{id}` | the release check (below) |
@@ -231,6 +231,26 @@ id (Examen spec 003, References).
 A list reads its first page unless `--all` walks every page. A name in a
 flag (`--candidate`, `--suite`) is resolved to its current version's
 digest before the request, as a manifest's names are.
+
+### What each release serves
+
+The group follows Examen's build order (its `specs/README.md`): a
+command ships in the release of the command line that follows the
+Examen release serving its route, and the group's tests hold each
+command to a route of the pinned release's document. Evals' first
+release is Examen's v0.1 profile (Examen spec 003): external candidates,
+experiments in mode `execute` and `import`, lease, renewal and submit,
+the import of past trials, the measurements an external harness
+declares, the grid, comparisons and the progress stream. Its commands
+are `apply` and each kind's `apply`, `list` and `show`; `experiments
+run`, `list`, `show`, `update`, `watch`, `cancel`, `close`, `retry` and
+`delete`; `compare`, on request too; `trials`; and `harness lease`,
+`harness lease --renew`, `harness submit` and `harness import`.
+`baselines` follow with the console section, `experiments regrade` with
+checks and judges, and `taxonomies`, `bars`, `exports`, `reports`,
+`publish`, `share` and `submissions` with the later steps that serve
+their routes. Benchmark submissions and the results table's rank
+intervals are served after v0.1.
 
 ### Running an experiment
 
@@ -241,10 +261,10 @@ digest before the request, as a manifest's names are.
 | `--suite <ref>` | `suite` | the suite pinned |
 | `--candidate <ref>`, repeated | `candidates` | the candidates pinned, in order; the first is the reference unless `--reference` names another |
 | `--trials <n>` | `trials` | `trials`; absent, Examen's default |
-| `--limit <usd>` | `limit` | `budget.cap_usd_micro`, the spending cap in whole micro-dollars (Examen spec 003); required, since Examen requires a budget and a client of the platform names no Budget, which the platform creates (platform spec 214) |
+| `--spending-cap <usd>` | `spending_cap` | `budget.cap_usd_micro`, the spending cap in whole micro-dollars (Examen spec 003); required, since Examen requires a budget and a client of the platform names no Budget, which the platform creates (platform spec 214) |
 | `--reference <candidate>` or `--reference baseline:<id>` | `reference` | `reference` |
 | `--parallelism <n>` | `parallelism` | `parallelism` |
-| `--mode import` | `mode` | `mode`: an experiment that runs no trial and takes its trials from `harness import`; absent, `execute` |
+| `--mode import` | `mode` | `mode`: an experiment that runs no trial and takes its past trials from `harness import`; absent, `execute` |
 | `--benchmark <key>` | `benchmark` | `benchmark`: the link token or public id of a published benchmark whose suite the experiment runs (Examen spec 013) |
 | `--meta k=v`, repeated | `metadata` | `metadata` |
 | `--idempotency-key <key>` | none | the `Idempotency-Key` header; absent, one random key per invocation, reused by the command's own retries |
@@ -253,20 +273,30 @@ A CI job that may retry passes a stable key, such as its commit, so a
 retried job reads the first experiment back instead of starting a
 second (Examen spec 003, Idempotency).
 
-**`sign_in_not_kept`.** The platform keeps a person's sign-in for an
-experiment only when the console starts it, so an experiment created
-from the command line is refused `403 sign_in_not_kept` (platform spec
-214) and nothing is stored. The command sends the create all the same,
-so it works unchanged on the day a kept-sign-in path exists for the
-command line. It then prints:
+**Which experiments the command line creates.** An experiment whose
+candidates are all `external` and whose suite has no `check`,
+`model_judge` or `agent_judge` grader is created from the command line:
+no person's token is ever minted for it, so the platform needs no
+sign-in it keeps (platform spec 214, row 13, a reversible choice taken
+on 2026-10-18 and flagged for the owner to confirm). That is an
+experiment an external harness works through lease and submit, and an
+experiment of past trials in mode `import`, the whole of Evals' first
+release.
+
+**`sign_in_not_kept`.** Every other experiment needs a sign-in the
+platform keeps for its unattended work, which it keeps only when the
+console starts the experiment, so its create from the command line is
+refused `403 sign_in_not_kept` and nothing is stored. The command sends
+the create all the same, so it works unchanged on the day a
+kept-sign-in path exists for the command line. It then prints:
 
 ```
-Experiments start from the console for now. The platform keeps your
-sign-in for an experiment only when you start it there, so its trials
-can run after this command ends.
+This experiment starts from the console for now. The platform keeps
+your sign-in for an experiment only when you start it there, so its
+agents, checks and judges can run after this command ends.
 
 Finish in the console:
-https://platform.latere.ai/console/evals/experiments/new?suite=fix-flaky-tests%40sha256%3A9f2c…&candidate=opus-high%40sha256%3A41ab…&candidate=sonnet-high%40sha256%3A77d0…&trials=10&limit=25&from=cli
+https://platform.latere.ai/console/evals/experiments/new?suite=fix-flaky-tests%40sha256%3A9f2c…&candidate=opus-high%40sha256%3A41ab…&candidate=sonnet-high%40sha256%3A77d0…&trials=10&spending_cap=25&from=cli
 ```
 
 The link is `LATERE_PLATFORM_URL` with the prefilled create address of
@@ -275,10 +305,11 @@ platform spec 215, carrying every choice the command was given, pinned,
 The console fills its form from it and sends nothing until the person
 presses Start. The command exits 2.
 
-So on the hosted platform today, a release job follows an experiment
-the console started: `experiments watch <id>`, then `bars check`. An
-external harness's job leases and submits the trials of such an
-experiment (below).
+So on the hosted platform a release job that compares agents follows
+an experiment the console started: `experiments watch <id>`, then
+`bars check`. An external harness's job creates its own experiment of
+external candidates, or works one created anywhere, and leases and
+submits its trials (below).
 
 ### The progress stream
 
@@ -351,19 +382,20 @@ https://platform.latere.ai/console/evals/comparisons/cmp_01jb…
 
 ### The external harness
 
-An external candidate's trials run on the owner's own harness (Examen
-specs 003 and 005). Two commands let a script run them:
+An external candidate's trials run on the owner's own external harness
+(Examen specs 003 and 005). Two commands let a script run them:
 
 - **`harness lease --experiment <id> [--candidate <ref>] [--max <n>] [--inputs <dir>]`**
   leases up to `n` pending trials of the experiment's external
   candidates (`POST /experiments/{id}/work/lease`). For each trial it
-  prints the id, the task, the lease's end, and the label the harness
-  puts on its model requests, `Lux-Labels: examen.trial=<trial>`.
+  prints the id, the task, the lease's end, and the label the external
+  harness puts on its model requests, `Lux-Labels: examen.trial=<trial>`.
   Examen finds a trial's model calls, usage and cost by the request ids
   a submit names, and by that label once Lux filters its request log by
-  a request's label (platform spec 214, decision 11), so a harness
-  passes its request ids at submit and sets the label as well. With
-  `--inputs`, it downloads each trial's inputs from the addresses the
+  a request's label (platform spec 214, decision 11), so an external
+  harness passes its request ids at submit and sets the label as well.
+  With `--inputs`, it downloads each trial's inputs, when its task has
+  any, from the addresses the
   lease answers to `<dir>/<trial>/inputs/<name>` and writes the
   instruction to `<dir>/<trial>/instruction.txt`, the trial as the lease
   answered it, with the candidate it was leased for, to
@@ -374,10 +406,10 @@ specs 003 and 005). Two commands let a script run them:
   no trial waiting it prints "No trials waiting." and exits 0.
 - **`harness lease --experiment <id> --renew <lease>`** renews a lease
   the caller holds (the same route with `renew`), so a trial that runs
-  longer than `EXTERNAL_LEASE` keeps it, and prints the new end. A
-  harness renews well before the end, at half the lease, say. A lease
-  that already lapsed prints Examen's sentence and exits 2; its trials
-  went back to pending, and the run's result can no longer be
+  longer than `EXTERNAL_LEASE` keeps it, and prints the new end. An
+  external harness renews well before the end, at half the lease, say.
+  A lease that already lapsed prints Examen's sentence and exits 2; its
+  trials went back to pending, and their results can no longer be
   submitted.
 - **`harness submit <trial> --lease <lease> --outcome <outcome> --started-at <time> --agent-ended-at <time> [--failure-code <code> --failure-detail <text>] [--outputs <dir>] [--transcript <file>] [--final-message <file>] [--lux-request <id>]... [--service-version <name>=<version>]... [--service-usage <file>] [--harness-version <version>] [--image <tag or digest>] [--measurements <file>] [--ref <text>]`**
   sends the trial's result (`POST /trials/{id}/submit`): the lease it is
@@ -388,35 +420,40 @@ specs 003 and 005). Two commands let a script run them:
   output the task names under `--outputs` (Outputs, below). A file
   under `--outputs` that the task does not name refuses the command
   before anything is sent, naming the path. `--transcript` and
-  `--final-message` send what judges read; `--lux-request` the Lux
+  `--final-message` send what judges read, which Examen takes only once
+  Evals keeps files (below); `--lux-request` the Lux
   request ids of its model calls; `--service-version` and
   `--service-usage` the versions of the services the run called and
   the usage each reported for itself, as Examen's `service_versions`
   and `service_usage` (a JSON file from a service's name to
   `{cost_usd_micro, units}`); `--harness-version` and `--image` the
-  run's `declared` harness version, which must equal the candidate's
+  trial's `declared` harness version, which must equal the candidate's
   `version`, and the image it ran in, kept as declared;
-  `--measurements` values the harness computed itself in the check
-  output form (`{"metrics": {...}}`), which the command sends with each
-  metric name pinned to the suite's metric and Examen stores as
-  reported by the harness and never headlines; `--ref` the harness's
-  own name for the run. A lease that expired, or one this caller does
+  `--measurements` values the external harness computed itself in the
+  check output form (`{"metrics": {...}}`), which the command sends with
+  each metric name pinned to the suite's metric and Examen stores as
+  self-reported, marked and never headlined; `--ref` the external
+  harness's own name for the trial. A lease that expired, or one this caller does
   not hold, prints Examen's sentence ("Lease it again.") and exits 2.
 
-**Outputs.** A file output goes inline, in standard base64, while the
-body stays under a bound of the command's own, one constant in
-`evals_upload.go`, and is otherwise uploaded as a directory output is.
-A directory output, an entry the task names ending in `/` such as
-`workspace/`, is never inline (Examen spec 003): the command writes it
-as one gzip-compressed tar archive of regular files and directories
-into the context's Storage space, the experiment owner's, which Examen
-reads it from, with its own actor token for `arca`, at
-`files/evals-uploads/<experiment id>/<trial id>/<output>.tar.gz`,
-outside the reserved `files/evals/`, and sends `{path, arca: {path,
-digest}}` with the archive's digest. Examen reads it as the owner,
-checks the digest, and keeps the trial's own archive and output
-manifest under its limits, so a workspace larger than a request body
-still arrives whole, and the command holds no copy of those limits.
+**Outputs.** Every output goes into the context's Storage space, the
+experiment owner's, with the command's own actor token for `arca`, and
+is sent by path and digest as `{path, arca: {path, digest}}`, never
+inline: a file output as the file itself, at
+`files/evals-uploads/<experiment id>/<trial id>/<output>`, and a
+directory output, an entry the task names ending in `/` such as
+`workspace/`, as one gzip-compressed tar archive of regular files and
+directories at `files/evals-uploads/<experiment id>/<trial id>/<output>.tar.gz`,
+both outside the reserved `files/evals/`. One rule serves every
+release. Evals' first release runs without a file store of Examen's
+own (Examen spec 003, the v0.1 profile): it records each output's path
+and digest without reading them, and refuses an inline output, a
+transcript and a final message `422 core_not_configured`, so an
+external harness leaves `--transcript` and `--final-message` out until
+Evals keeps files. Once it does, Examen reads each output as the owner, checks the digest,
+and keeps the trial's own copy and output manifest under its limits, so
+a workspace larger than a request body still arrives whole, and the
+command holds no copy of those limits.
 
 With `-q`, `lease` prints only trial ids, one per line, so a script can
 loop without parsing:
@@ -435,8 +472,8 @@ done
 
 #### The goalless study's adapter
 
-The goalless study (platform spec 219) is the first harness built on
-these commands, and shows the whole loop. Its `experiment.sh --lease
+The goalless study (platform spec 219) is the first external harness
+built on these commands, and shows the whole loop. Its `experiment.sh --lease
 <experiment id> --jobs <n>` starts `n` workers, and each one, for each
 candidate of the study's `evals/candidates.yaml` in turn:
 
@@ -454,48 +491,51 @@ candidate of the study's `evals/candidates.yaml` in turn:
    `Lux-Labels: examen.trial=<trial>` to every model request and writes
    the request id Lux answers on each response;
 4. classifies the outcome from the run's exit code and files, the same
-   way its importer classifies a past run; and
+   way its importer classifies a past trial; and
 5. submits with `harness submit <trial> --lease … --outcome …
    --started-at … --agent-ended-at … --outputs work/<trial>/outputs
-   --harness-version … --image … --transcript … --final-message …
-   --lux-request …` (one per id the forwarder wrote) `--ref <its
-   results path>`, the workspace going as one archive in the person's
-   Storage (Outputs, above).
+   --harness-version … --image … --lux-request …` (one per id the
+   forwarder wrote) `--ref <its results path>`, and, once Evals keeps
+   files, `--transcript … --final-message …`, the workspace going as one
+   archive in the person's Storage (Outputs, above).
 
-Its past runs take the other path, `harness import`, below.
+Its past trials take the other path, `harness import`, below.
 
-The harness signs in as any script does: the saved login, `latere
-login --token` in CI, or a key granted the lease and submit actions
-(platform spec 217) presented through `LATERE_EVALS_TOKEN`. It calls
+The external harness signs in as any script does: the saved login,
+`latere login --token` in CI, or a key whose grants name the actions it
+uses (platform spec 217), presented through `LATERE_EVALS_TOKEN`. It
+creates its own experiment of external candidates with `experiments
+run`, or works one created in the console. It calls
 models with a key of its own, the person's model key (`latere models`)
 or a service account's, so those calls spend on that key's budgets and
 not on the experiment's (platform spec 214).
 
-### Importing a harness's past runs
+### Importing past trials
 
-A harness that ran trials before Evals existed brings them in as an
-experiment of declared trials: an experiment in mode `import` whose
-candidates are external, created in the console like any experiment
-(platform spec 214).
+An external harness that ran trials before Evals existed brings them in
+as an experiment of declared trials: an experiment in mode `import`
+whose candidates are external, created with `experiments run --mode
+import`, or in the console when its suite has a check or a judge
+(Which experiments the command line creates, above).
 
-**The run file.** `harness import` reads JSON lines, one run per line,
-which the harness's owner writes from their own records; the command
-knows no harness's layout. Each line holds:
+**The trial file.** `harness import` reads JSON lines, one past trial
+per line, which the external harness's owner writes from their own
+records; the command knows no harness's layout. Each line holds:
 
 | Member | Meaning |
 |---|---|
 | `task`, `candidate` | references the command pins as a manifest's names are pinned |
 | `outcome`, `failure` | as `harness submit` sends them |
-| `started_at`, `agent_ended_at`, `ended_at` | the run's declared times, in the past, each no later than the next; `ended_at` is sent as `agent_ended_at` when absent |
+| `started_at`, `agent_ended_at`, `ended_at` | the trial's declared times, in the past, each no later than the next; `ended_at` is sent as `agent_ended_at` when absent |
 | `harness_version`, `image` | the declared harness version, which must equal the candidate's `version`, and the image tag or digest, sent as the import's `declared` |
-| `outputs` | a directory, relative to the file, whose contents are the run's outputs as `--outputs` sends them |
-| `transcript`, `final_message` | files, relative to the file; absent, none is sent |
-| `lux_requests` | the run's Lux request ids, when it recorded any; with none Lux can attribute, the trial's cost is `unknown`, never zero (Examen spec 005) |
+| `outputs` | a directory, relative to the file, whose contents are the trial's outputs as `--outputs` sends them |
+| `transcript`, `final_message` | files, relative to the file; absent, none is sent; left out until Evals keeps files (Outputs, above) |
+| `lux_requests` | the trial's Lux request ids, when it recorded any; with none Lux can attribute, the trial's cost is `unknown`, never zero (Examen spec 005) |
 | `service_versions`, `service_usage` | as `--service-version` and `--service-usage` send them |
-| `measurements` | values the run recorded itself, in the check output form, with each metric name pinned, stored as self-reported |
-| `ref` | the harness's own name for the run, such as `results20/claude/run-08`; required, since it is how a repeated import finds a run already imported |
+| `measurements` | values the external harness recorded itself, in the check output form, with each metric name pinned, stored as self-reported |
+| `ref` | the external harness's own name for the trial, such as `results20/claude/run-08`; required, since it is how a repeated import finds a trial already imported |
 
-**The command.** `harness import --experiment <id> -f <runs.jsonl>`
+**The command.** `harness import --experiment <id> -f <trials.jsonl>`
 sends each line to `POST /experiments/{id}/imports` with `executor:
 external` (Examen spec 003), with its outputs sent as a submit sends
 them, several lines at once up to
@@ -507,8 +547,8 @@ Examen refuses (`422 provenance_mismatch`, `409 cell_full`, a
 then prints one table of imported, already imported and refused lines
 per task and candidate, and every refused line with its `ref`, code and
 the members of `details` a person can act on; `--json` prints one line
-per run with Examen's answer. It never closes the experiment's intake:
-the owner closes it when every run is in, with `experiments close` or
+per trial with Examen's answer. It never closes the experiment's intake:
+the owner closes it when every past trial is in, with `experiments close` or
 in the console.
 
 **`--plan`** reads every line, resolves every pin, checks that each
@@ -535,7 +575,7 @@ resolves to the newest published version unless it pins a number, and a
 published version is never edited, only withdrawn. Who can read one is
 its visibility: `private`, the default, for the owner and the owners it
 invites; `unlisted`, for anyone with the link, signed out; and
-`public`, listed in the gallery, which no command sets.
+`public`, listed in the Evals gallery, which no command sets.
 
 - **`publish report <report> [--evidence aggregates|outputs|full] [--visibility private|unlisted]`**
   publishes a report Examen froze (Examen spec 010), or with
@@ -551,24 +591,25 @@ invites; `unlisted`, for anyone with the link, signed out; and
   publishes a suite version as a benchmark, always at `aggregates`;
   `owner_only` is the default. Its primary metric must be of level
   `trial` or `cell` and not a label, or Examen refuses it.
-- **`publish submit <benchmark key> --report <publication>[@<n>] --candidate <ref>`**
+- **`submissions create <benchmark key> --report <publication>[@<n>] --candidate <ref>`**
   enters one candidate of a report version, the newest published one
-  without `@<n>`, in a benchmark version's results table. The key is
+  without `@<n>`, in a benchmark version's results table; benchmark
+  submissions are served after v0.1. The key is
   the benchmark's link token or public id. The report's experiment must
   have run that exact suite version, and for a benchmark anyone with the
   link can open, the report must be `unlisted` too. It prints `accepted`
   or `pending`, the latter for a `reviewed` benchmark of another owner.
-  **`publish results <benchmark>`** prints the results table as Examen
-  answers it: the entries in its order, each with its primary metric and
+  **`publish results <benchmark>`**, served with them after v0.1,
+  prints the results table as Examen answers it: the entries in its order, each with its primary metric and
   interval, its rank interval as `rank 2 to 4` (`rank 1` when the two
   ends meet), never a place number alone, and its difference from the
   reference entry with its interval, verdict and reason, the reference
   entry's row marked `reference`; then the entries without enough
   trials or tasks to rank, each with why; and a last line naming
   Examen's `method`: the test, the adjustment, the level, the
-  resamples and the seed. **`submissions`** lists the caller's submissions, or with
-  `--benchmark` the review queue of a benchmark the caller owns, and
-  withdraws, accepts or rejects one.
+  resamples and the seed. The rest of the **`submissions`** group lists
+  the caller's submissions, or with `--benchmark` the review queue of a
+  benchmark the caller owns, and withdraws, accepts or rejects one.
 - **`publish dataset --license <spdx> [--citation <CITATION.cff>] (--export <id> | --experiment <id>...) [--evidence]`**
   publishes a dataset. `--export` names a `complete` dataset export;
   `--experiment` starts one of those experiments (`POST /exports`),
@@ -593,7 +634,7 @@ invites; `unlisted`, for anyone with the link, signed out; and
   organization as `latere org` names them (`PUT` and `DELETE
   /publications/{id}/shares/{grantee}`); `--replace-link`, which mints a
   new link token and stops the old one; and `--request-listing --line
-  <text> [--note <text>]`, which asks the platform for a gallery
+  <text> [--note <text>]`, which asks the platform for an Evals gallery
   listing at its account route, `PUT
   /v1/account/evals/publications/{id}/listing` (platform spec 218),
   since Examen's own listing route answers only a listing the platform
@@ -613,7 +654,7 @@ invites; `unlisted`, for anyone with the link, signed out; and
 
 Neither command takes `public`: `--visibility public` refuses the
 command before anything is sent and prints "Public items are listed in
-the gallery after review. Use --request-listing.", and exits 2.
+the Evals gallery after review. Use --request-listing.", and exits 2.
 
 **`sign_in_not_kept` for a publish.** On the hosted platform a publish
 that copies files (a report at `outputs` or `full`, any dataset), any
@@ -627,7 +668,7 @@ kept-sign-in path; it prints the sentence and the console's address for
 the same act, the Publish page with its source (platform spec 215,
 `/console/evals/published/new?report=…`, `?benchmark=…` or
 `?dataset=…`) or the publication's page for a withdrawal, and exits 2.
-A report at `aggregates`, `publish submit`, and `share --visibility`,
+A report at `aggregates`, `submissions create`, and `share --visibility`,
 `--invite`, `--revoke`, `--replace-link` and `--request-listing` work
 from the command line.
 
@@ -734,9 +775,11 @@ outcomes to, for every command, through a typed error
    resolving an agent version, a model alias or an image tag through
    their capabilities, which needs audiences this client does not hold
    and would bury another capability's choice inside an apply.
-4. **`experiments run` sends the create the platform refuses today.**
-   *Rejected:* refusing it locally, which would need a release of the
-   command line on the day the platform keeps its sign-in.
+4. **`experiments run` sends every create, one the platform refuses for
+   want of a kept sign-in included.** *Rejected:* refusing it locally,
+   which would copy the platform's rule on candidates and graders into
+   the command and need a release of the command line on the day the
+   platform keeps its sign-in.
 5. **The refusal links to a prefilled console form.** *Rejected:* the
    error alone, which leaves the person to enter every choice again.
 6. **One exit-code table for the group, Examen's release check's.**
@@ -749,8 +792,8 @@ outcomes to, for every command, through a typed error
    figures Examen never stored and that a console could contradict.
 9. **`--json` is the API's own bytes.** *Rejected:* a JSON shape of the
    command line's own, which a script would have to learn twice.
-10. **The harness is lease and submit, with `-q` for scripts.**
-    *Rejected:* a command that runs the harness itself, which would
+10. **The external harness is lease and submit, with `-q` for scripts.**
+    *Rejected:* a command that runs the external harness itself, which would
     decide for the owner how a trial is executed; it can follow once
     scripts show the common shape.
 11. **`latere eval` is retired for one release, and its variables
@@ -760,8 +803,8 @@ outcomes to, for every command, through a typed error
 12. **No dry run.** *Rejected:* computing digests locally to show what
     an apply would change, a second canonicalization that could disagree
     with Examen's.
-13. **`harness import` reads a run file the harness's owner writes, not
-    any harness's own layout.** *Rejected:* reading a study's results
+13. **`harness import` reads a trial file the external harness's owner
+    writes, not any harness's own layout.** *Rejected:* reading a study's results
     directories, which puts one harness's format into a general tool;
     and importing through lease and submit, which Examen refuses for an
     experiment in mode `import`.
@@ -771,7 +814,8 @@ outcomes to, for every command, through a typed error
 15. **`--plan` checks the file, not Examen's answer.** *Rejected:*
     predicting provenance refusals locally, the second canonicalization
     decision 12 rejects.
-16. **Lease renewal is a flag of `harness lease`, and a harness runs it.**
+16. **Lease renewal is a flag of `harness lease`, and an external harness
+    runs it.**
     *Rejected:* renewing inside `harness submit` or a background process
     of the command line, which would decide for the owner how a trial is
     run (decision 10).
@@ -782,15 +826,23 @@ outcomes to, for every command, through a typed error
     with every flag, which mixes making an immutable version with
     changing who reads it, two acts with different undo: a version is
     withdrawn, never edited, while a visibility changes back.
-19. **A directory output goes as one archive the command uploads to the
-    context's Storage space.** Examen never takes a directory output
-    inline and reads it from the owner's Storage by path and digest. *Rejected:*
-    file-by-file submission, which Examen does not define; and an upload
-    into the reserved `files/evals/`, which Examen writes.
+19. **Every output goes to the context's Storage space, a directory as
+    one archive, and is sent by path and digest.** Examen never takes a
+    directory output inline, and its first release takes no output
+    inline at all. *Rejected:* inline file outputs, which the first
+    release refuses and which would make the command choose by size;
+    file-by-file submission of a directory, which Examen does not
+    define; and an upload into the reserved `files/evals/`, which Examen
+    writes.
 20. **The listing request goes to the platform, not to Examen.**
     *Rejected:* Examen's `PUT /publications/{id}/listing`, which an
     installation allows only for a listing its own review approved, so
     a person asking there is always refused.
+21. **Benchmark submissions are one group, `submissions`.** *Rejected:*
+    `publish submit` beside a `submissions` group, two places for one
+    object; and submitting under `publish`, which makes an immutable
+    version, while a submission is withdrawn and reviewed like a
+    request.
 
 ## Not in this spec
 
@@ -798,9 +850,10 @@ outcomes to, for every command, through a typed error
   auth's to design (platform spec 214).
 - Importing a Topos session or a Cella sandbox (Examen's imported
   trials step), Examen's grants of a suite, a baseline or an experiment
-  to another owner, a report's narrative and its static exports, the
-  annotation queue and a judge's calibration: later steps of Examen's
-  build order, each a command of its own when it is served.
+  to another owner, a report's narrative, its drafting and linter and
+  its static HTML exports (after v0.1), the annotation queue and a
+  judge's calibration: later steps of Examen's build order, each a
+  command of its own when it is served.
 - Inviting a person by email address to a publication, which the
   console does through the platform's own route (platform spec 218);
   `share --invite` names an owner as Examen's share grant does.
@@ -808,7 +861,7 @@ outcomes to, for every command, through a typed error
   path with its digest.
 - Per-candidate progress in the watch block, which Examen's progress
   does not carry and the command will not add up.
-- A command that runs a harness.
+- A command that runs an external harness.
 
 ## Acceptance criteria
 
@@ -819,7 +872,7 @@ outcomes to, for every command, through a typed error
 | 3 | An apply pins each name to the digest an earlier document was applied as, else to the current version, prints every pin, and sends a pinned reference as written; a directory applies in kind order and refuses a file it does not know | `TestEvalsApplyPinsNames`, `TestEvalsApplyDirectory` |
 | 4 | `file://` instructions and inline inputs are read relative to the manifest and inlined; a refusal for size names Examen's constant | `TestEvalsApplyInlinesFiles`, `TestEvalsApplyNamesTheLimit` |
 | 5 | `experiments run` sends the choices pinned, with one `Idempotency-Key` across its own retries or the one given | `TestEvalsRunSendsPinnedChoices`, `TestEvalsRunIdempotencyKey` |
-| 6 | A create refused `sign_in_not_kept` prints the sentence and a console link that carries every choice in platform spec 215's parameters, and exits 2 | `TestEvalsRunSignInNotKept` |
+| 6 | A create of external candidates the platform answers `201` prints the experiment; a create refused `sign_in_not_kept` prints the sentence and a console link that carries every choice in platform spec 215's parameters, `spending_cap` among them, and exits 2 | `TestEvalsRunCreatesExternal`, `TestEvalsRunSignInNotKept` |
 | 7 | A watch follows the stream to `end`, renews its token and reconnects with `Last-Event-ID` with no event shown twice, prints on a terminal and off one as designed, and exits 0, 1 or 3 as the table says | `TestEvalsWatch`, `TestEvalsWatchRenewsAtExpiry`, `TestEvalsWatchExitCodes` |
 | 8 | The terminal comparison leads with the primary result whatever its verdict, prints every rate with its denominator and every verdict with its reason, never headlines a confounded comparison or a result with missing values, marks a provisional one, and `--json` is the API's answers | `TestEvalsCompare`, against golden outputs |
 | 9 | Trial filters reach the route's parameters, and a trial prints its checks, judgments, values with rationales and the three layers unmerged | `TestEvalsTrials` |
@@ -828,9 +881,9 @@ outcomes to, for every command, through a typed error
 | 12 | `exports create --wait` exits 0 on `complete`, 1 on `failed` and 3 when the wait passes | `TestEvalsExportWait` |
 | 13 | Every exit code of the group reaches the process unchanged | `TestHandleExitErrorKeepsTheEvalsCode` |
 | 14 | `eval` is a hidden word that exits 1 naming `latere evals` with any arguments; `EVAL_API_URL` or `EVAL_ADMIN_TOKEN` alone is refused naming its replacement; no shipped source or doc names the old command or variables; the old group's code and tests are gone | `TestRetiredCommands`, `TestRenamedVariables`, `TestNothingNamesARetiredCommand` |
-| 15 | The built binary applies a directory, is refused a create and prints the link, watches a stubbed run to its end, compares, asks for a comparison across two tasks, pins a baseline, applies a taxonomy, checks a bar, leases, renews and submits a trial, imports a run file, closes an import experiment, freezes, publishes at `aggregates` and shares a report, and is refused a benchmark's publish `sign_in_not_kept` with the console's Publish address, against a stub of the API, the mint and Storage | `cmd/latere/evals_e2e_test.go` |
-| 16 | `--inputs` writes `instruction.txt`, `trial.json` and `lease.json`; `--renew` extends a held lease and exits 2 on a lapsed one; a submit sends the lease, the failure members with `infra_failed`, the transcript, the final message, the declared harness version and image, the service versions and usage, and the ref; a directory output is uploaded as one gzip-compressed tar archive under `files/evals-uploads/` and sent as `{path, arca: {path, digest}}`, never inline; a file the task does not name is refused before sending | `TestEvalsHarnessRenew`, `TestEvalsHarnessSubmitMembers`, `TestEvalsHarnessDirectoryOutput` |
+| 15 | The built binary applies a directory, creates an experiment of external candidates, is refused a create of agent candidates and prints the link, watches a stubbed experiment to its end, compares, asks for a comparison across two tasks, pins a baseline, applies a taxonomy, checks a bar, leases, renews and submits a trial, imports a run file, closes an import experiment, freezes, publishes at `aggregates` and shares a report, and is refused a benchmark's publish `sign_in_not_kept` with the console's Publish address, against a stub of the API, the mint and Storage | `cmd/latere/evals_e2e_test.go` |
+| 16 | `--inputs` writes `instruction.txt`, `trial.json` and `lease.json`; `--renew` extends a held lease and exits 2 on a lapsed one; a submit sends the lease, the failure members with `infra_failed`, the transcript, the final message, the declared harness version and image, the service versions and usage, and the ref; a file output is uploaded as itself and a directory output as one gzip-compressed tar archive under `files/evals-uploads/`, each sent as `{path, arca: {path, digest}}`, never inline; a file the task does not name is refused before sending | `TestEvalsHarnessRenew`, `TestEvalsHarnessSubmitMembers`, `TestEvalsHarnessDirectoryOutput` |
 | 17 | `harness import` sends every line to the import route, counts `already_imported` as imported so a second run changes nothing, reports refused lines with their `ref` and goes on, and exits 0, 1, 2 or 3 as its section says; `--plan` sends nothing | `TestEvalsImport`, `TestEvalsImportResumes`, `TestEvalsImportPlanSendsNothing` |
-| 18 | `publish` sends the kind, name, title, evidence level and visibility, or `--to` for a new version; a dataset requires an SPDX license, reads the owner's CFF fields, and names a complete export or starts one; `--exclude` sends paths as given; with `--wait` a blocked version prints each finding's path, line and rule without its matched text and exits 1; `publish submit` sends the benchmark key, the report version and the candidate and prints `accepted` or `pending` | `TestEvalsPublish`, `TestEvalsPublishBlocked`, `TestEvalsSubmit` |
+| 18 | `publish` sends the kind, name, title, evidence level and visibility, or `--to` for a new version; a dataset requires an SPDX license, reads the owner's CFF fields, and names a complete export or starts one; `--exclude` sends paths as given; with `--wait` a blocked version prints each finding's path, line and rule without its matched text and exits 1; `submissions create` sends the benchmark key, the report version and the candidate and prints `accepted` or `pending` | `TestEvalsPublish`, `TestEvalsPublishBlocked`, `TestEvalsSubmit` |
 | 19 | `share` changes visibility, grants and revokes shares, replaces the link, requests a listing at the platform's account route, and withdraws a version by number after asking on a terminal or with `--yes`; `--visibility public` exits 2 with nothing sent | `TestEvalsShare`, `TestEvalsNoPublicVisibility` |
-| 20 | `experiments update`, `close`, `regrade` and `delete`, `baselines pin`, `taxonomies apply`, `reports create` and `compare --against` or `--task` reach their routes with the members the table names; `experiments run --mode import --benchmark <key>` sends both and carries both in the console link; `--limit` is required and sent as `budget.cap_usd_micro` | `TestEvalsExperimentChanges`, `TestEvalsBaselines`, `TestEvalsTaxonomies`, `TestEvalsReports`, `TestEvalsCompareOnRequest`, `TestEvalsRunSendsPinnedChoices` |
+| 20 | `experiments update`, `close`, `regrade` and `delete`, `baselines pin`, `taxonomies apply`, `reports create` and `compare --against` or `--task` reach their routes with the members the table names; `experiments run --mode import --benchmark <key>` sends both and carries both in the console link; `--spending-cap` is required and sent as `budget.cap_usd_micro` | `TestEvalsExperimentChanges`, `TestEvalsBaselines`, `TestEvalsTaxonomies`, `TestEvalsReports`, `TestEvalsCompareOnRequest`, `TestEvalsRunSendsPinnedChoices` |
