@@ -45,7 +45,7 @@ macOS.
 
 | Variable | Default | What it does |
 |----------|---------|--------------|
-| `LATERE_NO_UPDATE_CHECK` | unset | Any value turns off the daily release check and auto-upgrade. |
+| `LATERE_NO_UPDATE_CHECK` | unset | Any value turns off the release check that runs before each command, and auto-upgrade with it. |
 | `CI` | unset | Any value turns them off as well, so a build never upgrades itself. |
 | `XDG_STATE_HOME` | `~/.local/state` | The base of the directory `latere agents review` writes its logs to, `$XDG_STATE_HOME/latere/reviews`, and of `latere devices`' state, `$XDG_STATE_HOME/latere/devices`. |
 | `XDG_CACHE_HOME` | `~/Library/Caches` on macOS, `~/.cache` on Linux | The base of the directory a connected computer keeps its sandboxes' scratch directories in, `$XDG_CACHE_HOME/latere/devices`. |

@@ -75,6 +75,17 @@ func (r *signedRelease) paths() []string {
 	return append([]string(nil), r.requested...)
 }
 
+// downloadedAny reports whether any of the release's files was asked for,
+// as opposed to only the latest-release lookup.
+func (r *signedRelease) downloadedAny() bool {
+	for _, p := range r.paths() {
+		if strings.Contains(p, "/releases/download/") {
+			return true
+		}
+	}
+	return false
+}
+
 // downloadedArchive reports whether the release archive was asked for.
 func (r *signedRelease) downloadedArchive() bool {
 	for _, p := range r.paths() {
@@ -317,7 +328,7 @@ func TestAutoUpgradeRecordsUnsignedRelease(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	performAutoUpgrade("v1.0.0", &out)
+	performAutoUpgrade("v1.0.0", "v9.9.9", &out)
 	want := "Auto-upgrading latere v1.0.0 -> v9.9.9...\nthis release is not signed by Latere; nothing was changed\n"
 	if out.String() != want {
 		t.Errorf("output = %q, want %q", out.String(), want)
@@ -352,7 +363,7 @@ func TestOnStartSkipsARecentlyRefusedRelease(t *testing.T) {
 		retried   bool
 	}{
 		{"refused an hour ago", time.Hour, false},
-		{"refused a day ago", checkInterval + time.Minute, true},
+		{"refused a day ago", refusalRetry + time.Minute, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
@@ -363,7 +374,7 @@ func TestOnStartSkipsARecentlyRefusedRelease(t *testing.T) {
 			}
 			var out bytes.Buffer
 			OnStart("v1.0.0", &out)
-			retried := len(release.paths()) > 0
+			retried := release.downloadedAny()
 			if retried != tc.retried {
 				t.Errorf("auto-upgrade retried = %v, want %v (requests %v, output %q)", retried, tc.retried, release.paths(), out.String())
 			}
@@ -383,7 +394,7 @@ func TestRefusedRecently(t *testing.T) {
 	if st.refusedRecently("v9.9.10", now) {
 		t.Error("a refusal of another release holds back a newer one")
 	}
-	if st.refusedRecently("v9.9.9", now.Add(checkInterval)) {
+	if st.refusedRecently("v9.9.9", now.Add(refusalRetry)) {
 		t.Error("a refusal is still recent after a day")
 	}
 }

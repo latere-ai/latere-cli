@@ -46,10 +46,9 @@ load it from your shell startup files.`,
 	root.SetVersionTemplate("latere {{.Version}}\n")
 	root.CompletionOptions.DisableDefaultCmd = true
 
-	// Passive release awareness: before any command (except the
-	// release-management ones), serve an update notice from the cached
-	// check and, if the user opted in, auto-upgrade. Best-effort and
-	// non-fatal — it never blocks the command being run.
+	// Release check: before any command (except the ones skipUpdateCheck
+	// names), upgrade to a newer release or print a notice of it.
+	// Best-effort: a failed check never stops the command.
 	root.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
 		if !skipUpdateCheck(cmd) {
 			upgrade.OnStart(version, cmd.ErrOrStderr())

@@ -71,9 +71,11 @@ On Windows, download the `.zip` from the releases page.
 
 ## Stay up to date
 
-Auto-upgrade is on by default. `latere` checks for a new release at most
-once a day, and the next time you run a command after one appears, it
-replaces itself and then runs your command.
+Auto-upgrade is on by default. Before each command you run in a terminal,
+`latere` checks for a new release, and when there is one it replaces itself
+and then runs your command. The check takes a fraction of a second. When it
+fails, as it does offline, `latere` runs your command as it is and does not
+check again for ten minutes.
 
 ```sh
 latere upgrade            # install the latest release now
@@ -96,11 +98,13 @@ checksum and its gzip integrity before it replaces the binary. An empty
 binary, an archive or a binary over 200 MiB, and an archive that expands
 past 400 MiB are refused, and the installed executable is left as it was.
 
-The daily check and auto-upgrade are skipped for `go install` and
-development builds, when `CI` is set, when stderr is not a terminal, and
-when `latere` lives in a directory you cannot write, such as a
-`PREFIX=/usr/local` install; there `latere upgrade` tells you to run the
-installer again. `LATERE_NO_UPDATE_CHECK=1` turns the check off entirely.
+The check and auto-upgrade are skipped for `go install` and development
+builds, when `CI` is set, and when stderr is not a terminal, so scripts and
+pipes are never slowed. With `--auto off`, or when `latere` lives in a
+directory you cannot write, `latere` checks once a day and prints a notice
+instead. In a directory you cannot write, such as a `PREFIX=/usr/local`
+install, `latere upgrade` tells you to run the installer again.
+`LATERE_NO_UPDATE_CHECK=1` turns the check off entirely.
 Self-upgrade is not available on Windows, where a running binary is
 locked; download the release you want from the releases page instead.
 

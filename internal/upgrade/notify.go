@@ -35,27 +35,42 @@ var isTerminalStderr = func() bool {
 	return term.IsTerminal(int(os.Stderr.Fd()))
 }
 
-// OnStart runs the passive release check from the root command's
-// PersistentPreRunE. It is best-effort and never returns an error: a failed
-// check must not block the user's command.
+// checkTimeout bounds the release check that runs before an interactive
+// command. The check takes a few hundred milliseconds; a black-holed network
+// must not stall the command for longer than this.
+const checkTimeout = 2 * time.Second
+
+// OnStart runs the release check from the root command's PersistentPreRunE.
+// It is best-effort and never returns an error: a failed check must not
+// block the user's command.
 //
-// Notices are served instantly from the cached check result; the cache is
-// refreshed opportunistically in the background so the next invocation is
-// aware. When auto-upgrade is enabled and a newer release is already known,
-// the binary is replaced and the original command is re-exec'd on it.
+// A CLI that upgrades itself asks for the latest release on every
+// interactive run, before the command, and when one is newer it replaces the
+// binary and re-execs the original command on it. Otherwise it checks once
+// per checkInterval and prints a notice. A failed check is not repeated for
+// failureBackoff, so an offline machine is not slowed on every command.
 func OnStart(current string, w io.Writer) {
-	if !isRelease(current) || disabled() {
+	if !isRelease(current) || disabled() || !isTerminalStderr() {
 		return
 	}
 	now := time.Now()
 	st := loadState()
-	updateKnown := Newer(current, st.LatestVersion)
-
-	if updateKnown && autoUpgradeWanted() && !st.refusedRecently(st.LatestVersion, now) {
-		// performAutoUpgrade re-execs on success and does not return.
-		performAutoUpgrade(current, w)
+	auto := autoUpgradeWanted()
+	answered := false
+	if (auto || stale(st, now)) && !st.backingOff(now) {
+		st, answered = check(st, now)
 	}
-	if updateKnown && isTerminalStderr() && st.shouldNotify(st.LatestVersion, now) {
+	if !Newer(current, st.LatestVersion) {
+		return
+	}
+	// Only this run's answer starts an upgrade, never the cache, so an
+	// offline run does not start a download it cannot finish.
+	if auto && answered && !st.refusedRecently(st.LatestVersion, now) {
+		// performAutoUpgrade re-execs on success and does not return.
+		performAutoUpgrade(current, st.LatestVersion, w)
+		st = loadState() // keep a refusal it recorded
+	}
+	if st.shouldNotify(st.LatestVersion, now) {
 		printNotice(w, current, st.LatestVersion)
 		// Record the reminder so it repeats at most once per interval rather
 		// than on every command until the user upgrades.
@@ -63,20 +78,33 @@ func OnStart(current string, w io.Writer) {
 		st.NotifiedAt = now
 		_ = saveState(st)
 	}
-	if stale(st, now) {
-		go refresh()
-	}
 }
 
 // autoUpgradeWanted reports whether an auto-upgrade should run now: on by
-// default (overridable), supported and writable on this platform, interactive,
-// and not already inside a post-upgrade re-exec.
+// default (overridable), supported and writable on this platform, and not
+// already inside a post-upgrade re-exec.
 func autoUpgradeWanted() bool {
 	return LoadConfig().AutoUpgradeEnabled() &&
 		replaceSupported() &&
 		selfReplaceWritable() &&
-		isTerminalStderr() &&
 		os.Getenv(sentinelEnv) == ""
+}
+
+// check asks GitHub for the latest release and records the answer, or the
+// time of the failure so the next runs back off. It reports whether it got
+// an answer.
+func check(st checkState, now time.Time) (checkState, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), checkTimeout)
+	defer cancel()
+	tag, err := ResolveLatest(ctx, httpClient())
+	if err != nil {
+		st.FailedAt = now
+		_ = saveState(st)
+		return st, false
+	}
+	st.CheckedAt, st.LatestVersion, st.FailedAt = now, tag, time.Time{}
+	_ = saveState(st)
+	return st, true
 }
 
 func printNotice(w io.Writer, current, latest string) {
@@ -84,27 +112,11 @@ func printNotice(w io.Writer, current, latest string) {
 		display(current), display(latest))
 }
 
-// performAutoUpgrade resolves the latest release fresh (the cache is only the
-// trigger, never the source of truth), installs it, and re-execs the original
-// command. On any failure it prints a short note and returns so the current
-// command can still run. A release refused for its signature is recorded, so
-// it is tried again once a day rather than on every command.
-func performAutoUpgrade(current string, w io.Writer) {
-	// Re-resolve with a tight timeout: this runs synchronously before the
-	// user's command, so a black-holed network must not stall it for long.
-	resolveCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-	tag, err := ResolveLatest(resolveCtx, httpClient())
-	cancel()
-	if err != nil {
-		return // offline or rate-limited; stay on the current version silently
-	}
-	now := time.Now()
-	st := loadState()
-	st.CheckedAt, st.LatestVersion = now, tag
-	_ = saveState(st)
-	if !Newer(current, tag) {
-		return // cache was stale; nothing to do
-	}
+// performAutoUpgrade installs tag and re-execs the original command on it.
+// On any failure it prints a short note and returns so the current command
+// can still run. A release refused for its signature is recorded, so it is
+// tried again after refusalRetry rather than on every command.
+func performAutoUpgrade(current, tag string, w io.Writer) {
 	fprintf(w, "Auto-upgrading latere %s -> %s...\n", display(current), display(tag))
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
@@ -130,20 +142,6 @@ func performAutoUpgrade(current string, w io.Writer) {
 	}
 }
 
-// refresh updates the cached latest-release view. Best-effort: errors are
-// swallowed and retried on the next stale run.
-func refresh() {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	tag, err := ResolveLatest(ctx, httpClient())
-	if err != nil {
-		return
-	}
-	st := loadState()
-	st.CheckedAt, st.LatestVersion = time.Now(), tag
-	_ = saveState(st)
-}
-
 // Run executes `latere upgrade`. An empty target means "the latest release";
 // a specific target (e.g. "v0.2.29") installs exactly that version, which is
 // how a user rolls back from a broken release. With checkOnly it only reports.
@@ -162,7 +160,7 @@ func Run(ctx context.Context, current, target string, checkOnly bool, out io.Wri
 		}
 		// Keep the notice cache in step with what the user just saw.
 		st := loadState()
-		st.CheckedAt, st.LatestVersion = time.Now(), tag
+		st.CheckedAt, st.LatestVersion, st.FailedAt = time.Now(), tag, time.Time{}
 		_ = saveState(st)
 	}
 

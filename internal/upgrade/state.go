@@ -15,10 +15,26 @@ import (
 	"github.com/latere-ai/latere-cli/internal/config"
 )
 
-// checkInterval is how often the CLI refreshes its view of the latest
-// release. Notices are served from the cache between refreshes so the hot
-// path never blocks on the network.
-const checkInterval = 24 * time.Hour
+const (
+	// checkInterval is how often a CLI that will not upgrade itself
+	// (auto-upgrade off, a binary it cannot replace, or the run right after
+	// an upgrade) checks for a release. One that upgrades itself checks on
+	// every interactive run.
+	checkInterval = 24 * time.Hour
+
+	// noticeInterval is how often the notice for a release already
+	// announced repeats.
+	noticeInterval = 24 * time.Hour
+
+	// refusalRetry is how long auto-upgrade leaves a release it refused for
+	// its signature before trying it again.
+	refusalRetry = 24 * time.Hour
+
+	// failureBackoff is how long the CLI waits after a failed check before
+	// checking again, so an offline machine waits out checkTimeout once per
+	// window rather than on every command.
+	failureBackoff = 10 * time.Minute
+)
 
 // configDir resolves $XDG_CONFIG_HOME/latere (falling back to ~/.config/latere),
 // matching the token storage layout in internal/api.
@@ -83,12 +99,13 @@ func SaveConfig(c Config) error {
 }
 
 // checkState caches the result of the most recent release lookup, when the
-// user was last reminded, and the release auto-upgrade last refused for its
-// signature, so neither the notice nor a refused auto-upgrade repeats more
-// than once per interval per version.
+// last one failed, when the user was last reminded, and the release
+// auto-upgrade last refused for its signature, so neither a failed check,
+// the notice, nor a refused auto-upgrade repeats on every command.
 type checkState struct {
 	CheckedAt       time.Time `json:"checked_at"`
 	LatestVersion   string    `json:"latest_version"`
+	FailedAt        time.Time `json:"failed_at,omitzero"`
 	NotifiedVersion string    `json:"notified_version,omitempty"`
 	NotifiedAt      time.Time `json:"notified_at,omitzero"`
 	RefusedVersion  string    `json:"refused_version,omitempty"`
@@ -96,20 +113,26 @@ type checkState struct {
 }
 
 // shouldNotify reports whether to print the upgrade notice now: always for a
-// version not yet announced, otherwise at most once per checkInterval.
+// version not yet announced, otherwise at most once per noticeInterval.
 func (s checkState) shouldNotify(latest string, now time.Time) bool {
 	if s.NotifiedVersion != latest {
 		return true
 	}
-	return now.Sub(s.NotifiedAt) >= checkInterval
+	return now.Sub(s.NotifiedAt) >= noticeInterval
 }
 
 // refusedRecently reports whether auto-upgrade refused latest for its
-// signature less than checkInterval ago. A refused release is tried again
+// signature less than refusalRetry ago. A refused release is tried again
 // after that, which also recovers from a refusal seen while the release was
 // still uploading its files.
 func (s checkState) refusedRecently(latest string, now time.Time) bool {
-	return s.RefusedVersion == latest && now.Sub(s.RefusedAt) < checkInterval
+	return s.RefusedVersion == latest && now.Sub(s.RefusedAt) < refusalRetry
+}
+
+// backingOff reports whether the last check failed less than failureBackoff
+// ago.
+func (s checkState) backingOff(now time.Time) bool {
+	return now.Sub(s.FailedAt) < failureBackoff
 }
 
 func statePath() string {
@@ -148,7 +171,7 @@ func saveState(s checkState) error {
 	return writeFileAtomic(p, b, 0o600)
 }
 
-// stale reports whether the cached check is old enough to refresh.
+// stale reports whether the cached check is older than checkInterval.
 func stale(s checkState, now time.Time) bool {
 	return now.Sub(s.CheckedAt) >= checkInterval
 }

@@ -8,7 +8,9 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -154,5 +156,134 @@ func TestOnStartSilentWhenDisabled(t *testing.T) {
 	OnStart("0.1.0", &out)
 	if out.Len() != 0 {
 		t.Errorf("disabled check must be silent, got: %q", out.String())
+	}
+}
+
+// onStartEnv clears what turns the check off and makes stderr a terminal.
+func onStartEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("CI", "")
+	t.Setenv(envNoCheck, "")
+	t.Setenv(sentinelEnv, "")
+	old := isTerminalStderr
+	isTerminalStderr = func() bool { return true }
+	t.Cleanup(func() { isTerminalStderr = old })
+}
+
+// lookupServer answers the latest-release lookup with status, or with a
+// redirect to tag when status is 0, and counts the lookups.
+func lookupServer(t *testing.T, tag string, status int) *atomic.Int32 {
+	t.Helper()
+	var lookups atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		lookups.Add(1)
+		if status != 0 {
+			w.WriteHeader(status)
+			return
+		}
+		http.Redirect(w, r, "/"+repoSlug+"/releases/tag/"+tag, http.StatusFound)
+	}))
+	t.Cleanup(srv.Close)
+	old := githubBase
+	githubBase = srv.URL
+	t.Cleanup(func() { githubBase = old })
+	return &lookups
+}
+
+// A release published after the last check is installed on the next run,
+// before the command, even though the cached answer is still fresh.
+func TestOnStartUpgradesOnTheRunAfterARelease(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("auto-upgrade does not run on Windows")
+	}
+	onStartEnv(t)
+	useTestKey(t)
+	release := serveSignedRelease(t, "v9.9.9", "NEW-BINARY", func(string) string { return "" })
+	if err := saveState(checkState{CheckedAt: time.Now(), LatestVersion: "v1.0.0"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	OnStart("v1.0.0", &out)
+	if !strings.Contains(out.String(), "Auto-upgrading latere v1.0.0 -> v9.9.9...") {
+		t.Errorf("no auto-upgrade on the run after the release: %q (requests %v)", out.String(), release.paths())
+	}
+	if got := loadState().LatestVersion; got != "v9.9.9" {
+		t.Errorf("cached latest = %q, want v9.9.9", got)
+	}
+}
+
+// An offline machine waits out the check once per failureBackoff, not on
+// every command.
+func TestOnStartBacksOffAfterAFailedCheck(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("auto-upgrade does not run on Windows")
+	}
+	onStartEnv(t)
+	lookups := lookupServer(t, "", http.StatusBadGateway)
+
+	var out bytes.Buffer
+	OnStart("v1.0.0", &out)
+	OnStart("v1.0.0", &out)
+	if n := lookups.Load(); n != 1 {
+		t.Errorf("lookups within the backoff = %d, want 1", n)
+	}
+	if out.Len() != 0 {
+		t.Errorf("a failed check printed %q", out.String())
+	}
+
+	st := loadState()
+	st.FailedAt = time.Now().Add(-failureBackoff - time.Minute)
+	if err := saveState(st); err != nil {
+		t.Fatal(err)
+	}
+	OnStart("v1.0.0", &out)
+	if n := lookups.Load(); n != 2 {
+		t.Errorf("lookups after the backoff = %d, want 2", n)
+	}
+}
+
+// With auto-upgrade off the check runs once per checkInterval and only
+// prints the notice.
+func TestOnStartChecksDailyWithoutAutoUpgrade(t *testing.T) {
+	onStartEnv(t)
+	off := false
+	if err := SaveConfig(Config{AutoUpgrade: &off}); err != nil {
+		t.Fatal(err)
+	}
+	lookups := lookupServer(t, "v9.9.9", 0)
+
+	if err := saveState(checkState{CheckedAt: time.Now(), LatestVersion: "v1.0.0"}); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	OnStart("v1.0.0", &out)
+	if n := lookups.Load(); n != 0 || out.Len() != 0 {
+		t.Errorf("fresh cache: lookups = %d, output %q; want none", n, out.String())
+	}
+
+	if err := saveState(checkState{CheckedAt: time.Now().Add(-checkInterval), LatestVersion: "v1.0.0"}); err != nil {
+		t.Fatal(err)
+	}
+	OnStart("v1.0.0", &out)
+	if n := lookups.Load(); n != 1 {
+		t.Errorf("stale cache: lookups = %d, want 1", n)
+	}
+	if !strings.Contains(out.String(), "v1.0.0 -> v9.9.9") || strings.Contains(out.String(), "Auto-upgrading") {
+		t.Errorf("stale cache: output %q, want the notice alone", out.String())
+	}
+}
+
+// Scripts and pipes are never slowed by the check.
+func TestOnStartSkipsTheCheckWithoutATerminal(t *testing.T) {
+	onStartEnv(t)
+	isTerminalStderr = func() bool { return false }
+	lookups := lookupServer(t, "v9.9.9", 0)
+
+	var out bytes.Buffer
+	OnStart("v1.0.0", &out)
+	if n := lookups.Load(); n != 0 || out.Len() != 0 {
+		t.Errorf("lookups = %d, output %q; want none", n, out.String())
 	}
 }

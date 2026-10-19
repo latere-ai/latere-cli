@@ -25,8 +25,10 @@ installs the latest release; pass a version (e.g. v0.2.29) to install that
 exact release, which is how you roll back if an upgrade turns out to be
 broken.
 
-Auto-upgrade is on by default: when a new release appears, latere updates
-itself the next time it runs. Turn it off with --auto off; if a release is
+Auto-upgrade is on by default: before each command you run in a terminal,
+latere checks for a new release and, when there is one, updates itself
+first. Turn it off with --auto off, after which latere checks once a day
+and prints a notice instead; if a release is
 bad, roll back with 'latere upgrade <previous-version>' and (optionally)
 'latere upgrade --auto off' to stay put.
 
@@ -38,7 +40,7 @@ v0.21.0 carry no signature, so latere cannot go back to one. If latere was
 installed somewhere you cannot write, run the installer again:
 curl -fsSL https://platform.latere.ai | sh
 
-Set LATERE_NO_UPDATE_CHECK=1 to silence the passive update check.`,
+Set LATERE_NO_UPDATE_CHECK=1 to turn the release check off.`,
 		Example: `  latere upgrade            # install the latest release
   latere upgrade v0.2.29    # roll back to a specific release
   latere upgrade --check    # report whether a newer release exists

@@ -10,6 +10,17 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Changed
+
+- Auto-upgrade now checks for a new release before each command you run
+  in a terminal and installs it before running the command. It used to
+  check at most once a day and install on a later run, so a release could
+  wait a day or more. The check takes a fraction of a second; when it
+  fails, as it does offline, the command runs as it is and the next check
+  waits ten minutes. Scripts and pipes are not checked. With
+  `latere upgrade --auto off`, or a `latere` in a directory you cannot
+  write, the check stays once a day and prints a notice.
+
 ## v0.23.0 - 2026-10-19
 
 ### Changed
