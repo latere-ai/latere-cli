@@ -31,6 +31,7 @@ import (
 	"latere.ai/x/cella/runtime"
 	"latere.ai/x/cella/runtime/local"
 
+	"github.com/latere-ai/latere-cli/internal/api"
 	"github.com/latere-ai/latere-cli/internal/devices"
 	"github.com/latere-ai/latere-cli/internal/upgrade"
 )
@@ -314,6 +315,11 @@ func connectAs(ctx context.Context, paths devices.Paths, p devices.Policy, auth 
 	if err != nil {
 		return devices.Policy{}, err
 	}
+	// The saved login connected it, so its person owns the device: an
+	// application that serves it later refuses another person's tokens.
+	if err := devices.RecordOwner(paths, done.Policy.Device, savedLoginSubject()); err != nil {
+		fprintf(errOut, "  warning: whose device this computer is could not be recorded: %v\n", err)
+	}
 	if done.NameError != nil {
 		fprintf(errOut, "Note: this computer is connected, and its name was not set (%v). Set it with `latere devices rename %q`.\n",
 			wrapReposErr(done.NameError), p.Name)
@@ -365,6 +371,20 @@ func connectNamed(ctx context.Context, paths devices.Paths, p devices.Policy, au
 		done.NameError = err
 	}
 	return done, nil
+}
+
+// savedLoginSubject is the person the saved login names, "" when there is
+// none or it does not read.
+func savedLoginSubject() string {
+	tok, err := api.LoadAuthToken()
+	if err != nil {
+		return ""
+	}
+	info, err := principalFromJWT(tok.AccessToken)
+	if err != nil {
+		return ""
+	}
+	return info.Sub
 }
 
 // credentialsOr is the refusal for a step that waited for a client's token
@@ -427,12 +447,16 @@ func serveDevice(ctx context.Context, cmd *cobra.Command, paths devices.Paths, a
 	if err != nil {
 		return err
 	}
+	loginSubject := ""
+	if auth.held == nil {
+		loginSubject = savedLoginSubject()
+	}
 	engine := devices.New(devices.Config{
 		Paths: paths, URL: base, Keys: paths.Keys(),
 		Account: deviceAccount{auth: auth}, Version: version, NewDriver: deviceDriver,
 		Upgrade:     serveUpgrade(version),
 		Enroll:      deviceEnroller{auth: auth, paths: paths, errOut: cmd.ErrOrStderr()},
-		Credentials: auth.held, WaitToConnect: !attended,
+		Credentials: auth.held, LoginSubject: loginSubject, WaitToConnect: !attended,
 	})
 	ln, err := devices.ListenControl(paths.Socket())
 	if err != nil {
