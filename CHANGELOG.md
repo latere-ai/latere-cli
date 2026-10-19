@@ -10,8 +10,6 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
-## v0.23.1 - 2026-10-19
-
 ### Changed
 
 - A connected computer reads as online once its connection to Latere is
