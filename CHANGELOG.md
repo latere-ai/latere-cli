@@ -10,6 +10,47 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Changed
+
+- **Renaming a device from a desktop application leaves its running
+  sessions alone.** Only a change of the folders or the network restarts
+  the connection, which stops the commands running; a new name does not.
+- **A desktop application's tokens must be yours.** `serve --credentials
+  client` refuses a token in an organization's context
+  (`credentials_org_context`) and, once the computer is connected, a token
+  of another person than the one whose device it is
+  (`credentials_other_person`), so an application signed in as someone
+  else never makes the computer forget your device. Whose device it is is
+  kept in `owner.json` in the state directory.
+- **`serve --credentials client` waits for the application's sign-in to
+  mint this computer's key** instead of stopping, offline meanwhile, with
+  its control socket up.
+- **The consent covers everything a connect grants.** The facts a connect
+  states, in the terminal and to an application, now name the paths read
+  outside the folders and the remembered scheduled triggers the host
+  policy file kept, when it keeps any; a file changed after the proposal
+  fails the consent.
+
+### Added
+
+- `GET /v1/status?follow=1` streams the status each time it changes, so an
+  application learns at once that a token is needed.
+- `POST /v1/connect` answers `warnings` when the computer is connected and
+  its name was refused.
+
+### Fixed
+
+- A rename from an application no longer holds up sessions starting while
+  the platform answers.
+- A step that needs the application's token and found none is refused
+  `device_credentials_needed`, not as a refused connect, rename or
+  removal.
+- A proposal with no folder asks for one, instead of proposing the folder
+  `serve` runs in.
+- Removing a device while the computer is paused deletes its sandboxes; a
+  removal right after a connect never leaves the device served; and a key
+  replaced before a removal is no longer revoked against the next device.
+
 ## v0.25.0 - 2026-10-19
 
 ### Added
