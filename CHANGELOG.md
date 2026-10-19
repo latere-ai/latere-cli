@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.24.0 - 2026-10-19
+
 ### Changed
 
 - Auto-upgrade now checks for a new release before each command you run
