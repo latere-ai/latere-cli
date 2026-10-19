@@ -33,20 +33,34 @@ var DefaultHosts = []string{
 	"crates.io", "static.crates.io",
 }
 
+// The two answers to whether a session starts on the computer without the
+// person being asked here first.
+const (
+	// SessionStartAllow starts a session the person started, and one a
+	// scheduled trigger of theirs started, without asking; a trigger that
+	// fires on delivered events still asks. It is the default.
+	SessionStartAllow = "allow"
+	// SessionStartAsk asks before every session starts.
+	SessionStartAsk = "ask"
+)
+
 // RememberFor is how long a remembered scheduled trigger runs without
 // asking.
 const RememberFor = 30 * 24 * time.Hour
 
 // Policy is the host policy file: the computer's own say over what its
 // sessions may use. The platform never writes it, and the engine reads it at
-// each start; the remembered triggers alone are read at each create, so a
-// trigger forgotten while the engine runs asks again at once.
+// each start; session_start and the remembered triggers are read again at
+// each create, so a change to either applies to the next session.
 type Policy struct {
 	// Device is the environment this computer serves, set once it is
 	// connected.
 	Device string `yaml:"device,omitempty"`
 	// Name is what the computer is called in its owner's devices.
-	Name               string       `yaml:"name"`
+	Name string `yaml:"name"`
+	// SessionStart is SessionStartAllow or SessionStartAsk. A file written
+	// before the field existed holds none, which reads as allow.
+	SessionStart       string       `yaml:"session_start"`
 	Folders            []Folder     `yaml:"folders"`
 	Network            Network      `yaml:"network"`
 	ReadPaths          []string     `yaml:"read_paths"`
@@ -77,7 +91,8 @@ type Remembered struct {
 // policyHeader opens the file, so a person who opens it knows whose it is.
 const policyHeader = `# The host policy of this computer for latere devices (spec 016).
 # The platform never writes this file. A change to folders, network or
-# read_paths takes effect at the next 'latere devices connect'.
+# read_paths takes effect at the next 'latere devices connect'; one to
+# session_start (allow or ask) or remembered_triggers at the next session.
 # 'latere devices policy' prints and checks it.
 `
 
@@ -117,6 +132,10 @@ func SavePolicy(path string, p Policy) error {
 	}
 	if p.Network.Hosts == nil {
 		p.Network.Hosts = []string{}
+	}
+	if p.SessionStart == "" {
+		// The value a file without the field reads as, written out.
+		p.SessionStart = SessionStartAllow
 	}
 	var b bytes.Buffer
 	b.WriteString(policyHeader)
@@ -166,6 +185,11 @@ func Shorten(home, p string) string {
 // rules themselves are the local driver's, which CheckFolders applies.
 func (p Policy) Problems(home string) []string {
 	var out []string
+	switch p.SessionStart {
+	case "", SessionStartAllow, SessionStartAsk:
+	default:
+		out = append(out, fmt.Sprintf("session_start is %q; it is allow or ask", p.SessionStart))
+	}
 	switch p.Network.Mode {
 	case NetworkAllowlist, NetworkNone:
 	default:
@@ -191,6 +215,19 @@ func (p Policy) Problems(home string) []string {
 		}
 	}
 	return out
+}
+
+// StartsWithoutAsking reports whether a session starts on the computer with
+// no one asked here: under session_start allow, a session a person started
+// and one a trigger that fires on a schedule started. A trigger that fires
+// on delivered events, mail or a webhook, always asks, since anyone with its
+// address can send it input, and so does a trigger whose firing the create
+// does not name.
+func (p Policy) StartsWithoutAsking(a Approval) bool {
+	if p.SessionStart == SessionStartAsk {
+		return false
+	}
+	return a.Trigger == "" || a.FiresOn == FiresOnSchedule
 }
 
 // Remembers reports whether a scheduled trigger is admitted without asking:

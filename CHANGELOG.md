@@ -10,8 +10,29 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Changed
+
+- On a connected computer, the sessions you start, and your triggers that
+  run on a schedule, now start without asking on the computer. Each prints
+  one line as it starts, is written to the activity log, and is told to a
+  desktop application on the control socket. A trigger that runs on mail
+  or a webhook still asks there first. Each command that changes something
+  is still approved in the chat, unless you approved a matching one before.
+  This is the new `session_start: allow` in the host policy file, and a
+  computer connected before this release has it too: `connect` says so at
+  every start. To be asked before every session as before, run
+  `latere devices policy --session-start ask`, which applies to the next
+  session even while the computer is serving. Once this release writes
+  `session_start` into the file, an older `latere` refuses the file; remove
+  that line before going back to one.
+
 ### Added
 
+- `latere devices pause` stops every command a session started on this
+  computer at once and keeps sessions out, while `connect` keeps running;
+  `latere devices resume` lets them back in.
+- `latere devices connect --session-start allow|ask` and `latere devices
+  policy --session-start allow|ask` set how sessions start.
 - Each release also carries `checksums.txt.sshsig`, Latere's signature of
   `checksums.txt` in the format `ssh-keygen` checks, made with the same key
   as `checksums.txt.sig`, so a download can be verified with the

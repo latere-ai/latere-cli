@@ -67,8 +67,8 @@ var (
 
 func newDevicesConnectCmd(version string) *cobra.Command {
 	var (
-		name, network, apiURL, platformURL string
-		folders, hosts                     []string
+		name, network, sessionStart, apiURL, platformURL string
+		folders, hosts                                   []string
 	)
 	cmd := &cobra.Command{
 		Use:   "connect",
@@ -81,19 +81,26 @@ and asks you to type yes, writes the host policy file
 ~/.config/latere/device.yaml, and connects the computer as one of your
 devices. After that it serves the device this computer already is.
 
-It runs in the foreground until Ctrl-C. Each session asks for your
-approval here before it starts, and every command and file a session
-touches is printed and written to the activity log. Ctrl-C stops every
-command a session started on this computer.
+It runs in the foreground until Ctrl-C. Sessions you start, and your
+triggers that run on a schedule, start here without asking, and each
+prints a line when it starts; a trigger that runs on mail or a webhook
+asks for your approval here first. With --session-start ask, every
+session asks. Each command that changes something is still approved in
+the chat, unless you approved a matching one before. Every command and
+file a session touches is printed and written to the activity log.
+Ctrl-C stops every command a session started on this computer, and
+'latere devices pause' stops them while it keeps running.
 
 A folder is shared read-write unless it ends in :ro. With no --folder,
 the current directory is shared. The network is an allowlist of git and
 package hosts unless --host names the hosts, or --network none allows
 none. To change any of it later, edit the host policy file and connect
-again.`,
+again; 'latere devices policy --session-start' changes how sessions start
+at once.`,
 		Example: `  latere devices connect
   latere devices connect --folder ~/code/site --folder ~/notes:ro
   latere devices connect --network none
+  latere devices connect --session-start ask
   latere devices connect --name "Work laptop" --host github.com --host proxy.golang.org`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
@@ -108,14 +115,15 @@ again.`,
 				return devices.Fail(devices.CodePolicyInvalid, "", err)
 			}
 			flagged := cmd.Flags().Changed("name") || cmd.Flags().Changed("folder") ||
-				cmd.Flags().Changed("network") || cmd.Flags().Changed("host")
+				cmd.Flags().Changed("network") || cmd.Flags().Changed("host") || cmd.Flags().Changed("session-start")
 			if ok && policy.Device != "" && flagged {
 				return devices.Fail(devices.CodeAlreadyConnected, paths.PolicyFile()+" names the device "+policy.Device, nil)
 			}
 			if !ok || policy.Device == "" {
 				request := connectRequest{
-					name: name, folders: folders, network: network, hosts: hosts,
+					name: name, folders: folders, network: network, hosts: hosts, sessionStart: sessionStart,
 					networkSet: cmd.Flags().Changed("network"), hostsSet: cmd.Flags().Changed("host"),
+					sessionStartSet: cmd.Flags().Changed("session-start"),
 				}
 				if _, err = enrollDevice(ctx, cmd, paths, policy, request, apiURL, platformURL); err != nil {
 					return err
@@ -129,6 +137,7 @@ again.`,
 	f.StringArrayVar(&folders, "folder", nil, "a folder sessions may use, PATH or PATH:ro (repeatable; default: the current directory)")
 	f.StringVar(&network, "network", devices.NetworkAllowlist, "what sessions may reach: allowlist or none")
 	f.StringArrayVar(&hosts, "host", nil, "a host on the allowlist (repeatable; default: git and package hosts)")
+	f.StringVar(&sessionStart, "session-start", devices.SessionStartAllow, "whether your own sessions and scheduled triggers start without asking here: allow or ask")
 	f.StringVar(&apiURL, "api-url", "", cellaURLUsage)
 	f.StringVar(&platformURL, "platform-url", "", platformURLUsage)
 	return cmd
@@ -141,10 +150,12 @@ func newDevicesServeCmd(version string) *cobra.Command {
 		Args:  cobra.NoArgs,
 		Short: "Serve this computer with no terminal, for a desktop application or a background service.",
 		Long: `Serve the device this computer already is, with no one to answer in the
-terminal. A desktop application or a second terminal answers each
-session's request through the control socket,
-$XDG_STATE_HOME/latere/devices/control.sock; with none attached, a
-session is refused unless it is a scheduled trigger you remembered.
+terminal. Under session_start allow, sessions you start and your
+scheduled triggers start without asking. A desktop application or a
+second terminal answers every other session's request through the control
+socket, $XDG_STATE_HOME/latere/devices/control.sock, and is told of each
+session that starts; with none attached, a session that asks is refused
+unless it is a scheduled trigger you remembered.
 
 Connect the computer first with 'latere devices connect'. The status and
 every operation are printed as they happen, as connect prints them.`,
@@ -187,17 +198,20 @@ func deviceStart() (devices.Paths, *devices.Lock, error) {
 
 // connectRequest is what connect was asked for on its command line.
 type connectRequest struct {
-	name, network        string
-	folders, hosts       []string
-	networkSet, hostsSet bool
+	name, network, sessionStart           string
+	folders, hosts                        []string
+	networkSet, hostsSet, sessionStartSet bool
 }
 
 // proposal is the host policy connect proposes: the flags, then what an
 // earlier file said, then the defaults.
 func (r connectRequest) proposal(previous devices.Policy, home string) (devices.Policy, error) {
 	p := devices.Policy{
-		Name: previous.Name, Folders: previous.Folders, Network: previous.Network,
+		Name: previous.Name, SessionStart: previous.SessionStart, Folders: previous.Folders, Network: previous.Network,
 		ReadPaths: previous.ReadPaths, RememberedTriggers: previous.RememberedTriggers,
+	}
+	if r.sessionStartSet || p.SessionStart == "" {
+		p.SessionStart = r.sessionStart
 	}
 	if r.name != "" {
 		p.Name = r.name

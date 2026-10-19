@@ -23,7 +23,7 @@ specs/
   013-app-password.md                (implemented: latere apps password; access says a password, and visibility removes one)
   014-app-rename.md                  (implemented: latere apps rename; the app moves to a new slug and the latere remote follows)
   015-evals-commands.md              (in-progress: latere evals replaces latere eval; suites, experiments, comparisons, harness lease and import, publishing)
-  016-devices-command.md             (complete: latere devices connects this computer as an environment the person's sessions work on, approved here)
+  016-devices-command.md             (complete: latere devices connects this computer as an environment the person's sessions work on; their own sessions start there unasked)
   017-signed-upgrades.md             (complete: releases sign their checksums; upgrade and auto-upgrade verify the signature, and an SSH signature beside it for the installer)
 ```
 
@@ -101,13 +101,16 @@ Where each spec stands:
 - `016-devices-command.md`: `latere devices connect` connects this computer
   as one of the person's environments and serves it in the foreground as a
   Cella worker on the local driver, confined to the folders the person
-  grants. The person approves each session in the terminal, every
-  operation goes to an activity log on the computer, and the environment
-  key is kept in the keychain. `latere devices serve` runs the same engine
-  with no terminal, driven through a local control socket, which is what
-  a desktop application builds on. `latere logout` removes a connected
-  computer before it signs out. Built on 2026-10-18, not released; the
-  live run waits for platform 220 and Topos 080.
+  grants. The person's own sessions and scheduled triggers start there
+  without asking and are shown as they start, a trigger on delivered
+  events asks in the terminal, and `session_start: ask` makes every
+  session ask (amended on 2026-10-19); `latere devices pause` stops them
+  all. Every operation goes to an activity log on the computer, and the
+  environment key is kept in the keychain. `latere devices serve` runs the
+  same engine with no terminal, driven through a local control socket,
+  which is what a desktop application builds on. `latere logout` removes a
+  connected computer before it signs out. Released in v0.22.1 and checked
+  live on 2026-10-19.
 - `017-signed-upgrades.md`: each release signs `checksums.txt` with an
   Ed25519 key through `tools/sign`, and `latere upgrade` and auto-upgrade
   verify it against keys built into the binary before they read any

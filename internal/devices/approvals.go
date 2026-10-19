@@ -22,10 +22,13 @@ const (
 	AnswerAllow    = "allow"
 	AnswerDeny     = "deny"
 	AnswerRemember = "remember"
-	// answerRemembered and answerNoOne are what the activity log records
-	// for a create nobody was asked about.
-	answerRemembered = "remembered"
-	answerNoOne      = "no_one_here"
+	// answerRemembered, answerSessionStart and answerNoOne are what the
+	// activity log records for a create nobody was asked about: a
+	// remembered trigger, a session session_start allow starts, and one
+	// refused because no one could answer.
+	answerRemembered   = "remembered"
+	answerSessionStart = "session_start_allow"
+	answerNoOne        = "no_one_here"
 )
 
 // The ways a trigger fires, as the trigger-fires-on label names them.
@@ -67,6 +70,21 @@ type Approval struct {
 	// that fires on a schedule, with the agent version to bind it to.
 	Rememberable bool      `json:"rememberable"`
 	Asked        time.Time `json:"asked"`
+}
+
+// startedWords is who started the session, as the line that says a session
+// started words it.
+func (a Approval) startedWords() string {
+	if a.Trigger == "" {
+		return "started by a person"
+	}
+	switch a.FiresOn {
+	case FiresOnSchedule:
+		return "started by trigger " + a.Trigger + " on a schedule"
+	case FiresOnEvents:
+		return "started by trigger " + a.Trigger + " on delivered events"
+	}
+	return "started by trigger " + a.Trigger
 }
 
 // StartedBy is who started the session, as the prompt words it.

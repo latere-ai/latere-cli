@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"latere.ai/x/pkg/httpjson"
@@ -206,8 +207,9 @@ func (e *Engine) handleActivity(w http.ResponseWriter, r *http.Request) {
 
 // handleApprovals answers the creates waiting for the person, and with
 // follow=1 keeps the stream open with every create asked, answered or
-// withdrawn. A follower is a client that can answer: while it holds the
-// stream, a create waits for it.
+// withdrawn and every session started, asked or not, which is what a client
+// tells the person of. A follower is a client that can answer: while it
+// holds the stream, a create waits for it.
 func (e *Engine) handleApprovals(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("follow") != "1" {
 		httpjson.Write(w, http.StatusOK, map[string]any{"items": e.Waiting()})
@@ -233,7 +235,7 @@ func (e *Engine) handleApprovals(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			switch ev.Kind {
-			case EventAsked, EventAnswered, EventWithdrawn:
+			case EventAsked, EventAnswered, EventWithdrawn, EventStarted:
 				if !stream.send(ev) {
 					return
 				}
@@ -262,6 +264,44 @@ func (e *Engine) handleAnswer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ControlPost asks the engine serving this computer, through its control
+// socket, for one of its actions: "/v1/pause" or "/v1/resume". It answers
+// the engine's status after the action, and CodeNotServing when no engine
+// is serving.
+func ControlPost(ctx context.Context, socket, route string) (Status, error) {
+	client := &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
+	}}}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://device"+route, nil)
+	if err != nil {
+		return Status{}, Fail(CodeControlUnavailable, "", err)
+	}
+	res, err := client.Do(req)
+	if err != nil {
+		// No socket, or one an engine that ended left: nothing serves.
+		if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ENOENT) {
+			return Status{}, Fail(CodeNotServing, "no engine answers at "+socket, err)
+		}
+		return Status{}, Fail(CodeControlUnavailable, "", err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode != http.StatusOK {
+		var refusal httpjson.ErrorEnvelope
+		if err := json.NewDecoder(res.Body).Decode(&refusal); err != nil {
+			return Status{}, Fail(CodeControlUnavailable, "POST "+route+" answered "+res.Status, err)
+		}
+		if refusal.Error.Code == "not_serving" {
+			return Status{}, Fail(CodeNotServing, refusal.Error.Message, nil)
+		}
+		return Status{}, Fail(CodeControlUnavailable, fmt.Sprintf("POST %s answered %s: %s: %s", route, res.Status, refusal.Error.Code, refusal.Error.Message), nil)
+	}
+	var status Status
+	if err := json.NewDecoder(res.Body).Decode(&status); err != nil {
+		return Status{}, Fail(CodeControlUnavailable, "read the status POST "+route+" answered", err)
+	}
+	return status, nil
 }
 
 // stream writes one JSON value per line and flushes each.

@@ -65,7 +65,7 @@ In `$XDG_CONFIG_HOME/latere`, or `~/.config/latere`:
 |------|---------------|
 | `auth-token.json` | The login token and its refresh token, readable by you alone. `latere logout` deletes it. |
 | `model-keys.json` | Model keys for the Latere API, only on a machine with no system keychain. Elsewhere they are in the keychain under `latere-cli model key`. |
-| `device.yaml` | The host policy of a computer connected with `latere devices connect`: the folders sessions may use, the network, read paths and remembered triggers ([devices.md](devices.md#the-host-policy-file)). Readable by you alone. |
+| `device.yaml` | The host policy of a computer connected with `latere devices connect`: how sessions start, the folders sessions may use, the network, read paths and remembered triggers ([devices.md](devices.md#the-host-policy-file)). Readable by you alone. |
 | `device-keys.json` | The connected computer's key, only on a machine with no keychain or with `LATERE_DEVICE_KEYS_FILE` naming another file. Elsewhere it is in the keychain under `latere-cli device key`. |
 | `config.json` | Your auto-upgrade choice. |
 | `update-check.json` | When the CLI last checked for a release, what it found, and the last release auto-upgrade refused for its signature. |

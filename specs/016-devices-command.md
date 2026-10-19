@@ -12,7 +12,7 @@ depends_on:
   - "CROSS-REPO: latere-ai/cella specs/083-environments-a-subject-owns.md: an environment the person owns, key `ttl`, `serve_refused`, `key_revoked`"
   - "CROSS-REPO: latere-ai/platform specs/220-devices.md: what platformd allows at create, `/v1/account/devices`, removal, `device_limit`"
 affects:
-  - internal/commands/devices.go, devices_connect.go, devices_records.go, devices_other.go (new)
+  - internal/commands/devices.go, devices_connect.go, devices_records.go, devices_other.go (new; `pause`, `resume` and `--session-start` from 2026-10-19)
   - internal/devices/ (new: the engine, the host policy file, the key store, the activity log, the approvals, the terminal client, the control socket, the lock)
   - internal/commands/auth.go (`logout` warns, asks and removes the device on a connected computer)
   - internal/commands/root.go (the `devices` group)
@@ -152,6 +152,11 @@ No session can read them, even through a granted folder that contains
 them.
 
 ### Approving a session
+
+Amended on 2026-10-19: a session the person started, and one a scheduled
+trigger of theirs started, no longer ask by default. The rules below are
+now the ones of `session_start: ask`; "Amended, 2026-10-19" under Outcome
+has the default.
 
 This command's `HostPolicy.Admit` asks in the terminal:
 
@@ -463,3 +468,61 @@ every operation; `latere devices remove` ended `connect` with
 the way: `latere devices list` right after a connect can show the device
 offline for a moment, and the activity log words a missing file as
 "environment not found".
+
+### Amended, 2026-10-19: how a session starts
+
+The owner decided on 2026-10-19 that a device starts the person's own
+sessions without asking on the computer. Approval of what a session does
+stays where it is: each command that changes something is approved in the
+chat through Topos's confirm list, unless the person approved a matching
+one before. Only the prompt before a session starts changes. This
+supersedes "A session the person started always asks" in Design, and the
+reason given there (a stolen account starting a fresh session of a
+remembered agent): under the default, someone with the person's sign-in
+reaches the granted folders, still confined to them, and the connect
+screen says so.
+
+- **The host policy file** gains `session_start: allow | ask`. A new
+  connection writes `allow` unless `connect --session-start ask` says
+  otherwise, and a file without the field, as every file written before
+  it, reads as `allow`; any write of the file spells it out. Any other
+  value makes the file invalid.
+- **Under `allow`** a create with no trigger label, and one whose trigger
+  fires on a schedule, is admitted with no one asked. A trigger that fires
+  on delivered events, and one whose create does not name how it fires,
+  asks as before; with no one attached it is refused with "no one is here
+  to approve on this computer". Under `ask`, nothing changed.
+- **Read at each create.** `session_start` is read from the file at each
+  create, as the remembered triggers already were, so a change applies to
+  the next session with the engine serving. A file that cannot be read, or
+  that names another device, asks.
+- **Every admitted session is told**, asked or not, remembered or not: one
+  line in the terminal (`Site helper (ses_..., started by a person) is
+  using ~/code/site (read-write).`), a line of the activity log of type
+  `approval` (the answer `session_start_allow` when no one was asked), and
+  a `started` event on `GET /v1/approvals?follow=1`, with the facts the
+  prompt would show, for a desktop client to notify of.
+- **Switching.** Flags on a connected computer are still refused with
+  `device_already_connected`. `latere devices policy --session-start allow
+  | ask` writes the field instead, and the refusal's next step names it. At
+  every start the engine prints how sessions start and the command that
+  switches, since a computer connected before this change never sees the
+  connect screen again.
+- **`latere devices pause` and `resume`** are new: clients of the control
+  socket's `POST /v1/pause` and `/v1/resume`, which existed only on the
+  socket. Pause stops every command a session started and keeps sessions
+  out while `connect` runs. With nothing serving they stop with
+  `device_not_serving`.
+- **The connect screen** states the mode, that anyone who can start
+  sessions as the person reaches the granted folders, still confined, that
+  commands are still approved in the chat, and the command that switches.
+
+| Item | Test | Where |
+|---|---|---|
+| The field: default, a file without it, writes, a bad value | `TestSessionStartInTheFile`, `TestStartsWithoutAsking`, `TestPolicyProblems` | `internal/devices/policy_test.go` |
+| Allow: a person's session and a scheduled trigger start unasked, events and unnamed triggers ask, no one attached refuses, a switch applies at once | `TestSessionStartAllow` | `internal/devices/terminal_test.go` |
+| Every admission is told: the line, the activity log, the stream | `TestSessionStartAllow`, `TestApprovePrompt`, `TestControlSocket` | `internal/devices/` |
+| The screen and the start notice | `TestConnectScreenWording`, `TestStartedLineAndNotice`, `TestConnectScreenNeedsYes` | `internal/devices/terminal_test.go`, `internal/commands/devices_test.go` |
+| `--session-start` on connect and policy | `TestConnectProposesSessionStart`, `TestConnectSessionStartFlag`, `TestDevicesPolicy`, `TestConnectCreatesTheEnvironment` | `internal/commands/` |
+| `pause` and `resume` | `TestControlPost`, `TestDevicesPauseAndResume` | `internal/devices/control_test.go`, `internal/commands/devices_session_start_test.go` |
+| End to end: a session unasked, then `--session-start ask` and an approval over the socket | `TestDevicesConnectEndToEnd` | `cmd/latere/devices_e2e_test.go` |

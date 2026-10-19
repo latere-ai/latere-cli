@@ -85,18 +85,71 @@ func TestPolicyProblems(t *testing.T) {
 		t.Errorf("a good policy has problems %v", p)
 	}
 	bad := Policy{
-		Folders: []Folder{{Path: "relative"}}, Network: Network{Mode: "open"},
+		SessionStart: "sometimes",
+		Folders:      []Folder{{Path: "relative"}}, Network: Network{Mode: "open"},
 		ReadPaths:          []string{"also/relative"},
 		RememberedTriggers: []Remembered{{Trigger: "trg_1"}},
 	}
 	problems := strings.Join(bad.Problems("/home/a"), "\n")
-	for _, want := range []string{"network.mode", "folders:", "read_paths:", "remembered_triggers"} {
+	for _, want := range []string{`session_start is "sometimes"`, "network.mode", "folders:", "read_paths:", "remembered_triggers"} {
 		if !strings.Contains(problems, want) {
 			t.Errorf("the problems %q do not name %s", problems, want)
 		}
 	}
 	if p := (Policy{Network: Network{Mode: NetworkNone}}).Problems("/h"); len(p) != 1 || !strings.Contains(p[0], "folders is empty") {
 		t.Errorf("a policy with no folders reads %v", p)
+	}
+}
+
+// A file without session_start, as every file written before it existed,
+// reads as allow, and a saved file says so; an explicit ask is kept.
+func TestSessionStartInTheFile(t *testing.T) {
+	dir := t.TempDir()
+	older := filepath.Join(dir, "older.yaml")
+	if err := os.WriteFile(older, []byte("device: dev-abcdefghijklmnop\nname: Mac\nfolders:\n  - path: ~/a\n    write: true\nnetwork:\n  mode: none\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p, ok, err := LoadPolicy(older)
+	if err != nil || !ok || p.SessionStart != "" || len(p.Problems("/h")) != 0 {
+		t.Fatalf("a file without session_start reads %+v, %v, %v, problems %v", p, ok, err, p.Problems("/h"))
+	}
+	if !p.StartsWithoutAsking(Approval{}) {
+		t.Error("a file without session_start asks before a session a person started")
+	}
+	if err = SavePolicy(older, p); err != nil {
+		t.Fatal(err)
+	}
+	if raw, _ := os.ReadFile(older); !strings.Contains(string(raw), "\nsession_start: allow\n") {
+		t.Errorf("a saved file does not write session_start allow:\n%s", raw)
+	}
+	p.SessionStart = SessionStartAsk
+	if err = SavePolicy(older, p); err != nil {
+		t.Fatal(err)
+	}
+	if got, _, err := LoadPolicy(older); err != nil || got.SessionStart != SessionStartAsk {
+		t.Errorf("session_start ask read back as %q, %v", got.SessionStart, err)
+	}
+}
+
+func TestStartsWithoutAsking(t *testing.T) {
+	person := Approval{}
+	scheduled := Approval{Trigger: "trg_1", FiresOn: FiresOnSchedule}
+	events := Approval{Trigger: "trg_2", FiresOn: FiresOnEvents}
+	unnamed := Approval{Trigger: "trg_3"}
+	for _, mode := range []string{"", SessionStartAllow} {
+		p := Policy{SessionStart: mode}
+		if !p.StartsWithoutAsking(person) || !p.StartsWithoutAsking(scheduled) {
+			t.Errorf("session_start %q asks before a person's session or a scheduled trigger", mode)
+		}
+		if p.StartsWithoutAsking(events) || p.StartsWithoutAsking(unnamed) {
+			t.Errorf("session_start %q starts a trigger on delivered events, or one whose firing is unnamed, without asking", mode)
+		}
+	}
+	ask := Policy{SessionStart: SessionStartAsk}
+	for _, a := range []Approval{person, scheduled, events, unnamed} {
+		if ask.StartsWithoutAsking(a) {
+			t.Errorf("session_start ask starts %+v without asking", a)
+		}
 	}
 }
 

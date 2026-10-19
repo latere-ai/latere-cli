@@ -41,8 +41,10 @@ import (
 // computer against a real cellad, with an embedded worker on the local
 // driver, a stub authorizer that allows the owner, and a stub of the
 // platform's device routes. A session's sandbox is created on a granted
-// folder, approved over the control socket, runs a command that writes into
-// the folder, and a removal stops the command.
+// folder and starts with no one asked, as session_start allow has it, and
+// runs a command that writes into the folder; switched to ask, the next
+// session's sandbox is approved over the control socket; and a removal
+// stops the command.
 //
 // Where srt is installed it confines the command; elsewhere, as on the CI
 // runners, a stand-in runs it unconfined, so the whole flow is proved on
@@ -333,24 +335,45 @@ func TestDevicesConnectEndToEnd(t *testing.T) {
 		t.Errorf("the environment reads %+v", environment)
 	}
 
-	// A session's create waits for the person, who answers over the
-	// control socket.
+	// The person's own session starts with no one asked, under the default
+	// session_start allow, and is told on the control socket and in the
+	// terminal.
 	socket := filepath.Join(state, "latere", "devices", "control.sock")
 	approvals := followSocket(t, socket, "/v1/approvals?follow=1")
-	manifest := fmt.Sprintf(`{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":"session-sandbox",`+
-		`"labels":{"topos.latere.ai/session":"ses_e2e","topos.latere.ai/agent":"agt_e2e","topos.latere.ai/agent-version":"1"},`+
-		`"annotations":{"topos.latere.ai/agent-name":"E2E helper"}},`+
-		`"spec":{"environment":%q,"workspace":{"host":%q}}}`, id, project)
+	manifest := func(name, session string) []byte {
+		return fmt.Appendf(nil, `{"apiVersion":"cella.latere.ai/v1beta1","kind":"Sandbox","metadata":{"name":%q,`+
+			`"labels":{"topos.latere.ai/session":%q,"topos.latere.ai/agent":"agt_e2e","topos.latere.ai/agent-version":"1"},`+
+			`"annotations":{"topos.latere.ai/agent-name":"E2E helper"}},`+
+			`"spec":{"environment":%q,"workspace":{"host":%q}}}`, name, session, id, project)
+	}
+	sb, _, err := cella.CreateSandbox(context.Background(), cellaclient.JSON(manifest("session-sandbox", "ses_e2e")), cellaclient.Wait(time.Minute))
+	if err != nil {
+		t.Fatalf("the create under session_start allow failed: %v", err)
+	}
+	sandbox := sb.Status.ID
+	started := nextLine(t, approvals)
+	if facts, _ := started["approval"].(map[string]any); started["kind"] != "started" || facts["agent"] != "E2E helper" ||
+		facts["session"] != "ses_e2e" || facts["folder"] != project {
+		t.Fatalf("the clients were told %v", started)
+	}
+	waitForText(t, &stderr, "E2E helper (ses_e2e, started by a person) is using ~/project (read-write).", exited)
+
+	// Switched to ask, which applies to the next session with the computer
+	// serving, a session's create waits for the person, who answers over
+	// the control socket.
+	policy := exec.Command(latereBinary(t), "devices", "policy", "--session-start", "ask")
+	policy.Env = env
+	if out, err := policy.CombinedOutput(); err != nil {
+		t.Fatalf("policy --session-start ask: %v\n%s", err, out)
+	}
 	created := make(chan error, 1)
-	var sandbox string
 	go func() {
-		sb, _, err := cella.CreateSandbox(context.Background(), cellaclient.JSON([]byte(manifest)), cellaclient.Wait(time.Minute))
-		sandbox = sb.Status.ID
+		_, _, err := cella.CreateSandbox(context.Background(), cellaclient.JSON(manifest("asked-sandbox", "ses_asked")), cellaclient.Wait(time.Minute))
 		created <- err
 	}()
 	asked := nextLine(t, approvals)
 	approval, _ := asked["approval"].(map[string]any)
-	if asked["kind"] != "asked" || approval["agent"] != "E2E helper" || approval["session"] != "ses_e2e" || approval["folder"] != project {
+	if asked["kind"] != "asked" || approval["agent"] != "E2E helper" || approval["session"] != "ses_asked" || approval["folder"] != project {
 		t.Fatalf("the person was asked %v", asked)
 	}
 	answer(t, socket, approval["id"].(string), "allow")

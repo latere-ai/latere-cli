@@ -83,6 +83,8 @@ func (t Terminal) Run(ctx context.Context) {
 				}
 			case EventNotice:
 				t.print("Note: " + ev.Notice)
+			case EventStarted:
+				t.print(StartedLine(*ev.Approval, t.Home))
 			case EventAsked:
 				if !t.Interactive {
 					continue
@@ -127,6 +129,52 @@ func (t Terminal) Run(ctx context.Context) {
 }
 
 func (t Terminal) print(line string) { _, _ = fmt.Fprintln(t.Out, line) }
+
+// StartedLine is the line that tells the person a session started on the
+// computer: the agent, the session and who started it, and the folder.
+func StartedLine(a Approval, home string) string {
+	agent := a.Agent
+	if agent == "" {
+		agent = "An unnamed agent"
+	}
+	session := a.Session
+	if session == "" {
+		session = "a session not named"
+	}
+	folder := "its own scratch directory"
+	switch {
+	case a.Folder != "" && a.Write:
+		folder = Shorten(home, a.Folder) + " (read-write)"
+	case a.Folder != "":
+		folder = Shorten(home, a.Folder) + " (read-only)"
+	}
+	return fmt.Sprintf("%s (%s, %s) is using %s.", agent, session, a.startedWords(), folder)
+}
+
+// The sentences that tell the person how sessions start here, and how to
+// change it, at every start and on the connect screen.
+const (
+	sessionStartAllowWords = "Sessions you start, and your triggers that run on a schedule, start on\n" +
+		"this computer without asking here. A trigger that runs on mail or a\n" +
+		"webhook asks here first, since anyone with its address can send it input.\n" +
+		"Each command that changes something is still approved in the chat,\n" +
+		"unless you approved a matching one before."
+	sessionStartAskWords = "Each session asks for your approval here before it starts. Each command\n" +
+		"that changes something is also approved in the chat, unless you approved\n" +
+		"a matching one before."
+	switchToAsk   = "To be asked here before every session starts, run\n`latere devices policy --session-start ask`."
+	switchToAllow = "To let your own sessions and scheduled triggers start without asking\nhere, run `latere devices policy --session-start allow`."
+)
+
+// SessionStartNotice is what the engine says at every start about how
+// sessions start, so a computer connected before session_start existed
+// learns the default it now has.
+func SessionStartNotice(p Policy) string {
+	if p.SessionStart == SessionStartAsk {
+		return strings.ReplaceAll(sessionStartAskWords+" "+switchToAllow, "\n", " ")
+	}
+	return strings.ReplaceAll(sessionStartAllowWords+" "+switchToAsk, "\n", " ")
+}
 
 // Prompt is the question a create puts to the person.
 func Prompt(a Approval, home string) string {
@@ -248,7 +296,16 @@ func ConnectScreen(p Policy) string {
 		fmt.Fprintf(&b, "  %s\n", strings.Join(p.Network.Hosts, ", "))
 		b.WriteString("A host that accepts writes, such as a git host, can carry data out.\n\n")
 	}
-	b.WriteString("Only sessions you start, and triggers you own, can ask to use this\ncomputer, and each session needs your approval here before it starts.\n\n")
+	b.WriteString("Only sessions you start, and triggers you own, can use this computer.\n")
+	if p.SessionStart == SessionStartAsk {
+		b.WriteString(sessionStartAskWords + "\n" + switchToAllow + "\n\n")
+	} else {
+		b.WriteString(sessionStartAllowWords + "\n")
+		b.WriteString("Anyone who can start sessions as you can reach these folders, still\n" +
+			"confined to them: never your credentials, keychains or browser profiles,\n" +
+			"and no network beyond what is listed above.\n")
+		b.WriteString(switchToAsk + "\n\n")
+	}
 	b.WriteString("What the agent reads on this computer goes to the session's log and to\nthe model. In an organization's conversation, that organization can\nread it too.\n\n")
 	b.WriteString("Type yes to connect this computer: ")
 	return b.String()

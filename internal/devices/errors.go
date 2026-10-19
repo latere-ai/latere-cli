@@ -63,6 +63,7 @@ const (
 	CodeSignInExpired      = "device_sign_in_expired"
 	CodeSandboxUnavailable = "device_sandbox_unavailable"
 	CodeControlUnavailable = "device_control_unavailable"
+	CodeNotServing         = "device_not_serving"
 	CodeKeyUnavailable     = "device_key_unavailable"
 	CodeRefused            = "device_refused"
 	CodeUnsupported        = "device_unsupported"
@@ -117,7 +118,7 @@ var refusals = map[string]struct{ message, hint string }{
 	},
 	CodeAlreadyConnected: {
 		"This computer is already connected; its folders and network are in the host policy file.",
-		"Edit the file, then run `latere devices connect` with no flags.",
+		"Edit the file, then run `latere devices connect` with no flags. `latere devices policy --session-start` changes how sessions start.",
 	},
 	CodeRemoved: {
 		"This computer was removed from your devices.",
@@ -142,6 +143,10 @@ var refusals = map[string]struct{ message, hint string }{
 	CodeControlUnavailable: {
 		"The control socket could not be opened.",
 		"",
+	},
+	CodeNotServing: {
+		"This computer is not serving right now, so no session is using it.",
+		"Start it with `latere devices connect`.",
 	},
 	CodeKeyUnavailable: {
 		"This computer's key could not be read or kept.",

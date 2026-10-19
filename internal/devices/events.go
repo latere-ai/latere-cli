@@ -12,7 +12,10 @@ const (
 	EventAsked     = "asked"
 	EventAnswered  = "answered"
 	EventWithdrawn = "withdrawn"
-	EventNotice    = "notice"
+	// EventStarted is a session admitted to the computer, asked or not,
+	// with the facts its prompt would show, so a client can tell the person.
+	EventStarted = "started"
+	EventNotice  = "notice"
 )
 
 // The states of the engine.
@@ -24,8 +27,8 @@ const (
 )
 
 // Event is one thing a client of the engine is told: a change of status, a
-// line of activity, a create asked, answered or withdrawn, or a notice the
-// person should read.
+// line of activity, a create asked, answered or withdrawn, a session
+// started, or a notice the person should read.
 type Event struct {
 	Kind     string    `json:"kind"`
 	Status   *Status   `json:"status,omitempty"`

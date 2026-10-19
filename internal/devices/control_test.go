@@ -229,6 +229,12 @@ func TestControlSocket(t *testing.T) {
 			if answered["answer"] != AnswerAllow || answered["by"] != "Latere for Mac" {
 				t.Errorf("a client saw %v", answered)
 			}
+			// The session that starts is told on the same stream, which is
+			// what a desktop client tells the person of.
+			started := next(t, stream, EventStarted)
+			if facts, _ := started["approval"].(map[string]any); facts["session"] != "ses_c" || facts["folder"] != project {
+				t.Errorf("a client was told of the start as %v", started)
+			}
 		}
 		if status, body := post(t, c, "/v1/approvals/"+id, `{"answer":"deny"}`); status != http.StatusNotFound || !strings.Contains(body, "not_pending") {
 			t.Errorf("a second answer answered %d %s; the first answer wins", status, body)
@@ -274,6 +280,37 @@ func TestControlSocket(t *testing.T) {
 			t.Errorf("the follow carried %v", line)
 		}
 	})
+}
+
+// latere devices pause and resume are clients of the control socket: they
+// pause and resume a serving engine, and say so when none serves.
+func TestControlPost(t *testing.T) {
+	sandboxRuntime(t)
+	paths := testPaths(t)
+	if _, err := ControlPost(t.Context(), paths.Socket(), "/v1/pause"); CodeOf(err) != CodeNotServing {
+		t.Errorf("pause with no socket returned %v", err)
+	}
+	keys := OpenKeys(paths.KeyFile())
+	connected(t, paths, keys)
+	p := newStubPlane(t)
+	e := engineOn(paths, p, &fakeAccount{exists: true}, keys)
+	controlOn(t, e, paths)
+	if _, err := ControlPost(t.Context(), paths.Socket(), "/v1/pause"); CodeOf(err) != CodeNotServing {
+		t.Errorf("pause of an engine not running returned %v", err)
+	}
+	running(t, e)
+	p.waitConnected(t)
+	status, err := ControlPost(t.Context(), paths.Socket(), "/v1/pause")
+	if err != nil || status.State != StatePaused {
+		t.Fatalf("pause answered %+v, %v", status, err)
+	}
+	if status, err = ControlPost(t.Context(), paths.Socket(), "/v1/resume"); err != nil {
+		t.Fatalf("resume answered %+v, %v", status, err)
+	}
+	waitFor(t, "the engine to serve again", func() bool { return e.Status().State == StateOnline })
+	if _, err = ControlPost(t.Context(), paths.Socket(), "/v1/nothing"); CodeOf(err) != CodeControlUnavailable {
+		t.Errorf("an unknown route returned %v", err)
+	}
 }
 
 func TestControlSocketPathTooLong(t *testing.T) {

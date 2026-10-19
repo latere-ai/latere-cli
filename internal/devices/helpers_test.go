@@ -105,7 +105,9 @@ func resolvedTemp(t *testing.T) string {
 }
 
 // connected writes a host policy that names testEnv and grants project, and
-// keeps a fresh key for it.
+// keeps a fresh key for it. Its session_start is ask, since the engine's
+// tests go through the person's answers; session_start allow has tests of
+// its own.
 func connected(t *testing.T, paths Paths, keys KeyStore) (project string) {
 	t.Helper()
 	project = filepath.Join(paths.Home, "project")
@@ -113,7 +115,7 @@ func connected(t *testing.T, paths Paths, keys KeyStore) (project string) {
 		t.Fatal(err)
 	}
 	if err := SavePolicy(paths.PolicyFile(), Policy{
-		Device: testEnv, Name: "Test computer",
+		Device: testEnv, Name: "Test computer", SessionStart: SessionStartAsk,
 		Folders: []Folder{{Path: "~/project", Write: true}},
 		Network: Network{Mode: NetworkAllowlist, Hosts: []string{"github.com"}},
 	}); err != nil {

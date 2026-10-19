@@ -64,8 +64,9 @@ type Entry struct {
 	Outcome  string `json:"outcome,omitempty"`
 	Reason   string `json:"reason,omitempty"`
 	ExitCode *int   `json:"exit_code,omitempty"`
-	// Answer and By are an approval's: allow, deny, remember or
-	// remembered, and who gave it.
+	// Answer and By are an approval's: allow, deny or remember and the
+	// client that gave it, or, with no one asked, remembered,
+	// session_start_allow or no_one_here.
 	Answer string `json:"answer,omitempty"`
 	By     string `json:"by,omitempty"`
 }
@@ -104,16 +105,17 @@ func (e Entry) Line(home string) string {
 // approvalWords is an approval's answer as the terminal shows it.
 func approvalWords(answer, by string) string {
 	words := map[string]string{
-		AnswerAllow:      "allowed",
-		AnswerDeny:       "refused",
-		AnswerRemember:   "allowed and remembered for 30 days",
-		answerRemembered: "allowed without asking: a remembered trigger",
-		answerNoOne:      "refused: no one was here to approve",
+		AnswerAllow:        "allowed",
+		AnswerDeny:         "refused",
+		AnswerRemember:     "allowed and remembered for 30 days",
+		answerRemembered:   "allowed without asking: a remembered trigger",
+		answerSessionStart: "allowed without asking: session_start is allow",
+		answerNoOne:        "refused: no one was here to approve",
 	}[answer]
 	if words == "" {
 		words = answer
 	}
-	if by != "" && answer != answerRemembered && answer != answerNoOne {
+	if by != "" && answer != answerRemembered && answer != answerSessionStart && answer != answerNoOne {
 		words += " in " + by
 	}
 	return words

@@ -277,7 +277,8 @@ func TestConnectScreenNeedsYes(t *testing.T) {
 		}
 		for _, want := range []string{
 			`"Test Mac"`, "~/project (read-write)", "readable to the agent", ".env", "github.com, codeload.github.com",
-			"can carry data out", "needs your approval here", "session's log", "Type yes",
+			"can carry data out", "start on\nthis computer without asking here", "still approved in the chat",
+			"--session-start ask", "session's log", "Type yes",
 		} {
 			if !strings.Contains(errOut, want) {
 				t.Errorf("the connect screen lacks %q:\n%s", want, errOut)
@@ -352,7 +353,7 @@ func TestConnectCreatesTheEnvironment(t *testing.T) {
 		t.Error("a key kept in a working keychain also landed in the file")
 	}
 	policy, _, err := devices.LoadPolicy(paths.PolicyFile())
-	if err != nil || policy.Device != id || policy.Name != "Test Mac" || len(policy.Folders) != 2 ||
+	if err != nil || policy.Device != id || policy.Name != "Test Mac" || policy.SessionStart != devices.SessionStartAllow || len(policy.Folders) != 2 ||
 		policy.Folders[0].Path != "~/project" || !policy.Folders[0].Write || policy.Folders[1].Write ||
 		strings.Join(policy.Network.Hosts, ",") != "github.com" {
 		t.Errorf("the host policy file reads %+v, %v", policy, err)
@@ -557,6 +558,26 @@ func TestDevicesPolicy(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("policy lacks %q:\n%s", want, out)
 		}
+	}
+	if !strings.Contains(out, "start on this computer without asking here") {
+		t.Errorf("policy does not say how sessions start:\n%s", out)
+	}
+	// --session-start writes the file, which the next session reads.
+	_, errOut, err := runDevices(t, "", "devices", "policy", "--session-start", "ask")
+	if err != nil || !strings.Contains(errOut, "session_start is ask from the next session on.") {
+		t.Fatalf("policy --session-start ask returned %v:\n%s", err, errOut)
+	}
+	if policy, _, _ = devices.LoadPolicy(paths.PolicyFile()); policy.SessionStart != devices.SessionStartAsk || !policy.Remembers("trg_1", "4", time.Now()) {
+		t.Errorf("after --session-start ask the file reads %+v", policy)
+	}
+	if out, _, _ = runDevices(t, "", "devices", "policy"); !strings.Contains(out, "Each session asks for your approval here") {
+		t.Errorf("policy under ask does not say so:\n%s", out)
+	}
+	if _, _, err = runDevices(t, "", "devices", "policy", "--session-start", "sometimes"); devices.CodeOf(err) != devices.CodePolicyInvalid {
+		t.Errorf("policy --session-start sometimes returned %v", err)
+	}
+	if policy, _, _ = devices.LoadPolicy(paths.PolicyFile()); policy.SessionStart != devices.SessionStartAsk {
+		t.Errorf("a refused --session-start changed the file: %+v", policy)
 	}
 	if _, _, err = runDevices(t, "", "devices", "policy", "--forget", "trg_1"); err != nil {
 		t.Fatal(err)

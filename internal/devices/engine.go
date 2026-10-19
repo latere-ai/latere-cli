@@ -222,6 +222,7 @@ func (e *Engine) Run(ctx context.Context) error {
 	if e.cfg.Keys.InFile() {
 		e.notice("No keychain answered, so this computer's key is kept in " + e.cfg.Keys.Name() + ", readable by your user account.")
 	}
+	e.notice(SessionStartNotice(policy))
 	if e.cfg.Upgrade != nil {
 		go e.watchUpgrades(ctx)
 	}
@@ -781,17 +782,27 @@ func (e *Engine) recount() {
 }
 
 // Admit is the host policy's question before a create: a remembered
-// scheduled trigger runs without asking, and every other create waits for
-// the person, or is refused at once when no one is attached to answer.
+// scheduled trigger, and under session_start allow a session a person
+// started or a scheduled trigger started, run without asking; every other
+// create waits for the person, or is refused at once when no one is attached
+// to answer. Every create admitted is told to the clients.
 func (e *Engine) Admit(ctx context.Context, c worker.Create) worker.Verdict {
 	e.mu.Lock()
 	host, env := e.host, e.policy.Device
 	e.mu.Unlock()
 	now := e.cfg.Now()
 	a := approvalOf(c, host, now)
-	if a.Rememberable && e.remembers(env, a, now) {
+	// The file as it is now, so a trigger forgotten or a switch to ask
+	// while the engine runs applies to this create. A file that cannot be
+	// read, or names another device, asks.
+	policy, current := e.livePolicy(env)
+	switch {
+	case current && a.Rememberable && policy.Remembers(a.Trigger, a.AgentVersion, now):
 		e.logApproval(a, answerRemembered, "")
-		return worker.Verdict{Allow: true}
+		return e.admitted(a)
+	case current && policy.StartsWithoutAsking(a):
+		e.logApproval(a, answerSessionStart, "")
+		return e.admitted(a)
 	}
 	got, err := e.broker.ask(ctx, a)
 	if err != nil {
@@ -801,16 +812,23 @@ func (e *Engine) Admit(ctx context.Context, c worker.Create) worker.Verdict {
 	e.logApproval(a, got.answer, got.by)
 	switch got.answer {
 	case AnswerAllow:
-		return worker.Verdict{Allow: true}
+		return e.admitted(a)
 	case AnswerRemember:
 		if err := e.rememberTrigger(env, a, now); err != nil {
 			e.notice("The trigger could not be remembered: " + err.Error())
 		}
-		return worker.Verdict{Allow: true}
+		return e.admitted(a)
 	case answerNoOne:
 		return worker.Verdict{Reason: ReasonNoOneHere}
 	}
 	return worker.Verdict{Reason: ReasonRefused}
+}
+
+// admitted tells every client that a session starts on the computer, and
+// admits it.
+func (e *Engine) admitted(a Approval) worker.Verdict {
+	e.hub.publish(Event{Kind: EventStarted, Approval: &a})
+	return worker.Verdict{Allow: true}
 }
 
 // Check allows every operation on a sandbox the person admitted. Rules per
@@ -819,16 +837,16 @@ func (e *Engine) Check(context.Context, worker.Operation) worker.Verdict {
 	return worker.Verdict{Allow: true}
 }
 
-// remembers reads the host policy file as it is now, so a trigger the person
-// forgot while the engine runs asks again at once.
-func (e *Engine) remembers(env string, a Approval, now time.Time) bool {
+// livePolicy reads the host policy file as it is now, and reports whether it
+// still names env.
+func (e *Engine) livePolicy(env string) (Policy, bool) {
 	e.policyMu.Lock()
 	defer e.policyMu.Unlock()
 	p, ok, err := LoadPolicy(e.cfg.Paths.PolicyFile())
 	if err != nil || !ok || p.Device != env {
-		return false
+		return Policy{}, false
 	}
-	return p.Remembers(a.Trigger, a.AgentVersion, now)
+	return p, true
 }
 
 // rememberTrigger writes the trigger into the host policy file.

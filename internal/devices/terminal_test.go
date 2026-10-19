@@ -9,6 +9,7 @@ import (
 	"context"
 	"io"
 	"maps"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -188,9 +189,14 @@ func TestApprovePrompt(t *testing.T) {
 	})
 
 	t.Run("a remembered trigger runs without asking until its agent changes", func(t *testing.T) {
+		before := strings.Count(out.String(), "started by trigger trg_1 on a schedule) is using")
 		if v, _ := asking(t, e, out, typed, creating(paths.Home, scheduled)); !v.Allow {
 			t.Errorf("a remembered trigger was not admitted: %+v", v)
 		}
+		// Admitted with no one asked, it is still told to the person.
+		waitFor(t, "the line for the remembered trigger", func() bool {
+			return strings.Count(out.String(), "started by trigger trg_1 on a schedule) is using") > before
+		})
 		changed := map[string]string{}
 		maps.Copy(changed, scheduled)
 		changed[LabelVersion] = "5"
@@ -237,6 +243,128 @@ func TestApprovePrompt(t *testing.T) {
 			t.Errorf("a terminal that is not interactive asked:\n%s", quiet.String())
 		}
 	})
+}
+
+// Under session_start allow, a session a person started and one a scheduled
+// trigger started run with no one asked, each told to the person in one
+// line, in the activity log and as an event; a trigger on delivered events,
+// or one whose firing is unnamed, still asks; a switch to ask in the file
+// applies to the next create.
+func TestSessionStartAllow(t *testing.T) {
+	paths := testPaths(t)
+	connected(t, paths, OpenKeys(paths.KeyFile()))
+	setStart := func(mode string) {
+		t.Helper()
+		p, _, err := LoadPolicy(paths.PolicyFile())
+		if err != nil {
+			t.Fatal(err)
+		}
+		p.SessionStart = mode
+		if err = SavePolicy(paths.PolicyFile(), p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A file from before session_start existed: no field, which reads as
+	// allow.
+	raw, err := os.ReadFile(paths.PolicyFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	withoutField := strings.Replace(string(raw), "session_start: ask\n", "", 1)
+	if withoutField == string(raw) {
+		t.Fatalf("the file names no session_start to remove:\n%s", raw)
+	}
+	if err = os.WriteFile(paths.PolicyFile(), []byte(withoutField), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e := promptEngine(t, paths, time.Now)
+	events, stop := e.Subscribe()
+	defer stop()
+	out, typed := terminalOn(t, e, paths.Home, true)
+	person := map[string]string{LabelSession: "ses_p", LabelAgent: "agt_1", LabelVersion: "4"}
+	scheduled := map[string]string{LabelSession: "ses_s", LabelAgent: "agt_1", LabelVersion: "4", LabelTrigger: "trg_1", LabelFiresOn: FiresOnSchedule}
+	delivered := map[string]string{LabelSession: "ses_e", LabelAgent: "agt_1", LabelVersion: "4", LabelTrigger: "trg_2", LabelFiresOn: FiresOnEvents}
+	unnamed := map[string]string{LabelSession: "ses_u", LabelAgent: "agt_1", LabelVersion: "4", LabelTrigger: "trg_3"}
+	// told waits for the started event and the approval line of session.
+	told := func(session, answer string) {
+		t.Helper()
+		var started, logged bool
+		deadline := time.After(5 * time.Second)
+		for !started || !logged {
+			select {
+			case ev := <-events:
+				switch {
+				case ev.Kind == EventStarted && ev.Approval.Session == session:
+					started = true
+				case ev.Kind == EventActivity && ev.Activity.Type == TypeApproval && ev.Activity.Session == session:
+					if ev.Activity.Answer != answer {
+						t.Errorf("the activity log reads %q for %s, want %q", ev.Activity.Answer, session, answer)
+					}
+					logged = true
+				}
+			case <-deadline:
+				t.Fatalf("%s: started event %v, activity line %v", session, started, logged)
+			}
+		}
+	}
+
+	if v, prompt := asking(t, e, out, typed, creating(paths.Home, person)); !v.Allow || prompt != "" {
+		t.Errorf("a session a person started read %+v, prompt %q", v, prompt)
+	}
+	told("ses_p", answerSessionStart)
+	waitFor(t, "the line for ses_p", func() bool {
+		return strings.Contains(out.String(), "Site helper (ses_p, started by a person) is using ~/project (read-write).")
+	})
+	if v, _ := asking(t, e, out, typed, creating(paths.Home, scheduled)); !v.Allow {
+		t.Errorf("a scheduled trigger read %+v", v)
+	}
+	told("ses_s", answerSessionStart)
+	waitFor(t, "the line for ses_s", func() bool {
+		return strings.Contains(out.String(), "Site helper (ses_s, started by trigger trg_1 on a schedule) is using ~/project (read-write).")
+	})
+	if strings.Contains(out.String(), "A session wants to use this computer.") {
+		t.Errorf("a session that starts without asking was asked:\n%s", out.String())
+	}
+
+	// A trigger on delivered events asks, and so does one whose firing is
+	// unnamed; once allowed, it is told like the others.
+	for _, labels := range []map[string]string{delivered, unnamed} {
+		v, prompt := asking(t, e, out, typed, creating(paths.Home, labels), "y")
+		if !v.Allow || prompt == "" {
+			t.Errorf("%s read %+v without a prompt", labels[LabelSession], v)
+		}
+		told(labels[LabelSession], AnswerAllow)
+	}
+	// With no one attached, a trigger on delivered events is refused at once.
+	alone := promptEngine(t, paths, time.Now)
+	if v := alone.Admit(t.Context(), creating(paths.Home, delivered)); v.Allow || v.Reason != ReasonNoOneHere {
+		t.Errorf("an unattended trigger on delivered events read %+v", v)
+	}
+	if v := alone.Admit(t.Context(), creating(paths.Home, person)); !v.Allow {
+		t.Errorf("an unattended session a person started read %+v", v)
+	}
+
+	// A switch to ask applies to the next create, with the engine running.
+	setStart(SessionStartAsk)
+	if v, prompt := asking(t, e, out, typed, creating(paths.Home, person), "n"); v.Allow || prompt == "" {
+		t.Errorf("under ask, a session a person started read %+v without a prompt", v)
+	}
+	setStart(SessionStartAllow)
+	if v, prompt := asking(t, e, out, typed, creating(paths.Home, person)); !v.Allow || prompt != "" {
+		t.Errorf("back under allow, a session a person started read %+v, prompt %q", v, prompt)
+	}
+	// A file that names another device is not this computer's say: asks.
+	p, _, err := LoadPolicy(paths.PolicyFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Device = "dev-anotherdeviceaaaa"
+	if err = SavePolicy(paths.PolicyFile(), p); err != nil {
+		t.Fatal(err)
+	}
+	if v, prompt := asking(t, e, out, typed, creating(paths.Home, person), "n"); v.Allow || prompt == "" {
+		t.Errorf("with a file naming another device, a session read %+v without a prompt", v)
+	}
 }
 
 func TestTerminalShowsTheEngine(t *testing.T) {
@@ -341,20 +469,69 @@ func TestPromptWording(t *testing.T) {
 }
 
 func TestConnectScreenWording(t *testing.T) {
-	screen := ConnectScreen(Policy{
+	policy := Policy{
 		Name: "MacBook Pro", Folders: []Folder{{Path: "~/code/site", Write: true}, {Path: "~/notes"}},
 		Network: Network{Mode: NetworkAllowlist, Hosts: []string{"github.com", "pypi.org"}},
-	})
-	for _, want := range []string{
+	}
+	common := []string{
 		`"MacBook Pro"`, "~/code/site (read-write)", "~/notes (read-only)", ".env", "github.com, pypi.org",
-		"can carry data out", "each session needs your approval here", "session's log and to\nthe model",
-		"organization can\nread it too", "Type yes",
-	} {
-		if !strings.Contains(screen, want) {
-			t.Errorf("the connect screen lacks %q:\n%s", want, screen)
+		"can carry data out", "session's log and to\nthe model", "organization can\nread it too", "Type yes",
+		"still approved in the chat,\nunless you approved a matching one before",
+	}
+	// A computer connected with no session_start, the default, starts the
+	// person's own sessions without asking, and says who else that reaches.
+	allow := ConnectScreen(policy)
+	for _, want := range append(common,
+		"Sessions you start, and your triggers that run on a schedule, start on\nthis computer without asking here.",
+		"mail or a\nwebhook asks here first", "Anyone who can start sessions as you can reach these folders",
+		"never your credentials", "latere devices policy --session-start ask",
+	) {
+		if !strings.Contains(allow, want) {
+			t.Errorf("the connect screen lacks %q:\n%s", want, allow)
 		}
+	}
+	policy.SessionStart = SessionStartAsk
+	ask := ConnectScreen(policy)
+	for _, want := range append(common[:len(common)-1],
+		"Each session asks for your approval here before it starts.", "also approved in the chat",
+		"latere devices policy --session-start allow",
+	) {
+		if !strings.Contains(ask, want) {
+			t.Errorf("the connect screen under ask lacks %q:\n%s", want, ask)
+		}
+	}
+	if strings.Contains(ask, "without asking here.") {
+		t.Errorf("the connect screen under ask says sessions start without asking:\n%s", ask)
 	}
 	if none := ConnectScreen(Policy{Network: Network{Mode: NetworkNone}}); !strings.Contains(none, "Network: none") {
 		t.Errorf("a computer with no network reads:\n%s", none)
+	}
+}
+
+func TestStartedLineAndNotice(t *testing.T) {
+	for _, tc := range []struct {
+		a    Approval
+		want string
+	}{
+		{Approval{Agent: "Site helper", Session: "ses_1", Folder: "/h/code/site", Write: true},
+			"Site helper (ses_1, started by a person) is using ~/code/site (read-write)."},
+		{Approval{Agent: "Site helper", Session: "ses_2", Trigger: "trg_1", FiresOn: FiresOnSchedule, Folder: "/h/notes"},
+			"Site helper (ses_2, started by trigger trg_1 on a schedule) is using ~/notes (read-only)."},
+		{Approval{Agent: "Site helper", Session: "ses_3", Trigger: "trg_2", FiresOn: FiresOnEvents, Folder: "/h/notes"},
+			"Site helper (ses_3, started by trigger trg_2 on delivered events) is using ~/notes (read-only)."},
+		{Approval{Trigger: "trg_3"},
+			"An unnamed agent (a session not named, started by trigger trg_3) is using its own scratch directory."},
+	} {
+		if got := StartedLine(tc.a, "/h"); got != tc.want {
+			t.Errorf("StartedLine = %q, want %q", got, tc.want)
+		}
+	}
+	if allow := SessionStartNotice(Policy{}); !strings.Contains(allow, "start on this computer without asking here") ||
+		!strings.Contains(allow, "--session-start ask") || strings.Contains(allow, "\n") {
+		t.Errorf("the notice for a file with no session_start reads %q", allow)
+	}
+	if ask := SessionStartNotice(Policy{SessionStart: SessionStartAsk}); !strings.Contains(ask, "Each session asks") ||
+		!strings.Contains(ask, "--session-start allow") {
+		t.Errorf("the notice under ask reads %q", ask)
 	}
 }

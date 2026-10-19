@@ -35,7 +35,12 @@ func newDevicesCmd(version string) *cobra.Command {
 commands and edit files on it, in the folders you choose.
 
 'latere devices connect' connects this computer and serves it in the
-foreground; each session asks for your approval there before it starts.
+foreground. Sessions you start, and your triggers that run on a schedule,
+start there without asking; a trigger that runs on mail or a webhook asks
+for your approval there first, and 'latere devices policy --session-start
+ask' makes every session ask. Each command that changes something is still
+approved in the chat, unless you approved a matching one before.
+'latere devices pause' stops every session on the computer at once.
 The host policy file ~/.config/latere/device.yaml holds what sessions may
 use, and the activity log holds every operation they asked for.
 
@@ -44,6 +49,7 @@ personal: connect a computer from your personal context.`,
 		Example: `  latere devices connect --folder ~/code/site
   latere devices list
   latere devices activity -f
+  latere devices pause
   latere devices remove`,
 	}
 	cmd.AddCommand(
@@ -54,6 +60,17 @@ personal: connect a computer from your personal context.`,
 		newDevicesRemoveCmd(),
 		newDevicesPolicyCmd(),
 		newDevicesActivityCmd(),
+		newDevicesControlCmd("pause", "/v1/pause",
+			"Stop every session on this computer at once, until you resume it.",
+			`Disconnect this computer while 'latere devices connect' or 'latere devices
+serve' keeps running: every command a session started here stops, and no
+session can use the computer until 'latere devices resume'.`,
+			"Paused. Every command a session started on this computer was stopped, and no session can use it until `latere devices resume`."),
+		newDevicesControlCmd("resume", "/v1/resume",
+			"Let sessions use this computer again after a pause.",
+			`Connect this computer again after 'latere devices pause', so sessions can
+use it as before.`,
+			"Resumed. Sessions can use this computer again."),
 	)
 	return cmd
 }
@@ -227,21 +244,56 @@ Removing is final. Connecting the computer again makes a new device.`,
 	return cmd
 }
 
+// newDevicesControlCmd is a command that asks the engine serving this
+// computer for one action through its control socket, and prints said once
+// it is done.
+func newDevicesControlCmd(use, route, short, long, said string) *cobra.Command {
+	return &cobra.Command{
+		Use:     use,
+		Args:    cobra.NoArgs,
+		Short:   short,
+		Long:    long,
+		Example: "  latere devices " + use,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			paths, err := devices.DefaultPaths()
+			if err != nil {
+				return devices.Fail(devices.CodeServeFailed, "resolve the state directory", err)
+			}
+			if _, err = devices.ControlPost(cmd.Context(), paths.Socket(), route); err != nil {
+				return err
+			}
+			fprintln(cmd.ErrOrStderr(), said)
+			return nil
+		},
+	}
+}
+
 func newDevicesPolicyCmd() *cobra.Command {
-	var forget []string
+	var (
+		forget       []string
+		sessionStart string
+	)
 	cmd := &cobra.Command{
 		Use:   "policy",
 		Args:  cobra.NoArgs,
-		Short: "Print the host policy file, check it, and forget remembered triggers.",
+		Short: "Print the host policy file, check it, set how sessions start, and forget remembered triggers.",
 		Long: `Print the path and the content of the host policy file,
 ~/.config/latere/device.yaml, and check it: the folders and read paths
 against the rules of the sandbox, the network, and each remembered
 trigger.
 
+--session-start allow lets sessions you start, and your triggers that run
+on a schedule, start on this computer without asking; a trigger that runs
+on mail or a webhook still asks. --session-start ask makes every session
+ask. Either applies to the next session, even while this computer is
+serving. Each command that changes something is still approved in the
+chat, unless you approved a matching one before.
+
 A remembered trigger runs on this computer with no one asked, until its
 agent changes or its date passes. --forget TRIGGER removes one, and the
 trigger asks again at its next run, even while this computer is serving.`,
 		Example: `  latere devices policy
+  latere devices policy --session-start ask
   latere devices policy --forget trg_01jaq7v3k9m2wxyz`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			paths, err := devices.DefaultPaths()
@@ -257,6 +309,16 @@ trigger asks again at its next run, even while this computer is serving.`,
 				return devices.Fail(devices.CodeNotConnected, "there is no host policy file at "+path, nil)
 			}
 			out := cmd.OutOrStdout()
+			if cmd.Flags().Changed("session-start") {
+				if sessionStart != devices.SessionStartAllow && sessionStart != devices.SessionStartAsk {
+					return devices.Fail(devices.CodePolicyInvalid, fmt.Sprintf("--session-start is %q; it is allow or ask", sessionStart), nil)
+				}
+				policy.SessionStart = sessionStart
+				if err = devices.SavePolicy(path, policy); err != nil {
+					return devices.Fail(devices.CodePolicyInvalid, "write the host policy file", err)
+				}
+				fprintf(cmd.ErrOrStderr(), "session_start is %s from the next session on.\n", sessionStart)
+			}
 			if len(forget) > 0 {
 				for _, trigger := range forget {
 					if !policy.Forget(trigger) {
@@ -272,7 +334,7 @@ trigger asks again at its next run, even while this computer is serving.`,
 			if err != nil {
 				return devices.Fail(devices.CodePolicyInvalid, "", err)
 			}
-			fprintf(out, "%s\n\n%s\n", path, strings.TrimRight(string(raw), "\n"))
+			fprintf(out, "%s\n\n%s\n\n%s\n", path, strings.TrimRight(string(raw), "\n"), devices.SessionStartNotice(policy))
 			problems := policy.Problems(paths.Home)
 			if len(problems) == 0 {
 				if err := devices.CheckDriver(policy, paths, goruntime.GOOS, deviceDriver); err != nil {
@@ -298,6 +360,7 @@ trigger asks again at its next run, even while this computer is serving.`,
 		},
 	}
 	cmd.Flags().StringArrayVar(&forget, "forget", nil, "forget a remembered trigger by its id (repeatable)")
+	cmd.Flags().StringVar(&sessionStart, "session-start", "", "whether your own sessions and scheduled triggers start without asking here: allow or ask")
 	return cmd
 }
 
