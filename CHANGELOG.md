@@ -10,6 +10,31 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Added
+
+- **A desktop application can run `latere devices serve` without a
+  terminal from start to finish.** On a computer that is not connected,
+  `serve` now waits with its control socket open instead of refusing,
+  and the application connects it there: `GET /v1/connect` answers the
+  proposal with the facts the connect screen states and a consent
+  digest, and `POST /v1/connect` with that consent connects the computer
+  as typing yes does. After the device is removed, `serve` waits again.
+- **`serve --credentials client` never reads your saved sign-in.** The
+  application hands it short-lived Cella and platform tokens through
+  `PUT /v1/credentials`, kept in memory only, and `GET /v1/status` says
+  when one is needed again.
+- **The host policy and the device through the socket:** `GET` and `PUT
+  /v1/policy` read and change the name, folders and network, checked as
+  `connect` checks them; `DELETE /v1/policy/remembered/{trigger}` forgets
+  a remembered trigger; `POST /v1/remove` removes the device as `latere
+  devices remove` does, or with `{"local": true}` forgets it here alone.
+
+### Changed
+
+- `latere devices serve` makes no daily release check under
+  `LATERE_NO_UPDATE_CHECK` or `CI`, as every other release check already
+  does, so a copy an application bundles never looks for a release.
+
 ### Fixed
 
 - The notice that a new release is available no longer names a release
