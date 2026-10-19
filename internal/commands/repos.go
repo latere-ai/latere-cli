@@ -233,8 +233,16 @@ func platformBearer(ctx context.Context, base, authURL string) (string, error) {
 // platformCall sends one request to the platform with a fresh bearer and
 // decodes a JSON answer into out. A non-2xx answer is a *platformError.
 func platformCall(ctx context.Context, platformURL, authURL, method, path string, body, out any) error {
+	return platformCallWith(ctx, platformURL, func(ctx context.Context, base string) (string, error) {
+		return platformBearer(ctx, base, authURL)
+	}, method, path, body, out)
+}
+
+// platformCallWith is platformCall with the bearer bearer answers for the
+// platform's base URL, so a caller holding its own token presents it.
+func platformCallWith(ctx context.Context, platformURL string, bearerFor func(context.Context, string) (string, error), method, path string, body, out any) error {
 	base := resolvePlatformURL(platformURL)
-	bearer, err := platformBearer(ctx, base, authURL)
+	bearer, err := bearerFor(ctx, base)
 	if err != nil {
 		return err
 	}

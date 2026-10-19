@@ -9,10 +9,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
+	cellaclient "latere.ai/x/cella/client"
+
+	"github.com/latere-ai/latere-cli/internal/api"
 	"github.com/latere-ai/latere-cli/internal/devices"
 )
 
@@ -52,43 +54,80 @@ type deviceList struct {
 	Limit int            `json:"limit"`
 }
 
-// removeDevice removes a device at the platform, which deletes its
-// environment at Cella, revokes its keys and ends its sandboxes. A device the
-// platform no longer has is already removed.
-func removeDevice(ctx context.Context, platformURL, id string) error {
-	err := platformCall(ctx, platformURL, "", http.MethodDelete, devicesPath+"/"+id, nil, nil)
+// platformRequest is one request to the platform with a bearer its caller
+// chose, decoding a JSON answer into out.
+type platformRequest func(ctx context.Context, method, path string, body, out any) error
+
+// deviceAuth is where a device's calls as the person get their bearers: the
+// saved login, or under `serve --credentials client` the tokens the client
+// handed the engine, in which mode the saved login is never read.
+type deviceAuth struct {
+	apiURL, platformURL string
+	// held is the client's tokens; nil is the saved login.
+	held *devices.Credentials
+}
+
+// cella is the Cella client as the person.
+func (a deviceAuth) cella() (*cellaclient.Client, error) {
+	if a.held == nil {
+		return cellaClient(a.apiURL)
+	}
+	base, err := resolveCellaURL(a.apiURL)
+	if err != nil {
+		return nil, err
+	}
+	held := a.held
+	return cellaclient.New(cellaclient.Config{
+		URL: base, HTTPClient: cellaHTTPClient(), UserAgent: "latere-cli",
+		Token: cellaclient.TokenFunc(func(ctx context.Context) (string, error) { return held.Token(ctx, devices.AudienceCella) }),
+	})
+}
+
+// platform sends one request to the platform as the person.
+func (a deviceAuth) platform(ctx context.Context, method, path string, body, out any) error {
+	bearer := func(ctx context.Context, base string) (string, error) { return platformBearer(ctx, base, "") }
+	if a.held != nil {
+		bearer = func(ctx context.Context, _ string) (string, error) {
+			return a.held.Token(ctx, devices.AudiencePlatform)
+		}
+	}
+	return platformCallWith(ctx, a.platformURL, bearer, method, path, body, out)
+}
+
+// orgContext is the organization the person's bearer is in, "" for their
+// personal context, read from the saved login or the client's platform
+// token.
+func (a deviceAuth) orgContext(ctx context.Context) (string, error) {
+	var raw string
+	if a.held != nil {
+		token, err := a.held.Token(ctx, devices.AudiencePlatform)
+		if err != nil {
+			return "", devices.Fail(devices.CodeCredentialsNeeded, "", err)
+		}
+		raw = token
+	} else {
+		tok, err := api.LoadAuthToken()
+		if err != nil {
+			return "", devices.Fail(devices.CodeNoSignIn, "", err)
+		}
+		raw = tok.AccessToken
+	}
+	info, err := principalFromJWT(raw)
+	if err != nil {
+		return "", devices.Fail(devices.CodeNoSignIn, "", err)
+	}
+	return info.OrgID, nil
+}
+
+// remove removes a device at the platform, which deletes its environment at
+// Cella, revokes its keys and ends its sandboxes. A device the platform no
+// longer has is already removed.
+func (a deviceAuth) remove(ctx context.Context, id string) error {
+	err := a.platform(ctx, http.MethodDelete, devicesPath+"/"+id, nil, nil)
 	if pe, ok := errors.AsType[*platformError](err); ok && pe.Status == http.StatusNotFound {
 		return nil
 	}
 	return err
-}
-
-// forgetThisDevice forgets on this computer the device it was: the key
-// goes, and so does the host policy file when dropFile is set; otherwise the
-// file keeps its folders and network and names no device, so the next
-// connect proposes them again.
-func forgetThisDevice(paths devices.Paths, id string, dropFile bool) error {
-	var errs []error
-	if err := paths.Keys().Delete(id); err != nil {
-		errs = append(errs, fmt.Errorf("delete the key: %w", err))
-	}
-	path := paths.PolicyFile()
-	policy, ok, err := devices.LoadPolicy(path)
-	switch {
-	case err != nil:
-		errs = append(errs, err)
-	case !ok || policy.Device != id:
-	case dropFile:
-		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-			errs = append(errs, fmt.Errorf("delete the host policy file: %w", err))
-		}
-	default:
-		policy.Device = ""
-		if err := devices.SavePolicy(path, policy); err != nil {
-			errs = append(errs, fmt.Errorf("update the host policy file: %w", err))
-		}
-	}
-	return errors.Join(errs...)
 }
 
 // leaveBeforeLogout is what `latere logout` does on a connected computer:
@@ -116,10 +155,10 @@ func leaveBeforeLogout(ctx context.Context, in io.Reader, errOut io.Writer, plat
 			return devices.Fail(devices.CodeLogoutCancelled, fmt.Sprintf("the answer was %q", line), err)
 		}
 	}
-	if err := removeDevice(ctx, platformURL, policy.Device); err != nil {
+	if err := (deviceAuth{platformURL: platformURL}).remove(ctx, policy.Device); err != nil {
 		return devices.Fail(devices.CodeLogoutBlocked, "", wrapReposErr(err))
 	}
-	if err := forgetThisDevice(paths, policy.Device, false); err != nil {
+	if err := devices.Forget(paths.Keys(), paths.PolicyFile(), policy.Device, false); err != nil {
 		fprintf(errOut, "  warning: this computer was removed from your devices, and %v\n", err)
 	}
 	fprintln(errOut, "Removed this computer from your devices.")

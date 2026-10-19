@@ -32,12 +32,20 @@ const tenantLabelsPath = "/v1/account/environments/context"
 // platform's audience. A read the platform refuses ends the command: without
 // the labels a create is refused.
 func tenantLabels(ctx context.Context, platformURL string) (map[string]string, error) {
+	return readTenantLabels(ctx, func(ctx context.Context, method, path string, body, out any) error {
+		return platformCall(ctx, platformURL, "", method, path, body, out)
+	})
+}
+
+// readTenantLabels is tenantLabels through call, a platform request with a
+// bearer the caller chooses.
+func readTenantLabels(ctx context.Context, call platformRequest) (map[string]string, error) {
 	var answer struct {
 		Tenant struct {
 			Labels map[string]string `json:"labels"`
 		} `json:"tenant"`
 	}
-	if err := platformCall(ctx, platformURL, "", http.MethodGet, tenantLabelsPath, nil, &answer); err != nil {
+	if err := call(ctx, http.MethodGet, tenantLabelsPath, nil, &answer); err != nil {
 		return nil, fmt.Errorf("cannot read your account's labels for the workload from the platform: %w", wrapReposErr(err))
 	}
 	if len(answer.Tenant.Labels) == 0 {

@@ -178,7 +178,7 @@ func newDevicesRenameCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			name := cleanDeviceName(args[0])
+			name := devices.CleanName(args[0])
 			id := policy.Device
 			if len(args) == 2 {
 				id = args[1]
@@ -228,11 +228,11 @@ Removing is final. Connecting the computer again makes a new device.`,
 			if id == "" {
 				return devices.Fail(devices.CodeNotConnected, "name a device id from `latere devices list`", nil)
 			}
-			if err = removeDevice(cmd.Context(), platformURL, id); err != nil {
+			if err = (deviceAuth{platformURL: platformURL}).remove(cmd.Context(), id); err != nil {
 				return devices.Fail(devices.CodeRemoveFailed, "", wrapReposErr(err))
 			}
 			if id == policy.Device {
-				if err = forgetThisDevice(paths, id, true); err != nil {
+				if err = devices.Forget(paths.Keys(), paths.PolicyFile(), id, true); err != nil {
 					return devices.Fail(devices.CodeKeyUnavailable, "the device was removed, and on this computer: "+err.Error(), err)
 				}
 			}

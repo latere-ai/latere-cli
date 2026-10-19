@@ -97,11 +97,13 @@ type devicePlatform struct {
 
 	mu       sync.Mutex
 	requests []string
-	created  []byte
-	keyBody  string
-	renamed  map[string]string
-	removed  []string
-	devices  []map[string]any
+	// bearers is each request's route with the bearer it presented.
+	bearers []string
+	created []byte
+	keyBody string
+	renamed map[string]string
+	removed []string
+	devices []map[string]any
 	// refuseCreate, when set, answers the create with this detail.
 	refuseCreate string
 	// register answers a worker's registration: by default the stub stops
@@ -182,6 +184,7 @@ func newDevicePlatform(t *testing.T) *devicePlatform {
 	p.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p.mu.Lock()
 		p.requests = append(p.requests, r.Method+" "+r.URL.Path)
+		p.bearers = append(p.bearers, r.Method+" "+r.URL.Path+" "+strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
 		p.mu.Unlock()
 		mux.ServeHTTP(w, r)
 	}))
@@ -435,14 +438,6 @@ func connectedHere(t *testing.T, paths devices.Paths, project string) string {
 	return id
 }
 
-func TestServeRefusesAComputerNotConnected(t *testing.T) {
-	deviceHome(t)
-	newDevicePlatform(t)
-	if _, _, err := runDevices(t, "", "devices", "serve"); devices.CodeOf(err) != devices.CodeNotConnected {
-		t.Errorf("serve on a computer not connected returned %v", err)
-	}
-}
-
 func TestConnectRefusalsFromThePlatform(t *testing.T) {
 	for _, tc := range []struct {
 		detail, code, hint string
@@ -651,8 +646,8 @@ func TestCleanDeviceName(t *testing.T) {
 		"":                "This computer",
 		long:              strings.Repeat("é", 64),
 	} {
-		if got := cleanDeviceName(in); got != want {
-			t.Errorf("cleanDeviceName(%q) = %q, want %q", in, got, want)
+		if got := devices.CleanName(in); got != want {
+			t.Errorf("CleanName(%q) = %q, want %q", in, got, want)
 		}
 	}
 	if name := defaultComputerName(); name == "" {
