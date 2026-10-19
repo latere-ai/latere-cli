@@ -184,8 +184,8 @@ func (b *broker) attach() (detach func()) {
 			}
 			b.mu.Unlock()
 			for _, w := range orphans {
-				w.answer <- given{answer: answerNoOne}
 				b.emit(Event{Kind: EventAnswered, Approval: &w.approval, Answer: answerNoOne})
+				w.answer <- given{answer: answerNoOne}
 			}
 		})
 	}
@@ -257,8 +257,10 @@ func (b *broker) answer(id, answer, by string) error {
 	delete(b.pending, id)
 	b.order = slices.DeleteFunc(b.order, func(o string) bool { return o == id })
 	b.mu.Unlock()
-	w.answer <- given{answer: answer, by: by}
+	// The answer is told before the waiting create hears it, so every client
+	// reads it before the session it admits starts.
 	b.emit(Event{Kind: EventAnswered, Approval: &w.approval, Answer: answer, By: by})
+	w.answer <- given{answer: answer, by: by}
 	return nil
 }
 

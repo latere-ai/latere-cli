@@ -18,6 +18,12 @@ committed: the commit log already holds that.
   "not found: <path>" in the activity log, rather than "environment not
   found".
 
+### Fixed
+
+- On the control socket of `latere devices`, the answer to a session's
+  request now always comes before the `started` event of the session it
+  lets in, so a desktop application reads them in order.
+
 ## v0.24.1 - 2026-10-19
 
 ### Changed

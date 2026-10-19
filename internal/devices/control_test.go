@@ -371,3 +371,40 @@ func TestStageCannotReachTheControlSocket(t *testing.T) {
 		t.Errorf("a stage's command reached the control socket: %q", out)
 	}
 }
+
+// Every client reads an answer before the session it admits starts: the
+// broker tells the answer before the waiting create hears it, so the
+// started event the create then sends comes after it on every stream.
+func TestAnswerIsToldBeforeTheSessionStarts(t *testing.T) {
+	events := make(chan Event, 8)
+	admitted := make(chan struct{})
+	b := newBroker(func(e Event) {
+		if e.Kind == EventAnswered {
+			// Give a create that already heard its answer the time to
+			// start before the answer is told; one that has not heard it
+			// cannot start meanwhile.
+			select {
+			case <-admitted:
+			case <-time.After(200 * time.Millisecond):
+			}
+		}
+		events <- e
+	})
+	defer b.attach()()
+	go func() {
+		defer close(admitted)
+		if got, err := b.ask(context.Background(), Approval{Session: "ses_o"}); err != nil || got.answer != AnswerAllow {
+			t.Errorf("ask answered %+v, %v", got, err)
+		}
+		// What Admit sends once the answer admits the create.
+		events <- Event{Kind: EventStarted}
+	}()
+	asked := <-events
+	if err := b.answer(asked.Approval.ID, AnswerAllow, "a client"); err != nil {
+		t.Fatal(err)
+	}
+	<-admitted
+	if first, second := <-events, <-events; first.Kind != EventAnswered || second.Kind != EventStarted {
+		t.Fatalf("the clients read %s, then %s", first.Kind, second.Kind)
+	}
+}
