@@ -109,9 +109,14 @@ type checkState struct {
 	RefusedAt       time.Time `json:"refused_at,omitzero"`
 }
 
-// shouldNotify reports whether to print the upgrade notice now: always for a
-// version not yet announced, otherwise at most once per noticeInterval.
+// shouldNotify reports whether to print the upgrade notice now: never for a
+// release last refused for its signature, since `latere upgrade` would
+// refuse it too; always for a version not yet announced; otherwise at most
+// once per noticeInterval.
 func (s checkState) shouldNotify(latest string, now time.Time) bool {
+	if s.RefusedVersion == latest {
+		return false
+	}
 	if s.NotifiedVersion != latest {
 		return true
 	}
@@ -124,6 +129,14 @@ func (s checkState) shouldNotify(latest string, now time.Time) bool {
 // still uploading its files.
 func (s checkState) refusedRecently(latest string, now time.Time) bool {
 	return s.RefusedVersion == latest && now.Sub(s.RefusedAt) < refusalRetry
+}
+
+// recordRefusal records that tag was refused for its signature, so neither
+// auto-upgrade nor the notice names it on every command.
+func recordRefusal(tag string, now time.Time) {
+	st := loadState()
+	st.RefusedVersion, st.RefusedAt = tag, now
+	_ = saveState(st)
 }
 
 // backingOff reports whether the last check failed less than failureBackoff

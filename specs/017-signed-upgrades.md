@@ -187,4 +187,30 @@ as `ssh-keygen -Y sign` writes it.
   `signs` entries.
 - `checksums.txt.sig` and `latere upgrade`'s check are unchanged.
 
-What is left is the installer's own half in `latere-ai/platform`.
+The installer's own half shipped in `latere-ai/platform` v0.148.0: `curl
+-fsSL https://platform.latere.ai | sh` verified v0.24.2's signature on
+2026-10-19 before installing it.
+
+### The notice names no refused release, 2026-10-19
+
+The upgrade notice could name a release the CLI had refused for its
+signature. A run whose auto-upgrade refused a release printed the refusal
+and then "A new release of latere is available ... Run `latere upgrade` to
+update.", and every day after it repeated that notice, while `latere
+upgrade` refused the release each time. `latere upgrade` did not record its
+own refusal, so with auto-upgrade off the notice named the release daily.
+
+- `shouldNotify` is false for the release `update-check.json` records as
+  refused. A newer release than the refused one is announced as before.
+- `latere upgrade` records a refusal in `update-check.json` the way
+  auto-upgrade does, through the one `recordRefusal`.
+- `latere upgrade --check` on a release recorded as refused says "It was
+  refused when last installed: it is not signed by Latere." in place of
+  "Run `latere upgrade` to update."
+- Auto-upgrade still tries a refused release again after `refusalRetry`,
+  which recovers from a refusal seen while a release was still uploading
+  its signature; only the notice stays silent until then and after.
+- `TestNoticeNeverNamesARefusedRelease` holds the refusing run, a later run
+  with auto-upgrade off and a newer release after the refused one;
+  `TestUpgradeRecordsARefusal` holds `latere upgrade`'s record and the
+  check's line. Both fail on the code before this change.

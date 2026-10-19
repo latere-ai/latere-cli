@@ -126,9 +126,7 @@ func performAutoUpgrade(current, tag string, w io.Writer) {
 	bin, err := DownloadBinary(ctx, downloadClient(), tag)
 	if _, ok := errors.AsType[*unsignedError](err); ok {
 		fprintln(w, err)
-		st := loadState()
-		st.RefusedVersion, st.RefusedAt = tag, time.Now()
-		_ = saveState(st)
+		recordRefusal(tag, time.Now())
 		return
 	}
 	if err != nil {
@@ -179,8 +177,12 @@ func Run(ctx context.Context, current, target string, checkOnly bool, out io.Wri
 		return nil
 	}
 	if checkOnly {
-		if _, err := fmt.Fprintf(out, "A new release of latere is available: %s -> %s\nRun `latere upgrade` to update.\n",
-			display(current), display(tag)); err != nil {
+		hint := "Run `latere upgrade` to update."
+		if loadState().RefusedVersion == tag {
+			hint = "It was refused when last installed: it is not signed by Latere."
+		}
+		if _, err := fmt.Fprintf(out, "A new release of latere is available: %s -> %s\n%s\n",
+			display(current), display(tag), hint); err != nil {
 			return fmt.Errorf("write upgrade check result: %w", err)
 		}
 		return nil
@@ -197,6 +199,7 @@ func Run(ctx context.Context, current, target string, checkOnly bool, out io.Wri
 	}
 	bin, err := DownloadBinary(ctx, downloadClient(), tag)
 	if _, ok := errors.AsType[*unsignedError](err); ok {
+		recordRefusal(tag, time.Now())
 		return err
 	}
 	if err != nil {

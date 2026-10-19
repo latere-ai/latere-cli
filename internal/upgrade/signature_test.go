@@ -385,6 +385,80 @@ func TestOnStartSkipsARecentlyRefusedRelease(t *testing.T) {
 	}
 }
 
+// A release refused for its signature is not announced as one to install:
+// not on the run that refused it, and not on a later run, with auto-upgrade
+// on or off. A newer release after it is announced.
+func TestNoticeNeverNamesARefusedRelease(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("auto-upgrade does not run on Windows")
+	}
+	onStartEnv(t)
+	useTestKey(t)
+	serveSignedRelease(t, "v9.9.9", "NEW-BINARY", func(string) string { return "" })
+	if err := saveState(checkState{CheckedAt: time.Now().Add(-checkInterval), LatestVersion: "v1.0.0"}); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	OnStart("v1.0.0", &out)
+	if !strings.Contains(out.String(), unsignedMessage) || strings.Contains(out.String(), "A new release") {
+		t.Errorf("the refusing run: output %q, want the refusal and no notice", out.String())
+	}
+
+	off := false
+	if err := SaveConfig(Config{AutoUpgrade: &off}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	for _, tc := range []struct {
+		name, latest, want string
+	}{
+		{"the refused release, days later", "v9.9.9", ""},
+		{"a newer release", "v9.9.10", "v1.0.0 -> v9.9.10"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := saveState(checkState{
+				CheckedAt: now, LatestVersion: tc.latest,
+				NotifiedVersion: "v9.9.9", NotifiedAt: now.Add(-3 * noticeInterval),
+				RefusedVersion: "v9.9.9", RefusedAt: now.Add(-3 * refusalRetry),
+			}); err != nil {
+				t.Fatal(err)
+			}
+			var out bytes.Buffer
+			OnStart("v1.0.0", &out)
+			if tc.want == "" && out.Len() != 0 || tc.want != "" && !strings.Contains(out.String(), tc.want) {
+				t.Errorf("output %q, want %q", out.String(), tc.want)
+			}
+		})
+	}
+}
+
+// `latere upgrade` records a refusal as auto-upgrade does, so the notice
+// stops naming the release, and its check then says the release was
+// refused rather than to install it.
+func TestUpgradeRecordsARefusal(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("in-place upgrade does not run on Windows")
+	}
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	useTestKey(t)
+	serveSignedRelease(t, "v9.9.9", "NEW-BINARY", func(string) string { return "" })
+
+	var out bytes.Buffer
+	requireUnsigned(t, Run(context.Background(), "v1.0.0", "", false, &out), "has no checksums.txt.sig")
+	if st := loadState(); st.RefusedVersion != "v9.9.9" || time.Since(st.RefusedAt) > time.Minute {
+		t.Errorf("state = %+v, want the refusal of v9.9.9 recorded", st)
+	}
+
+	out.Reset()
+	if err := Run(context.Background(), "v1.0.0", "", true, &out); err != nil {
+		t.Fatalf("Run --check: %v", err)
+	}
+	want := "A new release of latere is available: v1.0.0 -> v9.9.9\nIt was refused when last installed: it is not signed by Latere.\n"
+	if out.String() != want {
+		t.Errorf("check output = %q, want %q", out.String(), want)
+	}
+}
+
 func TestRefusedRecently(t *testing.T) {
 	now := time.Now()
 	st := checkState{RefusedVersion: "v9.9.9", RefusedAt: now.Add(-time.Hour)}

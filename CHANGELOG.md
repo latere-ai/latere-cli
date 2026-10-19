@@ -10,6 +10,16 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Fixed
+
+- The notice that a new release is available no longer names a release
+  `latere` refused because it is not signed by Latere. It used to follow
+  the refusal with "Run `latere upgrade` to update." and repeat it every
+  day, though `latere upgrade` refused that release too. `latere upgrade`
+  now remembers its own refusal as auto-upgrade does, and `latere upgrade
+  --check` says when the latest release was refused. A newer release is
+  announced as before.
+
 ## v0.24.2 - 2026-10-19
 
 ### Changed
