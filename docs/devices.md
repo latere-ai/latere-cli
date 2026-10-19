@@ -17,11 +17,13 @@ you approved a matching one before.
 ## What you need
 
 - macOS or Linux. Windows is not supported.
-- The sandbox runtime `srt`, which confines every command a session runs:
+- On macOS, nothing more: every command a session runs is confined by
+  Seatbelt, which is part of macOS.
+- On Linux, the sandbox runtime `srt`, which confines every command a
+  session runs:
 
   ```sh
   npm install -g @anthropic-ai/sandbox-runtime
-  brew install ripgrep                                # macOS
   sudo apt-get install -y bubblewrap socat ripgrep    # Debian, Ubuntu
   srt echo ok
   ```
@@ -60,7 +62,7 @@ computer already is, with no questions.
 |---|---|
 | `--folder PATH` | A folder sessions may use, read-write. Add `:ro` for read-only. Repeat it for more. Without it, the current directory is shared. |
 | `--network allowlist` or `--network none` | Whether commands reach the hosts on the list, or no network at all. The default is `allowlist`. |
-| `--host H` | A host on the allowlist. Repeat it for more. Without it, the list holds the common git and package hosts: `github.com`, `codeload.github.com`, `registry.npmjs.org`, `pypi.org`, `files.pythonhosted.org`, `proxy.golang.org`, `sum.golang.org`, `crates.io` and `static.crates.io`. |
+| `--host H` | A host on the allowlist. On macOS it is reached over HTTPS on port 443 and HTTP on port 80; write `H:PORT` for another port, as `github.com:22` for git over SSH. Repeat it for more. Without it, the list holds the common git and package hosts: `github.com`, `codeload.github.com`, `registry.npmjs.org`, `pypi.org`, `files.pythonhosted.org`, `proxy.golang.org`, `sum.golang.org`, `crates.io` and `static.crates.io`. |
 | `--name N` | The computer's name among your devices. Without it, the computer's own name. |
 | `--session-start allow` or `--session-start ask` | Whether the sessions you start, and your triggers that run on a schedule, start without asking on the computer. The default is `allow`. With `ask`, every session asks. |
 
@@ -162,6 +164,17 @@ paths are denied even inside a folder you shared:
   the key file) and its state (the activity log, the control socket);
 - your keychains, and your browsers' profiles: Chrome, Chromium, Firefox,
   Edge, Brave, Arc and Safari.
+
+On macOS a command also cannot write, inside a folder you shared, the
+files your own tools later run as code: shell startup files (`.zshrc`,
+`.bashrc` and the others), `.envrc`, `.gitconfig`, `.gitmodules`,
+`.mcp.json`, `*.code-workspace`, and anything in `.claude`, `.cursor`,
+`.vscode` or `.idea`. In a repository it writes only what everyday git
+writes, never the repository's config or hooks, so `git add`, `commit`,
+`checkout`, `merge`, `rebase` and `fetch` work there and `git init`,
+`clone`, `config` and `remote add` do not. Its network goes through a
+proxy beside it that admits the hosts on the list and never decrypts a
+connection.
 
 A secret file you did not name inside a shared folder, such as a project's
 own `.env`, is part of what you shared. The directories on your `PATH` are
@@ -313,7 +326,7 @@ in time is refused `device_credentials_needed`.
 | `device_no_sign_in` or `sign_in_required` | Run `latere login`, then connect again. |
 | `device_key_refused` | Sign in with `latere login`, not with a pasted key. |
 | `device_limit` | You connected as many computers as one person may. Remove one with `latere devices remove ID`. |
-| `device_sandbox_unavailable` | Install `srt` and what it needs; the detail names it. |
+| `device_sandbox_unavailable` | On Linux, install `srt` and what it needs; the detail names it. On macOS, the detail names what Seatbelt lacks. |
 | `device_policy_invalid` | Fix the host policy file; `latere devices policy` shows what is wrong. |
 | `device_removed` | The computer was removed from your devices. Run `latere devices connect` to connect it again. |
 | `device_worker_limit` | Another computer is serving with this device's key right now. If that is not you, remove the device. |
