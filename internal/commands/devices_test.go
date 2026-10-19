@@ -374,6 +374,12 @@ func TestConnectCreatesTheEnvironment(t *testing.T) {
 	if !strings.Contains(errOut, "Connected this computer as Test Mac ("+id+")") {
 		t.Errorf("connect did not say it connected:\n%s", errOut)
 	}
+	// The saved login's person owns the device, so an application that
+	// serves it later refuses another person's tokens.
+	var owner struct{ Device, Subject string }
+	if raw, err := os.ReadFile(paths.OwnerFile()); err != nil || json.Unmarshal(raw, &owner) != nil || owner.Device != id || owner.Subject != "p1" {
+		t.Errorf("the owner recorded at connect is %+v, %v", owner, err)
+	}
 }
 
 func TestSecondConnectRefusedLocally(t *testing.T) {

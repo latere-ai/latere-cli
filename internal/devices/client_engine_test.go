@@ -230,21 +230,136 @@ func TestTokensAreTiedToTheDevicesOwner(t *testing.T) {
 	})
 }
 
-func TestOwnerIsLearnedFromTheFirstTokens(t *testing.T) {
+// ownedAccount mints only for alice; anyone else is told the device is not
+// theirs, as the command maps Cella's forbidden: device_not_owned.
+type ownedAccount struct {
+	*fakeAccount
+	creds *Credentials
+}
+
+func (a ownedAccount) MintKey(ctx context.Context, env string, ttl time.Duration) (Key, error) {
+	if _, err := a.creds.Token(ctx, AudienceCella); err != nil {
+		return Key{}, err
+	}
+	if a.creds.Subject() != "alice" {
+		return Key{}, fmt.Errorf("%w: forbidden: device_not_owned", ErrRemoved)
+	}
+	return a.fakeAccount.MintKey(ctx, env, ttl)
+}
+
+// A device connected before the owner was recorded (from a terminal, or by
+// v0.25.0) has no record. The first tokens handed may be another person's:
+// the platform's answer that the device is not theirs drops the tokens and
+// keeps the device, and the owner is recorded only once the platform mints
+// for them.
+func TestAnUnconfirmedPersonNeverForgetsTheDevice(t *testing.T) {
+	sandboxRuntime(t)
 	paths := testPaths(t)
 	keys := OpenKeys(paths.KeyFile())
 	connected(t, paths, keys)
-	creds := NewCredentials(nil, 0)
-	e := New(Config{Paths: paths, Keys: keys, Account: &fakeAccount{exists: true}, Version: "test", Credentials: creds})
-	c := controlOn(t, e, paths)
-	if code, body := send(t, c, http.MethodPut, "/v1/credentials", tokensFor("alice")); code != http.StatusOK {
-		t.Fatalf("the first tokens answered %d %s", code, body)
+	if err := keys.Delete(testEnv); err != nil {
+		t.Fatal(err)
 	}
+	p := newStubPlane(t)
+	creds := NewCredentials(nil, 100*time.Millisecond)
+	account := ownedAccount{fakeAccount: &fakeAccount{exists: true}, creds: creds}
+	e := New(Config{Paths: paths, URL: p.url, Keys: keys, Account: account, Version: "test", Enroll: &fakeEnroller{paths: paths}, Credentials: creds, WaitToConnect: true})
+	c := controlOn(t, e, paths)
+	_, done := running(t, e)
+	waitFor(t, "the wait for the sign-in", func() bool { return e.Status().State == StateOffline })
+
+	if code, body := send(t, c, http.MethodPut, "/v1/credentials", tokensFor("bob")); code != http.StatusOK {
+		t.Fatalf("bob's tokens answered %d %s", code, body)
+	}
+	waitFor(t, "the engine to say the sign-in is not the owner's", func() bool {
+		return strings.Contains(e.Status().Detail, "not this device's owner's")
+	})
+	if file, ok, err := LoadPolicy(paths.PolicyFile()); err != nil || !ok || file.Device != testEnv {
+		t.Errorf("another person's tokens made the computer forget the device: %+v, %v, %v", file, ok, err)
+	}
+	if owner, _ := readOwner(paths.OwnerFile(), testEnv); owner != "" {
+		t.Errorf("an unconfirmed person was recorded as the owner: %q", owner)
+	}
+	if s := e.Status(); s.Credentials == nil || s.Credentials.Cella != CredentialNeeded {
+		t.Errorf("bob's tokens were kept: %+v", s.Credentials)
+	}
+	select {
+	case <-done:
+		t.Fatal("serve ended on another person's tokens")
+	default:
+	}
+
+	if code, body := send(t, c, http.MethodPut, "/v1/credentials", tokensFor("alice")); code != http.StatusOK {
+		t.Fatalf("alice's tokens answered %d %s", code, body)
+	}
+	p.waitConnected(t)
+	waitFor(t, "the device to be online", func() bool { return e.Status().Online })
 	if owner, err := readOwner(paths.OwnerFile(), testEnv); err != nil || owner != "alice" {
-		t.Errorf("the owner recorded is %q, %v", owner, err)
+		t.Errorf("the owner recorded once the platform minted for alice is %q, %v", owner, err)
 	}
 	if code, body := send(t, c, http.MethodPut, "/v1/credentials", tokensFor("bob")); code != http.StatusConflict || errorCode(body) != CodeCredentialsOtherPerson {
-		t.Errorf("another person's tokens answered %d %s", code, body)
+		t.Errorf("another person's tokens after the owner was confirmed answered %d %s", code, body)
+	}
+}
+
+// A clean stop while a key renewal waits for the client's token ends
+// serve without a refusal.
+func TestStopDuringTheRenewalWaitIsClean(t *testing.T) {
+	sandboxRuntime(t)
+	paths := testPaths(t)
+	keys := OpenKeys(paths.KeyFile())
+	connected(t, paths, keys)
+	now := time.Now().UTC()
+	if err := keys.Put(Key{Environment: testEnv, Token: "key-1", JTI: "jti-1", MintedAt: now, ExpiresAt: now.Add(2 * time.Second)}); err != nil {
+		t.Fatal(err)
+	}
+	p := newStubPlane(t)
+	creds := NewCredentials(nil, 100*time.Millisecond)
+	account := tokenAccount{fakeAccount: &fakeAccount{exists: true}, creds: creds}
+	e := New(Config{Paths: paths, URL: p.url, Keys: keys, Account: account, Version: "test", Credentials: creds, WaitToConnect: true})
+	stop, _ := running(t, e)
+	p.waitConnected(t)
+	waitFor(t, "the renewal to wait", func() bool {
+		s := e.Status()
+		return s.State == StateOffline && s.Detail == "this computer's key is minted once the application hands it your sign-in"
+	})
+	if err := stop(); err != nil {
+		t.Errorf("a clean stop during the renewal wait answered %v", err)
+	}
+}
+
+// Served on the saved login, a device with no record gets its owner once
+// the platform answers that login as the device's own.
+func TestSavedLoginIsRecordedAsTheOwner(t *testing.T) {
+	sandboxRuntime(t)
+	paths := testPaths(t)
+	keys := OpenKeys(paths.KeyFile())
+	connected(t, paths, keys)
+	p := newStubPlane(t)
+	e := New(Config{Paths: paths, URL: p.url, Keys: keys, Account: &fakeAccount{exists: true}, Version: "test", LoginSubject: "alice"})
+	running(t, e)
+	p.waitConnected(t)
+	waitFor(t, "the owner to be recorded", func() bool {
+		owner, err := readOwner(paths.OwnerFile(), testEnv)
+		return err == nil && owner == "alice"
+	})
+}
+
+// A removal deletes the record of its own device's owner, never another
+// device's.
+func TestRemovalKeepsAnotherDevicesOwnerRecord(t *testing.T) {
+	paths := testPaths(t)
+	keys := OpenKeys(paths.KeyFile())
+	connected(t, paths, keys)
+	if err := writeOwner(paths.OwnerFile(), "dev-another", "alice"); err != nil {
+		t.Fatal(err)
+	}
+	e := New(Config{Paths: paths, Keys: keys, Account: &fakeAccount{}})
+	if err := e.forgetHere(testEnv); err != nil {
+		t.Fatal(err)
+	}
+	if owner, err := readOwner(paths.OwnerFile(), "dev-another"); err != nil || owner != "alice" {
+		t.Errorf("another device's owner record went with this removal: %q, %v", owner, err)
 	}
 }
 
@@ -343,13 +458,20 @@ func TestConnectScreenUnchangedWithoutKeptGrants(t *testing.T) {
 			t.Errorf("the connect screen changed:\n%s\nwant:\n%s", got, want)
 		}
 	}
+	until := time.Now().Add(10 * 24 * time.Hour).UTC()
 	kept := Policy{Name: "Mac", Folders: []Folder{{Path: "~/a"}}, Network: Network{Mode: NetworkNone}, ReadPaths: []string{"~/.gitconfig"},
-		RememberedTriggers: []Remembered{{Trigger: "trg_daily", AgentVersion: "4", Until: time.Date(2026, 11, 18, 0, 0, 0, 0, time.UTC)}}}
+		RememberedTriggers: []Remembered{
+			{Trigger: "trg_daily", AgentVersion: "4", Until: until},
+			{Trigger: "trg_old", AgentVersion: "2", Until: time.Now().Add(-time.Hour)},
+		}}
 	screen := ConnectScreen(kept)
-	for _, want := range []string{"~/.gitconfig", "trg_daily (agent version 4) until 18 November 2026"} {
+	for _, want := range []string{"~/.gitconfig", "trg_daily (agent version 4) until " + until.Format("2 January 2006")} {
 		if !strings.Contains(screen, want) {
 			t.Errorf("the screen does not tell what the file keeps, %q:\n%s", want, screen)
 		}
+	}
+	if strings.Contains(screen, "trg_old") {
+		t.Errorf("a remembered trigger past its date is stated as granted:\n%s", screen)
 	}
 }
 
