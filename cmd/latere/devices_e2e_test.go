@@ -21,6 +21,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -497,5 +498,194 @@ func answer(t *testing.T, socket, id, answer string) {
 	if res.StatusCode != http.StatusNoContent {
 		body, _ := io.ReadAll(res.Body)
 		t.Fatalf("the answer was refused: %s %s", res.Status, body)
+	}
+}
+
+// The end-to-end run of spec 018: `latere devices serve --credentials
+// client`, with no saved login at all, is connected, renamed and removed
+// through its control socket alone, as a desktop client drives it, against
+// a real cellad and the platform's device routes. Every bearer is a token
+// the client handed: Cella's verifies it, and the platform stub reads
+// none.
+func TestDevicesServeThroughTheSocketEndToEnd(t *testing.T) {
+	if testing.Short() {
+		t.Skip("the end-to-end run builds cellad, which -short leaves out")
+	}
+	issuer := issuertest.New(t)
+	authorizer := stub.New(t)
+	cellad := startCellad(t, issuer.URL(), authorizer.URL(), authorizer.Token())
+	exp := time.Now().Add(time.Hour)
+	cellaToken := issuer.Mint(issuertest.Claims{Sub: "alice", Aud: issuertest.StringList{"cella"}, Exp: exp.Unix()})
+	platformToken := issuer.Mint(issuertest.Claims{Sub: "alice", Aud: issuertest.StringList{"api.latere.ai"}, Exp: exp.Unix()})
+	cella, err := cellaclient.New(cellaclient.Config{URL: cellad, Token: cellaclient.StaticToken(cellaToken)})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var mu sync.Mutex
+	named := map[string]string{}
+	var bearers []string
+	platform := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		bearers = append(bearers, strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+		mu.Unlock()
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/account/environments/context":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"tenant":{"labels":{"platform.latere.ai/tenant":"p-alice","platform.latere.ai/principal":"alice"}}}`)
+		case r.Method == http.MethodPatch && strings.HasPrefix(r.URL.Path, "/v1/account/devices/"):
+			var body map[string]string
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			mu.Lock()
+			named[strings.TrimPrefix(r.URL.Path, "/v1/account/devices/")] = body["name"]
+			mu.Unlock()
+			w.WriteHeader(http.StatusOK)
+			_, _ = io.WriteString(w, `{}`)
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/v1/account/devices/"):
+			if _, err := cella.Delete(r.Context(), cellaclient.KindEnvironment, strings.TrimPrefix(r.URL.Path, "/v1/account/devices/")); err != nil {
+				http.Error(w, err.Error(), http.StatusBadGateway)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(platform.Close)
+
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := os.MkdirTemp("/tmp", "le")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(state) })
+	project := filepath.Join(home, "project")
+	if err = os.MkdirAll(project, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	config := filepath.Join(home, ".config")
+	env := []string{
+		"HOME=" + home, "XDG_CONFIG_HOME=" + config, "XDG_STATE_HOME=" + state,
+		"XDG_CACHE_HOME=" + filepath.Join(home, ".cache"),
+		// No saved login exists, and no token is given in the environment:
+		// every bearer is one the client hands through the socket.
+		"LATERE_AUTH_TOKEN_FILE=" + filepath.Join(config, "latere", "auth-token.json"),
+		"LATERE_ENVIRONMENTS_URL=" + cellad, "LATERE_PLATFORM_URL=" + platform.URL,
+		"LATERE_DEVICE_KEYS_FILE=" + filepath.Join(config, "latere", "device-keys.json"),
+		"LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "PATH=" + standInPath(t),
+		"TMPDIR=" + os.TempDir(),
+	}
+	serve := exec.Command(latereBinary(t), "devices", "serve", "--credentials", "client")
+	serve.Env = env
+	var stderr syncBuffer
+	serve.Stdout, serve.Stderr = &stderr, &stderr
+	if err = serve.Start(); err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan error, 1)
+	go func() { exited <- serve.Wait() }()
+	t.Cleanup(func() {
+		_ = serve.Process.Signal(os.Interrupt)
+		select {
+		case <-exited:
+		case <-time.After(15 * time.Second):
+			_ = serve.Process.Kill()
+		}
+		if t.Failed() {
+			t.Logf("latere devices serve:\n%s", stderr.String())
+		}
+	})
+	waitForText(t, &stderr, "Not connected.", exited)
+	socket := filepath.Join(state, "latere", "devices", "control.sock")
+	client := socketClient(socket)
+	call := func(method, route string, body any) (int, map[string]any) {
+		t.Helper()
+		var reader io.Reader
+		if body != nil {
+			raw, _ := json.Marshal(body)
+			reader = bytes.NewReader(raw)
+		}
+		req, err := http.NewRequest(method, "http://device"+route, reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		res, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = res.Body.Close() }()
+		var answer map[string]any
+		_ = json.NewDecoder(res.Body).Decode(&answer)
+		return res.StatusCode, answer
+	}
+	waitState := func(want string) map[string]any {
+		t.Helper()
+		deadline := time.Now().Add(60 * time.Second)
+		for {
+			_, status := call(http.MethodGet, "/v1/status", nil)
+			if status["state"] == want {
+				return status
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("the state stayed %v, want %s:\n%s", status["state"], want, stderr.String())
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+
+	if code, answer := call(http.MethodPut, "/v1/credentials", map[string]any{
+		"cella": map[string]any{"token": cellaToken, "expires_at": exp}, "platform": map[string]any{"token": platformToken, "expires_at": exp},
+	}); code != http.StatusOK {
+		t.Fatalf("the tokens answered %d %v", code, answer)
+	}
+	code, proposal := call(http.MethodGet, "/v1/connect?network=none&name=E2E+socket+computer&folder="+url.QueryEscape(project), nil)
+	if code != http.StatusOK {
+		t.Fatalf("the proposal answered %d %v", code, proposal)
+	}
+	if code, answer := call(http.MethodPost, "/v1/connect", map[string]any{"policy": proposal["policy"], "consent": proposal["consent"]}); code != http.StatusOK {
+		t.Fatalf("the connect answered %d %v", code, answer)
+	}
+	status := waitState("online")
+	id, _ := status["device"].(string)
+	if !regexp.MustCompile(`^dev-[a-z2-7]{16}$`).MatchString(id) {
+		t.Fatalf("the device is %q", id)
+	}
+	environment, _, err := cella.GetEnvironment(context.Background(), id)
+	if err != nil || environment.Spec.Mode != "worker" {
+		t.Fatalf("the environment reads %+v, %v", environment, err)
+	}
+	if code, answer := call(http.MethodPut, "/v1/policy", map[string]any{"name": "Renamed through the socket"}); code != http.StatusOK {
+		t.Fatalf("the rename answered %d %v", code, answer)
+	}
+	mu.Lock()
+	name := named[id]
+	seen := append([]string(nil), bearers...)
+	mu.Unlock()
+	if name != "Renamed through the socket" {
+		t.Errorf("the device is named %q at the platform", name)
+	}
+	for _, b := range seen {
+		if b != platformToken {
+			t.Errorf("the platform was presented %q, not the handed token", b)
+		}
+	}
+
+	if code, answer := call(http.MethodPost, "/v1/remove", nil); code != http.StatusOK || answer["state"] != "not_connected" {
+		t.Fatalf("the removal answered %d %v", code, answer)
+	}
+	if _, _, err := cella.GetEnvironment(context.Background(), id); err == nil {
+		t.Error("the environment outlived the removal")
+	}
+	if _, err := os.Stat(filepath.Join(config, "latere", "device.yaml")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the host policy file outlived the removal: %v", err)
+	}
+	select {
+	case err := <-exited:
+		t.Fatalf("serve ended with the removal: %v", err)
+	default:
 	}
 }
