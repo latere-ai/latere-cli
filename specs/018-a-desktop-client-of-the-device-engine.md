@@ -13,7 +13,8 @@ affects:
   - internal/devices/engine.go (an engine that serves its socket before it is connected; credentials from the client; the policy and removal routes)
   - internal/devices/credentials.go (new: the tokens a client hands the engine, and when it needs more)
   - internal/devices/policy.go (the policy checked and applied through the socket; extra denied paths)
-  - internal/devices/paths.go (`Deny` adds the policy's denied paths)
+  - internal/devices/paths.go (`Deny` adds the policy's denied paths; `OwnerFile`, whose device this computer serves)
+  - internal/devices/owner.go (new: the record of whose device this computer serves)
   - internal/devices/events.go (`Status` says the connection state and the credentials needed)
   - internal/commands/devices_connect.go (enrolment shared by connect and `POST /v1/connect`; `serve --credentials client`; the release check off under `LATERE_NO_UPDATE_CHECK`)
   - internal/commands/devices.go (`remove` shares its local half with `POST /v1/remove`)
@@ -94,20 +95,33 @@ sentence after it, so the client wraps and lays them out:
 ```
 
 The `who` fact follows `session_start`, with the same sentences the
-screen prints for allow and for ask. The proposal on a computer already
-connected is refused `device_already_connected`.
+screen prints for allow and for ask. What the host policy file kept from
+an earlier connect is granted too, so it is a fact as well: `read_paths`,
+the paths read outside the folders, and `remembered`, the scheduled
+triggers that start without asking, each only when the file holds one.
+The terminal's screen states them in the same words, and reads as before
+for a file that holds neither. With no `folder` asked and none kept in
+the file, the proposal names no folder, and its problems ask for one:
+`serve` runs where its application started it, often `/`, which the
+terminal's default, the folder it runs in, would propose. The proposal
+on a computer already connected is refused `device_already_connected`.
 
 `POST /v1/connect` with `{"policy": {...}, "consent": "<digest>"}` does
 what `connect` does after its typed yes, through the same function: it
 refuses a digest that does not match the policy and facts the engine
-would show now (`device_not_confirmed`), writes `device.yaml`, creates
+would show now, the file as it is then included, so a file changed since
+the proposal fails it (`device_not_confirmed`); the posted name is
+cleaned as the proposal's was. It writes `device.yaml`, creates
 the environment at Cella and names it at the platform with the client's
 credentials (B), and starts serving. Its refusals are 016's
 (`device_policy_invalid`, `device_personal_only`, `device_limit`,
 `device_org_context`, `sign_in_required`), and
-`device_credentials_needed` when no client handed a platform token in
-time, as the JSON error. The terminal's `ConnectScreen` renders the same
-facts, so the two never drift.
+`device_credentials_needed` when no client handed a token in time, as
+the JSON error. A name the platform refuses leaves the computer
+connected: the answer is the status with
+`"warnings": ["This computer is connected, and its name ... was not set: ..."]`.
+The terminal's `ConnectScreen` renders the same facts, so the two never
+drift.
 
 ### B. Credentials from the client
 
@@ -118,18 +132,41 @@ holds what a client gave it:
 `{"cella": {"token": "...", "expires_at": "..."}, "platform": {"token": "...", "expires_at": "..."}}`,
 each an actor token minted by the client for that audience from its own
 sign-in in the person's personal context. The engine checks each token's
-audience and expiry, keeps them in memory only, and uses them for
-`MintKey`, `RevokeKey`, `Exists` and the enrolment's platform calls. A
-token is never written to a file or the activity log.
+audience and expiry, that it names a person, and that it is in that
+person's own context (`credentials_org_context` otherwise: a device is
+personal); tokens handed together must name one person. It keeps them in
+memory only and uses them for `MintKey`, `RevokeKey`, `Exists` and the
+enrolment's platform calls. A token is never written to a file or the
+activity log.
+
+The tokens are tied to the person whose device the computer serves.
+Once it is connected, a token of another person is refused
+(`credentials_other_person`, 409), and tokens held for another are
+dropped: without the tie, an application signed in as someone else
+would have Cella answer `not_found` or `device_not_owned`, which the
+engine reads as a removal, and the computer would forget a device still
+its owner's at the platform. The owner is recorded in the state
+directory, `owner.json` beside the control socket, apart from
+`device.yaml` so that every version still reads that file: at a connect
+through the socket, the person whose tokens connected it; for a device
+connected before the record existed, the person the first tokens handed
+name. On a computer not connected, any person's tokens are taken, and
+another person's replace them, so the next connect may be anyone's.
 
 `GET /v1/status` gains `"credentials": {"cella": "valid" | "needed",
-"platform": "valid" | "needed"}`, and a status event is sent when one
-turns `needed`: none held, or the held one within a minute of its
-expiry. A key rotation or an existence check that needs a token waits
-up to 30 seconds for one; without one it keeps serving on the current
-key and tries again at the next check, as an expired saved login does
-today. Without `--credentials client`, the saved login is used as
-today.
+"platform": "valid" | "needed"}`, and `GET /v1/status?follow=1` streams
+the status, one JSON object a line, each time it changes, including when
+a token turns `needed`: none held, or the held one within a minute of
+its expiry. A key rotation or an existence check that needs a token
+waits up to 30 seconds for one; without one it keeps serving on the
+current key and tries again at the next check, as an expired saved login
+does today. A key that must be minted (none kept, or the kept one
+expired) waits for a token however long it takes, offline with the
+status saying the token is needed, and the engine and its socket stay
+up meanwhile; the next steps it names are the application's, never
+`latere login`. Every other step that needs a token and found none in
+time is refused `device_credentials_needed`. Without
+`--credentials client`, the saved login is used as today.
 
 ### C. The host policy through the socket
 
@@ -137,10 +174,15 @@ today.
 `PUT /v1/policy` with any of `name`, `folders`, `network` checks the
 result as `connect` does (`Problems`, `CheckDriver`), refuses with
 `device_policy_invalid` and the problem, or writes `device.yaml` under
-the engine's policy lock and reloads, answering the status. A changed
-name is set at the platform first (`PATCH /v1/account/devices/{id}`),
-with the client's credentials; a refusal there is
-`device_rename_failed`, and nothing is written.
+the engine's policy lock, answering the status. A change of the folders
+or the network is then read again by the serving engine, which restarts
+its worker and so stops every running session; a new name alone, or no
+change, does not reload and leaves them running. A changed name is set
+at the platform first (`PATCH /v1/account/devices/{id}`), with the
+client's credentials and outside the policy lock, so a session start is
+never held up by the platform; the file is then read again and the
+change applied over it. A refusal there is `device_rename_failed`, and
+nothing is written.
 `DELETE /v1/policy/remembered/{trigger}` forgets one remembered
 scheduled trigger, and answers `not_remembered` for one it does not
 name.
@@ -154,7 +196,11 @@ activity log kept, every sandbox stopped, and the engine back in
 `not_connected`. With `{"local": true}` it deletes only the local half,
 for a computer whose device belongs to another account or is already
 removed at the platform. `latere devices remove` and the route share one
-function.
+function. A removal while the computer is paused deletes its sandboxes
+and their directory too, and a removal that comes between a connect and
+the start of serving finds the start checking the file under the same
+lock, so no device the file no longer names is served. The record of the
+owner goes with the device.
 
 ### E. No release check when told not to
 
@@ -196,9 +242,25 @@ engine, `logout` asks as 016 says.
 | 8 | `TestDenyFromPolicy`: a denied path is unreadable to a stage, skipped where `srt` is missing | `internal/devices/engine_test.go` (with F) |
 | 9 | `TestLogoutKeepsAnApplicationsDevice` | `internal/commands/logout_device_test.go` (with G) |
 | 10 | `TestDevicesServeThroughTheSocketEndToEnd`: the built binary under `--credentials client` with no saved login, against a real cellad, from tokens through connect, rename and remove | `cmd/latere/devices_e2e_test.go` |
+| 11 | `TestRenameLeavesRunningSessionsAlone` and `TestRenameRunsOutsideTheFileLock`: a rename, an empty change and the same folders restart no worker, a change of the folders does, and a session start reads the file during a slow rename | `internal/devices/client_engine_test.go` |
+| 12 | `TestTokensAreTiedToTheDevicesOwner` and `TestOwnerIsLearnedFromTheFirstTokens`: an organization's token and two people's are refused; on a connected computer another person's is refused and the device is not forgotten; the owner is recorded from the first tokens; after a removal anyone's are taken | `internal/devices/client_engine_test.go` |
+| 13 | `TestClientModeWaitsForTheKey`: with no key and no token, `serve` waits offline with its socket up, and serves once tokens are handed | `internal/devices/client_engine_test.go` |
+| 14 | `TestConsentCoversWhatTheFileKept` and `TestConnectScreenUnchangedWithoutKeptGrants`: the facts name the file's read paths and remembered triggers, a file changed after the proposal fails the consent, and the screen is byte-identical for a file that keeps neither | `internal/devices/client_engine_test.go` |
+| 15 | `TestStatusCanBeFollowed`: the stream says a token is needed, valid after it is handed, and needed again before it expires | `internal/devices/client_engine_test.go` |
+| 16 | `TestConnectAnswersARefusedNameAndCleansIt`, `TestAMissingTokenIsSaidSo`, `TestAProposalWithNoFolderAsksForOne`, `TestRemovalWhilePausedDeletesTheSandboxes`, `TestRemovalClearsTheKeyToRevoke`, `TestAStartAfterARemovalServesNothing` | `internal/devices/client_engine_test.go` |
 
 ## Progress
 
-A to E are built (2026-10-19), with tests 1 to 7 and 10. F (paths a
-client denies) and G (logout on a computer an application serves) are
-not built yet; tests 8 and 9 come with them.
+A to E are built (2026-10-19), with tests 1 to 7 and 10, and released in
+v0.25.0. An independent review of that release found five things to
+change for a desktop client, built since with tests 11 to 16: a rename
+no longer restarts the worker, handed tokens are tied to the device's
+owner and an organization's are refused, a key to mint waits for the
+client's token instead of ending `serve`, the consent covers the read
+paths and remembered triggers the file kept, and the status can be
+followed; with them, the rename runs outside the policy lock, a missing
+token is answered `device_credentials_needed`, a proposal with no folder
+asks for one, and a removal while paused or right after a connect leaves
+nothing served or kept. F (paths a client denies) and G (logout on a
+computer an application serves) are not built yet; tests 8 and 9 come
+with them.
