@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -31,13 +32,29 @@ type Enroller interface {
 	Propose(previous Policy, q ConnectQuery) (Policy, error)
 	// Connect does what `connect` does after its typed yes: the host policy
 	// file, the environment at Cella and its name at the platform. It
-	// answers the policy with its device.
-	Connect(ctx context.Context, p Policy) (Policy, error)
+	// answers the policy with its device, and why the name was not set when
+	// the platform refused it, which leaves the computer connected.
+	Connect(ctx context.Context, p Policy) (Connected, error)
 	// Rename sets the device's name at the platform.
 	Rename(ctx context.Context, env, name string) error
 	// Remove removes the device at the platform, which deletes its
 	// environment at Cella and revokes its keys.
 	Remove(ctx context.Context, env string) error
+}
+
+// Connected is a connect that went through: the policy with its device, and
+// NameError, the platform's refusal of the name, when it refused it.
+type Connected struct {
+	Policy    Policy
+	NameError error
+}
+
+// ConnectAnswer is what POST /v1/connect answers: the status, and warnings
+// for what the connect could not do while connecting the computer, such as
+// setting its name.
+type ConnectAnswer struct {
+	Status
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // ConnectQuery is what a client asks a proposal for, as the query of
@@ -84,11 +101,13 @@ type Proposal struct {
 
 // The kinds of fact the person is shown before this computer is connected.
 const (
-	FactFolders = "folders"
-	FactSecrets = "secrets"
-	FactNetwork = "network"
-	FactWho     = "who"
-	FactLog     = "log"
+	FactFolders    = "folders"
+	FactSecrets    = "secrets"
+	FactNetwork    = "network"
+	FactReadPaths  = "read_paths"
+	FactWho        = "who"
+	FactRemembered = "remembered"
+	FactLog        = "log"
 )
 
 // Fact is one thing the person is told before this computer is connected:
@@ -150,13 +169,26 @@ func connectFacts(p Policy) []Fact {
 			"confined to them: never your credentials, keychains or browser profiles,\n" +
 			"and no network beyond what is listed above.\n" + switchToAsk
 	}
-	return []Fact{
+	facts := []Fact{
 		folders,
 		{Kind: FactSecrets, Text: "Everything in these folders is readable to the agent, a project's .env\nfile and other secrets kept there included."},
 		network,
-		{Kind: FactWho, Text: who},
-		{Kind: FactLog, Text: "What the agent reads on this computer goes to the session's log and to\nthe model. In an organization's conversation, that organization can\nread it too."},
 	}
+	// What a host policy file kept from an earlier connect is granted too,
+	// so the person is told it: the paths read outside the folders, and the
+	// scheduled triggers that start without asking.
+	if len(p.ReadPaths) > 0 {
+		facts = append(facts, Fact{Kind: FactReadPaths, Text: "Commands may also read these paths, outside the folders above:", Items: p.ReadPaths})
+	}
+	facts = append(facts, Fact{Kind: FactWho, Text: who})
+	if len(p.RememberedTriggers) > 0 {
+		remembered := Fact{Kind: FactRemembered, Text: "These scheduled triggers you remembered start without asking, each until\nthe date beside it:"}
+		for _, r := range p.RememberedTriggers {
+			remembered.Items = append(remembered.Items, fmt.Sprintf("%s (agent version %s) until %s", r.Trigger, r.AgentVersion, r.Until.UTC().Format("2 January 2006")))
+		}
+		facts = append(facts, remembered)
+	}
+	return append(facts, Fact{Kind: FactLog, Text: "What the agent reads on this computer goes to the session's log and to\nthe model. In an organization's conversation, that organization can\nread it too."})
 }
 
 // ConnectFacts are the facts for a policy as a client shows them: each
@@ -251,6 +283,11 @@ func (e *Engine) ProposeConnect(q ConnectQuery) (Proposal, error) {
 	if err != nil {
 		return Proposal{}, Fail(CodePolicyInvalid, "", err)
 	}
+	if len(q.Folders) == 0 && len(previous.Folders) == 0 {
+		// The terminal proposes the folder it runs in; serve runs where its
+		// application started it, often /, so a client names the folder.
+		p.Folders = nil
+	}
 	terms, facts := TermsOf(p), ConnectFacts(p)
 	return Proposal{Policy: terms, Facts: facts, Consent: Consent(terms, facts), Problems: e.checkPolicy(p)}, nil
 }
@@ -258,38 +295,50 @@ func (e *Engine) ProposeConnect(q ConnectQuery) (Proposal, error) {
 // Connect is POST /v1/connect: with a consent that matches the terms and
 // the facts the engine would show for them now, it connects this computer
 // as `connect` does after its typed yes, and starts serving it.
-func (e *Engine) Connect(ctx context.Context, t Terms, consent string) (Status, error) {
+func (e *Engine) Connect(ctx context.Context, t Terms, consent string) (ConnectAnswer, error) {
 	enroll, err := e.enroller()
 	if err != nil {
-		return Status{}, err
+		return ConnectAnswer{}, err
 	}
 	if !e.connectMu.TryLock() {
-		return Status{}, Fail(CodeAlreadyConnected, "another connect is in progress", nil)
+		return ConnectAnswer{}, Fail(CodeAlreadyConnected, "another connect is in progress", nil)
 	}
 	defer e.connectMu.Unlock()
 	previous, err := e.unconnectedPolicy()
 	if err != nil {
-		return Status{}, err
+		return ConnectAnswer{}, err
 	}
 	p := previous
-	p.Device, p.Name, p.SessionStart, p.Folders, p.Network = "", t.Name, t.SessionStart, t.Folders, t.Network
+	p.Device, p.Name, p.SessionStart, p.Folders, p.Network = "", CleanName(t.Name), t.SessionStart, t.Folders, t.Network
 	if p.Network.Mode == NetworkNone {
 		p.Network.Hosts = nil
 	}
 	if problems := e.checkPolicy(p); len(problems) > 0 {
-		return Status{}, Fail(CodePolicyInvalid, strings.Join(problems, "; "), nil)
+		return ConnectAnswer{}, Fail(CodePolicyInvalid, strings.Join(problems, "; "), nil)
 	}
+	// The facts are those of the file as it is now, the read paths and
+	// remembered triggers it kept included, so a file changed since the
+	// proposal fails the consent.
 	if Consent(TermsOf(p), ConnectFacts(p)) != consent {
-		return Status{}, Fail(CodeNotConfirmed, "the consent does not match the terms and the facts this engine shows for them now; ask GET /v1/connect again and show its answer", nil)
+		return ConnectAnswer{}, Fail(CodeNotConfirmed, "the consent does not match the terms and the facts this engine shows for them now; ask GET /v1/connect again and show its answer", nil)
 	}
-	if _, err = enroll.Connect(ctx, p); err != nil {
-		return Status{}, err
+	done, err := enroll.Connect(ctx, p)
+	if err != nil {
+		return ConnectAnswer{}, err
 	}
+	// The person whose tokens connected the computer owns its device.
+	e.bindCredentials(done.Policy.Device)
 	select {
 	case e.connected <- struct{}{}:
 	default:
 	}
-	return e.Status(), nil
+	answer := ConnectAnswer{Status: e.Status()}
+	if done.NameError != nil {
+		warning := fmt.Sprintf("This computer is connected, and its name %q was not set: %v", p.Name, done.NameError)
+		answer.Warnings = append(answer.Warnings, warning)
+		e.notice(warning)
+	}
+	return answer, nil
 }
 
 // PutCredentials is PUT /v1/credentials: the tokens a client hands an engine
@@ -346,29 +395,17 @@ type PolicyChange struct {
 	Network *Network  `json:"network"`
 }
 
-// PutPolicy is PUT /v1/policy: the change is checked as `connect` checks a
-// policy, a new name is set at the platform, and the file is written and
-// read again by the engine serving it.
-func (e *Engine) PutPolicy(ctx context.Context, c PolicyChange) (Status, error) {
-	e.policyMu.Lock()
-	p, err := e.connectedPolicy()
-	if err != nil {
-		e.policyMu.Unlock()
-		return Status{}, err
-	}
-	renamed := false
+// apply is p with the change, checked as `connect` checks a policy.
+func (e *Engine) apply(p Policy, c PolicyChange) (Policy, error) {
 	if c.Name != nil {
-		name := CleanName(*c.Name)
-		renamed = name != p.Name
-		p.Name = name
+		p.Name = CleanName(*c.Name)
 	}
 	if c.Folders != nil {
 		p.Folders = nil
 		for _, f := range *c.Folders {
 			path, err := Expand(e.cfg.Paths.Home, f.Path)
 			if err != nil {
-				e.policyMu.Unlock()
-				return Status{}, Fail(CodePolicyInvalid, "folders: "+err.Error(), nil)
+				return Policy{}, Fail(CodePolicyInvalid, "folders: "+err.Error(), nil)
 			}
 			p.Folders = append(p.Folders, Folder{Path: Shorten(e.cfg.Paths.Home, path), Write: f.Write})
 		}
@@ -380,33 +417,74 @@ func (e *Engine) PutPolicy(ctx context.Context, c PolicyChange) (Status, error) 
 		}
 	}
 	if problems := e.checkPolicy(p); len(problems) > 0 {
+		return Policy{}, Fail(CodePolicyInvalid, strings.Join(problems, "; "), nil)
+	}
+	return p, nil
+}
+
+// servesTheSame reports whether two policies give the local driver the same
+// folders and network, so a change between them needs no reload: a reload
+// restarts the worker, which stops every running session.
+func servesTheSame(a, b Policy) bool {
+	return slices.Equal(a.Folders, b.Folders) && a.Network.Mode == b.Network.Mode && slices.Equal(a.Network.Hosts, b.Network.Hosts)
+}
+
+// PutPolicy is PUT /v1/policy: the change is checked as `connect` checks a
+// policy, a new name is set at the platform, and the file is written. A
+// change of the folders or the network is read again by the engine serving
+// the device, which restarts its worker; a new name alone, or no change,
+// leaves every running session alone. The platform's rename runs outside
+// the file's lock, so a session start is never held up by it.
+func (e *Engine) PutPolicy(ctx context.Context, c PolicyChange) (Status, error) {
+	e.policyMu.Lock()
+	before, err := e.connectedPolicy()
+	if err != nil {
 		e.policyMu.Unlock()
-		return Status{}, Fail(CodePolicyInvalid, strings.Join(problems, "; "), nil)
+		return Status{}, err
 	}
-	if renamed {
-		enroll, err := e.enroller()
-		if err == nil {
-			err = enroll.Rename(ctx, p.Device, p.Name)
-		}
-		if err != nil {
-			e.policyMu.Unlock()
-			return Status{}, Fail(CodeRenameFailed, "", err)
-		}
-	}
-	err = SavePolicy(e.cfg.Paths.PolicyFile(), p)
+	after, err := e.apply(before, c)
 	e.policyMu.Unlock()
 	if err != nil {
-		return Status{}, Fail(CodePolicyInvalid, "write the host policy file", err)
+		return Status{}, err
+	}
+	if after.Name != before.Name {
+		enroll, err := e.enroller()
+		if err == nil {
+			err = enroll.Rename(ctx, after.Device, after.Name)
+		}
+		if err != nil {
+			return Status{}, e.fail(CodeRenameFailed, "", err)
+		}
+	}
+	// The file is read again: what changed in it during the rename (a
+	// remembered trigger) stays, and the change is applied over it.
+	e.policyMu.Lock()
+	now, err := e.connectedPolicy()
+	if err == nil && now.Device != before.Device {
+		err = Fail(CodeNotConnected, "the host policy file names another device now", nil)
+	}
+	if err == nil {
+		after, err = e.apply(now, c)
+	}
+	if err == nil {
+		if serr := SavePolicy(e.cfg.Paths.PolicyFile(), after); serr != nil {
+			err = Fail(CodePolicyInvalid, "write the host policy file", serr)
+		}
+	}
+	e.policyMu.Unlock()
+	if err != nil {
+		return Status{}, err
 	}
 	e.mu.Lock()
-	serving := e.running && e.policy.Device == p.Device
+	served := e.policy
+	serving := e.running && served.Device == after.Device
 	if serving {
 		// The name the status shows changes at once; the folders and the
 		// network with the reload.
-		e.policy.Name = p.Name
+		e.policy.Name = after.Name
 	}
 	e.mu.Unlock()
-	if serving {
+	if serving && !servesTheSame(served, after) {
 		if err := e.Reload(); err != nil {
 			return Status{}, err
 		}
@@ -441,7 +519,7 @@ func (e *Engine) ForgetRemembered(trigger string) error {
 // activity log stays, and `serve` waits to be connected again.
 func (e *Engine) Remove(ctx context.Context, local bool) (Status, error) {
 	e.mu.Lock()
-	env, cancel, done := e.policy.Device, e.devCancel, e.devDone
+	env := e.policy.Device
 	e.mu.Unlock()
 	if env == "" {
 		e.policyMu.Lock()
@@ -458,9 +536,16 @@ func (e *Engine) Remove(ctx context.Context, local bool) (Status, error) {
 			err = enroll.Remove(ctx, env)
 		}
 		if err != nil {
-			return Status{}, Fail(CodeRemoveFailed, "", err)
+			return Status{}, e.fail(CodeRemoveFailed, "", err)
 		}
 	}
+	// Under startMu a device's run either registered already, and is ended
+	// here, or has not checked the file yet, and finds the device gone.
+	e.startMu.Lock()
+	defer e.startMu.Unlock()
+	e.mu.Lock()
+	cancel, done := e.devCancel, e.devDone
+	e.mu.Unlock()
 	if cancel != nil {
 		// The device's run stops every sandbox and forgets the device here
 		// before it returns.
@@ -473,9 +558,11 @@ func (e *Engine) Remove(ctx context.Context, local bool) (Status, error) {
 }
 
 // forgetHere deletes the key and the host policy file of a device removed
-// through the control socket.
+// through the control socket, and the record of its owner.
 func (e *Engine) forgetHere(env string) error {
 	e.policyMu.Lock()
-	defer e.policyMu.Unlock()
-	return Forget(e.cfg.Keys, e.cfg.Paths.PolicyFile(), env, true)
+	err := Forget(e.cfg.Keys, e.cfg.Paths.PolicyFile(), env, true)
+	e.policyMu.Unlock()
+	e.unbindCredentials()
+	return err
 }

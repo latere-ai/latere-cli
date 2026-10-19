@@ -308,17 +308,33 @@ func enrollDevice(ctx context.Context, cmd *cobra.Command, paths devices.Paths, 
 }
 
 // connectAs is what connecting does once the person consented, in the
-// terminal or through the control socket: the host policy file, the
-// environment at Cella created as the person, and its name at the platform.
-// The key is minted when the engine starts.
+// terminal: connectNamed, then what it did printed.
 func connectAs(ctx context.Context, paths devices.Paths, p devices.Policy, auth deviceAuth, errOut io.Writer) (devices.Policy, error) {
+	done, err := connectNamed(ctx, paths, p, auth)
+	if err != nil {
+		return devices.Policy{}, err
+	}
+	if done.NameError != nil {
+		fprintf(errOut, "Note: this computer is connected, and its name was not set (%v). Set it with `latere devices rename %q`.\n",
+			wrapReposErr(done.NameError), p.Name)
+	}
+	fprintf(errOut, "Connected this computer as %s (%s).\n", p.Name, done.Policy.Device)
+	return done.Policy, nil
+}
+
+// connectNamed is what connecting does once the person consented, in the
+// terminal or through the control socket: the host policy file, the
+// environment at Cella created as the person, and its name at the
+// platform, whose refusal leaves the computer connected and is answered
+// beside it. The key is minted when the engine starts.
+func connectNamed(ctx context.Context, paths devices.Paths, p devices.Policy, auth deviceAuth) (devices.Connected, error) {
 	err := devices.SavePolicy(paths.PolicyFile(), p)
 	if err != nil {
-		return devices.Policy{}, devices.Fail(devices.CodePolicyInvalid, "write the host policy file", err)
+		return devices.Connected{}, devices.Fail(devices.CodePolicyInvalid, "write the host policy file", err)
 	}
 	labels, err := readTenantLabels(ctx, auth.platform)
 	if err != nil {
-		return devices.Policy{}, devices.Fail(devices.CodeRefused, "", err)
+		return devices.Connected{}, credentialsOr(err, devices.Fail(devices.CodeRefused, "", err))
 	}
 	labels[deviceKindLabel] = deviceKindValue
 	id := "dev-" + strings.ToLower(rand.Text()[:16])
@@ -331,25 +347,33 @@ func connectAs(ctx context.Context, paths devices.Paths, p devices.Policy, auth 
 		},
 	})
 	if err != nil {
-		return devices.Policy{}, devices.Fail(devices.CodeServeFailed, "encode the environment", err)
+		return devices.Connected{}, devices.Fail(devices.CodeServeFailed, "encode the environment", err)
 	}
 	client, err := auth.cella()
 	if err != nil {
-		return devices.Policy{}, devices.Fail(devices.CodeRefused, "", err)
+		return devices.Connected{}, credentialsOr(err, devices.Fail(devices.CodeRefused, "", err))
 	}
 	if _, _, err = client.CreateEnvironment(ctx, cellaclient.JSON(body)); err != nil {
-		return devices.Policy{}, createRefusal(ctx, err, auth)
+		return devices.Connected{}, credentialsOr(err, createRefusal(ctx, err, auth))
 	}
 	p.Device = id
 	if err = devices.SavePolicy(paths.PolicyFile(), p); err != nil {
-		return devices.Policy{}, devices.Fail(devices.CodePolicyInvalid, "write the device into the host policy file", err)
+		return devices.Connected{}, devices.Fail(devices.CodePolicyInvalid, "write the device into the host policy file", err)
 	}
+	done := devices.Connected{Policy: p}
 	if err = auth.platform(ctx, http.MethodPatch, devicesPath+"/"+id, map[string]string{"name": p.Name}, nil); err != nil {
-		fprintf(errOut, "Note: this computer is connected, and its name was not set (%v). Set it with `latere devices rename %q`.\n",
-			wrapReposErr(err), p.Name)
+		done.NameError = err
 	}
-	fprintf(errOut, "Connected this computer as %s (%s).\n", p.Name, id)
-	return p, nil
+	return done, nil
+}
+
+// credentialsOr is the refusal for a step that waited for a client's token
+// it was never handed, and otherwise the refusal given.
+func credentialsOr(err, otherwise error) error {
+	if errors.Is(err, devices.ErrCredentialsNeeded) {
+		return devices.Fail(devices.CodeCredentialsNeeded, "", err)
+	}
+	return otherwise
 }
 
 // createRefusal is the answer to an environment create the platform
@@ -511,16 +535,26 @@ func (d deviceEnroller) Propose(previous devices.Policy, q devices.ConnectQuery)
 }
 
 // Connect connects this computer as the person, refusing an organization's
-// context as connect does.
-func (d deviceEnroller) Connect(ctx context.Context, p devices.Policy) (devices.Policy, error) {
+// context as connect does. What it did is printed for serve's own output,
+// and a name the platform refused is answered to the client too.
+func (d deviceEnroller) Connect(ctx context.Context, p devices.Policy) (devices.Connected, error) {
 	org, err := d.auth.orgContext(ctx)
 	if err != nil {
-		return devices.Policy{}, err
+		return devices.Connected{}, err
 	}
 	if org != "" {
-		return devices.Policy{}, devices.Fail(devices.CodeOrgContext, "the sign-in is in the context of the organization "+org, nil)
+		return devices.Connected{}, devices.Fail(devices.CodeOrgContext, "the sign-in is in the context of the organization "+org, nil)
 	}
-	return connectAs(ctx, d.paths, p, d.auth, d.errOut)
+	done, err := connectNamed(ctx, d.paths, p, d.auth)
+	if err != nil {
+		return devices.Connected{}, err
+	}
+	if done.NameError != nil {
+		done.NameError = wrapReposErr(done.NameError)
+		fprintf(d.errOut, "Note: this computer is connected, and its name was not set (%v).\n", done.NameError)
+	}
+	fprintf(d.errOut, "Connected this computer as %s (%s).\n", p.Name, done.Policy.Device)
+	return done, nil
 }
 
 // Rename sets the device's name at the platform.

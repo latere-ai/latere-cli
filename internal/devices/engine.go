@@ -113,6 +113,12 @@ type Engine struct {
 	policyMu sync.Mutex
 	// connectMu lets one connect through the socket run at a time.
 	connectMu sync.Mutex
+	// startMu orders a device's run starting against a removal through the
+	// socket: the run checks the host policy file and registers itself under
+	// it, and a removal that finds no run forgets the device under it, so a
+	// removal right after a connect never leaves a run serving a device the
+	// file no longer names.
+	startMu sync.Mutex
 	// connected wakes an engine waiting to be connected once a client
 	// connected the computer.
 	connected chan struct{}
@@ -163,8 +169,54 @@ func New(cfg Config) *Engine {
 	e.broker = newBroker(e.hub.publish)
 	if cfg.Credentials != nil {
 		cfg.Credentials.notifyNeed(e.publishStatus)
+		cfg.Credentials.notifyBound(e.recordOwner)
+		// A client may hand tokens before Run reads the file: they are tied
+		// to the device's owner from the start.
+		if p, ok, err := LoadPolicy(cfg.Paths.PolicyFile()); err == nil && ok && p.Device != "" {
+			e.bindCredentials(p.Device)
+		}
 	}
 	return e
+}
+
+// bindCredentials ties a client's tokens to the person recorded as the
+// owner of device, or, where none is recorded, to the person the tokens
+// name, which is then recorded. It does nothing on the saved login.
+func (e *Engine) bindCredentials(device string) {
+	if e.cfg.Credentials == nil {
+		return
+	}
+	subject, err := readOwner(e.cfg.Paths.OwnerFile(), device)
+	if err != nil {
+		e.notice("Whose device this computer serves could not be read, so it is learned again from the next sign-in handed: " + err.Error())
+	}
+	e.cfg.Credentials.Bind(subject)
+}
+
+// recordOwner records subject as the owner of the device the host policy
+// file names, learned from the tokens a client handed for a device whose
+// owner was not recorded yet.
+func (e *Engine) recordOwner(subject string) {
+	e.policyMu.Lock()
+	p, ok, err := LoadPolicy(e.cfg.Paths.PolicyFile())
+	e.policyMu.Unlock()
+	if err != nil || !ok || p.Device == "" {
+		return
+	}
+	if err := writeOwner(e.cfg.Paths.OwnerFile(), p.Device, subject); err != nil {
+		e.notice("Whose device this computer serves could not be recorded: " + err.Error())
+	}
+}
+
+// unbindCredentials ends the tie once this computer is no longer
+// connected, and deletes the record of its owner.
+func (e *Engine) unbindCredentials() {
+	if err := removeOwner(e.cfg.Paths.OwnerFile()); err != nil {
+		e.notice("The record of whose device this computer served could not be deleted: " + err.Error())
+	}
+	if e.cfg.Credentials != nil {
+		e.cfg.Credentials.Unbind()
+	}
 }
 
 // publishStatus tells every client the status now.
@@ -261,6 +313,7 @@ func (e *Engine) Run(ctx context.Context) error {
 			}
 			continue
 		}
+		e.bindCredentials(policy.Device)
 		err = e.serveDevice(ctx, policy)
 		if ctx.Err() != nil && !errors.Is(err, errClientRemoved) {
 			return err
@@ -287,6 +340,9 @@ func (e *Engine) waitToConnect(ctx context.Context) error {
 	e.mu.Lock()
 	e.policy, e.paused = Policy{}, false
 	e.mu.Unlock()
+	if e.cfg.Credentials != nil {
+		e.cfg.Credentials.Unbind()
+	}
 	e.setState(StateNotConnected, "")
 	select {
 	case <-e.connected:
@@ -301,8 +357,16 @@ func (e *Engine) waitToConnect(ctx context.Context) error {
 // errClientRemoved once every sandbox stopped and the device is forgotten
 // here.
 func (e *Engine) serveDevice(ctx context.Context, policy Policy) (err error) {
+	e.startMu.Lock()
+	if _, current := e.livePolicy(policy.Device); !current {
+		// A removal through the socket, between the connect and this start,
+		// forgot the device: nothing is served for it.
+		e.startMu.Unlock()
+		return errClientRemoved
+	}
 	activity, err := OpenActivity(e.cfg.Paths.ActivityDir(policy.Device))
 	if err != nil {
+		e.startMu.Unlock()
 		return Fail(CodeServeFailed, "open the activity log", err)
 	}
 	devCtx, devCancel := context.WithCancelCause(ctx)
@@ -311,15 +375,24 @@ func (e *Engine) serveDevice(ctx context.Context, policy Policy) (err error) {
 	e.ctx, e.policy, e.activity, e.running = devCtx, policy, activity, true
 	e.devCancel, e.devDone = devCancel, done
 	e.mu.Unlock()
+	e.startMu.Unlock()
 	defer func() {
 		if errors.Is(context.Cause(devCtx), errClientRemoved) {
 			err = errClientRemoved
+			// The worker deleted the sandboxes it held; a removal while the
+			// computer was paused found no worker, so they are deleted here.
+			if serr := e.sweep(context.WithoutCancel(ctx), policy); serr != nil {
+				e.notice("A sandbox of the removed device could not be deleted: " + serr.Error())
+			}
 			if ferr := e.forgetHere(policy.Device); ferr != nil {
 				err = fmt.Errorf("%w; on this computer: %w", errClientRemoved, ferr)
 			}
 		}
 		e.mu.Lock()
 		e.running, e.sessions, e.paused, e.devCancel, e.devDone = false, 0, false, nil, nil
+		// The keys were this device's: a key to revoke after the next
+		// registration would be revoked against another device.
+		e.retiring, e.key = nil, Key{}
 		if errors.Is(err, errClientRemoved) {
 			e.policy = Policy{}
 		}
@@ -332,6 +405,12 @@ func (e *Engine) serveDevice(ctx context.Context, policy Policy) (err error) {
 		close(done)
 	}()
 	if err = e.prepareKey(devCtx); err != nil {
+		if devCtx.Err() != nil {
+			// The engine stopped, or a client removed the device, while the
+			// key waited for the person's sign-in: no refusal, and the
+			// deferred function answers a removal.
+			return nil
+		}
 		return err
 	}
 	if e.cfg.Keys.InFile() {
@@ -553,6 +632,34 @@ func deleteAll(parent context.Context, d runtime.Driver) error {
 	return errors.Join(errs...)
 }
 
+// sweep stops and deletes every sandbox of a device removed through the
+// control socket with a driver of its own, which also reaches a removal
+// that came while the computer was paused and no worker held a driver, and
+// deletes their directory.
+func (e *Engine) sweep(ctx context.Context, policy Policy) error {
+	o, err := DriverOptions(policy, e.cfg.Paths, e.cfg.GOOS)
+	if err != nil {
+		return err
+	}
+	if _, err = os.Stat(o.DataDir); errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	d, err := e.cfg.NewDriver(o)
+	if err != nil {
+		return err
+	}
+	err = deleteAll(ctx, d)
+	if c, ok := d.(io.Closer); ok {
+		if cerr := c.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}
+	if rerr := os.RemoveAll(o.DataDir); rerr != nil && err == nil {
+		err = rerr
+	}
+	return err
+}
+
 // refused is the answers table for a refusal the worker stops on.
 func (e *Engine) refused(r *worker.Refusal) error {
 	switch r.Code {
@@ -580,6 +687,7 @@ func (e *Engine) removed(detail string) error {
 	if err := e.forgetDevice(env); err != nil {
 		detail += "; the host policy file could not be updated: " + err.Error()
 	}
+	e.unbindCredentials()
 	return Fail(CodeRemoved, detail, nil)
 }
 
@@ -612,15 +720,15 @@ func (e *Engine) prepareKey(ctx context.Context) error {
 	now := e.cfg.Now()
 	switch {
 	case !ok:
-		next, err := e.mint(ctx, env)
+		next, err := e.mintWaiting(ctx, env)
 		if err != nil {
-			return e.mintFailed(err, Fail(CodeKeyUnavailable, "no key is kept for "+env+" and none could be minted", err))
+			return e.mintFailed(err, e.fail(CodeKeyUnavailable, "no key is kept for "+env+" and none could be minted", err))
 		}
 		k = next
 	case !now.Before(k.ExpiresAt):
-		next, err := e.mint(ctx, env)
+		next, err := e.mintWaiting(ctx, env)
 		if err != nil {
-			return e.mintFailed(err, Fail(CodeSignInExpired, "the key expired at "+k.ExpiresAt.Format(time.RFC3339), err))
+			return e.mintFailed(err, e.fail(CodeSignInExpired, "the key expired at "+k.ExpiresAt.Format(time.RFC3339), err))
 		}
 		k = next
 	case now.Sub(k.MintedAt) >= RotateAfter:
@@ -629,8 +737,12 @@ func (e *Engine) prepareKey(ctx context.Context) error {
 			return e.removed(err.Error())
 		}
 		if err != nil {
-			e.notice(fmt.Sprintf("This computer's key could not be replaced, so it serves with its current key until %s. Sign in again with `latere login` to renew it.",
-				k.ExpiresAt.Local().Format("2 January 2006")))
+			renew := "Sign in again with `latere login` to renew it."
+			if e.cfg.Credentials != nil {
+				renew = "It is replaced once the application hands this computer your sign-in again."
+			}
+			e.notice(fmt.Sprintf("This computer's key could not be replaced, so it serves with its current key until %s. %s",
+				k.ExpiresAt.Local().Format("2 January 2006"), renew))
 			break
 		}
 		old := k
@@ -652,6 +764,37 @@ func (e *Engine) mintFailed(err error, otherwise *Error) error {
 		return e.removed(err.Error())
 	}
 	return otherwise
+}
+
+// mintWaiting mints a key for env. Under a client's credentials, a mint
+// that lacks the person's token waits for the client to hand one, however
+// long that takes, offline meanwhile with the status saying the token is
+// needed, rather than ending the engine and the socket the client needs.
+func (e *Engine) mintWaiting(ctx context.Context, env string) (Key, error) {
+	for {
+		k, err := e.mint(ctx, env)
+		if err == nil || e.cfg.Credentials == nil || !errors.Is(err, ErrCredentialsNeeded) {
+			return k, err
+		}
+		e.setState(StateOffline, "this computer's key is minted once the application hands it your sign-in")
+		if err = e.cfg.Credentials.Wait(ctx, AudienceCella); err != nil {
+			return Key{}, err
+		}
+	}
+}
+
+// fail builds a refusal as Fail does, with the next step a client's engine
+// gives: where the saved login's refusal says to sign in with the CLI, the
+// application hands the sign-in.
+func (e *Engine) fail(code, detail string, err error) *Error {
+	if errors.Is(err, ErrCredentialsNeeded) {
+		code = CodeCredentialsNeeded
+	}
+	f := Fail(code, detail, err)
+	if e.cfg.Credentials != nil && strings.Contains(f.Hint, "latere login") {
+		f.Hint = refusals[CodeCredentialsNeeded].hint
+	}
+	return f
 }
 
 // mint mints a key for env as the person and keeps it in the store.
@@ -679,9 +822,9 @@ func (e *Engine) renewExpired(ctx context.Context) error {
 	e.mu.Lock()
 	env, old := e.policy.Device, e.key
 	e.mu.Unlock()
-	k, err := e.mint(ctx, env)
+	k, err := e.mintWaiting(ctx, env)
 	if err != nil {
-		return e.mintFailed(err, Fail(CodeSignInExpired, "the key expired at "+old.ExpiresAt.Format(time.RFC3339), err))
+		return e.mintFailed(err, e.fail(CodeSignInExpired, "the key expired at "+old.ExpiresAt.Format(time.RFC3339), err))
 	}
 	e.mu.Lock()
 	e.key = k

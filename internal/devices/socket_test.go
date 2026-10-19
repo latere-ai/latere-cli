@@ -39,6 +39,13 @@ type fakeEnroller struct {
 	renamed   map[string]string
 	removed   []string
 	renameErr error
+	removeErr error
+	// nameErr is the platform refusing the name at a connect.
+	nameErr error
+	// renameStarted, when set, is told of each rename, which then waits for
+	// renameGo, so a test can act while a rename is under way.
+	renameStarted chan struct{}
+	renameGo      chan struct{}
 }
 
 func (f *fakeEnroller) Propose(previous Policy, q ConnectQuery) (Policy, error) {
@@ -65,18 +72,26 @@ func (f *fakeEnroller) Propose(previous Policy, q ConnectQuery) (Policy, error) 
 	return p, nil
 }
 
-func (f *fakeEnroller) Connect(_ context.Context, p Policy) (Policy, error) {
+func (f *fakeEnroller) Connect(_ context.Context, p Policy) (Connected, error) {
 	p.Device = testEnv
 	if err := SavePolicy(f.paths.PolicyFile(), p); err != nil {
-		return Policy{}, err
+		return Connected{}, err
 	}
 	f.mu.Lock()
 	f.connects = append(f.connects, p)
+	nameErr := f.nameErr
 	f.mu.Unlock()
-	return p, nil
+	return Connected{Policy: p, NameError: nameErr}, nil
 }
 
 func (f *fakeEnroller) Rename(_ context.Context, env, name string) error {
+	f.mu.Lock()
+	started, proceed := f.renameStarted, f.renameGo
+	f.mu.Unlock()
+	if started != nil {
+		started <- struct{}{}
+		<-proceed
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.renameErr != nil {
@@ -92,6 +107,9 @@ func (f *fakeEnroller) Rename(_ context.Context, env, name string) error {
 func (f *fakeEnroller) Remove(_ context.Context, env string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.removeErr != nil {
+		return f.removeErr
+	}
 	f.removed = append(f.removed, env)
 	return nil
 }

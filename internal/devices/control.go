@@ -114,9 +114,7 @@ func (e *Engine) ServeControl(ctx context.Context, ln net.Listener) error {
 // ControlHandler is the local API.
 func (e *Engine) ControlHandler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /v1/status", func(w http.ResponseWriter, _ *http.Request) {
-		httpjson.Write(w, http.StatusOK, e.Status())
-	})
+	mux.HandleFunc("GET /v1/status", e.handleStatus)
 	mux.HandleFunc("GET /v1/activity", e.handleActivity)
 	mux.HandleFunc("GET /v1/approvals", e.handleApprovals)
 	mux.HandleFunc("POST /v1/approvals/{op}", e.handleAnswer)
@@ -179,12 +177,12 @@ func (e *Engine) handleConnect(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	status, err := e.Connect(r.Context(), body.Policy, body.Consent)
+	answer, err := e.Connect(r.Context(), body.Policy, body.Consent)
 	if err != nil {
 		writeControlError(w, err)
 		return
 	}
-	httpjson.Write(w, http.StatusOK, status)
+	httpjson.Write(w, http.StatusOK, answer)
 }
 
 // handleCredentials is PUT /v1/credentials: {"cella": {"token", "expires_at"},
@@ -250,8 +248,12 @@ func writeControlError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, ErrNoClientCredentials):
 		status, code, message = http.StatusConflict, "credentials_not_taken", "This computer serves with the saved sign-in, so it takes no tokens from a client."
+	case errors.As(err, &ce) && ce.Code == CodeCredentialsOrg:
+		status, code, message = http.StatusBadRequest, CodeCredentialsOrg, "A device is personal, and this token is in an organization's context; hand a token of your own context."
+	case errors.As(err, &ce) && ce.Code == CodeCredentialsOtherPerson:
+		status, code, message = http.StatusConflict, CodeCredentialsOtherPerson, "This computer serves another person's device; sign in as that person, or remove the device from this computer first."
 	case errors.As(err, &ce):
-		status, code, message = http.StatusBadRequest, "invalid_credentials", "A token was refused; hand a token for its audience that expires more than a minute from now."
+		status, code, message = http.StatusBadRequest, "invalid_credentials", "A token was refused; hand a token for its audience, of one person, that expires more than a minute from now."
 	case errors.Is(err, ErrNotRemembered):
 		status, code, message = http.StatusNotFound, "not_remembered", "No remembered trigger has this id."
 	case errors.Is(err, ErrNotRunning):
@@ -266,6 +268,36 @@ func writeControlError(w http.ResponseWriter, err error) {
 		status, code, message = http.StatusUnprocessableEntity, de.Code, de.Message
 	}
 	httpjson.WriteError(w, status, httpjson.Error{Code: code, Message: message, Details: map[string]any{"detail": err.Error()}})
+}
+
+// handleStatus answers the status, and with follow=1 keeps the stream open
+// with the status each time it changes: the state, the sessions, and a
+// client's token turning needed, which is when a client hands new ones.
+func (e *Engine) handleStatus(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("follow") != "1" {
+		httpjson.Write(w, http.StatusOK, e.Status())
+		return
+	}
+	events, stop := e.Subscribe()
+	defer stop()
+	w.Header().Set("Content-Type", "application/x-ndjson")
+	stream := newStream(w)
+	if !stream.send(e.Status()) {
+		return
+	}
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case ev, ok := <-events:
+			if !ok {
+				return
+			}
+			if ev.Kind == EventStatus && ev.Status != nil && !stream.send(ev.Status) {
+				return
+			}
+		}
+	}
 }
 
 // handleActivity answers the activity log, from since when given, and with
