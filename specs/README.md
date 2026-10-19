@@ -25,6 +25,7 @@ specs/
   015-evals-commands.md              (in-progress: latere evals replaces latere eval; suites, experiments, comparisons, harness lease and import, publishing)
   016-devices-command.md             (complete: latere devices connects this computer as an environment the person's sessions work on; their own sessions start there unasked)
   017-signed-upgrades.md             (complete: releases sign their checksums; upgrade and auto-upgrade verify the signature, and an SSH signature beside it for the installer)
+  018-a-desktop-client-of-the-device-engine.md (in-progress: serve connects, takes a client's tokens, changes the policy and removes the device through its socket)
 ```
 
 ## Status
@@ -119,6 +120,15 @@ Where each spec stands:
   v0.22.1 also carry `checksums.txt.sshsig`, the same key's SSH signature,
   which the installer can verify with `ssh-keygen`; the installer's
   verification is the platform's to build.
+- `018-a-desktop-client-of-the-device-engine.md`: what a desktop
+  application needs of 016's engine to run it with no terminal: `serve`
+  waits on a computer not yet connected and connects through the socket
+  with the consent the application showed, takes short-lived Cella and
+  platform tokens from the application in place of the saved login,
+  changes the host policy and removes the device through the socket,
+  makes no release check under `LATERE_NO_UPDATE_CHECK`, denies paths the
+  application names, and `logout` keeps a device the application serves.
+  Drafted on 2026-10-19 for Latere Studio's This Mac.
 
 Two surfaces shipped without a dedicated design record: the token-lifecycle
 work, which [docs/login-and-tokens.md](../docs/login-and-tokens.md) documents,
