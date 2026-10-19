@@ -337,8 +337,8 @@ apply" once a day, in the terminal or in `/v1/status`.
 
 Built on 2026-10-18, not released, on Cella v0.17.2. Every verification
 item has its test, and items 5, 12 (its stage half) and 13 ran against the
-real `srt` on macOS. The live run waits for platform spec 220 and Topos
-spec 080 to be released.
+real `srt` on macOS, and since 2026-10-19 on Linux in CI as well (below).
+The live run waits for platform spec 220 and Topos spec 080 to be released.
 
 | Item | Test | Where |
 |---|---|---|
@@ -356,13 +356,21 @@ spec 080 to be released.
 | 12 | `TestControlSocket`; `TestStageCannotReachTheControlSocket`, skipped where `srt` is missing | `internal/devices/control_test.go` |
 | 13 | `TestDevicesConnectEndToEnd` | `cmd/latere/devices_e2e_test.go` |
 
-The CI runners have no `srt`. There, the end-to-end run and the engine's
-tests run the local driver under a stand-in `srt` that runs each command
-unconfined, so the whole flow (connect, approve, exec, removal) is proved
-on every runner, and confinement is proved only where the real `srt` is,
-which today is a developer's Mac. Linux confinement is not exercised by
-any test here, nor by Cella's: a Linux CI job with `srt`, bubblewrap and
-socat is a follow-up the maintainer logged.
+The gate's runners have no `srt`. There, the end-to-end run and the
+engine's tests run the local driver under a stand-in `srt` that runs each
+command unconfined, so the whole flow (connect, approve, exec, removal) is
+proved on every runner. Confinement is proved where the real `srt` is: a
+developer's Mac, and the CI job "devices under the real sandbox on Linux",
+added on 2026-10-19, which installs `srt` with bubblewrap, socat and
+ripgrep on Ubuntu and runs the engine's tests, the command's device tests
+and the end-to-end run against a real `cellad`. That job fails when one of
+them skips or falls back to the stand-in. Its first run found two faults in
+the tests, none in the CLI or in Cella: `TestStopEndsBackgroundCommands`
+read the pid a command reported for itself, which under bubblewrap is the
+pid inside the sandbox's own PID namespace, so it now finds each command on
+the computer by its command line; and `TestTerminalShowsTheEngine` could
+let a `y` typed with nothing waiting answer the next prompt, a race in the
+test that a slower runner shows.
 
 Where the build differs from the design, or adds to it:
 

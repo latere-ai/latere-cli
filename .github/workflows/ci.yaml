@@ -27,3 +27,38 @@ permissions:
 jobs:
   verify:
     uses: latere-ai/ci/.github/workflows/lateregate.yml@v1
+
+  # `latere devices` under the real sandbox on Linux. The gate's runners have
+  # no srt, so there the device tests run each command unconfined under a
+  # stand-in, and the confinement tests skip. This job installs srt and what
+  # it uses on Linux (bubblewrap, socat, ripgrep), so the engine's tests, the
+  # command's tests and the end-to-end run against a real cellad all go
+  # through Cella's local driver confined by srt over bubblewrap. Ubuntu's
+  # AppArmor blocks the unprivileged user namespaces bubblewrap needs until
+  # they are allowed. A test of this job that skips, or a run that falls back
+  # to the stand-in, fails the job, since it would prove nothing here.
+  device:
+    name: devices under the real sandbox on Linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: The sandbox runtime and what it uses
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap socat ripgrep netcat-openbsd
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          npm install -g @anthropic-ai/sandbox-runtime
+          srt echo ok
+      - name: The device tests with the real srt
+        run: |
+          set -o pipefail
+          go test -count=1 -v ./internal/devices/ 2>&1 | tee devices.log
+          go test -count=1 -v -run '^Test(Connect|Serve|SecondConnect|Devices|LogoutWarns)' ./internal/commands/ ./cmd/latere/ 2>&1 | tee commands.log
+          if grep -E -- '--- SKIP|under a stand-in' devices.log commands.log; then
+            echo "a device test skipped or ran under the stand-in, so the real sandbox did not run it" >&2
+            exit 1
+          fi

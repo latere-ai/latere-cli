@@ -46,6 +46,16 @@ environment variables**, so a green `go test ./...` does not mean they ran:
 |------|------------|-------------------|
 | `TestFamilyE2E` | `LATERE_FAMILY_E2E=1` | Every product against production with your signed-in identity. `LATERE_FAMILY_E2E_WRITE=1` adds the write paths, which spend money on real model calls and clean up after themselves; `LATERE_FAMILY_E2E_LOGOUT=1` ends by revoking your session. |
 
+The `latere devices` tests run Cella's local driver under the sandbox
+runtime `srt` where it is on `PATH`, and under a stand-in that runs each
+command unconfined where it is not, so the tests that prove confinement
+(`TestOwnPathsDenied`, `TestStageCannotReachTheControlSocket`) skip without
+it. Install it to run them: `npm install -g @anthropic-ai/sandbox-runtime`,
+with ripgrep on macOS, and bubblewrap, socat and ripgrep on Linux. CI's
+job "devices under the real sandbox on Linux" runs them, the command's
+device tests and the end-to-end run against a real `cellad` with the real
+`srt` on Ubuntu, and fails when any of them skips.
+
 ## How the code is organized
 
 | Path | What it holds |
