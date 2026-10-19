@@ -98,7 +98,8 @@ The `who` fact follows `session_start`, with the same sentences the
 screen prints for allow and for ask. What the host policy file kept from
 an earlier connect is granted too, so it is a fact as well: `read_paths`,
 the paths read outside the folders, and `remembered`, the scheduled
-triggers that start without asking, each only when the file holds one.
+triggers that start without asking and are still within their date,
+each only when the file holds one.
 The terminal's screen states them in the same words, and reads as before
 for a file that holds neither. With no `folder` asked and none kept in
 the file, the proposal names no folder, and its problems ask for one:
@@ -139,32 +140,40 @@ memory only and uses them for `MintKey`, `RevokeKey`, `Exists` and the
 enrolment's platform calls. A token is never written to a file or the
 activity log.
 
-The tokens are tied to the person whose device the computer serves.
-Once it is connected, a token of another person is refused
-(`credentials_other_person`, 409), and tokens held for another are
-dropped: without the tie, an application signed in as someone else
-would have Cella answer `not_found` or `device_not_owned`, which the
-engine reads as a removal, and the computer would forget a device still
-its owner's at the platform. The owner is recorded in the state
-directory, `owner.json` beside the control socket, apart from
-`device.yaml` so that every version still reads that file: at a connect
-through the socket, the person whose tokens connected it; for a device
-connected before the record existed, the person the first tokens handed
-name. On a computer not connected, any person's tokens are taken, and
-another person's replace them, so the next connect may be anyone's.
+The tokens are tied to the person whose device the computer serves,
+once the platform has confirmed who that is: a token of another person
+is then refused (`credentials_other_person`, 409), and tokens held for
+another are dropped. Without the tie, an application signed in as
+someone else would have Cella answer `not_found` or `device_not_owned`,
+which the engine reads as a removal, and the computer would forget a
+device still its owner's at the platform. The owner is recorded in the
+state directory, `owner.json` beside the control socket, apart from
+`device.yaml` so that every version still reads that file, and only as
+the platform confirmed it: at a connect (through the socket, the person
+whose tokens connected it; from the terminal, the saved login's person),
+and, for a device connected before the record existed, the first time
+the platform mints the computer's key for a person or answers their
+sign-in as the device's own (under the saved login, `serve` asks once
+at start). Until then, any person's tokens are taken, and when the
+platform answers them `not_found` or `device_not_owned`, the device is
+kept: the tokens are dropped, and the status reads offline, asking for
+the owner's sign-in. On a computer not connected, any person's tokens
+are taken, and another person's replace them, so the next connect may be
+anyone's.
 
 `GET /v1/status` gains `"credentials": {"cella": "valid" | "needed",
 "platform": "valid" | "needed"}`, and `GET /v1/status?follow=1` streams
 the status, one JSON object a line, each time it changes, including when
 a token turns `needed`: none held, or the held one within a minute of
-its expiry. A key rotation or an existence check that needs a token
+its expiry. A follower that falls behind is dropped, its stream ending,
+and reconnects. A key rotation or an existence check that needs a token
 waits up to 30 seconds for one; without one it keeps serving on the
 current key and tries again at the next check, as an expired saved login
 does today. A key that must be minted (none kept, or the kept one
 expired) waits for a token however long it takes, offline with the
 status saying the token is needed, and the engine and its socket stay
 up meanwhile; the next steps it names are the application's, never
-`latere login`. Every other step that needs a token and found none in
+`latere login`. A stop while it waits ends `serve` cleanly. Every other step that needs a token and found none in
 time is refused `device_credentials_needed`. Without
 `--credentials client`, the saved login is used as today.
 
@@ -244,11 +253,11 @@ engine, `logout` asks as 016 says.
 | 9 | `TestLogoutKeepsAnApplicationsDevice` | `internal/commands/logout_device_test.go` (with G) |
 | 10 | `TestDevicesServeThroughTheSocketEndToEnd`: the built binary under `--credentials client` with no saved login, against a real cellad, from tokens through connect, rename and remove | `cmd/latere/devices_e2e_test.go` |
 | 11 | `TestRenameLeavesRunningSessionsAlone` and `TestRenameRunsOutsideTheFileLock`: a rename, an empty change and the same folders restart no worker, a change of the folders does, and a session start reads the file during a slow rename | `internal/devices/client_engine_test.go` |
-| 12 | `TestTokensAreTiedToTheDevicesOwner` and `TestOwnerIsLearnedFromTheFirstTokens`: an organization's token and two people's are refused; on a connected computer another person's is refused and the device is not forgotten; the owner is recorded from the first tokens; after a removal anyone's are taken | `internal/devices/client_engine_test.go` |
-| 13 | `TestClientModeWaitsForTheKey`: with no key and no token, `serve` waits offline with its socket up, and serves once tokens are handed | `internal/devices/client_engine_test.go` |
+| 12 | `TestTokensAreTiedToTheDevicesOwner`, `TestAnUnconfirmedPersonNeverForgetsTheDevice`, `TestSavedLoginIsRecordedAsTheOwner` and `TestConnectCreatesTheEnvironment`: an organization's token and two people's are refused; with a recorded owner another person's is refused and the device is not forgotten; without one, another person's tokens are dropped and the device kept, and the owner is recorded once the platform mints for them; the saved login and a terminal connect record the owner; after a removal anyone's are taken | `internal/devices/client_engine_test.go`, `internal/commands/devices_test.go` |
+| 13 | `TestClientModeWaitsForTheKey` and `TestStopDuringTheRenewalWaitIsClean`: with no key and no token, `serve` waits offline with its socket up, and serves once tokens are handed; a stop during a renewal's wait is clean | `internal/devices/client_engine_test.go` |
 | 14 | `TestConsentCoversWhatTheFileKept` and `TestConnectScreenUnchangedWithoutKeptGrants`: the facts name the file's read paths and remembered triggers, a file changed after the proposal fails the consent, and the screen is byte-identical for a file that keeps neither | `internal/devices/client_engine_test.go` |
 | 15 | `TestStatusCanBeFollowed`: the stream says a token is needed, valid after it is handed, and needed again before it expires | `internal/devices/client_engine_test.go` |
-| 16 | `TestConnectAnswersARefusedNameAndCleansIt`, `TestAMissingTokenIsSaidSo`, `TestAProposalWithNoFolderAsksForOne`, `TestRemovalWhilePausedDeletesTheSandboxes`, `TestRemovalClearsTheKeyToRevoke`, `TestAStartAfterARemovalServesNothing`, `TestRemovalDeletesAFileTheWorkerAlreadyCleared` | `internal/devices/client_engine_test.go` |
+| 16 | `TestConnectAnswersARefusedNameAndCleansIt`, `TestAMissingTokenIsSaidSo`, `TestAProposalWithNoFolderAsksForOne`, `TestRemovalWhilePausedDeletesTheSandboxes`, `TestRemovalClearsTheKeyToRevoke`, `TestAStartAfterARemovalServesNothing`, `TestRemovalDeletesAFileTheWorkerAlreadyCleared`, `TestRemovalKeepsAnotherDevicesOwnerRecord` | `internal/devices/client_engine_test.go` |
 
 ## Progress
 
@@ -262,6 +271,11 @@ paths and remembered triggers the file kept, and the status can be
 followed; with them, the rename runs outside the policy lock, a missing
 token is answered `device_credentials_needed`, a proposal with no folder
 asks for one, and a removal while paused or right after a connect leaves
-nothing served or kept. F (paths a client denies) and G (logout on a
+nothing served or kept. A second review then found that the owner tie did
+not hold for a device connected before the record existed, and that a
+stop during a key renewal's wait ended with a refusal; both are fixed:
+the owner is recorded only as the platform confirms it, an unconfirmed
+person's removal answer never forgets the device, and the stop is
+clean. F (paths a client denies) and G (logout on a
 computer an application serves) are not built yet; tests 8 and 9 come
 with them.

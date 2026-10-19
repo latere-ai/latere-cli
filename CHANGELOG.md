@@ -17,19 +17,23 @@ committed: the commit log already holds that.
   the connection, which stops the commands running; a new name does not.
 - **A desktop application's tokens must be yours.** `serve --credentials
   client` refuses a token in an organization's context
-  (`credentials_org_context`) and, once the computer is connected, a token
-  of another person than the one whose device it is
-  (`credentials_other_person`), so an application signed in as someone
-  else never makes the computer forget your device. Whose device it is is
-  kept in `owner.json` in the state directory.
+  (`credentials_org_context`). Once the platform has confirmed whose device
+  this is, it refuses another person's token (`credentials_other_person`).
+  The owner is recorded in `owner.json` in the state directory when you
+  connect, from the terminal or through the socket, and, for a device
+  connected before this release, the first time the platform mints the
+  computer's key for a person or answers their sign-in as the device's
+  own. Until then, tokens the platform answers as not the device's
+  owner's are dropped and the device is kept, so an application signed in
+  as someone else never makes the computer forget your device.
 - **`serve --credentials client` waits for the application's sign-in to
   mint this computer's key** instead of stopping, offline meanwhile, with
   its control socket up.
 - **The consent covers everything a connect grants.** The facts a connect
   states, in the terminal and to an application, now name the paths read
-  outside the folders and the remembered scheduled triggers the host
-  policy file kept, when it keeps any; a file changed after the proposal
-  fails the consent.
+  outside the folders and the remembered scheduled triggers still within
+  their date that the host policy file kept, when it keeps any; a file
+  changed after the proposal fails the consent.
 
 ### Added
 
@@ -42,6 +46,9 @@ committed: the commit log already holds that.
 
 - A rename from an application no longer holds up sessions starting while
   the platform answers.
+- Stopping `serve --credentials client` while a key renewal waits for the
+  application's sign-in ends it cleanly, not with
+  `device_sign_in_expired`.
 - A step that needs the application's token and found none is refused
   `device_credentials_needed`, not as a refused connect, rename or
   removal.
