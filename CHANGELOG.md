@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.24.3 - 2026-10-19
+
 ### Fixed
 
 - The notice that a new release is available no longer names a release
