@@ -72,6 +72,17 @@ type Config struct {
 	// is built for; empty is this one.
 	Now  func() time.Time
 	GOOS string
+	// Enroll reaches the platform as the person for what a client does
+	// through the control socket: connect, rename and remove. Nil refuses
+	// those routes.
+	Enroll Enroller
+	// Credentials holds the tokens a client hands under `serve --credentials
+	// client`, which Account and Enroll then present. Nil is the saved login.
+	Credentials *Credentials
+	// WaitToConnect is `serve`: on a computer not connected, or once its
+	// device is removed, the engine waits for a client to connect it through
+	// the control socket instead of ending.
+	WaitToConnect bool
 }
 
 // The causes that end one run of the worker without ending the engine.
@@ -100,6 +111,11 @@ type Engine struct {
 
 	// policyMu orders every read-modify-write of the host policy file.
 	policyMu sync.Mutex
+	// connectMu lets one connect through the socket run at a time.
+	connectMu sync.Mutex
+	// connected wakes an engine waiting to be connected once a client
+	// connected the computer.
+	connected chan struct{}
 
 	mu       sync.Mutex
 	ctx      context.Context
@@ -111,14 +127,20 @@ type Engine struct {
 	driver   runtime.Driver
 	host     v1.HostInfo
 	sessions int
-	// connected is whether the worker's stream is open now, as its State
+	// streaming is whether the worker's stream is open now, as its State
 	// last said.
-	connected bool
+	streaming bool
 	upgrade   string
 	cancel    context.CancelCauseFunc
-	running   bool
-	paused    bool
-	resume    chan struct{}
+	// started is the engine's Run; running is one device's run within it.
+	started bool
+	running bool
+	paused  bool
+	resume  chan struct{}
+	// devCancel ends the device's run, and devDone is closed once it has
+	// returned.
+	devCancel context.CancelCauseFunc
+	devDone   chan struct{}
 	activity  *Activity
 	lastCheck time.Time
 }
@@ -137,9 +159,18 @@ func New(cfg Config) *Engine {
 	if cfg.UpgradeEvery <= 0 {
 		cfg.UpgradeEvery = 24 * time.Hour
 	}
-	e := &Engine{cfg: cfg, hub: newHub(), state: StateStarting}
+	e := &Engine{cfg: cfg, hub: newHub(), state: StateStarting, connected: make(chan struct{}, 1)}
 	e.broker = newBroker(e.hub.publish)
+	if cfg.Credentials != nil {
+		cfg.Credentials.notifyNeed(e.publishStatus)
+	}
 	return e
+}
+
+// publishStatus tells every client the status now.
+func (e *Engine) publishStatus() {
+	status := e.Status()
+	e.hub.publish(Event{Kind: EventStatus, Status: &status})
 }
 
 // Subscribe answers every event from now on, and the function that ends
@@ -165,11 +196,16 @@ func (e *Engine) Status() Status {
 }
 
 func (e *Engine) statusLocked() Status {
-	return Status{
+	s := Status{
 		Device: e.policy.Device, Name: e.policy.Name, State: e.state, Online: e.state == StateOnline,
 		Detail: e.detail, Sessions: e.sessions, Waiting: len(e.broker.waitingNow()),
 		Version: e.cfg.Version, Upgrade: e.upgrade,
 	}
+	if e.cfg.Credentials != nil {
+		state := e.cfg.Credentials.State()
+		s.Credentials = &state
+	}
+	return s
 }
 
 // setState records the state and tells every client when it changed.
@@ -195,44 +231,118 @@ func (e *Engine) setState(state, detail string) {
 func (e *Engine) notice(text string) { e.hub.publish(Event{Kind: EventNotice, Notice: text}) }
 
 // Run serves the device this computer is until ctx ends or the control
-// plane refuses it, and stops every sandbox before it returns.
+// plane refuses it, and stops every sandbox before it returns. Under
+// WaitToConnect it serves its control socket's clients on a computer not
+// connected yet, and after its device is removed, until ctx ends.
 func (e *Engine) Run(ctx context.Context) error {
-	policy, err := e.readPolicy()
-	if err != nil {
+	e.mu.Lock()
+	if e.started {
+		e.mu.Unlock()
+		return Fail(CodeAlreadyServed, "this engine is already running", nil)
+	}
+	e.started, e.ctx = true, ctx
+	e.mu.Unlock()
+	defer func() {
+		e.mu.Lock()
+		e.started = false
+		e.mu.Unlock()
+	}()
+	if e.cfg.Upgrade != nil {
+		go e.watchUpgrades(ctx)
+	}
+	for {
+		policy, err := e.readPolicy()
+		if err != nil {
+			if !e.cfg.WaitToConnect || CodeOf(err) != CodeNotConnected {
+				return err
+			}
+			if e.waitToConnect(ctx) != nil {
+				return nil
+			}
+			continue
+		}
+		err = e.serveDevice(ctx, policy)
+		if ctx.Err() != nil && !errors.Is(err, errClientRemoved) {
+			return err
+		}
+		removedHere := errors.Is(err, errClientRemoved)
+		switch {
+		case removedHere && e.cfg.WaitToConnect:
+			e.notice("This computer was removed from your devices.")
+			continue
+		case removedHere:
+			return Fail(CodeRemoved, "the device was removed through the control socket", err)
+		case CodeOf(err) == CodeRemoved && e.cfg.WaitToConnect:
+			e.notice("This computer was removed from your devices: " + err.Error())
+			continue
+		}
 		return err
 	}
+}
+
+// waitToConnect waits, in the state not_connected, for a client to connect
+// this computer through the control socket, and answers the context's error
+// when it ends first.
+func (e *Engine) waitToConnect(ctx context.Context) error {
+	e.mu.Lock()
+	e.policy, e.paused = Policy{}, false
+	e.mu.Unlock()
+	e.setState(StateNotConnected, "")
+	select {
+	case <-e.connected:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// serveDevice serves one device until ctx ends, the control plane refuses
+// it, or a client removes it through the control socket; the last answers
+// errClientRemoved once every sandbox stopped and the device is forgotten
+// here.
+func (e *Engine) serveDevice(ctx context.Context, policy Policy) (err error) {
 	activity, err := OpenActivity(e.cfg.Paths.ActivityDir(policy.Device))
 	if err != nil {
 		return Fail(CodeServeFailed, "open the activity log", err)
 	}
-	defer func() { _ = activity.Close() }()
+	devCtx, devCancel := context.WithCancelCause(ctx)
+	done := make(chan struct{})
 	e.mu.Lock()
-	if e.running {
-		e.mu.Unlock()
-		return Fail(CodeAlreadyServed, "this engine is already running", nil)
-	}
-	e.ctx, e.policy, e.activity, e.running = ctx, policy, activity, true
+	e.ctx, e.policy, e.activity, e.running = devCtx, policy, activity, true
+	e.devCancel, e.devDone = devCancel, done
 	e.mu.Unlock()
 	defer func() {
+		if errors.Is(context.Cause(devCtx), errClientRemoved) {
+			err = errClientRemoved
+			if ferr := e.forgetHere(policy.Device); ferr != nil {
+				err = fmt.Errorf("%w; on this computer: %w", errClientRemoved, ferr)
+			}
+		}
 		e.mu.Lock()
-		e.running, e.sessions = false, 0
+		e.running, e.sessions, e.paused, e.devCancel, e.devDone = false, 0, false, nil, nil
+		if errors.Is(err, errClientRemoved) {
+			e.policy = Policy{}
+		}
 		e.mu.Unlock()
+		if errors.Is(err, errClientRemoved) {
+			e.setState(StateNotConnected, "")
+		}
+		_ = activity.Close()
+		devCancel(nil)
+		close(done)
 	}()
-	if err = e.prepareKey(ctx); err != nil {
+	if err = e.prepareKey(devCtx); err != nil {
 		return err
 	}
 	if e.cfg.Keys.InFile() {
 		e.notice("No keychain answered, so this computer's key is kept in " + e.cfg.Keys.Name() + ", readable by your user account.")
 	}
 	e.notice(SessionStartNotice(policy))
-	if e.cfg.Upgrade != nil {
-		go e.watchUpgrades(ctx)
-	}
 	for {
-		if err = e.waitWhilePaused(ctx); err != nil {
-			return nil //nolint:nilerr // the context ending under a pause is the person stopping the engine
+		if err = e.waitWhilePaused(devCtx); err != nil {
+			return nil //nolint:nilerr // the context ending under a pause is the person stopping the engine, or a removal the deferred function answers
 		}
-		again, err := e.serveOnce(ctx)
+		again, err := e.serveOnce(devCtx)
 		if err != nil || !again {
 			return err
 		}
@@ -377,9 +487,16 @@ func (e *Engine) serveOnce(ctx context.Context) (bool, error) {
 		Log: slog.New(slog.DiscardHandler), Version: e.cfg.Version, AdmitTimeout: e.cfg.AdmitTimeout,
 	})
 	e.mu.Lock()
-	e.driver, e.cancel, e.sessions, e.connected = nil, nil, 0, false
+	e.driver, e.cancel, e.sessions, e.streaming = nil, nil, 0, false
 	e.mu.Unlock()
 	if ctx.Err() != nil {
+		if errors.Is(context.Cause(ctx), errClientRemoved) {
+			// The platform ends the sandboxes it knows of; these are stopped
+			// here too, so no command outlives the removal.
+			if err := deleteAll(ctx, d); err != nil {
+				e.notice("A sandbox of the removed device could not be stopped: " + err.Error())
+			}
+		}
 		return false, nil
 	}
 	cause := context.Cause(runCtx)
@@ -659,8 +776,8 @@ func (e *Engine) unauthorized() {
 // goroutine, which waits for it, so whatever takes longer runs apart.
 func (e *Engine) workerState(s worker.State) {
 	e.mu.Lock()
-	wasConnected := e.connected
-	e.connected = s.Connected
+	wasConnected := e.streaming
+	e.streaming = s.Connected
 	e.mu.Unlock()
 	if s.Connected {
 		e.registered()

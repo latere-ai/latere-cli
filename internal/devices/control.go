@@ -131,15 +131,129 @@ func (e *Engine) ControlHandler() http.Handler {
 			httpjson.Write(w, http.StatusOK, e.Status())
 		})
 	}
+	mux.HandleFunc("GET /v1/connect", e.handleProposal)
+	mux.HandleFunc("POST /v1/connect", e.handleConnect)
+	mux.HandleFunc("PUT /v1/credentials", e.handleCredentials)
+	mux.HandleFunc("GET /v1/policy", func(w http.ResponseWriter, _ *http.Request) {
+		p, err := e.Policy()
+		if err != nil {
+			writeControlError(w, err)
+			return
+		}
+		httpjson.Write(w, http.StatusOK, p)
+	})
+	mux.HandleFunc("PUT /v1/policy", e.handlePolicy)
+	mux.HandleFunc("DELETE /v1/policy/remembered/{trigger}", func(w http.ResponseWriter, r *http.Request) {
+		if err := e.ForgetRemembered(r.PathValue("trigger")); err != nil {
+			writeControlError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("POST /v1/remove", e.handleRemove)
 	return mux
+}
+
+// handleProposal is GET /v1/connect?name=&folder=&network=&host=&session_start=,
+// folder and host repeatable.
+func (e *Engine) handleProposal(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	proposal, err := e.ProposeConnect(ConnectQuery{
+		Name: q.Get("name"), Network: q.Get("network"), SessionStart: q.Get("session_start"),
+		Folders: q["folder"], Hosts: q["host"],
+	})
+	if err != nil {
+		writeControlError(w, err)
+		return
+	}
+	httpjson.Write(w, http.StatusOK, proposal)
+}
+
+// handleConnect is POST /v1/connect: {"policy": {...}, "consent": "..."}, as
+// GET /v1/connect answered them.
+func (e *Engine) handleConnect(w http.ResponseWriter, r *http.Request) {
+	body, ok := httpjson.DecodeBody[struct {
+		Policy  Terms  `json:"policy"`
+		Consent string `json:"consent"`
+	}](w, r)
+	if !ok {
+		return
+	}
+	status, err := e.Connect(r.Context(), body.Policy, body.Consent)
+	if err != nil {
+		writeControlError(w, err)
+		return
+	}
+	httpjson.Write(w, http.StatusOK, status)
+}
+
+// handleCredentials is PUT /v1/credentials: {"cella": {"token", "expires_at"},
+// "platform": {...}}, either or both.
+func (e *Engine) handleCredentials(w http.ResponseWriter, r *http.Request) {
+	body, ok := httpjson.DecodeBody[map[string]HeldToken](w, r)
+	if !ok {
+		return
+	}
+	status, err := e.PutCredentials(*body)
+	if err != nil {
+		writeControlError(w, err)
+		return
+	}
+	httpjson.Write(w, http.StatusOK, status)
+}
+
+// handlePolicy is PUT /v1/policy: any of name, folders and network.
+func (e *Engine) handlePolicy(w http.ResponseWriter, r *http.Request) {
+	body, ok := httpjson.DecodeBody[PolicyChange](w, r)
+	if !ok {
+		return
+	}
+	status, err := e.PutPolicy(r.Context(), *body)
+	if err != nil {
+		writeControlError(w, err)
+		return
+	}
+	httpjson.Write(w, http.StatusOK, status)
+}
+
+// handleRemove is POST /v1/remove, with {"local": true} to forget the device
+// here alone. A request with no body removes it at the platform too.
+func (e *Engine) handleRemove(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Local bool `json:"local"`
+	}
+	if r.ContentLength != 0 {
+		decoded, ok := httpjson.DecodeBody[struct {
+			Local bool `json:"local"`
+		}](w, r)
+		if !ok {
+			return
+		}
+		body = *decoded
+	}
+	status, err := e.Remove(r.Context(), body.Local)
+	if err != nil {
+		writeControlError(w, err)
+		return
+	}
+	httpjson.Write(w, http.StatusOK, status)
 }
 
 // writeControlError answers a refusal of the local API in the family's
 // envelope: one code, one fixed sentence, the detail beside it.
 func writeControlError(w http.ResponseWriter, err error) {
 	status, code, message := http.StatusInternalServerError, CodeServeFailed, refusals[CodeServeFailed].message
-	var de *Error
+	var (
+		de *Error
+		ce *CredentialsError
+	)
 	switch {
+	case errors.Is(err, ErrNoClientCredentials):
+		status, code, message = http.StatusConflict, "credentials_not_taken", "This computer serves with the saved sign-in, so it takes no tokens from a client."
+	case errors.As(err, &ce):
+		status, code, message = http.StatusBadRequest, "invalid_credentials", "A token was refused; hand a token for its audience that expires more than a minute from now."
+	case errors.Is(err, ErrNotRemembered):
+		status, code, message = http.StatusNotFound, "not_remembered", "No remembered trigger has this id."
 	case errors.Is(err, ErrNotRunning):
 		status, code, message = http.StatusConflict, "not_serving", "This computer is not serving right now."
 	case errors.Is(err, ErrNotPending):
@@ -175,10 +289,15 @@ func (e *Engine) handleActivity(w http.ResponseWriter, r *http.Request) {
 		events, stop = e.Subscribe()
 		defer stop()
 	}
-	entries, err := ReadActivity(e.cfg.Paths.ActivityDir(env), since)
-	if err != nil {
-		writeControlError(w, Fail(CodeServeFailed, "read the activity log", err))
-		return
+	// A computer not connected has no device's log to read; a follower is
+	// told each line once a device serves.
+	var entries []Entry
+	if env != "" {
+		entries, err = ReadActivity(e.cfg.Paths.ActivityDir(env), since)
+		if err != nil {
+			writeControlError(w, Fail(CodeServeFailed, "read the activity log", err))
+			return
+		}
 	}
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	stream := newStream(w)

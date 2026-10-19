@@ -60,6 +60,12 @@ func (t Terminal) Run(ctx context.Context) {
 	}
 	var waiting []Approval
 	last := ""
+	// A serve that waits to be connected may have said so before this
+	// terminal subscribed; it says it once here.
+	if s := t.Engine.Status(); s.State == StateNotConnected {
+		last = statusLine(s)
+		t.print(last)
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -271,42 +277,26 @@ func statusLine(s Status) string {
 		return "Offline. Reconnecting."
 	case StatePaused:
 		return "Paused. Sessions cannot use this computer until it resumes."
+	case StateNotConnected:
+		return "Not connected. Waiting for a client to connect this computer through the control socket."
 	}
 	return "Connecting."
 }
 
 // ConnectScreen is what the person is shown before a computer is
 // connected: what sessions may use, what the agent reads, and who may ask.
+// GET /v1/connect answers the same facts.
 func ConnectScreen(p Policy) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Connect this computer to Latere as %q?\n\n", p.Name)
-	b.WriteString("Sessions you start in Latere will run commands and read and edit files\non this computer, in these folders only:\n")
-	for _, f := range p.Folders {
-		access := "read-only"
-		if f.Write {
-			access = "read-write"
+	for _, f := range connectFacts(p) {
+		b.WriteString(f.screen())
+		// The folders run into what is readable in them; every other fact
+		// ends with a blank line.
+		if f.Kind != FactFolders {
+			b.WriteString("\n")
 		}
-		fmt.Fprintf(&b, "  %s (%s)\n", f.Path, access)
 	}
-	b.WriteString("Everything in these folders is readable to the agent, a project's .env\nfile and other secrets kept there included.\n\n")
-	if p.Network.Mode == NetworkNone || len(p.Network.Hosts) == 0 {
-		b.WriteString("Network: none. Commands on this computer reach no host.\n\n")
-	} else {
-		b.WriteString("Network: commands may reach these hosts only:\n")
-		fmt.Fprintf(&b, "  %s\n", strings.Join(p.Network.Hosts, ", "))
-		b.WriteString("A host that accepts writes, such as a git host, can carry data out.\n\n")
-	}
-	b.WriteString("Only sessions you start, and triggers you own, can use this computer.\n")
-	if p.SessionStart == SessionStartAsk {
-		b.WriteString(sessionStartAskWords + "\n" + switchToAllow + "\n\n")
-	} else {
-		b.WriteString(sessionStartAllowWords + "\n")
-		b.WriteString("Anyone who can start sessions as you can reach these folders, still\n" +
-			"confined to them: never your credentials, keychains or browser profiles,\n" +
-			"and no network beyond what is listed above.\n")
-		b.WriteString(switchToAsk + "\n\n")
-	}
-	b.WriteString("What the agent reads on this computer goes to the session's log and to\nthe model. In an organization's conversation, that organization can\nread it too.\n\n")
 	b.WriteString("Type yes to connect this computer: ")
 	return b.String()
 }

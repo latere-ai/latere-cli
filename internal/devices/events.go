@@ -24,6 +24,10 @@ const (
 	StateOnline   = "online"
 	StateOffline  = "offline"
 	StatePaused   = "paused"
+	// StateNotConnected is `serve` on a computer no device is connected as
+	// yet, or whose device was removed: it waits for a client to connect it
+	// through the control socket.
+	StateNotConnected = "not_connected"
 )
 
 // Event is one thing a client of the engine is told: a change of status, a
@@ -47,8 +51,8 @@ type Event struct {
 type Status struct {
 	Device string `json:"device"`
 	Name   string `json:"name"`
-	// State is starting, online, offline or paused, and Detail why it is
-	// offline.
+	// State is starting, online, offline, paused or not_connected, and
+	// Detail why it is offline.
 	State  string `json:"state"`
 	Online bool   `json:"online"`
 	Detail string `json:"detail,omitempty"`
@@ -59,6 +63,9 @@ type Status struct {
 	Version string `json:"version"`
 	// Upgrade is set when a newer release was found while serving.
 	Upgrade string `json:"upgrade,omitempty"`
+	// Credentials is set on an engine that takes its tokens from a client
+	// (`serve --credentials client`): for each audience, valid or needed.
+	Credentials *CredentialsState `json:"credentials,omitempty"`
 }
 
 // subscriberBuffer is how many events a client may fall behind by before it

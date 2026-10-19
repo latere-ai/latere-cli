@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 
 	"gopkg.in/yaml.v3"
 	"latere.ai/x/pkg/atomicfile"
@@ -55,37 +56,37 @@ const RememberFor = 30 * 24 * time.Hour
 type Policy struct {
 	// Device is the environment this computer serves, set once it is
 	// connected.
-	Device string `yaml:"device,omitempty"`
+	Device string `yaml:"device,omitempty" json:"device"`
 	// Name is what the computer is called in its owner's devices.
-	Name string `yaml:"name"`
+	Name string `yaml:"name" json:"name"`
 	// SessionStart is SessionStartAllow or SessionStartAsk. A file written
 	// before the field existed holds none, which reads as allow.
-	SessionStart       string       `yaml:"session_start"`
-	Folders            []Folder     `yaml:"folders"`
-	Network            Network      `yaml:"network"`
-	ReadPaths          []string     `yaml:"read_paths"`
-	RememberedTriggers []Remembered `yaml:"remembered_triggers"`
+	SessionStart       string       `yaml:"session_start" json:"session_start"`
+	Folders            []Folder     `yaml:"folders" json:"folders"`
+	Network            Network      `yaml:"network" json:"network"`
+	ReadPaths          []string     `yaml:"read_paths" json:"read_paths"`
+	RememberedTriggers []Remembered `yaml:"remembered_triggers" json:"remembered_triggers"`
 }
 
 // Folder is one granted folder. Path is absolute or starts with ~.
 type Folder struct {
-	Path  string `yaml:"path"`
-	Write bool   `yaml:"write"`
+	Path  string `yaml:"path" json:"path"`
+	Write bool   `yaml:"write" json:"write"`
 }
 
 // Network is the network sessions may reach: an allowlist of hosts, or
 // none.
 type Network struct {
-	Mode  string   `yaml:"mode"`
-	Hosts []string `yaml:"hosts,flow"`
+	Mode  string   `yaml:"mode" json:"mode"`
+	Hosts []string `yaml:"hosts,flow" json:"hosts"`
 }
 
 // Remembered is one scheduled trigger admitted without asking: by its id
 // and the agent version it ran, until the expiry.
 type Remembered struct {
-	Trigger      string    `yaml:"trigger"`
-	AgentVersion string    `yaml:"agent_version"`
-	Until        time.Time `yaml:"until"`
+	Trigger      string    `yaml:"trigger" json:"trigger"`
+	AgentVersion string    `yaml:"agent_version" json:"agent_version"`
+	Until        time.Time `yaml:"until" json:"until"`
 }
 
 // policyHeader opens the file, so a person who opens it knows whose it is.
@@ -285,4 +286,57 @@ func ParseFolder(value, cwd, home string) (Folder, error) {
 		path = filepath.Join(cwd, path)
 	}
 	return Folder{Path: filepath.Clean(path), Write: write}, nil
+}
+
+// MaxNameLength is the longest name the platform keeps for a device.
+const MaxNameLength = 64
+
+// CleanName keeps a name the platform takes: printable characters, trimmed,
+// at most MaxNameLength of them, and "This computer" for none.
+func CleanName(name string) string {
+	var b strings.Builder
+	n := 0
+	for _, r := range strings.TrimSpace(name) {
+		if !unicode.IsPrint(r) {
+			continue
+		}
+		if n == MaxNameLength {
+			break
+		}
+		b.WriteRune(r)
+		n++
+	}
+	if out := strings.TrimSpace(b.String()); out != "" {
+		return out
+	}
+	return "This computer"
+}
+
+// Forget forgets on this computer the device id it was: its key goes, and
+// so does the host policy file at policyFile when dropFile is set;
+// otherwise the file keeps its folders and network and names no device, so
+// the next connect proposes them again. A file that names another device is
+// left as it is. `latere devices remove`, `latere logout` and the engine's
+// removal through the control socket share it.
+func Forget(keys KeyStore, policyFile, id string, dropFile bool) error {
+	var errs []error
+	if err := keys.Delete(id); err != nil {
+		errs = append(errs, fmt.Errorf("delete the key: %w", err))
+	}
+	policy, ok, err := LoadPolicy(policyFile)
+	switch {
+	case err != nil:
+		errs = append(errs, err)
+	case !ok || policy.Device != id:
+	case dropFile:
+		if err := os.Remove(policyFile); err != nil && !errors.Is(err, os.ErrNotExist) {
+			errs = append(errs, fmt.Errorf("delete the host policy file: %w", err))
+		}
+	default:
+		policy.Device = ""
+		if err := SavePolicy(policyFile, policy); err != nil {
+			errs = append(errs, fmt.Errorf("update the host policy file: %w", err))
+		}
+	}
+	return errors.Join(errs...)
 }

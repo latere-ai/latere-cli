@@ -71,6 +71,8 @@ const (
 	CodeLogoutCancelled    = "device_logout_cancelled"
 	CodeRemoveFailed       = "device_remove_failed"
 	CodeLogoutBlocked      = "device_logout_blocked"
+	CodeRenameFailed       = "device_rename_failed"
+	CodeCredentialsNeeded  = "device_credentials_needed"
 
 	// The platform's own refusals of a device's create (platform spec 220),
 	// which reach the CLI as Cella's forbidden with the reason in its
@@ -175,6 +177,14 @@ var refusals = map[string]struct{ message, hint string }{
 	CodeLogoutBlocked: {
 		"This computer could not be removed from your devices, so you are still signed in.",
 		"Try again, or remove it with `latere devices remove` and then sign out.",
+	},
+	CodeCredentialsNeeded: {
+		"This computer needs your sign-in from the application that serves it.",
+		"The application hands it again on its own; if this goes on, sign in to the application again.",
+	},
+	CodeRenameFailed: {
+		"The device could not be renamed, so its name is unchanged.",
+		"Try again.",
 	},
 	CodePersonalOnly: {
 		"A device is personal, and this sign-in is in an organization's context.",
