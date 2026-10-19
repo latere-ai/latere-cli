@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.23.0 - 2026-10-19
+
 ### Changed
 
 - On a connected computer, the sessions you start, and your triggers that
