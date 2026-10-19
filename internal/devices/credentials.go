@@ -44,9 +44,22 @@ var ErrCredentialsNeeded = errors.New("no client handed a valid token for this a
 // saved login, which takes none from a client.
 var ErrNoClientCredentials = errors.New("this engine serves with the saved login and takes no token from a client")
 
+// The codes a refused token is answered with, beside the general
+// invalid_credentials: a token in an organization's context, and a token of
+// another person than the one whose device this computer serves.
+const (
+	CodeCredentialsOrg         = "credentials_org_context"
+	CodeCredentialsOtherPerson = "credentials_other_person"
+)
+
 // CredentialsError is a token a client handed that the engine refuses: not
-// addressed to its audience, or expired, or with no expiry at all.
-type CredentialsError struct{ Reason string }
+// addressed to its audience, expired or with no expiry, in an
+// organization's context, or another person's. Code is one of the codes
+// above, or empty for any other refusal.
+type CredentialsError struct {
+	Code   string
+	Reason string
+}
 
 func (e *CredentialsError) Error() string { return e.Reason }
 
@@ -71,6 +84,15 @@ type Credentials struct {
 
 	mu   sync.Mutex
 	held map[string]HeldToken
+	// heldSubject is the person the held tokens name.
+	heldSubject string
+	// bound is set while this computer is connected: every token handed
+	// must then name owner, the person whose device it is. An empty owner
+	// is learned from the tokens held, or the next ones handed, and told to
+	// onBound.
+	bound   bool
+	owner   string
+	onBound func(subject string)
 	// changed is closed and replaced at each Put, waking every waiting call.
 	changed chan struct{}
 	timers  map[string]*time.Timer
@@ -97,21 +119,104 @@ func (c *Credentials) notifyNeed(f func()) {
 	c.onNeed = f
 }
 
+// notifyBound sets what is told the owner learned from the tokens, so the
+// engine records whose device this computer serves.
+func (c *Credentials) notifyBound(f func(subject string)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.onBound = f
+}
+
+// Bind ties the tokens to owner, the person whose device this computer
+// serves, while it is connected: a token of another person is refused from
+// now on, and tokens held for another are dropped. An empty owner, for a
+// device whose owner was never recorded, is the person the tokens held now
+// name, or else the next ones handed.
+func (c *Credentials) Bind(owner string) {
+	c.mu.Lock()
+	c.bound, c.owner = true, owner
+	learned := ""
+	if owner == "" && c.heldSubject != "" {
+		c.owner, learned = c.heldSubject, c.heldSubject
+	}
+	if c.owner != "" && c.heldSubject != "" && c.heldSubject != c.owner {
+		c.dropLocked()
+	}
+	f := c.onBound
+	c.mu.Unlock()
+	if learned != "" && f != nil {
+		f(learned)
+	}
+}
+
+// Unbind ends the tie once this computer is no longer connected, so the
+// next connect may be any person's.
+func (c *Credentials) Unbind() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.bound, c.owner = false, ""
+}
+
+// Subject is the person the held tokens name, "" when none is held.
+func (c *Credentials) Subject() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.heldSubject
+}
+
+// dropLocked forgets every held token. The caller holds mu.
+func (c *Credentials) dropLocked() {
+	for audience, timer := range c.timers {
+		timer.Stop()
+		delete(c.timers, audience)
+	}
+	c.held, c.heldSubject = map[string]HeldToken{}, ""
+}
+
 // Put keeps the tokens given, by audience, after checking every one: a token
-// for another audience, or one that expires within a minute, is refused and
-// nothing is kept.
+// for another audience, one that expires within a minute, one in an
+// organization's context, tokens that name different people, and, while
+// this computer is connected, a token of another person than its owner are
+// refused, and nothing is kept.
 func (c *Credentials) Put(tokens map[string]HeldToken) error {
 	now := c.now()
 	checked := map[string]HeldToken{}
+	subject := ""
 	for audience, t := range tokens {
-		expiry, err := checkToken(audience, t, now)
+		expiry, sub, err := checkToken(audience, t, now)
 		if err != nil {
 			return err
 		}
+		if subject != "" && sub != subject {
+			return &CredentialsError{Reason: "the tokens handed together name different people"}
+		}
+		subject = sub
 		checked[audience] = HeldToken{Token: t.Token, ExpiresAt: expiry}
 	}
+	if len(checked) == 0 {
+		return nil
+	}
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	if c.bound && c.owner != "" && subject != c.owner {
+		c.mu.Unlock()
+		return &CredentialsError{Code: CodeCredentialsOtherPerson, Reason: "the token is another person's than the one whose device this computer serves"}
+	}
+	if c.heldSubject != "" && c.heldSubject != subject {
+		// Tokens of another person never stand beside these.
+		c.dropLocked()
+	}
+	c.heldSubject = subject
+	learned := ""
+	if c.bound && c.owner == "" {
+		c.owner, learned = subject, subject
+	}
+	f := c.onBound
+	defer func() {
+		c.mu.Unlock()
+		if learned != "" && f != nil {
+			f(learned)
+		}
+	}()
 	for audience, t := range checked {
 		c.held[audience] = t
 		if timer := c.timers[audience]; timer != nil {
@@ -129,6 +234,27 @@ func (c *Credentials) Put(tokens map[string]HeldToken) error {
 	close(c.changed)
 	c.changed = make(chan struct{})
 	return nil
+}
+
+// Wait blocks until a usable token for audience is held, with no deadline,
+// and answers the context's error when it ends first. It is for a step that
+// cannot go on without the person's sign-in, such as minting this
+// computer's key, which waits for the client however long that takes.
+func (c *Credentials) Wait(ctx context.Context, audience string) error {
+	for {
+		c.mu.Lock()
+		t, ok := c.held[audience]
+		changed := c.changed
+		c.mu.Unlock()
+		if ok && c.now().Add(credentialsMargin).Before(t.ExpiresAt) {
+			return nil
+		}
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 }
 
 // Token answers a usable token for audience, waiting for a client to hand
@@ -170,36 +296,46 @@ func (c *Credentials) State() CredentialsState {
 
 // checkToken reads a handed token's claims without verifying its signature,
 // which the service it is presented to does: it must be addressed to the
-// audience and expire more than a minute from now. Its expiry is the earlier
-// of its exp claim and the one the client gave.
-func checkToken(audience string, t HeldToken, now time.Time) (time.Time, error) {
+// audience, name a person, be in that person's own context rather than an
+// organization's (a device is personal), and expire more than a minute from
+// now. It answers its expiry, the earlier of its exp claim and the one the
+// client gave, and the person it names.
+func checkToken(audience string, t HeldToken, now time.Time) (time.Time, string, error) {
 	if strings.TrimSpace(t.Token) == "" {
-		return time.Time{}, &CredentialsError{Reason: "the " + audience + " token is empty"}
+		return time.Time{}, "", &CredentialsError{Reason: "the " + audience + " token is empty"}
 	}
 	parts := strings.Split(t.Token, ".")
 	if len(parts) < 2 {
-		return time.Time{}, &CredentialsError{Reason: "the " + audience + " token is not a JWT"}
+		return time.Time{}, "", &CredentialsError{Reason: "the " + audience + " token is not a JWT"}
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
-		return time.Time{}, &CredentialsError{Reason: "the " + audience + " token's claims do not decode: " + err.Error()}
+		return time.Time{}, "", &CredentialsError{Reason: "the " + audience + " token's claims do not decode: " + err.Error()}
 	}
 	var claims struct {
-		Aud json.RawMessage `json:"aud"`
-		Exp int64           `json:"exp"`
+		Aud   json.RawMessage `json:"aud"`
+		Exp   int64           `json:"exp"`
+		Sub   string          `json:"sub"`
+		OrgID string          `json:"org_id"`
 	}
 	if err = json.Unmarshal(raw, &claims); err != nil {
-		return time.Time{}, &CredentialsError{Reason: "the " + audience + " token's claims do not decode: " + err.Error()}
+		return time.Time{}, "", &CredentialsError{Reason: "the " + audience + " token's claims do not decode: " + err.Error()}
 	}
 	var auds []string
 	var one string
 	if json.Unmarshal(claims.Aud, &one) == nil {
 		auds = []string{one}
 	} else if err = json.Unmarshal(claims.Aud, &auds); err != nil {
-		return time.Time{}, &CredentialsError{Reason: "the " + audience + " token names no audience"}
+		return time.Time{}, "", &CredentialsError{Reason: "the " + audience + " token names no audience"}
 	}
 	if !slices.Contains(auds, audience) {
-		return time.Time{}, &CredentialsError{Reason: fmt.Sprintf("the %s token is addressed to %v, not to %s", audience, auds, audience)}
+		return time.Time{}, "", &CredentialsError{Reason: fmt.Sprintf("the %s token is addressed to %v, not to %s", audience, auds, audience)}
+	}
+	if strings.TrimSpace(claims.Sub) == "" {
+		return time.Time{}, "", &CredentialsError{Reason: "the " + audience + " token names no person"}
+	}
+	if claims.OrgID != "" {
+		return time.Time{}, "", &CredentialsError{Code: CodeCredentialsOrg, Reason: "the " + audience + " token is in the context of the organization " + claims.OrgID + ", and a device is personal"}
 	}
 	expiry := t.ExpiresAt
 	if claims.Exp > 0 {
@@ -208,10 +344,10 @@ func checkToken(audience string, t HeldToken, now time.Time) (time.Time, error) 
 		}
 	}
 	if expiry.IsZero() {
-		return time.Time{}, &CredentialsError{Reason: "the " + audience + " token names no expiry"}
+		return time.Time{}, "", &CredentialsError{Reason: "the " + audience + " token names no expiry"}
 	}
 	if !now.Add(credentialsMargin).Before(expiry) {
-		return time.Time{}, &CredentialsError{Reason: fmt.Sprintf("the %s token expires at %s, within a minute", audience, expiry.UTC().Format(time.RFC3339))}
+		return time.Time{}, "", &CredentialsError{Reason: fmt.Sprintf("the %s token expires at %s, within a minute", audience, expiry.UTC().Format(time.RFC3339))}
 	}
-	return expiry.UTC(), nil
+	return expiry.UTC(), claims.Sub, nil
 }

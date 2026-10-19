@@ -108,6 +108,11 @@ func (p Paths) Socket() string { return filepath.Join(p.Devices(), "control.sock
 // LockFile is what one engine holds while it serves this computer.
 func (p Paths) LockFile() string { return filepath.Join(p.Devices(), "lock") }
 
+// OwnerFile records whose device this computer serves, for an engine that
+// takes its tokens from a client: in the state directory, which no session
+// reaches, and apart from the host policy file, which every version reads.
+func (p Paths) OwnerFile() string { return filepath.Join(p.Devices(), "owner.json") }
+
 // ActivityDir holds one environment's activity log.
 func (p Paths) ActivityDir(environment string) string {
 	return filepath.Join(p.Devices(), environment)
