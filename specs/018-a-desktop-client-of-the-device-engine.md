@@ -9,6 +9,7 @@ depends_on:
   - "CROSS-REPO: latere-ai/platform specs/220-devices.md, what platformd allows at create and `/v1/account/devices`"
 affects:
   - internal/devices/control.go (the routes below)
+  - internal/devices/connect.go (new: the connect's facts, terms and consent; the engine's connect, policy, credentials and removal)
   - internal/devices/engine.go (an engine that serves its socket before it is connected; credentials from the client; the policy and removal routes)
   - internal/devices/credentials.go (new: the tokens a client hands the engine, and when it needs more)
   - internal/devices/policy.go (the policy checked and applied through the socket; extra denied paths)
@@ -16,6 +17,8 @@ affects:
   - internal/devices/events.go (`Status` says the connection state and the credentials needed)
   - internal/commands/devices_connect.go (enrolment shared by connect and `POST /v1/connect`; `serve --credentials client`; the release check off under `LATERE_NO_UPDATE_CHECK`)
   - internal/commands/devices.go (`remove` shares its local half with `POST /v1/remove`)
+  - internal/commands/devices_records.go (`deviceAuth`: the saved login or the client's tokens, for every call a device makes as the person)
+  - internal/upgrade/notify.go (`Disabled`, which `serve` asks before it checks for releases)
   - internal/commands/auth.go (`logout` on a computer a desktop application serves)
   - docs/devices.md, CHANGELOG.md
 effort: medium
@@ -67,25 +70,32 @@ refuses. It takes the lock, opens the control socket, and waits in a new
 state, `not_connected`, which `GET /v1/status` answers with no device.
 The terminal's `connect` is unchanged.
 
-`GET /v1/connect?name=&folder=&network=&host=` answers the proposal for
-those values, filled as `connect` fills them (the computer's name, the
-default hosts) and checked as `connect` checks them, with the facts the
-connect screen states, each as a field and in its words:
+`GET /v1/connect?name=&folder=&network=&host=&session_start=` answers
+the proposal for those values, filled as `connect` fills them (the
+computer's name, the default hosts, what an earlier file said) and checked
+as `connect` checks them, with the facts the connect screen states. A
+folder is absolute or under `~`, with `:ro` for read-only; `folder` and
+`host` repeat. Each fact is a sentence on one line, what it names, and a
+sentence after it, so the client wraps and lays them out:
 
 ```json
 {
-  "policy": {"name": "MacBook Pro", "folders": [{"path": "~/code/site", "write": true}], "network": {"mode": "allowlist", "hosts": ["github.com", "..."]}},
+  "policy": {"name": "MacBook Pro", "session_start": "allow", "folders": [{"path": "~/code/site", "write": true}], "network": {"mode": "allowlist", "hosts": ["github.com", "..."]}},
   "facts": [
-    {"kind": "folders", "text": "Sessions you start in Latere will run commands and read and edit files on this computer, in these folders only."},
+    {"kind": "folders", "text": "Sessions you start in Latere will run commands and read and edit files on this computer, in these folders only:", "items": ["~/code/site (read-write)"]},
     {"kind": "secrets", "text": "Everything in these folders is readable to the agent, a project's .env file and other secrets kept there included."},
-    {"kind": "network", "text": "A host that accepts writes, such as a git host, can carry data out."},
-    {"kind": "who", "text": "Only sessions you start, and triggers you own, can ask to use this computer, and each session needs your approval here before it starts."},
+    {"kind": "network", "text": "Network: commands may reach these hosts only:", "items": ["github.com", "..."], "note": "A host that accepts writes, such as a git host, can carry data out."},
+    {"kind": "who", "text": "Only sessions you start, and triggers you own, can use this computer. Sessions you start, and your triggers that run on a schedule, start on this computer without asking here. ..."},
     {"kind": "log", "text": "What the agent reads on this computer goes to the session's log and to the model. In an organization's conversation, that organization can read it too."}
   ],
-  "consent": "<a digest of the policy and the facts>",
+  "consent": "sha256:<hex of the policy and the facts as JSON>",
   "problems": []
 }
 ```
+
+The `who` fact follows `session_start`, with the same sentences the
+screen prints for allow and for ask. The proposal on a computer already
+connected is refused `device_already_connected`.
 
 `POST /v1/connect` with `{"policy": {...}, "consent": "<digest>"}` does
 what `connect` does after its typed yes, through the same function: it
@@ -94,9 +104,10 @@ would show now (`device_not_confirmed`), writes `device.yaml`, creates
 the environment at Cella and names it at the platform with the client's
 credentials (B), and starts serving. Its refusals are 016's
 (`device_policy_invalid`, `device_personal_only`, `device_limit`,
-`device_org_context`, `sign_in_required`), as the JSON error. The
-terminal's `ConnectScreen` renders the same facts, so the two never
-drift.
+`device_org_context`, `sign_in_required`), and
+`device_credentials_needed` when no client handed a platform token in
+time, as the JSON error. The terminal's `ConnectScreen` renders the same
+facts, so the two never drift.
 
 ### B. Credentials from the client
 
@@ -127,9 +138,12 @@ today.
 result as `connect` does (`Problems`, `CheckDriver`), refuses with
 `device_policy_invalid` and the problem, or writes `device.yaml` under
 the engine's policy lock and reloads, answering the status. A changed
-name is also set at the platform (`PATCH /v1/account/devices/{id}`) with
-the client's credentials. `DELETE /v1/policy/remembered/{trigger}`
-forgets one remembered scheduled trigger.
+name is set at the platform first (`PATCH /v1/account/devices/{id}`),
+with the client's credentials; a refusal there is
+`device_rename_failed`, and nothing is written.
+`DELETE /v1/policy/remembered/{trigger}` forgets one remembered
+scheduled trigger, and answers `not_remembered` for one it does not
+name.
 
 ### D. Removing through the socket
 
@@ -172,13 +186,19 @@ engine, `logout` asks as 016 says.
 
 | # | Test | Where |
 |---|---|---|
-| 1 | `TestServeWaitsNotConnected`: `serve` with no device answers `not_connected` on the socket and creates nothing | `internal/devices/control_test.go` |
-| 2 | `TestConnectThroughSocket`: against a stub Cella and platform, `POST /v1/connect` with the digest from `GET /v1/connect` creates the same environment `connect` creates, and a stale digest is refused `device_not_confirmed` | `internal/commands/devices_test.go` |
-| 3 | `TestConnectScreenMatchesFacts`: the terminal's screen and the route's facts are one source | `internal/devices/terminal_test.go` |
-| 4 | `TestClientCredentials`: under `--credentials client`, with no `auth-token.json`, a key is minted with the handed token, status turns `needed` before expiry, and no token reaches a file or the log | `internal/devices/engine_test.go` |
-| 5 | `TestPolicyThroughSocket`: a bad folder is refused with its problem; a good change reloads and the driver serves the new grants | `internal/devices/policy_test.go` |
-| 6 | `TestRemoveThroughSocket` and its `local` form | `internal/commands/devices_test.go` |
-| 7 | `TestServeHonorsNoUpdateCheck`: no release lookup under `LATERE_NO_UPDATE_CHECK` | `internal/commands/devices_test.go` |
-| 8 | `TestDenyFromPolicy`: a denied path is unreadable to a stage, skipped where `srt` is missing | `internal/devices/engine_test.go` |
-| 9 | `TestLogoutKeepsAnApplicationsDevice` | `internal/commands/logout_device_test.go` |
-| 10 | The end-to-end run of 016, driven through the socket alone from connect to remove | `cmd/latere/devices_e2e_test.go` |
+| 1 | `TestServeWaitsNotConnected` and `TestServeWaitsNotConnectedCommand`: `serve` with no device answers `not_connected` on the socket and creates nothing | `internal/devices/socket_test.go`, `internal/commands/devices_socket_test.go` |
+| 2 | `TestConnectThroughSocket` and `TestConnectThroughSocketWithClientCredentials`: `POST /v1/connect` with the consent from `GET /v1/connect` creates the environment `connect` creates and names it, and a stale consent is refused `device_not_confirmed` | `internal/devices/socket_test.go`, `internal/commands/devices_socket_test.go` |
+| 3 | `TestConnectScreenMatchesFacts`: every fact the route answers is on the terminal's screen | `internal/devices/socket_test.go` |
+| 4 | `TestClientCredentials` and `TestConnectThroughSocketWithClientCredentials`: tokens are checked and kept in memory, a call waits for one, a held one turns `needed` a minute before its expiry; under `--credentials client` with a saved login no process may read, every Cella and platform request presents the handed token, and no token reaches a file, the log or the output | `internal/devices/socket_test.go`, `internal/commands/devices_socket_test.go` |
+| 5 | `TestPolicyThroughSocket`: a bad folder is refused with its problem; a refused rename writes nothing; a good change reloads and the driver serves the new grants; a remembered trigger is forgotten | `internal/devices/socket_test.go` |
+| 6 | `TestRemoveThroughSocket` and its `local` form, with `serve` waiting again afterwards | `internal/devices/socket_test.go`, `internal/commands/devices_socket_test.go` |
+| 7 | `TestServeHonorsNoUpdateCheck`: no release lookup under `LATERE_NO_UPDATE_CHECK` or `CI` | `internal/commands/devices_account_test.go` |
+| 8 | `TestDenyFromPolicy`: a denied path is unreadable to a stage, skipped where `srt` is missing | `internal/devices/engine_test.go` (with F) |
+| 9 | `TestLogoutKeepsAnApplicationsDevice` | `internal/commands/logout_device_test.go` (with G) |
+| 10 | `TestDevicesServeThroughTheSocketEndToEnd`: the built binary under `--credentials client` with no saved login, against a real cellad, from tokens through connect, rename and remove | `cmd/latere/devices_e2e_test.go` |
+
+## Progress
+
+A to E are built (2026-10-19), with tests 1 to 7 and 10. F (paths a
+client denies) and G (logout on a computer an application serves) are
+not built yet; tests 8 and 9 come with them.

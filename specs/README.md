@@ -25,7 +25,7 @@ specs/
   015-evals-commands.md              (in-progress: latere evals replaces latere eval; suites, experiments, comparisons, harness lease and import, publishing)
   016-devices-command.md             (complete: latere devices connects this computer as an environment the person's sessions work on; their own sessions start there unasked)
   017-signed-upgrades.md             (complete: releases sign their checksums; upgrade and auto-upgrade verify the signature, and an SSH signature beside it for the installer)
-  018-a-desktop-client-of-the-device-engine.md (in-progress: serve connects, takes a client's tokens, changes the policy and removes the device through its socket)
+  018-a-desktop-client-of-the-device-engine.md (in-progress: serve connects, takes a client's tokens, changes the policy and removes the device through its socket, built; a client's denied paths and logout beside an application, to come)
 ```
 
 ## Status
