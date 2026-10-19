@@ -135,11 +135,14 @@ func TestFollowActivity(t *testing.T) {
 	}
 	waitUntil(t, "the existing line", seen(1))
 	// Enough lines to rotate the file under the follower more than once.
+	// Each line waits until the follower has the one before it: two
+	// rotations between two polls lose the lines in the file between them,
+	// which a 200-byte log reaches in milliseconds and the 10 MB one never.
 	for i := range 12 {
 		if err = a.Write(Entry{Time: time.Now(), Type: "Exec", Path: fmt.Sprintf("after-%d", i)}); err != nil {
 			t.Fatal(err)
 		}
-		time.Sleep(5 * time.Millisecond)
+		waitUntil(t, fmt.Sprintf("line after-%d", i), seen(i+2))
 	}
 	waitUntil(t, "every line written after", seen(13))
 	cancel()
