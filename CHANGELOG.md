@@ -10,6 +10,20 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Changed
+
+- **On macOS, `latere devices` needs nothing installed.** Every command a
+  session runs is confined by Seatbelt, part of macOS, in place of srt,
+  Node.js and ripgrep. Linux keeps srt.
+- **On macOS a host on a device's allowlist is reached on ports 443 and
+  80;** write `host:port` for another, as `github.com:22` for git over SSH.
+- **On macOS a session cannot write, inside a folder you shared, the files
+  your own tools later run as code**: shell startup files, `.envrc`,
+  `.gitconfig`, `.gitmodules`, `.mcp.json`, `*.code-workspace`, the
+  `.claude`, `.cursor`, `.vscode` and `.idea` folders, and a repository's
+  config and hooks. Everyday git works there; `git init`, `clone`,
+  `config` and `remote add` do not.
+
 ## v0.26.0 - 2026-10-19
 
 ### Changed
