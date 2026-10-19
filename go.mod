@@ -19,7 +19,7 @@ require (
 	golang.org/x/term v0.46.0
 	gopkg.in/yaml.v3 v3.0.1
 	latere.ai/x/cella v0.18.0
-	latere.ai/x/pkg v0.102.0
+	latere.ai/x/pkg v0.103.0
 	latere.ai/x/topos v0.7.0
 )
 
