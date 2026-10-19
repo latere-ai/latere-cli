@@ -89,6 +89,8 @@ committed: the commit log already holds that.
   `LATERE_NO_UPDATE_CHECK` or `CI`, as every other release check already
   does, so a copy an application bundles never looks for a release.
 
+## v0.24.3 - 2026-10-19
+
 ### Fixed
 
 - The notice that a new release is available no longer names a release
