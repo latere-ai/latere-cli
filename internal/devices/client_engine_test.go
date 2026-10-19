@@ -564,3 +564,26 @@ func TestAStartAfterARemovalServesNothing(t *testing.T) {
 		t.Errorf("the removed device registered: %v", p.bearersNow())
 	}
 }
+
+func TestRemovalDeletesAFileTheWorkerAlreadyCleared(t *testing.T) {
+	paths := testPaths(t)
+	keys := OpenKeys(paths.KeyFile())
+	connected(t, paths, keys)
+	// The worker saw the removal at the platform first: the file names no
+	// device and keeps its folders.
+	file, _, err := LoadPolicy(paths.PolicyFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	file.Device = ""
+	if err := SavePolicy(paths.PolicyFile(), file); err != nil {
+		t.Fatal(err)
+	}
+	e := New(Config{Paths: paths, Keys: keys, Account: &fakeAccount{}})
+	if err := e.forgetHere(testEnv); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(paths.PolicyFile()); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the host policy file outlived a removal through the socket: %v", err)
+	}
+}
