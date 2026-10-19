@@ -79,6 +79,9 @@ type Config struct {
 	// Credentials holds the tokens a client hands under `serve --credentials
 	// client`, which Account and Enroll then present. Nil is the saved login.
 	Credentials *Credentials
+	// LoginSubject is the person the saved login names, recorded as the
+	// device's owner once the platform answers that login as its own.
+	LoginSubject string
 	// WaitToConnect is `serve`: on a computer not connected, or once its
 	// device is removed, the engine waits for a client to connect it through
 	// the control socket instead of ending.
@@ -169,9 +172,8 @@ func New(cfg Config) *Engine {
 	e.broker = newBroker(e.hub.publish)
 	if cfg.Credentials != nil {
 		cfg.Credentials.notifyNeed(e.publishStatus)
-		cfg.Credentials.notifyBound(e.recordOwner)
 		// A client may hand tokens before Run reads the file: they are tied
-		// to the device's owner from the start.
+		// to the device's recorded owner from the start.
 		if p, ok, err := LoadPolicy(cfg.Paths.PolicyFile()); err == nil && ok && p.Device != "" {
 			e.bindCredentials(p.Device)
 		}
@@ -180,43 +182,70 @@ func New(cfg Config) *Engine {
 }
 
 // bindCredentials ties a client's tokens to the person recorded as the
-// owner of device, or, where none is recorded, to the person the tokens
-// name, which is then recorded. It does nothing on the saved login.
+// owner of device. With none recorded, any person's tokens are taken until
+// the platform answers one as the owner (confirmOwner). It does nothing on
+// the saved login.
 func (e *Engine) bindCredentials(device string) {
 	if e.cfg.Credentials == nil {
 		return
 	}
 	subject, err := readOwner(e.cfg.Paths.OwnerFile(), device)
 	if err != nil {
-		e.notice("Whose device this computer serves could not be read, so it is learned again from the next sign-in handed: " + err.Error())
+		e.notice("Whose device this computer serves could not be read, so it is confirmed again with the next sign-in: " + err.Error())
 	}
-	e.cfg.Credentials.Bind(subject)
+	e.cfg.Credentials.SetOwner(subject)
 }
 
-// recordOwner records subject as the owner of the device the host policy
-// file names, learned from the tokens a client handed for a device whose
-// owner was not recorded yet.
-func (e *Engine) recordOwner(subject string) {
-	e.policyMu.Lock()
-	p, ok, err := LoadPolicy(e.cfg.Paths.PolicyFile())
-	e.policyMu.Unlock()
-	if err != nil || !ok || p.Device == "" {
+// confirmOwner records the person the platform just answered as the
+// owner of device, by minting its key or reading it as them, when no owner
+// is recorded yet, and ties a client's tokens to them from then on.
+func (e *Engine) confirmOwner(device string) {
+	subject := e.cfg.LoginSubject
+	if e.cfg.Credentials != nil {
+		subject = e.cfg.Credentials.Subject()
+	}
+	if subject == "" || device == "" {
 		return
 	}
-	if err := writeOwner(e.cfg.Paths.OwnerFile(), p.Device, subject); err != nil {
-		e.notice("Whose device this computer serves could not be recorded: " + err.Error())
+	recorded, err := readOwner(e.cfg.Paths.OwnerFile(), device)
+	if err != nil || (recorded != "" && recorded != subject) {
+		return
+	}
+	if recorded == "" {
+		if err := writeOwner(e.cfg.Paths.OwnerFile(), device, subject); err != nil {
+			e.notice("Whose device this computer serves could not be recorded: " + err.Error())
+			return
+		}
+	}
+	if e.cfg.Credentials != nil {
+		e.cfg.Credentials.SetOwner(subject)
 	}
 }
 
-// unbindCredentials ends the tie once this computer is no longer
-// connected, and deletes the record of its owner.
-func (e *Engine) unbindCredentials() {
-	if err := removeOwner(e.cfg.Paths.OwnerFile()); err != nil {
+// unbindCredentials ends the tie once device is no longer served, and
+// deletes the record of its owner.
+func (e *Engine) unbindCredentials(device string) {
+	if err := removeOwner(e.cfg.Paths.OwnerFile(), device); err != nil {
 		e.notice("The record of whose device this computer served could not be deleted: " + err.Error())
 	}
 	if e.cfg.Credentials != nil {
-		e.cfg.Credentials.Unbind()
+		e.cfg.Credentials.SetOwner("")
 	}
+}
+
+// unconfirmed reports whether a client's tokens are not yet confirmed as
+// the device owner's: a removal the platform answers to them may mean the
+// tokens are another person's, not that the device is gone.
+func (e *Engine) unconfirmed() bool {
+	return e.cfg.Credentials != nil && e.cfg.Credentials.Owner() == ""
+}
+
+// notTheOwner answers a removal the platform gave tokens not confirmed as
+// the device owner's: the device is kept, the tokens are dropped, and the
+// status says the client should hand the owner's sign-in.
+func (e *Engine) notTheOwner(err error) {
+	e.cfg.Credentials.Drop()
+	e.setState(StateOffline, "the sign-in the application handed is not this device's owner's ("+err.Error()+"); hand the owner's sign-in, or remove this computer here")
 }
 
 // publishStatus tells every client the status now.
@@ -341,7 +370,7 @@ func (e *Engine) waitToConnect(ctx context.Context) error {
 	e.policy, e.paused = Policy{}, false
 	e.mu.Unlock()
 	if e.cfg.Credentials != nil {
-		e.cfg.Credentials.Unbind()
+		e.cfg.Credentials.SetOwner("")
 	}
 	e.setState(StateNotConnected, "")
 	select {
@@ -416,6 +445,7 @@ func (e *Engine) serveDevice(ctx context.Context, policy Policy) (err error) {
 	if e.cfg.Keys.InFile() {
 		e.notice("No keychain answered, so this computer's key is kept in " + e.cfg.Keys.Name() + ", readable by your user account.")
 	}
+	e.confirmSavedLogin(devCtx, policy.Device)
 	e.notice(SessionStartNotice(policy))
 	for {
 		if err = e.waitWhilePaused(devCtx); err != nil {
@@ -426,6 +456,27 @@ func (e *Engine) serveDevice(ctx context.Context, policy Policy) (err error) {
 			return err
 		}
 	}
+}
+
+// confirmSavedLogin records the saved login's person as the owner of a
+// device whose owner was never recorded, once the platform answers that
+// login as the device's own, so an application that serves the device
+// later refuses another person's tokens. A device connected before the
+// record existed gets one this way.
+func (e *Engine) confirmSavedLogin(ctx context.Context, device string) {
+	if e.cfg.Credentials != nil || e.cfg.LoginSubject == "" {
+		return
+	}
+	if recorded, err := readOwner(e.cfg.Paths.OwnerFile(), device); err != nil || recorded != "" {
+		return
+	}
+	go func() {
+		cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		if exists, err := e.cfg.Account.Exists(cctx, device); err == nil && exists {
+			e.confirmOwner(device)
+		}
+	}()
 }
 
 // readPolicy reads the host policy file for a start or a reload, refusing a
@@ -587,6 +638,11 @@ func (e *Engine) serveOnce(ctx context.Context) (bool, error) {
 		return true, nil
 	case errors.Is(cause, errKeyExpired):
 		if rerr := e.renewExpired(ctx); rerr != nil {
+			if ctx.Err() != nil {
+				// The engine stopped, or a client removed the device, while
+				// the renewal waited for the person's sign-in.
+				return false, nil
+			}
 			return false, rerr
 		}
 		return true, nil
@@ -687,7 +743,7 @@ func (e *Engine) removed(detail string) error {
 	if err := e.forgetDevice(env); err != nil {
 		detail += "; the host policy file could not be updated: " + err.Error()
 	}
-	e.unbindCredentials()
+	e.unbindCredentials(env)
 	return Fail(CodeRemoved, detail, nil)
 }
 
@@ -733,6 +789,10 @@ func (e *Engine) prepareKey(ctx context.Context) error {
 		k = next
 	case now.Sub(k.MintedAt) >= RotateAfter:
 		next, err := e.mint(ctx, env)
+		if errors.Is(err, ErrRemoved) && e.unconfirmed() {
+			e.notTheOwner(err)
+			break
+		}
 		if errors.Is(err, ErrRemoved) {
 			return e.removed(err.Error())
 		}
@@ -773,10 +833,16 @@ func (e *Engine) mintFailed(err error, otherwise *Error) error {
 func (e *Engine) mintWaiting(ctx context.Context, env string) (Key, error) {
 	for {
 		k, err := e.mint(ctx, env)
-		if err == nil || e.cfg.Credentials == nil || !errors.Is(err, ErrCredentialsNeeded) {
+		switch {
+		case err == nil || e.cfg.Credentials == nil:
+			return k, err
+		case errors.Is(err, ErrRemoved) && e.unconfirmed():
+			e.notTheOwner(err)
+		case errors.Is(err, ErrCredentialsNeeded):
+			e.setState(StateOffline, "this computer's key is minted once the application hands it your sign-in")
+		default:
 			return k, err
 		}
-		e.setState(StateOffline, "this computer's key is minted once the application hands it your sign-in")
 		if err = e.cfg.Credentials.Wait(ctx, AudienceCella); err != nil {
 			return Key{}, err
 		}
@@ -813,6 +879,8 @@ func (e *Engine) mint(ctx context.Context, env string) (Key, error) {
 	if err = e.cfg.Keys.Put(k); err != nil {
 		return Key{}, Fail(CodeKeyUnavailable, "keep the new key", err)
 	}
+	// The platform minted it for this person: they own the device.
+	e.confirmOwner(env)
 	return k, nil
 }
 
@@ -886,7 +954,12 @@ func (e *Engine) unauthorized() {
 		cctx, stop := context.WithTimeout(ctx, 30*time.Second)
 		defer stop()
 		exists, err := e.cfg.Account.Exists(cctx, env)
+		if exists {
+			e.confirmOwner(env)
+		}
 		switch {
+		case !exists && err == nil && e.unconfirmed():
+			e.notTheOwner(errors.New("the platform answered that the device is not theirs"))
 		case err != nil:
 			// The person's own sign-in cannot ask: the worker keeps trying,
 			// and the next refusal asks again.

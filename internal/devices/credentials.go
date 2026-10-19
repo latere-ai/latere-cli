@@ -86,13 +86,10 @@ type Credentials struct {
 	held map[string]HeldToken
 	// heldSubject is the person the held tokens name.
 	heldSubject string
-	// bound is set while this computer is connected: every token handed
-	// must then name owner, the person whose device it is. An empty owner
-	// is learned from the tokens held, or the next ones handed, and told to
-	// onBound.
-	bound   bool
-	owner   string
-	onBound func(subject string)
+	// owner is the person whose device this computer serves, once the
+	// platform confirmed it: every token handed must then name owner. Empty,
+	// any person's tokens are taken.
+	owner string
 	// changed is closed and replaced at each Put, waking every waiting call.
 	changed chan struct{}
 	timers  map[string]*time.Timer
@@ -119,42 +116,37 @@ func (c *Credentials) notifyNeed(f func()) {
 	c.onNeed = f
 }
 
-// notifyBound sets what is told the owner learned from the tokens, so the
-// engine records whose device this computer serves.
-func (c *Credentials) notifyBound(f func(subject string)) {
+// SetOwner ties the tokens to owner, the person the platform confirmed as
+// the owner of the device this computer serves: a token of another person
+// is refused from now on, and tokens held for another are dropped. An empty
+// owner, for a computer not connected or a device whose owner is not
+// confirmed yet, takes any person's tokens.
+func (c *Credentials) SetOwner(owner string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.onBound = f
-}
-
-// Bind ties the tokens to owner, the person whose device this computer
-// serves, while it is connected: a token of another person is refused from
-// now on, and tokens held for another are dropped. An empty owner, for a
-// device whose owner was never recorded, is the person the tokens held now
-// name, or else the next ones handed.
-func (c *Credentials) Bind(owner string) {
-	c.mu.Lock()
-	c.bound, c.owner = true, owner
-	learned := ""
-	if owner == "" && c.heldSubject != "" {
-		c.owner, learned = c.heldSubject, c.heldSubject
-	}
-	if c.owner != "" && c.heldSubject != "" && c.heldSubject != c.owner {
+	c.owner = owner
+	if owner != "" && c.heldSubject != "" && c.heldSubject != owner {
 		c.dropLocked()
 	}
-	f := c.onBound
-	c.mu.Unlock()
-	if learned != "" && f != nil {
-		f(learned)
-	}
 }
 
-// Unbind ends the tie once this computer is no longer connected, so the
-// next connect may be any person's.
-func (c *Credentials) Unbind() {
+// Owner is the confirmed owner the tokens are tied to, "" when none is.
+func (c *Credentials) Owner() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.bound, c.owner = false, ""
+	return c.owner
+}
+
+// Drop forgets every held token, for tokens the platform answered as
+// another person's than the device's owner, so the client hands others.
+func (c *Credentials) Drop() {
+	c.mu.Lock()
+	c.dropLocked()
+	f := c.onNeed
+	c.mu.Unlock()
+	if f != nil {
+		f()
+	}
 }
 
 // Subject is the person the held tokens name, "" when none is held.
@@ -175,9 +167,9 @@ func (c *Credentials) dropLocked() {
 
 // Put keeps the tokens given, by audience, after checking every one: a token
 // for another audience, one that expires within a minute, one in an
-// organization's context, tokens that name different people, and, while
-// this computer is connected, a token of another person than its owner are
-// refused, and nothing is kept.
+// organization's context, tokens that name different people, and a token of
+// another person than the device's confirmed owner are refused, and nothing
+// is kept.
 func (c *Credentials) Put(tokens map[string]HeldToken) error {
 	now := c.now()
 	checked := map[string]HeldToken{}
@@ -197,8 +189,8 @@ func (c *Credentials) Put(tokens map[string]HeldToken) error {
 		return nil
 	}
 	c.mu.Lock()
-	if c.bound && c.owner != "" && subject != c.owner {
-		c.mu.Unlock()
+	defer c.mu.Unlock()
+	if c.owner != "" && subject != c.owner {
 		return &CredentialsError{Code: CodeCredentialsOtherPerson, Reason: "the token is another person's than the one whose device this computer serves"}
 	}
 	if c.heldSubject != "" && c.heldSubject != subject {
@@ -206,17 +198,6 @@ func (c *Credentials) Put(tokens map[string]HeldToken) error {
 		c.dropLocked()
 	}
 	c.heldSubject = subject
-	learned := ""
-	if c.bound && c.owner == "" {
-		c.owner, learned = subject, subject
-	}
-	f := c.onBound
-	defer func() {
-		c.mu.Unlock()
-		if learned != "" && f != nil {
-			f(learned)
-		}
-	}()
 	for audience, t := range checked {
 		c.held[audience] = t
 		if timer := c.timers[audience]; timer != nil {

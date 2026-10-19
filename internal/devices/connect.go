@@ -15,6 +15,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"time"
 )
 
 // What a desktop client does through the control socket that the terminal
@@ -182,11 +183,16 @@ func connectFacts(p Policy) []Fact {
 		facts = append(facts, Fact{Kind: FactReadPaths, Text: "Commands may also read these paths, outside the folders above:", Items: p.ReadPaths})
 	}
 	facts = append(facts, Fact{Kind: FactWho, Text: who})
-	if len(p.RememberedTriggers) > 0 {
-		remembered := Fact{Kind: FactRemembered, Text: "These scheduled triggers you remembered start without asking, each until\nthe date beside it:"}
-		for _, r := range p.RememberedTriggers {
+	// A remembered trigger past its date asks again, so it grants nothing
+	// and is not stated.
+	remembered := Fact{Kind: FactRemembered, Text: "These scheduled triggers you remembered start without asking, each until\nthe date beside it:"}
+	now := time.Now()
+	for _, r := range p.RememberedTriggers {
+		if now.Before(r.Until) {
 			remembered.Items = append(remembered.Items, fmt.Sprintf("%s (agent version %s) until %s", r.Trigger, r.AgentVersion, r.Until.UTC().Format("2 January 2006")))
 		}
+	}
+	if len(remembered.Items) > 0 {
 		facts = append(facts, remembered)
 	}
 	return append(facts, Fact{Kind: FactLog, Text: "What the agent reads on this computer goes to the session's log and to\nthe model. In an organization's conversation, that organization can\nread it too."})
@@ -328,7 +334,7 @@ func (e *Engine) Connect(ctx context.Context, t Terms, consent string) (ConnectA
 		return ConnectAnswer{}, err
 	}
 	// The person whose tokens connected the computer owns its device.
-	e.bindCredentials(done.Policy.Device)
+	e.confirmOwner(done.Policy.Device)
 	select {
 	case e.connected <- struct{}{}:
 	default:
@@ -573,6 +579,6 @@ func (e *Engine) forgetHere(env string) error {
 		}
 	}
 	e.policyMu.Unlock()
-	e.unbindCredentials()
+	e.unbindCredentials(env)
 	return err
 }
