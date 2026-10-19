@@ -256,11 +256,31 @@ the device cannot be removed, you stay signed in.
 terminal. Sessions that start without asking start as under `connect`. A desktop application, a background service or a second terminal
 drives it through a local socket, `~/.local/state/latere/devices/control.sock`,
 which only processes of your own user can open and no session can reach.
-It speaks HTTP with JSON, versioned under `/v1`:
+
+An application can take a computer from nothing to serving without a
+terminal. On a computer that is not connected, `serve` waits in the state
+`not_connected` with its socket open; the application asks for the
+proposal, shows its facts, and connects with the consent it answered.
+After the device is removed, `serve` waits again.
+
+`serve --credentials client` never reads your saved sign-in: the
+application hands it short-lived tokens it minted for `cella` and
+`api.latere.ai` from its own sign-in, kept in memory only, and the status
+says when one is needed again. A bundled copy runs with
+`LATERE_NO_UPDATE_CHECK=1`, so it never looks for a release and never
+replaces itself.
+
+The socket speaks HTTP with JSON, versioned under `/v1`:
 
 | Route | What it does |
 |---|---|
-| `GET /v1/status` | The device, `state` (`starting`, `online`, `offline` or `paused`), the sessions using it, the creates waiting, the version, and an upgrade when one was found while serving |
+| `GET /v1/status` | The device, `state` (`starting`, `online`, `offline`, `paused` or `not_connected`), the sessions using it, the creates waiting, the version, an upgrade when one was found while serving, and under `--credentials client` whether each token is `valid` or `needed` |
+| `GET /v1/connect?name=&folder=&network=&host=&session_start=` | On a computer not connected, the proposal: the `policy` filled as `connect` fills its flags (`folder` and `host` repeat; a folder is absolute or under `~`, and ends in `:ro` to be read-only), the `facts` the connect screen states, each with its `kind`, `text`, `items` and `note`, a `consent` digest of both, and the `problems` with the policy |
+| `POST /v1/connect` | `{"policy": {...}, "consent": "sha256:..."}` as the proposal answered them: connects this computer as `connect` does after its typed yes, and starts serving. A consent that does not match the policy and the facts the engine shows now is refused `device_not_confirmed` |
+| `PUT /v1/credentials` | `{"cella": {"token", "expires_at"}, "platform": {"token", "expires_at"}}`, either or both, under `--credentials client`. A token for another audience, or one that expires within a minute, is refused `invalid_credentials` |
+| `GET /v1/policy`, `PUT /v1/policy` | The host policy file; a change of `name`, `folders` or `network`, checked as `connect` checks it, with a new name set among your devices, then read again by the serving engine |
+| `DELETE /v1/policy/remembered/{trigger}` | Forget a remembered trigger; `latere devices policy --forget` |
+| `POST /v1/remove` | Remove this device, as `latere devices remove` does: every command stops, the key and the host policy file are deleted, the activity log stays. `{"local": true}` forgets it here alone, for a device already removed or another account's |
 | `GET /v1/activity?follow=1` | The activity log as newline-delimited JSON, and with `follow=1` each line as it is written. `since=` takes a duration such as `1h` or a time |
 | `GET /v1/approvals?follow=1` | The sessions waiting for an answer, and with `follow=1` every one asked, answered or withdrawn, and every session that starts on the computer, asked or not (`"kind": "started"`, with the agent, the session, who started it and the folder), which is what an application notifies of. While a client holds this stream, a session that asks waits for an answer |
 | `POST /v1/approvals/{id}` | `{"answer": "allow" \| "deny" \| "remember", "client": "Your app"}`. `remember` only for a trigger that fires on a schedule. The first answer wins, and every client sees it |
@@ -287,3 +307,6 @@ Every refusal is `{"error": {"code", "message", "details": {"detail"}}}`.
 | `device_worker_replaced` | Another process connected with this device's key and took over. If that was not you, remove the device. |
 | `device_sign_in_expired` | Your sign-in and the key have both expired. Run `latere login`, then connect again. |
 | `device_not_serving` | `latere devices pause` or `resume` found nothing serving this computer. Start it with `latere devices connect`. |
+| `device_not_confirmed` | Nothing was connected: type yes at the screen, or ask the proposal again and connect with its consent. |
+| `device_rename_failed` | The new name was not set among your devices, so nothing changed. Try again. |
+| `device_credentials_needed` | The application serving this computer has not handed its tokens; it does on its own, or sign in to it again. |
