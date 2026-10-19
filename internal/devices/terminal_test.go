@@ -282,8 +282,13 @@ func TestTerminalShowsTheEngine(t *testing.T) {
 		t.Error("a refusal from another client admitted the create")
 	}
 	waitFor(t, "the other client's answer", func() bool { return strings.Contains(out.String(), "Refused in Latere for Mac.") })
-	// A line typed with nothing waiting is ignored.
+	// A line typed with nothing waiting is ignored. The empty line after it
+	// is read only once the terminal took the y, so the y cannot answer the
+	// create below; the empty line answers nothing wherever it lands.
 	if _, err := io.WriteString(typed, "y\n"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(typed, "\n"); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())

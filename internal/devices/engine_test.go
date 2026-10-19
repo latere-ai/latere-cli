@@ -129,39 +129,66 @@ func TestStopEndsBackgroundCommands(t *testing.T) {
 	stop, _ := running(t, e)
 	p.waitConnected(t)
 
-	main := filepath.Join(project, "main.pid")
+	// Each command is found on this computer by its own command line. A pid
+	// the command reports for itself would not do: on Linux, bubblewrap
+	// starts every sandbox in a PID namespace of its own, where the shell is
+	// pid 2 whatever this computer calls it.
+	base := 300000 + time.Now().UnixNano()%100000
+	mainLine, backgroundLine := fmt.Sprintf("sleep %d", base), fmt.Sprintf("sleep %d", base+1)
 	spec := deviceCreate("sbx_bg", project, sessionLabels("ses_bg"))
-	spec.Command = []string{"sh", "-c", "echo $$ > " + main + "; exec sleep 300"}
+	spec.Command = []string{"sh", "-c", "exec " + mainLine}
 	if _, err := p.driver.Create(t.Context(), spec); err != nil {
 		t.Fatal(err)
 	}
-	background := filepath.Join(project, "background.pid")
-	if code, _ := run(t, p.driver, "sbx_bg", "sh", "-c", "sleep 300 >/dev/null 2>&1 & echo $! > "+background); code != 0 {
-		t.Fatalf("the background command did not start: %d", code)
+	// The exec's context lasts as long as the test, as a session's does:
+	// the driver ends a command whose caller went away, and run's context
+	// ends with run.
+	x, err := p.driver.Exec(t.Context(), "sbx_bg", runtime.ExecRequest{
+		Command: []string{"sh", "-c", backgroundLine + " >/dev/null 2>&1 &"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitCtx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	if code, err := x.Wait(waitCtx); err != nil || code != 0 {
+		t.Fatalf("the background command did not start: %d %v", code, err)
+	}
+	lookup := func(line string) []int {
+		found, err := processesRunning(line)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return found
 	}
 	pids := map[string]int{}
-	waitFor(t, "both commands to write their pids", func() bool {
-		for _, path := range []string{main, background} {
-			raw, err := os.ReadFile(path)
-			if err != nil {
-				return false
-			}
-			pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
-			if err != nil {
-				return false
-			}
-			pids[path] = pid
+	waitFor(t, "the sandbox's command to run", func() bool {
+		found := lookup(mainLine)
+		if len(found) == 1 {
+			pids["the sandbox's command"] = found[0]
 		}
-		return true
+		return len(found) == 1
 	})
-	if !alive(pids[main]) {
-		t.Fatal("the sandbox's command is not running before the stop")
+	// What an exec leaves in the background can end with the exec, as the
+	// driver and, on Linux, the exec's own PID namespace end it; one still
+	// running is held to the same stop as the sandbox's command.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if found := lookup(backgroundLine); len(found) == 1 {
+			pids["the background command"] = found[0]
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Log("the background command ended with its exec")
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 	if err := stop(); err != nil {
 		t.Fatalf("Run returned %v", err)
 	}
-	for path, pid := range pids {
-		waitFor(t, filepath.Base(path)+" to end", func() bool { return !alive(pid) })
+	for what, pid := range pids {
+		waitFor(t, what+" to end", func() bool { return !alive(pid) })
 	}
 }
 
