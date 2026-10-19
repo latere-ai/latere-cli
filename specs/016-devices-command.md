@@ -1,6 +1,6 @@
 ---
 title: "`latere devices`: connect this computer as one of the person's environments and serve it in the foreground through Cella's embedded worker and local driver, the host policy file of granted folders, network and remembered scheduled triggers, the person approving each session in the terminal or through the engine's control socket, `latere devices serve` for a desktop application or a background service, an activity log of every operation, the environment key in the keychain and rotated, and list, rename, remove, policy and activity"
-status: implemented
+status: complete
 depends_on:
   - specs/001-auth-unification-migration.md
   - specs/008-cella-at-the-origin.md
@@ -21,7 +21,7 @@ affects:
   - docs/devices.md (new), docs/configuration.md, docs/login-and-tokens.md, README.md, CHANGELOG.md
 effort: large
 created: 2026-10-18
-updated: 2026-10-18
+updated: 2026-10-19
 author: changkun
 ---
 
@@ -439,3 +439,19 @@ Where the build differs from the design, or adds to it:
   (v0.17.1); and an exec naming a directory in the person's folder was
   refused by Cella's exec route (v0.17.2). The end-to-end run covers all
   three.
+
+### Live, 2026-10-19
+
+Released in v0.22.1 (v0.22.0's release stopped on a test that read the
+sandbox's state before the worker had stopped it; the test now waits for
+it). Checked on production from a Mac: `latere devices connect` with a
+granted folder and no network came online; a hosted session named the
+device and folder; its bash call was confirmed; the computer asked for its
+approval with the agent's name, the session and the folder, and was
+answered through the control socket; the command read a file in the
+folder, wrote one there and ran `uname` (Darwin); the activity log held
+every operation; `latere devices remove` ended `connect` with
+`device_removed` and left no key in the keychain. Two small things seen on
+the way: `latere devices list` right after a connect can show the device
+offline for a moment, and the activity log words a missing file as
+"environment not found".

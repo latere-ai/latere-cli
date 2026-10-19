@@ -23,8 +23,8 @@ specs/
   013-app-password.md                (implemented: latere apps password; access says a password, and visibility removes one)
   014-app-rename.md                  (implemented: latere apps rename; the app moves to a new slug and the latere remote follows)
   015-evals-commands.md              (in-progress: latere evals replaces latere eval; suites, experiments, comparisons, harness lease and import, publishing)
-  016-devices-command.md             (implemented: latere devices connects this computer as an environment the person's sessions work on, approved here)
-  017-signed-upgrades.md             (implemented: releases sign their checksums; upgrade and auto-upgrade verify the signature, the installer to follow)
+  016-devices-command.md             (complete: latere devices connects this computer as an environment the person's sessions work on, approved here)
+  017-signed-upgrades.md             (complete: releases sign their checksums; upgrade and auto-upgrade verify the signature, the installer to follow)
 ```
 
 ## Status

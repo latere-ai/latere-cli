@@ -1,6 +1,6 @@
 ---
 title: "Signed upgrades: each release signs its checksums with an Ed25519 key held by the release pipeline, and `latere upgrade`, auto-upgrade and the installer verify the signature against keys built into the binary before trusting any checksum"
-status: implemented
+status: complete
 depends_on:
   - "CROSS-REPO: latere-ai/platform specs/186-the-latere-command-installs-from-the-platforms-address.md, the installer that verifies the same signature"
 affects:
@@ -16,7 +16,7 @@ affects:
   - docs/configuration.md, README.md, CONTRIBUTING.md, CHANGELOG.md
 effort: small
 created: 2026-10-18
-updated: 2026-10-18
+updated: 2026-10-19
 author: changkun
 ---
 
@@ -144,3 +144,12 @@ The installer's half is not built here.
 - **Not built here.** The installer script that verifies
   `checksums.txt.sig` belongs to `latere-ai/platform`, spec 186, and is
   still to come. Until it lands, the installer checks only the checksums.
+
+### Live, 2026-10-18
+
+v0.21.0 was the first signed release. Its `checksums.txt.sig` verifies with
+the public key in `keys.go` by a separate Ed25519 check, the darwin arm64
+archive matches its checksum, the v0.21.0 binary reinstalls itself
+(`latere upgrade v0.21.0`), and an upgrade to the unsigned v0.20.1 is
+refused. v0.22.1 verifies the same way. The installer's check is still to
+come.
