@@ -17,7 +17,7 @@ affects:
   - internal/commands/auth.go (`logout` warns, asks and removes the device on a connected computer)
   - internal/commands/root.go (the `devices` group)
   - cmd/latere/devices_e2e_test.go (new: the end-to-end run against a real cellad)
-  - go.mod (`latere.ai/x/cella` v0.17.2, with `worker` and `runtime/local`)
+  - go.mod (`latere.ai/x/cella` v0.17.2, with `worker` and `runtime/local`; v0.18.0 from 2026-10-19, for `worker.Options.State`)
   - docs/devices.md (new), docs/configuration.md, docs/login-and-tokens.md, README.md, CHANGELOG.md
 effort: large
 created: 2026-10-18
@@ -439,10 +439,9 @@ Where the build differs from the design, or adds to it:
   driver's rules refuse, is refused and the engine keeps serving. A socket
   path longer than a socket address holds (103 bytes) is refused with
   `device_control_unavailable`, naming `XDG_STATE_HOME`.
-- **Online and offline** are read from the worker's registration answers
-  and from its log line when the stream ends, which
-  `TestEngineReadsTheWorkerLines` pins to the Cella this build uses. A
-  typed hook in `worker.Options` is a Cella follow-up.
+- **Online and offline** were read from the worker's registration answers
+  and from its log line when the stream ends. Since Cella v0.18.0 they are
+  read from `worker.Options.State` (amended on 2026-10-19, below).
 - **`device_limit`** keeps its fixed sentence; the next step names how many
   devices the person has and the limit `GET /v1/account/devices` answers.
 - **Three Cella gaps this build found, each fixed in Cella:** a worker's
@@ -526,3 +525,31 @@ screen says so.
 | `--session-start` on connect and policy | `TestConnectProposesSessionStart`, `TestConnectSessionStartFlag`, `TestDevicesPolicy`, `TestConnectCreatesTheEnvironment` | `internal/commands/` |
 | `pause` and `resume` | `TestControlPost`, `TestDevicesPauseAndResume` | `internal/devices/control_test.go`, `internal/commands/devices_session_start_test.go` |
 | End to end: a session unasked, then `--session-start ask` and an approval over the socket | `TestDevicesConnectEndToEnd` | `cmd/latere/devices_e2e_test.go` |
+
+### Amended, 2026-10-19: the worker's state
+
+On Cella v0.18.0 the engine learns whether the computer is online from
+`worker.Options.State`, the typed hook the worker calls on each change of
+its connection, in place of a transport that read each registration's
+answer and a logger that matched the line the worker logs when its stream
+ends.
+
+- **Online** is a State with `Connected`: the registration taken and the
+  stream open. It was the registration alone before. A key this start
+  replaced is revoked then, as before.
+- **Offline**, while the worker reconnects, says why: a key refused with
+  401 (a `worker.RegistrationError`), which asks whether the device still
+  exists as before; another answer to the registration, by its status; a
+  stream that ended; or a control plane never reached.
+- **The last State**, as `worker.Run` returns, changes nothing: a pause, a
+  reload, a stop and a refusal are answered by the engine as before.
+- The worker's own log lines are discarded, as the logger that matched them
+  discarded the rest; the person reads the engine's events.
+- `TestEngineFollowsTheWorkerState` runs a real worker against the stub
+  control plane through a stream that ends and a registration answered 503,
+  and `TestWorkerStateReads` holds each State to the state and detail it
+  reads as.
+
+Cella v0.18.0 also writes the environment's status at registration and
+words a missing path "not found: <path>", which is how the activity log now
+reads one, in place of "environment not found" in the live check above.

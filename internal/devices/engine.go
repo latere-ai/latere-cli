@@ -24,7 +24,6 @@ import (
 	"latere.ai/x/cella/runtime/local"
 	"latere.ai/x/cella/runtime/remote"
 	"latere.ai/x/cella/worker"
-	"latere.ai/x/pkg/otel"
 )
 
 // Account is what the engine asks of the control plane as the person, with
@@ -59,8 +58,8 @@ type Config struct {
 	// NewDriver builds the driver from the host policy. Nil is the local
 	// driver.
 	NewDriver func(local.Options) (runtime.Driver, error)
-	// HTTPClient makes the worker's registration. Nil takes a client with
-	// the tracing transport.
+	// HTTPClient makes the worker's registration. Nil is the worker's own,
+	// with its timeout and the tracing transport.
 	HTTPClient *http.Client
 	// Upgrade reports a newer release, which a long serve announces once a
 	// day; nil checks nothing. UpgradeEvery is how often, a day when zero.
@@ -102,16 +101,19 @@ type Engine struct {
 	// policyMu orders every read-modify-write of the host policy file.
 	policyMu sync.Mutex
 
-	mu        sync.Mutex
-	ctx       context.Context
-	policy    Policy
-	key       Key
-	retiring  *Key
-	state     string
-	detail    string
-	driver    runtime.Driver
-	host      v1.HostInfo
-	sessions  int
+	mu       sync.Mutex
+	ctx      context.Context
+	policy   Policy
+	key      Key
+	retiring *Key
+	state    string
+	detail   string
+	driver   runtime.Driver
+	host     v1.HostInfo
+	sessions int
+	// connected is whether the worker's stream is open now, as its State
+	// last said.
+	connected bool
 	upgrade   string
 	cancel    context.CancelCauseFunc
 	running   bool
@@ -367,13 +369,15 @@ func (e *Engine) serveOnce(ctx context.Context) (bool, error) {
 	e.setState(StateStarting, "")
 	expiry := time.AfterFunc(key.ExpiresAt.Sub(e.cfg.Now()), func() { cancel(errKeyExpired) })
 	defer expiry.Stop()
+	// The worker's own log lines are not the person's: what they read is
+	// the engine's events, which State and Record feed.
 	err = worker.Run(runCtx, worker.Options{
 		URL: e.cfg.URL, Environment: policy.Device, Key: e.currentKey, Driver: d,
-		Policy: e, Record: e.record, HTTPClient: e.registrationClient(),
-		Log: slog.New(logObserver{e: e}), Version: e.cfg.Version, AdmitTimeout: e.cfg.AdmitTimeout,
+		Policy: e, Record: e.record, State: e.workerState, HTTPClient: e.cfg.HTTPClient,
+		Log: slog.New(slog.DiscardHandler), Version: e.cfg.Version, AdmitTimeout: e.cfg.AdmitTimeout,
 	})
 	e.mu.Lock()
-	e.driver, e.cancel, e.sessions = nil, nil, 0
+	e.driver, e.cancel, e.sessions, e.connected = nil, nil, 0, false
 	e.mu.Unlock()
 	if ctx.Err() != nil {
 		return false, nil
@@ -646,77 +650,46 @@ func (e *Engine) unauthorized() {
 	}()
 }
 
-// registrationClient is the worker's registration client, with a transport
-// that tells the engine what each registration answered.
-func (e *Engine) registrationClient() *http.Client {
-	base := otel.Transport(nil)
-	timeout := 30 * time.Second
-	if e.cfg.HTTPClient != nil {
-		if e.cfg.HTTPClient.Transport != nil {
-			base = e.cfg.HTTPClient.Transport
-		}
-		if e.cfg.HTTPClient.Timeout > 0 {
-			timeout = e.cfg.HTTPClient.Timeout
-		}
+// workerState is the worker's State: the computer is online once the
+// control plane took the registration and the stream is open, and offline,
+// with why, each time it stops being connected and reconnects. A key the
+// control plane refused with 401 asks whether the device still exists. The
+// last call, as Run returns, changes nothing: what ended Run (a pause, a
+// reload, a stop or a refusal) is serveOnce's to answer. It runs on Run's
+// goroutine, which waits for it, so whatever takes longer runs apart.
+func (e *Engine) workerState(s worker.State) {
+	e.mu.Lock()
+	wasConnected := e.connected
+	e.connected = s.Connected
+	e.mu.Unlock()
+	if s.Connected {
+		e.registered()
+		return
 	}
-	return &http.Client{Timeout: timeout, Transport: observedTransport{base: base, e: e}}
-}
-
-// observedTransport reads the answer to each registration.
-type observedTransport struct {
-	base http.RoundTripper
-	e    *Engine
-}
-
-func (t observedTransport) RoundTrip(r *http.Request) (*http.Response, error) {
-	res, err := t.base.RoundTrip(r)
-	if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/workers") {
-		return res, err
+	if !s.Reconnect {
+		return
 	}
+	var refused *worker.RegistrationError
 	switch {
-	case err != nil:
-		t.e.setState(StateOffline, "the control plane could not be reached: "+err.Error())
-	case res.StatusCode == http.StatusCreated || res.StatusCode == http.StatusOK:
-		t.e.registered()
-	case res.StatusCode == http.StatusUnauthorized:
-		t.e.setState(StateOffline, "the control plane refused this computer's key")
-		t.e.unauthorized()
+	case errors.As(s.Err, &refused) && refused.StatusCode == http.StatusUnauthorized:
+		e.setState(StateOffline, "the control plane refused this computer's key")
+		e.unauthorized()
+	case errors.As(s.Err, &refused):
+		e.setState(StateOffline, "the control plane answered the registration with "+refused.Status)
+	case wasConnected:
+		e.setState(StateOffline, "the connection to the control plane ended: "+errText(s.Err)+"; reconnecting")
 	default:
-		t.e.setState(StateOffline, "the control plane answered the registration with "+res.Status)
+		e.setState(StateOffline, "the control plane could not be reached: "+errText(s.Err))
 	}
-	return res, err
 }
 
-// streamEnded is the line the worker logs when its stream to the control
-// plane closes, which is how the engine learns the computer went offline.
-// TestEngineReadsTheWorkerLines holds it to the Cella this build pins.
-const streamEnded = "the worker's stream to the control plane ended"
-
-// logObserver takes the worker's own log lines and turns the one that says
-// the stream ended into the offline state. Nothing else is printed: the
-// engine's own events are what the person reads.
-type logObserver struct{ e *Engine }
-
-func (logObserver) Enabled(context.Context, slog.Level) bool { return true }
-
-func (o logObserver) Handle(_ context.Context, r slog.Record) error {
-	if r.Message != streamEnded {
-		return nil
+// errText is an error's text, and a plain word for none.
+func errText(err error) string {
+	if err == nil {
+		return "no reason was given"
 	}
-	detail := "the connection to the control plane ended"
-	r.Attrs(func(a slog.Attr) bool {
-		if a.Key == "err" {
-			detail += ": " + a.Value.String()
-			return false
-		}
-		return true
-	})
-	o.e.setState(StateOffline, detail+"; reconnecting")
-	return nil
+	return err.Error()
 }
-
-func (o logObserver) WithAttrs([]slog.Attr) slog.Handler { return o }
-func (o logObserver) WithGroup(string) slog.Handler      { return o }
 
 // record is the worker's Record: one line of activity per operation, and a
 // new count of sessions after one that starts or ends a sandbox.

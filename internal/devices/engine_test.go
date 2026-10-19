@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"net/http"
 	"os"
@@ -528,7 +529,11 @@ func sawNotice(events <-chan Event, text string) bool {
 	}
 }
 
-func TestEngineReadsTheWorkerLines(t *testing.T) {
+// The engine follows the worker's State: online once the registration is
+// taken and the stream is open, offline with why when the stream ends or a
+// registration is answered with an error, and online again once the worker
+// reconnects.
+func TestEngineFollowsTheWorkerState(t *testing.T) {
 	sandboxRuntime(t)
 	paths := testPaths(t)
 	keys := OpenKeys(paths.KeyFile())
@@ -540,18 +545,70 @@ func TestEngineReadsTheWorkerLines(t *testing.T) {
 	running(t, e)
 	p.waitConnected(t)
 	waitFor(t, "online", func() bool { return e.Status().State == StateOnline })
+	// The next registration is answered as a control plane that is not
+	// ready answers it, once; the one after it is taken.
+	var once sync.Once
+	p.mu.Lock()
+	p.register = func(w http.ResponseWriter, _ string) bool {
+		refused := false
+		once.Do(func() {
+			refused = true
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = io.WriteString(w, `{"error":{"code":"not_ready","message":"not ready"}}`)
+		})
+		return refused
+	}
+	p.mu.Unlock()
 	p.endStream("")
-	var states []string
-	deadline := time.After(20 * time.Second)
-	for !slices.Contains(states, StateOffline) || states[len(states)-1] != StateOnline {
+	var details []string
+	deadline := time.After(30 * time.Second)
+	for len(details) < 3 || details[len(details)-1] != StateOnline {
 		select {
 		case ev := <-events:
-			if ev.Kind == EventStatus {
-				states = append(states, ev.Status.State)
+			if ev.Kind != EventStatus {
+				continue
+			}
+			// The online of the first connection came before the stream
+			// ended, and is not part of what is read here.
+			if ev.Status.State == StateOnline && len(details) > 0 {
+				details = append(details, StateOnline)
+			} else if ev.Status.State == StateOffline {
+				details = append(details, ev.Status.Detail)
 			}
 		case <-deadline:
-			t.Fatalf("the engine went through %v; want offline when the stream ended, then online again", states)
+			t.Fatalf("the engine went through %q; want offline when the stream ended, offline at the refused registration, then online", details)
 		}
+	}
+	if len(details) != 3 || !strings.HasPrefix(details[0], "the connection to the control plane ended: ") ||
+		details[1] != "the control plane answered the registration with 503 Service Unavailable" {
+		t.Errorf("the engine went through %q", details)
+	}
+}
+
+// Each State the worker reports reads as the engine's state, and the last
+// one, as Run returns, leaves the state to whatever ended Run.
+func TestWorkerStateReads(t *testing.T) {
+	paths := testPaths(t)
+	e := New(Config{Paths: paths, Keys: OpenKeys(paths.KeyFile()), Account: &fakeAccount{}})
+	e.workerState(worker.State{Err: errors.New("dial tcp: connection refused"), Reconnect: true, RetryIn: time.Second})
+	if s := e.Status(); s.State != StateOffline || s.Detail != "the control plane could not be reached: dial tcp: connection refused" {
+		t.Errorf("a control plane never reached reads %+v", s)
+	}
+	e.workerState(worker.State{Connected: true})
+	if s := e.Status(); s.State != StateOnline || !s.Online {
+		t.Errorf("a connected worker reads %+v", s)
+	}
+	e.workerState(worker.State{Reconnect: true})
+	if s := e.Status(); s.State != StateOffline || s.Detail != "the connection to the control plane ended: no reason was given; reconnecting" {
+		t.Errorf("a stream that ended reads %+v", s)
+	}
+	e.workerState(worker.State{Err: &worker.RegistrationError{StatusCode: http.StatusUnauthorized, Status: "401 Unauthorized"}, Reconnect: true})
+	if s := e.Status(); s.State != StateOffline || s.Detail != "the control plane refused this computer's key" {
+		t.Errorf("a refused key reads %+v", s)
+	}
+	e.workerState(worker.State{Err: context.Canceled})
+	if s := e.Status(); s.Detail != "the control plane refused this computer's key" {
+		t.Errorf("the last State changed the state to %+v", s)
 	}
 }
 

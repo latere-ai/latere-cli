@@ -10,6 +10,14 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Changed
+
+- A connected computer reads as online once its connection to Latere is
+  open, rather than as soon as it registers, and says why when it is
+  offline. A file a session asked for that is not there reads as
+  "not found: <path>" in the activity log, rather than "environment not
+  found".
+
 ## v0.24.1 - 2026-10-19
 
 ### Changed
