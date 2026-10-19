@@ -267,11 +267,17 @@ After the device is removed, `serve` waits again.
 application hands it short-lived tokens it minted for `cella` and
 `api.latere.ai` from its own sign-in, kept in memory only, and the status
 says when one is needed again. The tokens must be your own, in your
-personal context: once the computer is connected, a token of another
-person than the one whose device it is is refused, so an application
-signed in as someone else never makes the computer forget a device that is
-still yours. When the computer's key must be minted and no token is held,
-`serve` waits, offline, until the application hands one. A bundled copy runs with
+personal context. Once the platform has confirmed whose device it is, a
+token of another person is refused: the owner is recorded when you connect
+the computer, from the terminal or through the socket, and for a device
+connected before this release, the first time the platform mints the
+computer's key for a person or answers their sign-in as the device's own.
+Until then any person's tokens are taken, and when the platform answers
+them that the device is not theirs, the computer keeps the device, drops
+the tokens, and its status says, offline, that it needs the owner's
+sign-in. An application signed in as someone else never makes the computer
+forget your device. When the computer's key must be minted and no token is
+held, `serve` waits, offline, until the application hands one. A bundled copy runs with
 `LATERE_NO_UPDATE_CHECK=1`, so it never looks for a release and never
 replaces itself.
 
@@ -279,10 +285,10 @@ The socket speaks HTTP with JSON, versioned under `/v1`:
 
 | Route | What it does |
 |---|---|
-| `GET /v1/status?follow=1` | The device, `state` (`starting`, `online`, `offline`, `paused` or `not_connected`), the sessions using it, the creates waiting, the version, an upgrade when one was found while serving, and under `--credentials client` whether each token is `valid` or `needed`. With `follow=1`, the status as newline-delimited JSON each time it changes, which is how an application learns a token is needed |
-| `GET /v1/connect?name=&folder=&network=&host=&session_start=` | On a computer not connected, the proposal: the `policy` filled as `connect` fills its flags (`folder` and `host` repeat; a folder is absolute or under `~`, and ends in `:ro` to be read-only), the `facts` the connect screen states, each with its `kind`, `text`, `items` and `note`, a `consent` digest of both, and the `problems` with the policy. With no `folder` and none kept in the host policy file, the proposal names no folder and its problems ask for one. The facts include what the file kept from an earlier connect: the paths read outside the folders (`read_paths`) and the scheduled triggers you remembered (`remembered`) |
+| `GET /v1/status?follow=1` | The device, `state` (`starting`, `online`, `offline`, `paused` or `not_connected`), the sessions using it, the creates waiting, the version, an upgrade when one was found while serving, and under `--credentials client` whether each token is `valid` or `needed`. With `follow=1`, the status as newline-delimited JSON each time it changes, which is how an application learns a token is needed. A follower that falls behind is dropped: its stream ends, and it reconnects and reads the status again |
+| `GET /v1/connect?name=&folder=&network=&host=&session_start=` | On a computer not connected, the proposal: the `policy` filled as `connect` fills its flags (`folder` and `host` repeat; a folder is absolute or under `~`, and ends in `:ro` to be read-only), the `facts` the connect screen states, each with its `kind`, `text`, `items` and `note`, a `consent` digest of both, and the `problems` with the policy. With no `folder` and none kept in the host policy file, the proposal names no folder and its problems ask for one. The facts include what the file kept from an earlier connect: the paths read outside the folders (`read_paths`) and the scheduled triggers you remembered that are still within their date (`remembered`) |
 | `POST /v1/connect` | `{"policy": {...}, "consent": "sha256:..."}` as the proposal answered them: connects this computer as `connect` does after its typed yes, and starts serving. A consent that does not match the policy and the facts the engine shows now, the host policy file as it is then included, is refused `device_not_confirmed`. The answer is the status, with `warnings` when the computer is connected and its name was refused |
-| `PUT /v1/credentials` | `{"cella": {"token", "expires_at"}, "platform": {"token", "expires_at"}}`, either or both, of one person, under `--credentials client`. A token for another audience, one that expires within a minute, or tokens of two people are refused `invalid_credentials`; a token in an organization's context `credentials_org_context`; on a connected computer, another person's token than its owner's `credentials_other_person` |
+| `PUT /v1/credentials` | `{"cella": {"token", "expires_at"}, "platform": {"token", "expires_at"}}`, either or both, of one person, under `--credentials client`. A token for another audience, one that expires within a minute, or tokens of two people are refused `invalid_credentials`; a token in an organization's context `credentials_org_context`; once the device's owner is confirmed, another person's token `credentials_other_person` |
 | `GET /v1/policy`, `PUT /v1/policy` | The host policy file; a change of `name`, `folders` or `network`, checked as `connect` checks it, with a new name set among your devices. A change of the folders or the network is read again by the serving engine, which restarts its connection and stops the commands running; a new name alone leaves them running |
 | `DELETE /v1/policy/remembered/{trigger}` | Forget a remembered trigger; `latere devices policy --forget` |
 | `POST /v1/remove` | Remove this device, as `latere devices remove` does: every command stops, the key and the host policy file are deleted, the activity log stays. `{"local": true}` forgets it here alone, for a device already removed or another account's |
