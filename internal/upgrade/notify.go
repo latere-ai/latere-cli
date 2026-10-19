@@ -21,10 +21,10 @@ const sentinelEnv = "LATERE_UPGRADED"
 // envNoCheck disables all release awareness when set (any value).
 const envNoCheck = "LATERE_NO_UPDATE_CHECK"
 
-// disabled reports whether release awareness should be entirely skipped:
+// Disabled reports whether release awareness should be entirely skipped:
 // explicitly turned off, or running in CI where a surprise notice or binary
 // swap is unwelcome.
-func disabled() bool {
+func Disabled() bool {
 	return os.Getenv(envNoCheck) != "" || os.Getenv("CI") != ""
 }
 
@@ -50,7 +50,7 @@ const checkTimeout = 2 * time.Second
 // run; otherwise it prints a notice. A failed check is not repeated for
 // failureBackoff, so an offline machine is not slowed on every command.
 func OnStart(current string, w io.Writer) {
-	if !isRelease(current) || disabled() || !isTerminalStderr() {
+	if !isRelease(current) || Disabled() || !isTerminalStderr() {
 		return
 	}
 	now := time.Now()
