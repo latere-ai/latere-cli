@@ -48,8 +48,10 @@ committed: the commit log already holds that.
 - A proposal with no folder asks for one, instead of proposing the folder
   `serve` runs in.
 - Removing a device while the computer is paused deletes its sandboxes; a
-  removal right after a connect never leaves the device served; and a key
-  replaced before a removal is no longer revoked against the next device.
+  removal right after a connect never leaves the device served; a removal
+  deletes the host policy file even when the connection saw the removal
+  first; and a key replaced before a removal is no longer revoked against
+  the next device.
 
 ## v0.25.0 - 2026-10-19
 

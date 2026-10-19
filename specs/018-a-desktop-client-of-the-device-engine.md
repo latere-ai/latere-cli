@@ -199,8 +199,9 @@ removed at the platform. `latere devices remove` and the route share one
 function. A removal while the computer is paused deletes its sandboxes
 and their directory too, and a removal that comes between a connect and
 the start of serving finds the start checking the file under the same
-lock, so no device the file no longer names is served. The record of the
-owner goes with the device.
+lock, so no device the file no longer names is served. The file goes
+even when the worker saw the removal at the platform first and cleared
+its device. The record of the owner goes with the device.
 
 ### E. No release check when told not to
 
@@ -247,7 +248,7 @@ engine, `logout` asks as 016 says.
 | 13 | `TestClientModeWaitsForTheKey`: with no key and no token, `serve` waits offline with its socket up, and serves once tokens are handed | `internal/devices/client_engine_test.go` |
 | 14 | `TestConsentCoversWhatTheFileKept` and `TestConnectScreenUnchangedWithoutKeptGrants`: the facts name the file's read paths and remembered triggers, a file changed after the proposal fails the consent, and the screen is byte-identical for a file that keeps neither | `internal/devices/client_engine_test.go` |
 | 15 | `TestStatusCanBeFollowed`: the stream says a token is needed, valid after it is handed, and needed again before it expires | `internal/devices/client_engine_test.go` |
-| 16 | `TestConnectAnswersARefusedNameAndCleansIt`, `TestAMissingTokenIsSaidSo`, `TestAProposalWithNoFolderAsksForOne`, `TestRemovalWhilePausedDeletesTheSandboxes`, `TestRemovalClearsTheKeyToRevoke`, `TestAStartAfterARemovalServesNothing` | `internal/devices/client_engine_test.go` |
+| 16 | `TestConnectAnswersARefusedNameAndCleansIt`, `TestAMissingTokenIsSaidSo`, `TestAProposalWithNoFolderAsksForOne`, `TestRemovalWhilePausedDeletesTheSandboxes`, `TestRemovalClearsTheKeyToRevoke`, `TestAStartAfterARemovalServesNothing`, `TestRemovalDeletesAFileTheWorkerAlreadyCleared` | `internal/devices/client_engine_test.go` |
 
 ## Progress
 
