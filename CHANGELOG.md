@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.26.0 - 2026-10-19
+
 ### Changed
 
 - **Renaming a device from a desktop application leaves its running
