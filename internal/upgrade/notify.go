@@ -35,8 +35,8 @@ var isTerminalStderr = func() bool {
 	return term.IsTerminal(int(os.Stderr.Fd()))
 }
 
-// checkTimeout bounds the release check that runs before an interactive
-// command. The check takes a few hundred milliseconds; a black-holed network
+// checkTimeout bounds the release check that runs before a command when one
+// is due. The check takes a few hundred milliseconds; a black-holed network
 // must not stall the command for longer than this.
 const checkTimeout = 2 * time.Second
 
@@ -44,10 +44,10 @@ const checkTimeout = 2 * time.Second
 // It is best-effort and never returns an error: a failed check must not
 // block the user's command.
 //
-// A CLI that upgrades itself asks for the latest release on every
-// interactive run, before the command, and when one is newer it replaces the
-// binary and re-execs the original command on it. Otherwise it checks once
-// per checkInterval and prints a notice. A failed check is not repeated for
+// Once per checkInterval, on an interactive run, it asks for the latest
+// release before the command. When one is newer, a CLI that upgrades itself
+// replaces the binary and re-execs the original command on it in that same
+// run; otherwise it prints a notice. A failed check is not repeated for
 // failureBackoff, so an offline machine is not slowed on every command.
 func OnStart(current string, w io.Writer) {
 	if !isRelease(current) || disabled() || !isTerminalStderr() {
@@ -56,8 +56,11 @@ func OnStart(current string, w io.Writer) {
 	now := time.Now()
 	st := loadState()
 	auto := autoUpgradeWanted()
+	// A newer release found earlier but not installed, as after a failed
+	// download, is asked for again so the retry starts from a fresh answer.
+	pending := auto && Newer(current, st.LatestVersion) && !st.refusedRecently(st.LatestVersion, now)
 	answered := false
-	if (auto || stale(st, now)) && !st.backingOff(now) {
+	if (stale(st, now) || pending) && !st.backingOff(now) {
 		st, answered = check(st, now)
 	}
 	if !Newer(current, st.LatestVersion) {

@@ -10,6 +10,14 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Changed
+
+- Auto-upgrade checks for a new release once a day again, rather than
+  before every command. When the daily check finds one, it is still
+  installed before that command runs, not on a later run. A release found
+  but not installed, as after a failed download, is tried again on the
+  next command. Run `latere upgrade` to install a release sooner.
+
 ## v0.24.0 - 2026-10-19
 
 ### Changed

@@ -16,10 +16,7 @@ import (
 )
 
 const (
-	// checkInterval is how often a CLI that will not upgrade itself
-	// (auto-upgrade off, a binary it cannot replace, or the run right after
-	// an upgrade) checks for a release. One that upgrades itself checks on
-	// every interactive run.
+	// checkInterval is how often the CLI checks for a release.
 	checkInterval = 24 * time.Hour
 
 	// noticeInterval is how often the notice for a release already

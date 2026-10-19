@@ -191,26 +191,65 @@ func lookupServer(t *testing.T, tag string, status int) *atomic.Int32 {
 	return &lookups
 }
 
-// A release published after the last check is installed on the next run,
-// before the command, even though the cached answer is still fresh.
-func TestOnStartUpgradesOnTheRunAfterARelease(t *testing.T) {
+// The run whose check finds a release installs it before the command, not a
+// later run.
+func TestOnStartUpgradesOnTheRunThatFindsARelease(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("auto-upgrade does not run on Windows")
 	}
 	onStartEnv(t)
 	useTestKey(t)
 	release := serveSignedRelease(t, "v9.9.9", "NEW-BINARY", func(string) string { return "" })
-	if err := saveState(checkState{CheckedAt: time.Now(), LatestVersion: "v1.0.0"}); err != nil {
+	if err := saveState(checkState{CheckedAt: time.Now().Add(-checkInterval), LatestVersion: "v1.0.0"}); err != nil {
 		t.Fatal(err)
 	}
 
 	var out bytes.Buffer
 	OnStart("v1.0.0", &out)
 	if !strings.Contains(out.String(), "Auto-upgrading latere v1.0.0 -> v9.9.9...") {
-		t.Errorf("no auto-upgrade on the run after the release: %q (requests %v)", out.String(), release.paths())
+		t.Errorf("no auto-upgrade on the run that found the release: %q (requests %v)", out.String(), release.paths())
 	}
 	if got := loadState().LatestVersion; got != "v9.9.9" {
 		t.Errorf("cached latest = %q, want v9.9.9", got)
+	}
+}
+
+// Within checkInterval of the last check, a run that has nothing to install
+// does not ask again.
+func TestOnStartChecksOnceADay(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("auto-upgrade does not run on Windows")
+	}
+	onStartEnv(t)
+	lookups := lookupServer(t, "v9.9.9", 0)
+	if err := saveState(checkState{CheckedAt: time.Now().Add(-checkInterval + time.Hour), LatestVersion: "v1.0.0"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	OnStart("v1.0.0", &out)
+	if n := lookups.Load(); n != 0 || out.Len() != 0 {
+		t.Errorf("lookups = %d, output %q; want none", n, out.String())
+	}
+}
+
+// A release the last check found but did not install, as after a failed
+// download, is tried again on the next run from a fresh answer.
+func TestOnStartRetriesAFoundRelease(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("auto-upgrade does not run on Windows")
+	}
+	onStartEnv(t)
+	useTestKey(t)
+	release := serveSignedRelease(t, "v9.9.9", "NEW-BINARY", func(string) string { return "" })
+	if err := saveState(checkState{CheckedAt: time.Now(), LatestVersion: "v9.9.9"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	OnStart("v1.0.0", &out)
+	if !strings.Contains(out.String(), "Auto-upgrading latere v1.0.0 -> v9.9.9...") || !release.downloadedAny() {
+		t.Errorf("no retry of the found release: %q (requests %v)", out.String(), release.paths())
 	}
 }
 

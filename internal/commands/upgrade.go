@@ -25,10 +25,10 @@ installs the latest release; pass a version (e.g. v0.2.29) to install that
 exact release, which is how you roll back if an upgrade turns out to be
 broken.
 
-Auto-upgrade is on by default: before each command you run in a terminal,
-latere checks for a new release and, when there is one, updates itself
-first. Turn it off with --auto off, after which latere checks once a day
-and prints a notice instead; if a release is
+Auto-upgrade is on by default: once a day, before a command you run in a
+terminal, latere checks for a new release and, when there is one, updates
+itself before running the command. Turn it off with --auto off, after
+which the daily check only prints a notice; if a release is
 bad, roll back with 'latere upgrade <previous-version>' and (optionally)
 'latere upgrade --auto off' to stay put.
 
