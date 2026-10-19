@@ -58,7 +58,16 @@ archive against the release's `checksums.txt` when `shasum` is available.
 Every [release](https://github.com/latere-ai/latere-cli/releases) carries
 archives for Linux, macOS, and Windows on amd64 and arm64, a
 `checksums.txt`, and, from v0.21.0, `checksums.txt.sig`, Latere's signature
-of the checksums. On Windows, download the `.zip` from the releases page.
+of the checksums. Releases after v0.22.1 also carry `checksums.txt.sshsig`,
+the same signature in the format `ssh-keygen` checks:
+
+```sh
+echo 'latere-release ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMfnPqHvaCgoT2+x/5xSoSAgrbXaY2Zszk2gReHc1nPg' > allowed_signers
+ssh-keygen -Y verify -f allowed_signers -I latere-release -n latere-release \
+  -s checksums.txt.sshsig < checksums.txt
+```
+
+On Windows, download the `.zip` from the releases page.
 
 ## Stay up to date
 

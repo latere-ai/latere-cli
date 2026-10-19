@@ -24,7 +24,7 @@ specs/
   014-app-rename.md                  (implemented: latere apps rename; the app moves to a new slug and the latere remote follows)
   015-evals-commands.md              (in-progress: latere evals replaces latere eval; suites, experiments, comparisons, harness lease and import, publishing)
   016-devices-command.md             (complete: latere devices connects this computer as an environment the person's sessions work on, approved here)
-  017-signed-upgrades.md             (complete: releases sign their checksums; upgrade and auto-upgrade verify the signature, the installer to follow)
+  017-signed-upgrades.md             (complete: releases sign their checksums; upgrade and auto-upgrade verify the signature, and an SSH signature beside it for the installer)
 ```
 
 ## Status
@@ -112,8 +112,10 @@ Where each spec stands:
   Ed25519 key through `tools/sign`, and `latere upgrade` and auto-upgrade
   verify it against keys built into the binary before they read any
   checksum, refusing a release before v0.21.0. It comes before 016, since
-  a connected computer upgrades itself. Built on 2026-10-18, not released;
-  the installer's verification is the platform's to build.
+  a connected computer upgrades itself. Released in v0.21.0. Releases after
+  v0.22.1 also carry `checksums.txt.sshsig`, the same key's SSH signature,
+  which the installer can verify with `ssh-keygen`; the installer's
+  verification is the platform's to build.
 
 Two surfaces shipped without a dedicated design record: the token-lifecycle
 work, which [docs/login-and-tokens.md](../docs/login-and-tokens.md) documents,

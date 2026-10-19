@@ -10,6 +10,14 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Added
+
+- Each release also carries `checksums.txt.sshsig`, Latere's signature of
+  `checksums.txt` in the format `ssh-keygen` checks, made with the same key
+  as `checksums.txt.sig`, so a download can be verified with the
+  `ssh-keygen` that macOS and Linux already have; the README shows the
+  command. `latere upgrade` checks `checksums.txt.sig` as before.
+
 ## v0.22.1 - 2026-10-19
 
 ### Changed

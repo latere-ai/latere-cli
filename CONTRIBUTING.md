@@ -97,18 +97,33 @@ and the changelog section as its body. The installer the platform serves and
 `latere upgrade` both install the newest published release, so a tag whose workflow failed
 reaches nobody.
 
-GoReleaser also runs `tools/sign` over `checksums.txt`, writing
-`checksums.txt.sig`, the standard base64 of its Ed25519 signature.
-`latere upgrade` and auto-upgrade verify that signature against the public
-keys in `internal/upgrade/keys.go` before they read any checksum. The
-private key is the repository secret `RELEASE_SIGNING_KEY`, the standard
+GoReleaser also runs `tools/sign` over `checksums.txt` twice, with the same
+key, writing two signatures:
+
+- `checksums.txt.sig`, the standard base64 of its Ed25519 signature, which
+  `latere upgrade` and auto-upgrade verify against the public keys in
+  `internal/upgrade/keys.go` before they read any checksum;
+- `checksums.txt.sshsig`, the same key's signature in OpenSSH's signature
+  format with the namespace `latere-release`, for the installer, which
+  verifies it with `ssh-keygen` (stock macOS has no other Ed25519
+  verifier). The installer embeds the allowed signers line
+  `upgrade.AllowedSigners` derives from `keys.go`, and runs:
+
+  ```sh
+  ssh-keygen -Y verify -f allowed_signers -I latere-release -n latere-release \
+    -s checksums.txt.sshsig < checksums.txt
+  ```
+
+The private key is the repository secret `RELEASE_SIGNING_KEY`, the standard
 base64 of a 32-byte Ed25519 seed, which the shared pipeline passes to the
 GoReleaser step alone. The signer fails, and the release with it, when the
 secret is unset or malformed or `keys.go` does not hold its public half.
 
 To rotate the key, run `go run ./tools/sign -keygen <file>`, which writes a
 new private key to a file only you can read and prints its public key. Add
-that public key to `keys.go` beside the current one and release. Then set
+that public key to `keys.go` beside the current one, add its allowed
+signers line (`TestAllowedSignersFollowsTheKeys` shows how it is derived)
+to the installer beside the current one, and release. Then set
 `RELEASE_SIGNING_KEY` to the new private key and release again: that
 release is signed by the new key, which every CLI from the previous release
 holds. In the release after it, remove the old key from `keys.go`. `keys.go`

@@ -5,25 +5,34 @@
 // with.
 //
 //	go run ./tools/sign <file> <signature-file>
+//	go run ./tools/sign -sshsig <file> <signature-file>
 //	go run ./tools/sign -keygen <private-key-file>
 //
-// GoReleaser runs the first form over checksums.txt (.goreleaser.yaml,
-// `signs`). The private key is the RELEASE_SIGNING_KEY environment variable,
-// the standard base64 of a 32-byte Ed25519 seed, and the signature file holds
-// the standard base64 of the 64-byte signature, which `latere upgrade`
-// verifies against internal/upgrade/keys.go before it reads any checksum.
+// GoReleaser runs the first two forms over checksums.txt (.goreleaser.yaml,
+// `signs`), with the same key. The private key is the RELEASE_SIGNING_KEY
+// environment variable, the standard base64 of a 32-byte Ed25519 seed.
+//
+// The first form writes checksums.txt.sig, the standard base64 of the 64-byte
+// signature, which `latere upgrade` verifies against internal/upgrade/keys.go
+// before it reads any checksum. The second writes checksums.txt.sshsig, the
+// same key's signature in OpenSSH's signature format (PROTOCOL.sshsig) with
+// the namespace latere-release, which the installer verifies with
+// `ssh-keygen -Y verify`: stock macOS has no other Ed25519 verifier.
+//
 // Signing fails, and the release with it, when the variable is unset or
 // malformed or its public key is not one keys.go holds, since every CLI would
 // refuse what it signed.
 //
-// The second form makes a key for a rotation: it writes a new private key, in
+// The third form makes a key for a rotation: it writes a new private key, in
 // the encoding RELEASE_SIGNING_KEY takes, to a file only its owner can read,
 // and prints the public key to add to keys.go.
 package main
 
 import (
 	"crypto/ed25519"
+	"crypto/sha512"
 	"encoding/base64"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -37,7 +46,7 @@ import (
 // keyEnv names the variable holding the private signing key.
 const keyEnv = "RELEASE_SIGNING_KEY"
 
-const usage = "usage: sign <file> <signature-file> | sign -keygen <private-key-file>"
+const usage = "usage: sign [-sshsig] <file> <signature-file> | sign -keygen <private-key-file>"
 
 func main() { os.Exit(cli(os.Args[1:], os.Getenv, os.Stdout, os.Stderr)) }
 
@@ -62,15 +71,18 @@ func run(args []string, getenv func(string) string, keys []ed25519.PublicKey, st
 	case len(args) == 2 && args[0] == "-keygen":
 		return keygen(args[1], stdout)
 	case len(args) == 2 && !strings.HasPrefix(args[0], "-"):
-		return sign(args[0], args[1], getenv(keyEnv), keys)
+		return sign(args[0], args[1], getenv(keyEnv), keys, rawSignature)
+	case len(args) == 3 && args[0] == "-sshsig" && !strings.HasPrefix(args[1], "-"):
+		return sign(args[1], args[2], getenv(keyEnv), keys, sshSignature)
 	default:
 		return errors.New(usage)
 	}
 }
 
-// sign writes the signature of the file at path to out, with the private key
-// encoded as RELEASE_SIGNING_KEY takes it.
-func sign(path, out, encoded string, keys []ed25519.PublicKey) error {
+// sign writes the signature of the file at path to out, in the format
+// format writes, with the private key encoded as RELEASE_SIGNING_KEY takes
+// it.
+func sign(path, out, encoded string, keys []ed25519.PublicKey, format func(ed25519.PrivateKey, []byte) []byte) error {
 	encoded = strings.TrimSpace(encoded)
 	if encoded == "" {
 		return fmt.Errorf("%s is not set; a release is never published unsigned", keyEnv)
@@ -94,11 +106,68 @@ func sign(path, out, encoded string, keys []ed25519.PublicKey) error {
 	if err != nil {
 		return fmt.Errorf("read %s: %w", path, err)
 	}
-	signature := base64.StdEncoding.EncodeToString(ed25519.Sign(private, data))
-	if err := os.WriteFile(out, []byte(signature), 0o644); err != nil { //nolint:gosec // a signature is public
+	if err := os.WriteFile(out, format(private, data), 0o644); err != nil { //nolint:gosec // a signature is public
 		return fmt.Errorf("write %s: %w", out, err)
 	}
 	return nil
+}
+
+// rawSignature is checksums.txt.sig: the standard base64 of the 64-byte
+// Ed25519 signature of data, with no newline.
+func rawSignature(private ed25519.PrivateKey, data []byte) []byte {
+	return []byte(base64.StdEncoding.EncodeToString(ed25519.Sign(private, data)))
+}
+
+// The fixed fields of an SSH signature (OpenSSH's PROTOCOL.sshsig).
+const (
+	sshsigMagic   = "SSHSIG"
+	sshsigVersion = 1
+	sshsigHash    = "sha512"
+	// sshsigColumns is the width OpenSSH wraps the armored base64 at.
+	sshsigColumns = 70
+)
+
+// sshSignature is checksums.txt.sshsig: the Ed25519 signature of data in
+// OpenSSH's signature format, the namespace upgrade.SSHNamespace, armored as
+// `ssh-keygen -Y sign` writes it. What is signed is not data itself but the
+// magic, the namespace, an empty reserved field, the hash's name and data's
+// SHA-512, so the signature verifies for that namespace alone.
+func sshSignature(private ed25519.PrivateKey, data []byte) []byte {
+	digest := sha512.Sum512(data)
+	signed := []byte(sshsigMagic)
+	signed = sshString(signed, []byte(upgrade.SSHNamespace))
+	signed = sshString(signed, nil)
+	signed = sshString(signed, []byte(sshsigHash))
+	signed = sshString(signed, digest[:])
+	// Public always returns an ed25519.PublicKey, as in sign.
+	public, _ := private.Public().(ed25519.PublicKey)
+	sig := sshString(nil, []byte("ssh-ed25519"))
+	sig = sshString(sig, ed25519.Sign(private, signed))
+
+	blob := []byte(sshsigMagic)
+	blob = binary.BigEndian.AppendUint32(blob, sshsigVersion)
+	blob = sshString(blob, upgrade.SSHPublicKey(public))
+	blob = sshString(blob, []byte(upgrade.SSHNamespace))
+	blob = sshString(blob, nil)
+	blob = sshString(blob, []byte(sshsigHash))
+	blob = sshString(blob, sig)
+
+	encoded := base64.StdEncoding.EncodeToString(blob)
+	var b strings.Builder
+	b.WriteString("-----BEGIN SSH SIGNATURE-----\n")
+	for len(encoded) > sshsigColumns {
+		b.WriteString(encoded[:sshsigColumns] + "\n")
+		encoded = encoded[sshsigColumns:]
+	}
+	b.WriteString(encoded + "\n-----END SSH SIGNATURE-----\n")
+	return []byte(b.String())
+}
+
+// sshString appends b to buf as an SSH wire string (RFC 4251): its length as
+// a big-endian uint32, then its bytes.
+func sshString(buf, b []byte) []byte {
+	buf = binary.BigEndian.AppendUint32(buf, uint32(len(b))) //nolint:gosec // every field written is far below 4 GiB
+	return append(buf, b...)
 }
 
 // keygen writes a new private key to path, readable by its owner alone and

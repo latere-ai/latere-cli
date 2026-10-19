@@ -9,9 +9,13 @@ import (
 	"encoding/base64"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/latere-ai/latere-cli/internal/upgrade"
 )
@@ -74,6 +78,145 @@ func TestSignsAFixtureTheCLIVerifies(t *testing.T) {
 	}
 }
 
+// The SSH signature tools/sign writes is the one the installer verifies with
+// the real ssh-keygen, against the allowed signers line keys.go derives, and
+// it verifies nothing else: not other content, another namespace or another
+// key.
+func TestSSHSignatureVerifiesWithSSHKeygen(t *testing.T) {
+	keygen, err := exec.LookPath("ssh-keygen")
+	if err != nil {
+		t.Skip("ssh-keygen is not on PATH here, so the SSH signature is unchecked on this machine; it is OpenSSH's, present on macOS and on most Linux systems")
+	}
+	public, encoded := throwawayKey(t)
+	otherPublic, _ := throwawayKey(t)
+	dir, sums := writeFixture(t)
+	out := filepath.Join(dir, "checksums.txt.sshsig")
+	if err := run([]string{"-sshsig", sums, out}, env(encoded), []ed25519.PublicKey{public}, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	sig, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(sig, []byte("-----BEGIN SSH SIGNATURE-----\n")) || !bytes.HasSuffix(sig, []byte("\n-----END SSH SIGNATURE-----\n")) {
+		t.Fatalf("the signature is not armored as ssh-keygen writes it:\n%s", sig)
+	}
+	for line := range strings.Lines(string(sig)) {
+		if len(strings.TrimSuffix(line, "\n")) > 70 {
+			t.Errorf("a line is wider than OpenSSH's 70 columns: %q", line)
+		}
+	}
+	signers := func(key ed25519.PublicKey) string {
+		path := filepath.Join(t.TempDir(), "allowed_signers")
+		if err := os.WriteFile(path, []byte(upgrade.AllowedSigner(key)+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	verify := func(allowed, namespace, content string) (string, error) {
+		cmd := exec.Command(keygen, "-Y", "verify", "-f", allowed, "-I", upgrade.SSHNamespace, "-n", namespace, "-s", out)
+		cmd.Stdin = strings.NewReader(content)
+		got, err := cmd.CombinedOutput()
+		return string(got), err
+	}
+	if got, err := verify(signers(public), upgrade.SSHNamespace, fixtureSums); err != nil {
+		t.Fatalf("ssh-keygen refuses the signature: %v\n%s", err, got)
+	}
+	for name, tc := range map[string]struct{ allowed, namespace, content string }{
+		"other content":     {signers(public), upgrade.SSHNamespace, fixtureSums + "x"},
+		"another namespace": {signers(public), "file", fixtureSums},
+		"another key":       {signers(otherPublic), upgrade.SSHNamespace, fixtureSums},
+	} {
+		if got, err := verify(tc.allowed, tc.namespace, tc.content); err == nil {
+			t.Errorf("ssh-keygen verifies the signature for %s:\n%s", name, got)
+		}
+	}
+}
+
+// One key writes both signatures a release carries, each in the format its
+// verifier reads.
+func TestSignWritesBothSignatures(t *testing.T) {
+	public, encoded := throwawayKey(t)
+	dir, sums := writeFixture(t)
+	raw, ssh := filepath.Join(dir, "checksums.txt.sig"), filepath.Join(dir, "checksums.txt.sshsig")
+	keys := []ed25519.PublicKey{public}
+	if err := run([]string{sums, raw}, env(encoded), keys, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := run([]string{"-sshsig", sums, ssh}, env(encoded), keys, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	sig, err := os.ReadFile(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := upgrade.VerifySignature([]byte(fixtureSums), sig, keys); err != nil {
+		t.Errorf("the CLI refuses checksums.txt.sig: %v", err)
+	}
+	armored, err := os.ReadFile(ssh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blob, err := base64.StdEncoding.DecodeString(strings.Join(slices.DeleteFunc(strings.Split(string(armored), "\n"),
+		func(line string) bool { return line == "" || strings.HasPrefix(line, "-----") }), ""))
+	if err != nil {
+		t.Fatalf("checksums.txt.sshsig is not base64 between its armor lines: %v", err)
+	}
+	// The magic and version, then the signing key as OpenSSH encodes it.
+	head := append([]byte("SSHSIG\x00\x00\x00\x01"), sshString(nil, upgrade.SSHPublicKey(public))...)
+	if !bytes.HasPrefix(blob, head) {
+		t.Errorf("checksums.txt.sshsig does not open with the magic, version 1 and the signing key")
+	}
+	if !bytes.Contains(blob, sshString(nil, []byte(upgrade.SSHNamespace))) || !bytes.Contains(blob, sshString(nil, []byte("sha512"))) {
+		t.Errorf("checksums.txt.sshsig names no %s namespace or sha512 hash", upgrade.SSHNamespace)
+	}
+}
+
+// GoReleaser uploads the one file each `signs` entry names, so each signature
+// a release carries is an entry of its own, both over checksums.txt and both
+// made by tools/sign.
+func TestGoReleaserPublishesBothSignatures(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", ".goreleaser.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config struct {
+		Signs []struct {
+			ID        string   `yaml:"id"`
+			Artifacts string   `yaml:"artifacts"`
+			Cmd       string   `yaml:"cmd"`
+			Args      []string `yaml:"args"`
+			Signature string   `yaml:"signature"`
+		} `yaml:"signs"`
+	}
+	if err := yaml.Unmarshal(raw, &config); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string][]string{
+		"${artifact}.sig":    {"run", "./tools/sign", "${artifact}", "${signature}"},
+		"${artifact}.sshsig": {"run", "./tools/sign", "-sshsig", "${artifact}", "${signature}"},
+	}
+	ids := map[string]bool{}
+	for _, s := range config.Signs {
+		args, ok := want[s.Signature]
+		if !ok {
+			t.Errorf("signs %q writes %q, which no verifier reads", s.ID, s.Signature)
+			continue
+		}
+		if s.Artifacts != "checksum" || s.Cmd != "go" || !slices.Equal(s.Args, args) {
+			t.Errorf("signs %q: artifacts %q, %s %q; want checksum, go %q", s.ID, s.Artifacts, s.Cmd, s.Args, args)
+		}
+		if ids[s.ID] {
+			t.Errorf("two signs entries share the id %q", s.ID)
+		}
+		ids[s.ID] = true
+		delete(want, s.Signature)
+	}
+	for signature := range want {
+		t.Errorf("no signs entry writes %s", signature)
+	}
+}
+
 func TestSignRefusesWithoutAUsableKey(t *testing.T) {
 	public, encoded := throwawayKey(t)
 	otherPublic, _ := throwawayKey(t)
@@ -90,20 +233,26 @@ func TestSignRefusesWithoutAUsableKey(t *testing.T) {
 		{"not a built-in key", encoded, []ed25519.PublicKey{otherPublic}, "is not in internal/upgrade/keys.go"},
 		{"no built-in key", encoded, nil, "is not in internal/upgrade/keys.go"},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			dir, sums := writeFixture(t)
-			out := filepath.Join(dir, "checksums.txt.sig")
-			err := run([]string{sums, out}, env(tc.key), tc.keys, &bytes.Buffer{})
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("error = %v, want %q", err, tc.want)
-			}
-			if strings.Contains(err.Error(), encoded) {
-				t.Error("the error names the private key")
-			}
-			if _, err := os.Stat(out); !errors.Is(err, os.ErrNotExist) {
-				t.Errorf("a signature was written: %v", err)
-			}
-		})
+		for _, mode := range []string{"", "-sshsig"} {
+			t.Run(tc.name+mode, func(t *testing.T) {
+				dir, sums := writeFixture(t)
+				out := filepath.Join(dir, "checksums.txt.sig")
+				args := []string{sums, out}
+				if mode != "" {
+					args = append([]string{mode}, args...)
+				}
+				err := run(args, env(tc.key), tc.keys, &bytes.Buffer{})
+				if err == nil || !strings.Contains(err.Error(), tc.want) {
+					t.Fatalf("error = %v, want %q", err, tc.want)
+				}
+				if strings.Contains(err.Error(), encoded) {
+					t.Error("the error names the private key")
+				}
+				if _, err := os.Stat(out); !errors.Is(err, os.ErrNotExist) {
+					t.Errorf("a signature was written: %v", err)
+				}
+			})
+		}
 	}
 }
 
@@ -135,7 +284,10 @@ func TestSignReportsFileErrors(t *testing.T) {
 }
 
 func TestUsage(t *testing.T) {
-	for _, args := range [][]string{nil, {"checksums.txt"}, {"-x", "out"}, {"a", "b", "c"}, {"-keygen"}} {
+	for _, args := range [][]string{
+		nil, {"checksums.txt"}, {"-x", "out"}, {"a", "b", "c"}, {"-keygen"},
+		{"-sshsig"}, {"-sshsig", "checksums.txt"}, {"-sshsig", "-x", "out"}, {"-sshsig", "a", "b", "c"},
+	} {
 		if err := run(args, env(""), nil, &bytes.Buffer{}); err == nil || err.Error() != usage {
 			t.Errorf("run(%q) error = %v, want the usage", args, err)
 		}
