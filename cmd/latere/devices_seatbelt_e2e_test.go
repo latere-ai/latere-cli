@@ -1,6 +1,11 @@
 // SPDX-FileCopyrightText: 2026 Latere AI
 // SPDX-License-Identifier: MIT
 
+// The file builds on macOS alone, so the Linux run of the real sandbox,
+// which fails on any skipped device test, never sees it.
+
+//go:build darwin
+
 package main
 
 import (
@@ -13,7 +18,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -36,9 +40,6 @@ import (
 // The allowed host does not resolve, so the proof needs no network: the
 // proxy admits it and answers that it could not reach it.
 func TestDevicesSessionCommandsRunUnderSeatbeltEndToEnd(t *testing.T) {
-	if runtime.GOOS != "darwin" {
-		t.Skip("Seatbelt is part of macOS")
-	}
 	if testing.Short() {
 		t.Skip("the end-to-end run builds cellad, which -short leaves out")
 	}
