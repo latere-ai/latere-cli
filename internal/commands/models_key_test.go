@@ -52,7 +52,13 @@ type keyWorld struct {
 	// the bearer of each read.
 	wallet      string
 	walletReads []string
+	// refusal is what the core answers a bearer accept turns down: a key
+	// it does not know, unless set.
+	refusal string
 }
+
+// refusedDisabled is the core's answer for a Key it holds disabled.
+const refusedDisabled = `{"error":{"code":"key_disabled","message":"This key is disabled."}}`
 
 // walletBought is the platform's wallet read of a person whose wallet has
 // held bought credit, and walletGiven one whose wallet holds only credit
@@ -163,6 +169,11 @@ func (w *keyWorld) serveCore(t *testing.T, rw http.ResponseWriter, r *http.Reque
 	w.core = append(w.core, coreCall{path: r.URL.Path, bearer: bearer, model: body.Model, stream: body.Stream})
 	w.mu.Unlock()
 	if !w.accept(bearer, n) {
+		if w.refusal != "" {
+			rw.WriteHeader(http.StatusForbidden)
+			_, _ = io.WriteString(rw, w.refusal)
+			return
+		}
 		rw.WriteHeader(http.StatusUnauthorized)
 		_, _ = io.WriteString(rw, `{"error":{"code":"unauthenticated","message":"This request needs a valid credential."}}`)
 		return
@@ -420,65 +431,63 @@ func TestModelKeySourceReportsARefusedHandedKey(t *testing.T) {
 	}
 }
 
-// The platform makes a personal key only once the person's wallet has held
-// credit they bought: the console refuses one before, and a key made at
-// auth before then reaches no model. So in the personal context the CLI
-// asks the platform's wallet read first, makes no key at auth when the
-// wallet has held none, and says why and where to add credit; in an
-// organization's context, whose keys spend the organization's wallet, it
-// asks nothing, and a deployment without wallets has no such rule.
-func TestNoPersonalModelKeyBeforeBoughtCredit(t *testing.T) {
+// A personal key is made at any time; the platform opens it at the model
+// service only once the person's wallet has held credit they bought. So a
+// model command in the personal context makes the key without asking the
+// wallet, and when the core answers key_disabled for it, the command reads
+// the wallet and says the key waits for credit and where to add it. A key
+// whose wallet has held bought credit, a key of an organization's context
+// and a deployment without wallets answer the core's own refusal.
+func TestAPersonalModelKeyWaitsForBoughtCredit(t *testing.T) {
+	disabled := func(w *keyWorld) { w.accept = func(string, int32) bool { return false }; w.refusal = refusedDisabled }
 	t.Run("never bought", func(t *testing.T) {
 		w := newKeyWorld(t, "")
 		w.wallet = walletGiven
+		disabled(w)
 		out, _, err := w.run(t, "models")
 		if err == nil || !strings.Contains(err.Error(), "credit you bought") || !strings.Contains(err.Error(), "/console/billing") || out != "" {
-			t.Fatalf("models = %q %v, want why no key was made and where to add credit", out, err)
+			t.Fatalf("models = %q %v, want why the key calls no model and where to add credit", out, err)
 		}
-		if len(w.requests) != 0 {
-			t.Fatalf("auth was asked for a key: %v", w.requests)
+		if len(w.requests) != 1 {
+			t.Fatalf("auth was asked for %d keys, want the one made before credit", len(w.requests))
 		}
 		if len(w.walletReads) != 1 || w.walletReads[0] != "Bearer platform-token" {
-			t.Fatalf("wallet reads = %v, want one with the platform's bearer", w.walletReads)
+			t.Fatalf("wallet reads = %v, want one with the platform's bearer, after the core's refusal", w.walletReads)
+		}
+		// The key is kept: a top-up opens it, and the next command uses it.
+		w.accept = func(string, int32) bool { return true }
+		if _, _, err := w.run(t, "models"); err != nil || len(w.requests) != 1 {
+			t.Fatalf("after a top-up: %v, %d keys made", err, len(w.requests))
 		}
 	})
-	t.Run("bought", func(t *testing.T) {
-		w := newKeyWorld(t, "")
-		if _, _, err := w.run(t, "models"); err != nil {
-			t.Fatal(err)
-		}
-		if len(w.requests) != 1 || len(w.walletReads) != 1 {
-			t.Fatalf("keys %v, wallet reads %v; want one each", w.requests, w.walletReads)
-		}
-	})
+	for name, set := range map[string]func(*keyWorld){
+		"bought": func(w *keyWorld) {},
+		"no wallets on the deployment": func(w *keyWorld) {
+			w.wallet = `{"error":{"code":"wallet_unconfigured","message":"The wallet is not available on this deployment."}}`
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := newKeyWorld(t, "")
+			set(w)
+			disabled(w)
+			if _, _, err := w.run(t, "models"); err == nil || !strings.Contains(err.Error(), "key_disabled") || strings.Contains(err.Error(), "credit you bought") {
+				t.Fatalf("models = %v, want the core's refusal", err)
+			}
+		})
+	}
 	t.Run("organization", func(t *testing.T) {
 		w := newKeyWorld(t, "org-1")
 		w.wallet = walletGiven
-		if _, _, err := w.run(t, "models"); err != nil {
-			t.Fatal(err)
-		}
-		if len(w.requests) != 1 || len(w.walletReads) != 0 {
-			t.Fatalf("keys %v, wallet reads %v; want a key and no wallet read", w.requests, w.walletReads)
+		disabled(w)
+		if _, _, err := w.run(t, "models"); err == nil || !strings.Contains(err.Error(), "key_disabled") || len(w.walletReads) != 0 {
+			t.Fatalf("models = %v with wallet reads %v, want the core's refusal and no read", err, w.walletReads)
 		}
 	})
-	t.Run("no wallets on the deployment", func(t *testing.T) {
+	t.Run("a key that works reads no wallet", func(t *testing.T) {
 		w := newKeyWorld(t, "")
-		w.wallet = `{"error":{"code":"wallet_unconfigured","message":"The wallet is not available on this deployment."}}`
-		if _, _, err := w.run(t, "models"); err != nil {
-			t.Fatal(err)
-		}
-		if len(w.requests) != 1 {
-			t.Fatalf("keys %v, want one", w.requests)
-		}
-	})
-	t.Run("wallet unreadable", func(t *testing.T) {
-		w := newKeyWorld(t, "")
-		w.wallet = `{"error":{"code":"wallet_unavailable","message":"The wallet cannot be read right now. Try again shortly."}}`
-		if _, _, err := w.run(t, "models"); err == nil || !strings.Contains(err.Error(), "Try again shortly") {
-			t.Fatalf("models = %v, want the platform's sentence", err)
-		}
-		if len(w.requests) != 0 {
-			t.Fatalf("auth was asked for a key: %v", w.requests)
+		w.wallet = walletGiven
+		if _, _, err := w.run(t, "models"); err != nil || len(w.walletReads) != 0 {
+			t.Fatalf("models = %v with wallet reads %v", err, w.walletReads)
 		}
 	})
 }

@@ -52,7 +52,6 @@ func modelKeyLogin(ctx context.Context, modelsURL, authURL string) (modelkey.Log
 // key for its context, created on first use.
 func modelKey(ctx context.Context, modelsURL, authURL string) (*modelkey.Keys, modelkey.Login, modelkey.Result, error) {
 	keys := newModelKeys()
-	keys.MayCreate = personalKeyMayBeMade
 	if res, ok := modelkey.FromEnv(); ok {
 		return keys, modelkey.Login{}, res, nil
 	}
@@ -65,42 +64,6 @@ func modelKey(ctx context.Context, modelsURL, authURL string) (*modelkey.Keys, m
 		return nil, modelkey.Login{}, modelkey.Result{}, err
 	}
 	return keys, l, res, nil
-}
-
-// accountWalletPath is the platform's read of the wallet of the token's
-// context, which answers whether it has held bought credit.
-const accountWalletPath = "/v1/account/wallet"
-
-// personalKeyMayBeMade is the platform's rule for a personal key, asked
-// before one is created at auth: the platform makes a personal key only
-// once the person's wallet has held bought credit, a top-up or a platform
-// administrator's grant. The console's create refuses one before then
-// (bought_credit_required), and a key made at auth before then reaches no
-// model, so the CLI makes none and says why. The platform's wallet read
-// answers the fact the console's create decides on, for the same wallet.
-// A key of an organization's context spends the organization's wallet and
-// is not held to it, and a deployment that keeps no wallets has no rule.
-func personalKeyMayBeMade(ctx context.Context, l modelkey.Login) error {
-	if l.OrgID != "" {
-		return nil
-	}
-	var wallet struct {
-		Bought *bool `json:"bought"`
-	}
-	err := platformCall(ctx, "", l.AuthBase, http.MethodGet, accountWalletPath, nil, &wallet)
-	if pe, ok := errors.AsType[*platformError](err); ok && pe.Code == "wallet_unconfigured" {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("cannot read your wallet before making a model key: %w", wrapReposErr(err))
-	}
-	if wallet.Bought == nil {
-		return errors.New("the platform's wallet read did not say whether your wallet has held bought credit, which a personal model key needs")
-	}
-	if !*wallet.Bought {
-		return modelkey.ErrNoBoughtCredit
-	}
-	return nil
 }
 
 // modelKeyProvenance is what `models env` says about the key it prints.
@@ -132,6 +95,9 @@ func callWithModelKey(ctx context.Context, keys *modelkey.Keys, l modelkey.Login
 			if err != nil && res.Record.Status == "pending_approval" && errors.As(err, &ae) && ae.Status == http.StatusUnauthorized {
 				return nil, errors.New("the model key waits for an org admin's approval; ask one to approve it in the console")
 			}
+			if err != nil && !res.FromEnv && errors.As(err, &ae) && ae.Status == http.StatusForbidden && ae.Code == "key_disabled" {
+				return nil, explainDisabled(ctx, l, res.Record, err)
+			}
 			return raw, err
 		}
 		fmt.Fprintf(os.Stderr, "note: the model key %s was refused; replacing it\n", res.Record.Prefix)
@@ -141,6 +107,37 @@ func callWithModelKey(ctx context.Context, keys *modelkey.Keys, l modelkey.Login
 		}
 		res, replaced = next, true
 	}
+}
+
+// accountWalletPath is the platform's read of the wallet of the token's
+// context, which answers whether it has held bought credit.
+const accountWalletPath = "/v1/account/wallet"
+
+// explainDisabled says why the core answered key_disabled for the login's
+// own key. A personal key is created at any time, but the platform opens
+// it at the model service only once the person's wallet has held bought
+// credit, a top-up or a platform administrator's grant, since the credit
+// Latere gives is spent through agent sessions alone. When the wallet read
+// says it has held none, the answer is that sentence and where to add
+// credit; otherwise it is the core's own refusal.
+func explainDisabled(ctx context.Context, l modelkey.Login, r modelkey.Record, disabled error) error {
+	if l.OrgID != "" {
+		return disabled
+	}
+	var wallet struct {
+		Bought *bool `json:"bought"`
+	}
+	err := platformCall(ctx, "", l.AuthBase, http.MethodGet, accountWalletPath, nil, &wallet)
+	if pe, ok := errors.AsType[*platformError](err); ok && pe.Code == "wallet_unconfigured" {
+		return disabled
+	}
+	if err != nil {
+		return fmt.Errorf("%w (whether your wallet has held bought credit could not be read: %w)", disabled, wrapReposErr(err))
+	}
+	if wallet.Bought == nil || *wallet.Bought {
+		return disabled
+	}
+	return fmt.Errorf("the model key %s calls no model yet: in your personal account a key calls models once your wallet has held credit you bought, and the credit Latere gives you is spent through agent sessions. Add credit at https://platform.latere.ai/console/billing and the key works without being made again, or switch to an organization with `latere org`", r.Prefix)
 }
 
 // callWhileFresh makes the call, and retries its 401 while the key is young

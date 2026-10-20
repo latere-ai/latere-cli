@@ -65,11 +65,6 @@ type Keys struct {
 	Now   func() time.Time
 	// Host is the machine name in the key's name.
 	Host string
-	// MayCreate, when set, is asked before a key is created for a login,
-	// first or in place of one near its end, and its error ends the create
-	// with nothing made at auth and the stored key kept. The commands set
-	// it to the platform's rule for a personal key.
-	MayCreate func(ctx context.Context, l Login) error
 }
 
 // New is Keys over the CLI's store and auth.
@@ -124,49 +119,15 @@ func (k *Keys) Ensure(ctx context.Context, l Login) (Result, error) {
 		return Result{Record: r}, nil
 	}
 	if ok {
-		next, err := k.Replace(ctx, l, r)
-		// A renewal MayCreate refuses keeps the key it would have
-		// replaced, which works until its end: only a new key is held to
-		// the rule.
-		if _, refused := errors.AsType[refusal](err); refused && k.Now().Before(r.ExpiresAt) {
-			fmt.Fprintf(os.Stderr, "note: the model key %s ends %s and is not replaced: %v\n", r.Prefix, r.ExpiresAt.UTC().Format(time.DateOnly), err)
-			return Result{Record: r}, nil
-		}
-		return next, err
-	}
-	if err := k.mayCreate(ctx, l); err != nil {
-		return Result{}, err
+		return k.Replace(ctx, l, r)
 	}
 	return k.create(ctx, l)
 }
 
-// mayCreate asks MayCreate, when set, whether a key may be created for l,
-// and marks its refusal as one.
-func (k *Keys) mayCreate(ctx context.Context, l Login) error {
-	if k.MayCreate == nil {
-		return nil
-	}
-	if err := k.MayCreate(ctx, l); err != nil {
-		return refusal{err}
-	}
-	return nil
-}
-
-// refusal is MayCreate's refusal, told apart from a failure at auth or in
-// the store, so a renewal it refuses keeps the key it would have replaced.
-type refusal struct{ err error }
-
-func (r refusal) Error() string { return r.err.Error() }
-func (r refusal) Unwrap() error { return r.err }
-
 // Replace revokes old at auth, forgets it, and creates the login's next
 // key. A revocation auth does not answer does not stop the replacement: the
-// old key is forgotten here either way. MayCreate is asked first: a next
-// key it refuses leaves the old key unrevoked and kept.
+// old key is forgotten here either way.
 func (k *Keys) Replace(ctx context.Context, l Login, old Record) (Result, error) {
-	if err := k.mayCreate(ctx, l); err != nil {
-		return Result{}, err
-	}
 	if old.ID != "" {
 		if err := k.Auth.Revoke(ctx, l.AuthBase, l.Access, old.ID); err != nil {
 			fmt.Fprintf(os.Stderr, "note: could not revoke the previous model key %s: %v\n", old.Prefix, err)
@@ -254,12 +215,6 @@ func (k *Keys) ForgetAll(ctx context.Context, authBase, sub, access string) []er
 	return errs
 }
 
-// ErrNoBoughtCredit is why no personal key is made: the platform makes one
-// only once the person's wallet has held credit they bought, a top-up or a
-// platform administrator's grant, and spends the credit it gives through
-// agent sessions alone.
-var ErrNoBoughtCredit = errors.New("no model key was made: in your personal account a model key is made once your wallet has held credit you bought, and the credit Latere gives you is spent through agent sessions. Add credit at https://platform.latere.ai/console/billing, or switch to an organization with `latere org`")
-
 // explain turns auth's refusals into the sentence the person acts on.
 func explain(err error) error {
 	var ke *api.KeyError
@@ -273,8 +228,6 @@ func explain(err error) error {
 		return errors.New("you are no longer a member of this organization; switch context with `latere org`")
 	case "key_limit":
 		return errors.New("you already hold the maximum number of keys; revoke one in the console, then retry")
-	case "bought_credit_required":
-		return ErrNoBoughtCredit
 	}
 	return fmt.Errorf("create a model key: %w", err)
 }
