@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.28.0 - 2026-10-20
+
 ### Changed
 
 - **A model command makes your personal key whatever your wallet holds.**
