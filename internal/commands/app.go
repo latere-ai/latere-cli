@@ -18,6 +18,7 @@ import (
 	"strings"
 	"text/tabwriter"
 	"time"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
@@ -207,14 +208,31 @@ func (e *appError) detail(key string) string {
 }
 
 // answerText is the sentence of a refusal: the API's message, or the text
-// of an answer that is not the API's envelope, such as a proxy's page.
-// An empty answer has none, where the SDK puts the status's own text.
+// of an answer that is not the API's envelope, such as a proxy's page or a
+// plain-text refusal. The SDK names such an answer by its status's text and
+// keeps its bytes in Body, so the text comes from Body, trimmed and cut to
+// maxAnswerText bytes on a character boundary. An empty answer has none.
 func answerText(e *latere.Error) string {
-	if e.Code == "" && e.Message == http.StatusText(e.StatusCode) {
-		return ""
+	if e.Code != "" || e.Message != http.StatusText(e.StatusCode) {
+		return e.Message
 	}
-	return e.Message
+	text := strings.TrimSpace(string(e.Body))
+	if strings.HasPrefix(text, "{") {
+		// The API's envelope whose message is the status's own text.
+		return e.Message
+	}
+	if len(text) > maxAnswerText {
+		cut := maxAnswerText
+		for cut > 0 && !utf8.RuneStart(text[cut]) {
+			cut--
+		}
+		text = text[:cut]
+	}
+	return text
 }
+
+// maxAnswerText bounds the text a refusal without the API's envelope shows.
+const maxAnswerText = 200
 
 // jsonError is the JSON decoding error err wraps, or nil.
 func jsonError(err error) error {

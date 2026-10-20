@@ -165,9 +165,9 @@ func offersPasswords(access *apps.Access) bool {
 
 // skipReasons says why an invite left an address out, by the reason the
 // platform names.
-var skipReasons = map[string]string{
-	"self":   "your own address, and you open the app already",
-	"listed": "already invited",
+var skipReasons = map[apps.SkipReason]string{
+	apps.SkipSelf:   "your own address, and you open the app already",
+	apps.SkipListed: "already invited",
 }
 
 // appPlatform is one command's connection to the platform for who can open
@@ -740,7 +740,7 @@ func printInvited(out io.Writer, a *apps.App, invited *apps.Invites) error {
 		b.WriteString("Skipped:\n")
 		w := tabwriter.NewWriter(&b, 0, 4, 2, ' ', 0)
 		for _, s := range invited.Skipped {
-			fprintf(w, "  %s\t%s\n", s.Email, defaultStr(skipReasons[s.Reason], s.Reason))
+			fprintf(w, "  %s\t%s\n", s.Email, defaultStr(skipReasons[s.Reason], string(s.Reason)))
 		}
 		_ = w.Flush()
 	}
