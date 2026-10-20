@@ -10,6 +10,13 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Fixed
+
+- **`latere` builds for Windows again.** v0.27.0 was tagged but not
+  published: the sandbox's launcher, which `latere devices` needs on
+  macOS and Linux, was reached on Windows too, where it does not build.
+  This release carries v0.27.0's changes.
+
 ## v0.27.0 - 2026-10-20
 
 ### Changed
