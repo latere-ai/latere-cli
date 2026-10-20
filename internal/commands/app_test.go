@@ -305,7 +305,19 @@ func newStubApps(t *testing.T) *stubApps {
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		flusher := w.(http.Flusher)
-		for _, f := range s.frames {
+		// A follow that reconnects names the last frame it read, and the
+		// stream resumes after it, as insulad's does: the frames up to that
+		// id are not sent again.
+		frames := s.frames
+		if last := r.Header.Get("Last-Event-ID"); last != "" {
+			for i, f := range frames {
+				if strings.HasPrefix(f, "id: "+last+"\n") {
+					frames = frames[i+1:]
+					break
+				}
+			}
+		}
+		for _, f := range frames {
 			time.Sleep(s.frameDelay)
 			_, _ = io.WriteString(w, f)
 			flusher.Flush()
@@ -422,6 +434,22 @@ func (s *stubApps) inOrder() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.order...)
+}
+
+// withoutResends is requests with a request the SDK sent again right after
+// itself folded into one: a read or a removal answered 5xx is retried, and
+// a request answered 401 is sent once more with a token minted again. A
+// test reads the steps a command took with it, not how often each was
+// tried.
+func withoutResends(requests []string) []string {
+	var out []string
+	for _, r := range requests {
+		if len(out) > 0 && out[len(out)-1] == r {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out
 }
 
 // passwordSent is the one password the platform was sent, and fails the

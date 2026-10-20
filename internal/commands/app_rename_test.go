@@ -343,7 +343,7 @@ func TestAppRenameRefusals(t *testing.T) {
 			if out != "" || errOut != "" {
 				t.Errorf("stdout = %q, stderr = %q, want neither", out, errOut)
 			}
-			if got := s.seen(); !slices.Equal(got, renameRequests) {
+			if got := withoutResends(s.seen()); !slices.Equal(got, renameRequests) {
 				t.Errorf("requests = %v", got)
 			}
 			if got := gitRun(t, dir, "remote", "get-url", "latere"); got != stubOldPush {

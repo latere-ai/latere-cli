@@ -95,7 +95,7 @@ func TestAppVisibilityChangesWhoCanOpenTheApp(t *testing.T) {
 			wantLacks(t, out, append(tc.lacks, "password")...)
 			// Whether the app has a password is read before the change, and
 			// an app without one has nothing removed.
-			if got := s.inOrder(); !slices.Equal(got, []string{"apps GET /v1/apps/apps/hello", "platform GET " + stubAccessPath, "apps PATCH /v1/apps/apps/hello"}) {
+			if got := withoutResends(s.inOrder()); !slices.Equal(got, []string{"apps GET /v1/apps/apps/hello", "platform GET " + stubAccessPath, "apps PATCH /v1/apps/apps/hello"}) {
 				t.Errorf("requests in order = %v", got)
 			}
 			eachAPIItsOwnAudience(t, s)
@@ -350,7 +350,7 @@ func TestAppVisibilityChangesWhateverThePlatformAnswers(t *testing.T) {
 			if want := fmt.Sprintf(unchecked, tc.cause); errOut != want {
 				t.Errorf("stderr = %q, want %q", errOut, want)
 			}
-			if got := s.inOrder(); !slices.Equal(got, []string{"apps GET /v1/apps/apps/hello", "platform GET " + stubAccessPath, "apps PATCH /v1/apps/apps/hello"}) {
+			if got := withoutResends(s.inOrder()); !slices.Equal(got, []string{"apps GET /v1/apps/apps/hello", "platform GET " + stubAccessPath, "apps PATCH /v1/apps/apps/hello"}) {
 				t.Errorf("requests in order = %v", got)
 			}
 			if len(s.patched) != 1 || s.patched["visibility"] != "private" {
@@ -473,7 +473,7 @@ func TestAppVisibilitySaysAPasswordItCouldNotRemove(t *testing.T) {
 			wantContains(t, out, "visibility: private\n\nAnyone with the password, set 2026-10-08 12:00 UTC: whoever types it at the app's address opens the app, with no Latere account.\n")
 			wantLacks(t, out, "password was removed", "Only people invited")
 		}
-		if got := s.inOrder(); !slices.Equal(got, []string{"apps GET /v1/apps/apps/hello", "platform GET " + stubAccessPath,
+		if got := withoutResends(s.inOrder()); !slices.Equal(got, []string{"apps GET /v1/apps/apps/hello", "platform GET " + stubAccessPath,
 			"apps PATCH /v1/apps/apps/hello", "platform DELETE " + stubAccessPath + "/password"}) {
 			t.Errorf("requests in order = %v", got)
 		}
@@ -1032,7 +1032,7 @@ func TestAppUnshareStopsAtAFailedRemoval(t *testing.T) {
 	wantContains(t, err.Error(), "take back the invitation of pilot@harbor.example: apps_unavailable: Sharing could not be reached. Try again shortly.\ndetail: revoke failed")
 	wantContains(t, out, "No longer invited to hello:\n  ines@example.com\n")
 	wantLacks(t, out, "pilot@harbor.example")
-	if got := s.seenAtThePlatform(); len(got) != 3 {
+	if got := withoutResends(s.seenAtThePlatform()); len(got) != 3 {
 		t.Errorf("requests at the platform = %v, want the read and two removals", got)
 	}
 	if code := HandleExitError(&bytes.Buffer{}, err); code != 1 {
