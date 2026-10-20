@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.29.1 - 2026-10-20
+
 ### Changed
 
 - **The `latere apps` commands use the Go SDK's first release, v0.1.0.**
