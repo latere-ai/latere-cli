@@ -21,7 +21,7 @@ affects:
   - docs/devices.md (new), docs/configuration.md, docs/login-and-tokens.md, README.md, CHANGELOG.md
 effort: large
 created: 2026-10-18
-updated: 2026-10-19
+updated: 2026-10-21
 author: changkun
 ---
 
@@ -376,6 +376,15 @@ pid inside the sandbox's own PID namespace, so it now finds each command on
 the computer by its command line; and `TestTerminalShowsTheEngine` could
 let a `y` typed with nothing waiting answer the next prompt, a race in the
 test that a slower runner shows.
+
+Since 2026-10-21 the engine is Cella's `latere.ai/x/cella/device`, from
+Cella v0.20.0, which Latere Studio embeds too, and `internal/devices` is
+gone: the engine's tests in the table (items 4 to 6, 8 to 10 and 12) are
+Cella's, run under the real `srt` in Cella's CI, and the terminal client
+is `internal/deviceterm`, with its own tests. The command embeds the engine
+with the Topos label keys, the platform's audience and its three own
+refusals (`internal/commands/devices_latere.go`), and the files on disk
+are the same, so a computer connected before is served as it is.
 
 Where the build differs from the design, or adds to it:
 

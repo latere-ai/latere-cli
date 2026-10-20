@@ -49,7 +49,8 @@ import (
 //
 // Where srt is installed it confines the command; elsewhere, as on the CI
 // runners, a stand-in runs it unconfined, so the whole flow is proved on
-// every runner and the confinement by internal/devices' tests where srt is.
+// every runner and the confinement by Cella's device engine tests where srt
+// is.
 
 // cellaVersion is the Cella module this build pins, whose cellad the test
 // runs, so the control plane and the embedded worker are one release.

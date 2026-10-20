@@ -8,56 +8,38 @@ package commands
 import (
 	"bufio"
 	"context"
-	"crypto/rand"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
 	goruntime "runtime"
 	"strings"
 	"syscall"
-	"time"
-	"unicode"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
 	cellaclient "latere.ai/x/cella/client"
-	v1 "latere.ai/x/cella/manifest/v1"
+	"latere.ai/x/cella/device"
 	"latere.ai/x/cella/runtime"
 	"latere.ai/x/cella/runtime/local"
+	"latere.ai/x/sdk-go/latere"
 
 	"github.com/latere-ai/latere-cli/internal/api"
-	"github.com/latere-ai/latere-cli/internal/devices"
+	"github.com/latere-ai/latere-cli/internal/deviceterm"
 	"github.com/latere-ai/latere-cli/internal/upgrade"
 )
 
-// The device kind label every device environment carries beside its
-// owner's tenant labels (platform spec 220).
-const (
-	deviceKindLabel = "platform.latere.ai/kind"
-	deviceKindValue = "device"
-)
-
-// deviceSandboxes is how many sandboxes a device environment holds at once,
-// one per session working on the computer. Cella requires an environment to
-// declare a capacity, and placement admits against it.
-const deviceSandboxes = 8
-
 // What a test replaces: the effective user, whether stdin is a person's
-// terminal, the computer's own name, the driver the engine runs, and the
-// lookup of the newest release.
+// terminal, the driver the engine runs, and the lookup of the newest
+// release.
 var (
 	deviceEUID        = os.Geteuid
 	deviceInteractive = func(in io.Reader) bool {
 		f, ok := in.(*os.File)
 		return ok && term.IsTerminal(int(f.Fd()))
 	}
-	computerName  = defaultComputerName
 	deviceDriver  = func(o local.Options) (runtime.Driver, error) { return local.New(o) }
 	latestRelease = upgrade.ResolveLatest
 )
@@ -107,14 +89,14 @@ at once.`,
 				return err
 			}
 			defer func() { _ = lock.Release() }()
-			policy, ok, err := devices.LoadPolicy(paths.PolicyFile())
+			policy, ok, err := device.LoadPolicy(paths.PolicyFile())
 			if err != nil {
-				return devices.Fail(devices.CodePolicyInvalid, "", err)
+				return device.Fail(device.CodePolicyInvalid, "", err)
 			}
 			flagged := cmd.Flags().Changed("name") || cmd.Flags().Changed("folder") ||
 				cmd.Flags().Changed("network") || cmd.Flags().Changed("host") || cmd.Flags().Changed("session-start")
 			if ok && policy.Device != "" && flagged {
-				return devices.Fail(devices.CodeAlreadyConnected, paths.PolicyFile()+" names the device "+policy.Device, nil)
+				return device.Fail(device.CodeAlreadyConnected, paths.PolicyFile()+" names the device "+policy.Device, nil)
 			}
 			if !ok || policy.Device == "" {
 				request := connectRequest{
@@ -132,9 +114,9 @@ at once.`,
 	f := cmd.Flags()
 	f.StringVar(&name, "name", "", "the name this computer has among your devices (default: the computer's own name)")
 	f.StringArrayVar(&folders, "folder", nil, "a folder sessions may use, PATH or PATH:ro (repeatable; default: the current directory)")
-	f.StringVar(&network, "network", devices.NetworkAllowlist, "what sessions may reach: allowlist or none")
+	f.StringVar(&network, "network", device.NetworkAllowlist, "what sessions may reach: allowlist or none")
 	f.StringArrayVar(&hosts, "host", nil, "a host on the allowlist (repeatable; default: git and package hosts)")
-	f.StringVar(&sessionStart, "session-start", devices.SessionStartAllow, "whether your own sessions and scheduled triggers start without asking here: allow or ask")
+	f.StringVar(&sessionStart, "session-start", device.SessionStartAllow, "whether your own sessions and scheduled triggers start without asking here: allow or ask")
 	f.StringVar(&apiURL, "api-url", "", cellaURLUsage)
 	f.StringVar(&platformURL, "platform-url", "", platformURLUsage)
 	return cmd
@@ -176,7 +158,7 @@ operation are printed as they happen, as connect prints them.`,
 			switch credentials {
 			case credentialsLogin:
 			case credentialsClient:
-				auth.held = devices.NewCredentials(nil, 0)
+				auth.held = device.NewCredentials(device.CredentialsOptions{PlatformAudience: latere.DefaultAudience, Read: readDeviceToken})
 			default:
 				return fmt.Errorf("--credentials is %q; it is login or client", credentials)
 			}
@@ -200,20 +182,20 @@ operation are printed as they happen, as connect prints them.`,
 // deviceStart refuses what cannot be safe, root and a build that cannot
 // verify its own upgrades, and takes the lock that keeps one engine per
 // computer, before anything reaches the platform.
-func deviceStart() (devices.Paths, *devices.Lock, error) {
+func deviceStart() (device.Paths, *device.Lock, error) {
 	if deviceEUID() == 0 {
-		return devices.Paths{}, nil, devices.Fail(devices.CodeRunsAsRoot, "the effective user id is 0", nil)
+		return device.Paths{}, nil, device.Fail(device.CodeRunsAsRoot, "the effective user id is 0", nil)
 	}
 	if !upgrade.HasReleaseKey() {
-		return devices.Paths{}, nil, devices.Fail(devices.CodeUnverifiedBuild, "this build holds no release key to verify an upgrade with", nil)
+		return device.Paths{}, nil, cliRefusal(codeUnverifiedBuild, "this build holds no release key to verify an upgrade with", nil)
 	}
-	paths, err := devices.DefaultPaths()
+	paths, err := device.DefaultPaths()
 	if err != nil {
-		return devices.Paths{}, nil, devices.Fail(devices.CodeServeFailed, "resolve the configuration and state directories", err)
+		return device.Paths{}, nil, device.Fail(device.CodeServeFailed, "resolve the configuration and state directories", err)
 	}
-	lock, err := devices.TakeLock(paths.LockFile())
+	lock, err := device.TakeLock(paths.LockFile())
 	if err != nil {
-		return devices.Paths{}, nil, err
+		return device.Paths{}, nil, err
 	}
 	return paths, lock, nil
 }
@@ -225,99 +207,82 @@ type connectRequest struct {
 	networkSet, hostsSet, sessionStartSet bool
 }
 
+// query is the request as the engine reads a connect's terms: a flag left
+// unset is empty, which reads as what the previous file said, then the
+// default.
+func (r connectRequest) query() device.ConnectQuery {
+	q := device.ConnectQuery{Name: r.name, Folders: r.folders}
+	if r.networkSet {
+		q.Network = r.network
+	}
+	if r.hostsSet {
+		q.Hosts = r.hosts
+	}
+	if r.sessionStartSet {
+		q.SessionStart = r.sessionStart
+	}
+	return q
+}
+
 // proposal is the host policy connect proposes: the flags, then what an
-// earlier file said, then the defaults.
-func (r connectRequest) proposal(previous devices.Policy, home string) (devices.Policy, error) {
-	p := devices.Policy{
-		Name: previous.Name, SessionStart: previous.SessionStart, Folders: previous.Folders, Network: previous.Network,
-		ReadPaths: previous.ReadPaths, RememberedTriggers: previous.RememberedTriggers,
+// earlier file said, then the defaults, with the folders resolved against
+// the working directory.
+func (r connectRequest) proposal(previous device.Policy, home string) (device.Policy, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return device.Policy{}, err
 	}
-	if r.sessionStartSet || p.SessionStart == "" {
-		p.SessionStart = r.sessionStart
-	}
-	if r.name != "" {
-		p.Name = r.name
-	}
-	if p.Name == "" {
-		p.Name = computerName()
-	}
-	p.Name = devices.CleanName(p.Name)
-	if len(r.folders) > 0 || len(p.Folders) == 0 {
-		values := r.folders
-		if len(values) == 0 {
-			values = []string{"."}
-		}
-		cwd, err := os.Getwd()
-		if err != nil {
-			return devices.Policy{}, err
-		}
-		p.Folders = nil
-		for _, v := range values {
-			folder, err := devices.ParseFolder(v, cwd, home)
-			if err != nil {
-				return devices.Policy{}, err
-			}
-			folder.Path = devices.Shorten(home, folder.Path)
-			p.Folders = append(p.Folders, folder)
-		}
-	}
-	if r.networkSet || p.Network.Mode == "" {
-		p.Network.Mode = r.network
-	}
-	switch {
-	case p.Network.Mode == devices.NetworkNone:
-		p.Network.Hosts = nil
-	case r.hostsSet:
-		p.Network.Hosts = r.hosts
-	case len(p.Network.Hosts) == 0:
-		p.Network.Hosts = devices.DefaultHosts
-	}
-	return p, nil
+	return device.ProposePolicy(previous, r.query(), home, cwd, device.DefaultComputerName)
 }
 
 // enrollDevice connects this computer from the terminal: the screen and its
 // typed yes, then connectAs.
-func enrollDevice(ctx context.Context, cmd *cobra.Command, paths devices.Paths, previous devices.Policy, r connectRequest, auth deviceAuth) (devices.Policy, error) {
+func enrollDevice(ctx context.Context, cmd *cobra.Command, paths device.Paths, previous device.Policy, r connectRequest, auth deviceAuth) (device.Policy, error) {
 	errOut := cmd.ErrOrStderr()
 	org, err := auth.orgContext(ctx)
 	if err != nil {
-		return devices.Policy{}, err
+		return device.Policy{}, err
 	}
 	if org != "" {
-		return devices.Policy{}, devices.Fail(devices.CodeOrgContext, "the saved login is in the context of the organization "+org, nil)
+		return device.Policy{}, device.Fail(device.CodeOrgContext, "the saved login is in the context of the organization "+org, nil)
 	}
 	p, err := r.proposal(previous, paths.Home)
 	if err != nil {
-		return devices.Policy{}, devices.Fail(devices.CodePolicyInvalid, "", err)
+		return device.Policy{}, device.Fail(device.CodePolicyInvalid, "", err)
 	}
 	if problems := p.Problems(paths.Home); len(problems) > 0 {
-		return devices.Policy{}, devices.Fail(devices.CodePolicyInvalid, strings.Join(problems, "; "), nil)
+		return device.Policy{}, device.Fail(device.CodePolicyInvalid, strings.Join(problems, "; "), nil)
 	}
-	if err = devices.CheckDriver(p, paths, goruntime.GOOS, deviceDriver); err != nil {
-		return devices.Policy{}, devices.Fail(devices.CodePolicyInvalid, "", err)
+	if err = device.CheckDriver(p, paths, goruntime.GOOS, deviceDriver); err != nil {
+		return device.Policy{}, device.Fail(device.CodePolicyInvalid, "", err)
 	}
-	fprint(errOut, devices.ConnectScreen(p))
+	fprint(errOut, device.ConnectScreen(p))
 	answer, err := bufio.NewReader(cmd.InOrStdin()).ReadString('\n')
 	if err != nil && !errors.Is(err, io.EOF) {
-		return devices.Policy{}, devices.Fail(devices.CodeNotConfirmed, "read the answer", err)
+		return device.Policy{}, device.Fail(device.CodeNotConfirmed, "read the answer", err)
 	}
 	if !strings.EqualFold(strings.TrimSpace(answer), "yes") {
 		fprintln(errOut)
-		return devices.Policy{}, devices.Fail(devices.CodeNotConfirmed, fmt.Sprintf("the answer was %q", strings.TrimSpace(answer)), nil)
+		return device.Policy{}, device.Fail(device.CodeNotConfirmed, fmt.Sprintf("the answer was %q", strings.TrimSpace(answer)), nil)
 	}
 	return connectAs(ctx, paths, p, auth, errOut)
 }
 
 // connectAs is what connecting does once the person consented, in the
-// terminal: connectNamed, then what it did printed.
-func connectAs(ctx context.Context, paths devices.Paths, p devices.Policy, auth deviceAuth, errOut io.Writer) (devices.Policy, error) {
-	done, err := connectNamed(ctx, paths, p, auth)
+// terminal: the engine's Enrollment as the person, then what it did
+// printed.
+func connectAs(ctx context.Context, paths device.Paths, p device.Policy, auth deviceAuth, errOut io.Writer) (device.Policy, error) {
+	client, err := auth.cella()
 	if err != nil {
-		return devices.Policy{}, err
+		return device.Policy{}, device.Fail(device.CodeRefused, "", err)
+	}
+	done, err := newEnrollment(paths, client, auth).Connect(ctx, p)
+	if err != nil {
+		return device.Policy{}, err
 	}
 	// The saved login connected it, so its person owns the device: an
 	// application that serves it later refuses another person's tokens.
-	if err := devices.RecordOwner(paths, done.Policy.Device, savedLoginSubject()); err != nil {
+	if err := device.RecordOwner(paths, done.Policy.Device, savedLoginSubject()); err != nil {
 		fprintf(errOut, "  warning: whose device this computer is could not be recorded: %v\n", err)
 	}
 	if done.NameError != nil {
@@ -328,49 +293,14 @@ func connectAs(ctx context.Context, paths devices.Paths, p devices.Policy, auth 
 	return done.Policy, nil
 }
 
-// connectNamed is what connecting does once the person consented, in the
-// terminal or through the control socket: the host policy file, the
-// environment at Cella created as the person, and its name at the
-// platform, whose refusal leaves the computer connected and is answered
-// beside it. The key is minted when the engine starts.
-func connectNamed(ctx context.Context, paths devices.Paths, p devices.Policy, auth deviceAuth) (devices.Connected, error) {
-	err := devices.SavePolicy(paths.PolicyFile(), p)
-	if err != nil {
-		return devices.Connected{}, devices.Fail(devices.CodePolicyInvalid, "write the host policy file", err)
-	}
-	labels, err := readTenantLabels(ctx, auth.platform)
-	if err != nil {
-		return devices.Connected{}, credentialsOr(err, devices.Fail(devices.CodeRefused, "", err))
-	}
-	labels[deviceKindLabel] = deviceKindValue
-	id := "dev-" + strings.ToLower(rand.Text()[:16])
-	body, err := json.Marshal(v1.Environment{
-		APIVersion: v1.APIVersion, Kind: v1.KindEnvironment,
-		Metadata: v1.Metadata{Name: id, Labels: labels},
-		Spec: v1.EnvironmentSpec{
-			Mode: v1.EnvironmentWorker, Isolation: v1.IsolationProcess, Workers: v1.WorkersSpec{Max: 1},
-			Capacity: v1.Capacity{Sandboxes: deviceSandboxes},
-		},
+// newEnrollment is the engine's Enrollment as the person: the environment
+// created through client, the platform's part through auth, and the device
+// kind label beside the tenant labels.
+func newEnrollment(paths device.Paths, client *cellaclient.Client, auth deviceAuth) *device.Enrollment {
+	return device.NewEnrollment(device.EnrollmentOptions{
+		Paths: paths, Cella: client, Platform: laterePlatform{auth: auth},
+		Labels: map[string]string{deviceKindLabel: deviceKindValue},
 	})
-	if err != nil {
-		return devices.Connected{}, devices.Fail(devices.CodeServeFailed, "encode the environment", err)
-	}
-	client, err := auth.cella()
-	if err != nil {
-		return devices.Connected{}, credentialsOr(err, devices.Fail(devices.CodeRefused, "", err))
-	}
-	if _, _, err = client.CreateEnvironment(ctx, cellaclient.JSON(body)); err != nil {
-		return devices.Connected{}, credentialsOr(err, createRefusal(ctx, err, auth))
-	}
-	p.Device = id
-	if err = devices.SavePolicy(paths.PolicyFile(), p); err != nil {
-		return devices.Connected{}, devices.Fail(devices.CodePolicyInvalid, "write the device into the host policy file", err)
-	}
-	done := devices.Connected{Policy: p}
-	if err = auth.platform(ctx, http.MethodPatch, devicesPath+"/"+id, map[string]string{"name": p.Name}, nil); err != nil {
-		done.NameError = err
-	}
-	return done, nil
 }
 
 // savedLoginSubject is the person the saved login names, "" when there is
@@ -387,62 +317,10 @@ func savedLoginSubject() string {
 	return info.Sub
 }
 
-// credentialsOr is the refusal for a step that waited for a client's token
-// it was never handed, and otherwise the refusal given.
-func credentialsOr(err, otherwise error) error {
-	if errors.Is(err, devices.ErrCredentialsNeeded) {
-		return devices.Fail(devices.CodeCredentialsNeeded, "", err)
-	}
-	return otherwise
-}
-
-// createRefusal is the answer to an environment create the platform
-// refused. Its reason travels in Cella's developer detail, and each reason
-// the platform names gets its own refusal; the device limit is told with the
-// limit the platform answers for the person.
-func createRefusal(ctx context.Context, err error, auth deviceAuth) error {
-	var ce *cellaclient.Error
-	if !errors.As(err, &ce) {
-		return devices.Fail(devices.CodeRefused, "", err)
-	}
-	switch reason := platformReason(ce.Detail); reason {
-	case devices.CodePersonalOnly, devices.CodeSignInRequired, devices.CodeKeyRefused, devices.CodeInvalid:
-		return devices.Fail(reason, ce.Detail, err)
-	case devices.CodeLimit:
-		refusal := devices.Fail(devices.CodeLimit, ce.Detail, err)
-		var list deviceList
-		if lerr := auth.platform(ctx, http.MethodGet, devicesPath, nil, &list); lerr == nil && list.Limit > 0 {
-			refusal.Hint = fmt.Sprintf("You have %d devices, and one person may connect %d. %s", len(list.Items), list.Limit, refusal.Hint)
-		}
-		return refusal
-	}
-	if ce.Status == http.StatusUnauthorized {
-		return devices.Fail(devices.CodeSignInRequired, ce.Detail, err)
-	}
-	return devices.Fail(devices.CodeRefused, defaultStr(ce.Detail, ce.Error()), err)
-}
-
-// platformReason is the platform's reason in a Cella refusal's detail, which
-// reads "forbidden: environment.create: device_limit": the last word, when
-// it is a code.
-func platformReason(detail string) string {
-	_, word, ok := strings.CutLast(detail, ": ")
-	if !ok {
-		return ""
-	}
-	word = strings.TrimSpace(word)
-	for _, r := range word {
-		if !unicode.IsLower(r) && r != '_' {
-			return ""
-		}
-	}
-	return word
-}
-
 // serveDevice runs the engine with its control socket, and with the
 // terminal as a client when attended. Unattended, it is `serve`, which waits
 // to be connected through the socket.
-func serveDevice(ctx context.Context, cmd *cobra.Command, paths devices.Paths, auth deviceAuth, version string, attended bool) error {
+func serveDevice(ctx context.Context, cmd *cobra.Command, paths device.Paths, auth deviceAuth, version string, attended bool) error {
 	base, err := resolveCellaURL(auth.apiURL)
 	if err != nil {
 		return err
@@ -451,14 +329,21 @@ func serveDevice(ctx context.Context, cmd *cobra.Command, paths devices.Paths, a
 	if auth.held == nil {
 		loginSubject = savedLoginSubject()
 	}
-	engine := devices.New(devices.Config{
+	// One client serves the whole run: its token source reads the saved
+	// login, or the client's held token, on each call.
+	client, err := auth.cella()
+	if err != nil {
+		return err
+	}
+	engine := device.New(device.Config{
 		Paths: paths, URL: base, Keys: paths.Keys(),
-		Account: deviceAccount{auth: auth}, Version: version, NewDriver: deviceDriver,
+		Account: device.NewCellaAccount(client), Version: version, NewDriver: deviceDriver,
+		Labels:      toposLabels,
 		Upgrade:     serveUpgrade(version),
-		Enroll:      deviceEnroller{auth: auth, paths: paths, errOut: cmd.ErrOrStderr()},
+		Enroll:      deviceEnroller{Enrollment: newEnrollment(paths, client, auth), errOut: cmd.ErrOrStderr()},
 		Credentials: auth.held, LoginSubject: loginSubject, WaitToConnect: !attended,
 	})
-	ln, err := devices.ListenControl(paths.Socket())
+	ln, err := device.ListenControl(paths.Socket())
 	if err != nil {
 		return err
 	}
@@ -469,7 +354,7 @@ func serveDevice(ctx context.Context, cmd *cobra.Command, paths devices.Paths, a
 	printed := make(chan struct{})
 	go func() {
 		defer close(printed)
-		devices.Terminal{
+		deviceterm.Terminal{
 			Engine: engine, In: cmd.InOrStdin(), Out: cmd.ErrOrStderr(),
 			Interactive: attended && deviceInteractive(cmd.InOrStdin()), Home: paths.Home,
 		}.Run(serving)
@@ -478,7 +363,7 @@ func serveDevice(ctx context.Context, cmd *cobra.Command, paths devices.Paths, a
 	stopServing()
 	<-printed
 	if err := <-controlled; err != nil && runErr == nil {
-		runErr = devices.Fail(devices.CodeControlUnavailable, "", err)
+		runErr = device.Fail(device.CodeControlUnavailable, "", err)
 	}
 	if runErr == nil {
 		fprintln(cmd.ErrOrStderr(), "Stopped serving this computer; every command a session started here was stopped.")
@@ -502,76 +387,21 @@ func serveUpgrade(version string) func(context.Context) (string, bool) {
 	}
 }
 
-// deviceAccount is the engine's Account: the person's own Cella token, from
-// the saved login or the client, as every Environments command presents.
-type deviceAccount struct{ auth deviceAuth }
-
-func (a deviceAccount) MintKey(ctx context.Context, env string, ttl time.Duration) (devices.Key, error) {
-	client, err := a.auth.cella()
-	if err != nil {
-		return devices.Key{}, err
-	}
-	key, _, err := client.MintEnvironmentKeyFor(ctx, env, ttl)
-	if err != nil {
-		return devices.Key{}, removedOr(err)
-	}
-	return devices.Key{Environment: env, Token: key.Token, JTI: key.JTI, ExpiresAt: key.Expires}, nil
-}
-
-func (a deviceAccount) RevokeKey(ctx context.Context, env, jti string) error {
-	client, err := a.auth.cella()
-	if err != nil {
-		return err
-	}
-	return client.RevokeEnvironmentKey(ctx, env, jti)
-}
-
-func (a deviceAccount) Exists(ctx context.Context, env string) (bool, error) {
-	client, err := a.auth.cella()
-	if err != nil {
-		return false, err
-	}
-	_, _, err = client.GetEnvironment(ctx, env)
-	if err == nil {
-		return true, nil
-	}
-	if errors.Is(removedOr(err), devices.ErrRemoved) {
-		return false, nil
-	}
-	return false, err
-}
-
-// deviceEnroller is the engine's Enroller: what a client does through the
-// control socket, through the same functions the commands use.
+// deviceEnroller is the engine's Enroller for what a client does through
+// the control socket: the Enrollment, with what a connect did printed for
+// serve's own output.
 type deviceEnroller struct {
-	auth   deviceAuth
-	paths  devices.Paths
+	*device.Enrollment
 	errOut io.Writer
-}
-
-// Propose fills the terms as connect fills its flags.
-func (d deviceEnroller) Propose(previous devices.Policy, q devices.ConnectQuery) (devices.Policy, error) {
-	return connectRequest{
-		name: q.Name, folders: q.Folders, network: defaultStr(q.Network, devices.NetworkAllowlist), hosts: q.Hosts,
-		sessionStart: defaultStr(q.SessionStart, devices.SessionStartAllow),
-		networkSet:   q.Network != "", hostsSet: len(q.Hosts) > 0, sessionStartSet: q.SessionStart != "",
-	}.proposal(previous, d.paths.Home)
 }
 
 // Connect connects this computer as the person, refusing an organization's
 // context as connect does. What it did is printed for serve's own output,
 // and a name the platform refused is answered to the client too.
-func (d deviceEnroller) Connect(ctx context.Context, p devices.Policy) (devices.Connected, error) {
-	org, err := d.auth.orgContext(ctx)
+func (d deviceEnroller) Connect(ctx context.Context, p device.Policy) (device.Connected, error) {
+	done, err := d.Enrollment.Connect(ctx, p)
 	if err != nil {
-		return devices.Connected{}, err
-	}
-	if org != "" {
-		return devices.Connected{}, devices.Fail(devices.CodeOrgContext, "the sign-in is in the context of the organization "+org, nil)
-	}
-	done, err := connectNamed(ctx, d.paths, p, d.auth)
-	if err != nil {
-		return devices.Connected{}, err
+		return device.Connected{}, err
 	}
 	if done.NameError != nil {
 		done.NameError = wrapReposErr(done.NameError)
@@ -579,51 +409,4 @@ func (d deviceEnroller) Connect(ctx context.Context, p devices.Policy) (devices.
 	}
 	fprintf(d.errOut, "Connected this computer as %s (%s).\n", p.Name, done.Policy.Device)
 	return done, nil
-}
-
-// Rename sets the device's name at the platform.
-func (d deviceEnroller) Rename(ctx context.Context, env, name string) error {
-	return d.auth.platform(ctx, http.MethodPatch, devicesPath+"/"+env, map[string]string{"name": name}, nil)
-}
-
-// Remove removes the device at the platform, as `latere devices remove`
-// does.
-func (d deviceEnroller) Remove(ctx context.Context, env string) error {
-	return d.auth.remove(ctx, env)
-}
-
-// removedOr marks a refusal that says the device is no longer the
-// person's: Cella holds no such environment, or the platform refuses it as
-// removed or as another person's.
-func removedOr(err error) error {
-	var ce *cellaclient.Error
-	if !errors.As(err, &ce) {
-		return err
-	}
-	switch {
-	case ce.Code == "not_found":
-	case ce.Code == "forbidden" && (platformReason(ce.Detail) == "device_removed" || platformReason(ce.Detail) == "device_not_owned"):
-	default:
-		return err
-	}
-	return fmt.Errorf("%w: %w", devices.ErrRemoved, err)
-}
-
-// defaultComputerName is the computer's own name: the one macOS shows in
-// its sharing settings, or the host name without its local domain.
-func defaultComputerName() string {
-	if goruntime.GOOS == "darwin" {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if out, err := exec.CommandContext(ctx, "/usr/sbin/scutil", "--get", "ComputerName").Output(); err == nil {
-			if name := strings.TrimSpace(string(out)); name != "" {
-				return name
-			}
-		}
-	}
-	host, err := os.Hostname()
-	if err != nil || host == "" {
-		return "This computer"
-	}
-	return strings.TrimSuffix(host, ".local")
 }

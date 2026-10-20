@@ -10,7 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/latere-ai/latere-cli/internal/devices"
+	"latere.ai/x/cella/device"
 )
 
 // newDevicesCmd is the devices group where the local driver has no
@@ -22,7 +22,7 @@ func newDevicesCmd(string) *cobra.Command {
 		Args:               cobra.ArbitraryArgs,
 		DisableFlagParsing: true,
 		RunE: func(*cobra.Command, []string) error {
-			return devices.Fail(devices.CodeUnsupported, "this computer runs "+runtime.GOOS, nil)
+			return device.Fail(device.CodeUnsupported, "this computer runs "+runtime.GOOS, nil)
 		},
 	}
 }

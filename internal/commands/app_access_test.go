@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"latere.ai/x/sdk-go/latere"
 )
 
 // wantLacks fails for each phrase got holds.
@@ -42,8 +44,8 @@ func eachAPIItsOwnAudience(t *testing.T, s *stubApps) {
 		}
 	}
 	for _, b := range s.platformBearers {
-		if aud := audienceOf(t, b); aud != platformAudience {
-			t.Errorf("the platform received a bearer for %q, want %q", aud, platformAudience)
+		if aud := audienceOf(t, b); aud != latere.DefaultAudience {
+			t.Errorf("the platform received a bearer for %q, want %q", aud, latere.DefaultAudience)
 		}
 	}
 }
@@ -542,7 +544,7 @@ func TestAppAccessListsThePeopleInvited(t *testing.T) {
 		t.Errorf("requests at the platform = %v", got)
 	}
 	eachAPIItsOwnAudience(t, s)
-	if !slices.Equal(s.audiences, []string{appAudience, platformAudience}) {
+	if !slices.Equal(s.audiences, []string{appAudience, latere.DefaultAudience}) {
 		t.Errorf("mints = %v, want one for each API", s.audiences)
 	}
 }

@@ -29,6 +29,13 @@ committed: the commit log already holds that.
   runs every call without asking. Its file tools now reach the working
   directory alone and refuse your credential files, and a model it has no
   context window or output limit for is refused when the turn starts.
+- **`latere devices` runs Cella's shared device engine.** Connecting,
+  serving, approving sessions, the activity log and the control socket
+  are the engine Latere Studio runs too, so the terminal and the
+  application serve one device the same way. Its commands, flags, words
+  and exit codes are as they were, and so are the files it keeps: the
+  host policy file, the key, the activity log and the owner record. A
+  computer already connected keeps working with no step.
 
 ### Removed
 

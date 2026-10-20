@@ -22,7 +22,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/latere-ai/latere-cli/internal/devices"
+	"latere.ai/x/cella/device"
+	"latere.ai/x/sdk-go/latere"
 )
 
 // `latere devices serve` driven through its control socket alone, as a
@@ -55,7 +56,7 @@ type served struct {
 
 // serving runs `latere devices serve` with args until the test ends, and
 // waits for its control socket to answer.
-func serving(t *testing.T, paths devices.Paths, args ...string) *served {
+func serving(t *testing.T, paths device.Paths, args ...string) *served {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	root := NewRoot("test")
@@ -166,7 +167,7 @@ func TestServeWaitsNotConnectedCommand(t *testing.T) {
 	sandboxStandIn(t)
 	p := newDevicePlatform(t)
 	s := serving(t, paths)
-	status := s.waitState(t, devices.StateNotConnected)
+	status := s.waitState(t, device.StateNotConnected)
 	if status["device"] != "" || status["online"] != false {
 		t.Errorf("a computer not connected reads %v", status)
 	}
@@ -185,12 +186,12 @@ func TestServeWaitsNotConnectedCommand(t *testing.T) {
 func TestServeRefusesASecondEngine(t *testing.T) {
 	paths, _ := deviceHome(t)
 	newDevicePlatform(t)
-	lock, err := devices.TakeLock(paths.LockFile())
+	lock, err := device.TakeLock(paths.LockFile())
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = lock.Release() })
-	if _, _, err := runDevices(t, "", "devices", "serve", "--credentials", "client"); devices.CodeOf(err) != devices.CodeAlreadyServed {
+	if _, _, err := runDevices(t, "", "devices", "serve", "--credentials", "client"); device.CodeOf(err) != device.CodeAlreadyServed {
 		t.Errorf("a second serve returned %v", err)
 	}
 }
@@ -212,18 +213,18 @@ func TestConnectThroughSocketWithClientCredentials(t *testing.T) {
 	}
 	unreadableLogin(t)
 	s := serving(t, paths, "--credentials", "client")
-	status := s.waitState(t, devices.StateNotConnected)
-	if creds, _ := status["credentials"].(map[string]any); creds["cella"] != devices.CredentialNeeded || creds["platform"] != devices.CredentialNeeded {
+	status := s.waitState(t, device.StateNotConnected)
+	if creds, _ := status["credentials"].(map[string]any); creds["cella"] != device.CredentialNeeded || creds["platform"] != device.CredentialNeeded {
 		t.Errorf("a client's engine with no tokens reads %v", status["credentials"])
 	}
 
 	exp := time.Now().Add(time.Hour)
-	cellaToken := fakeJWT(t, map[string]any{"sub": "p1", "aud": devices.AudienceCella, "exp": exp.Unix()})
-	platformToken := fakeJWT(t, map[string]any{"sub": "p1", "aud": devices.AudiencePlatform, "exp": exp.Unix()})
+	cellaToken := fakeJWT(t, map[string]any{"sub": "p1", "aud": device.AudienceCella, "exp": exp.Unix()})
+	platformToken := fakeJWT(t, map[string]any{"sub": "p1", "aud": latere.DefaultAudience, "exp": exp.Unix()})
 	code, answer := s.call(t, http.MethodPut, "/v1/credentials", map[string]any{
 		"cella": map[string]any{"token": cellaToken, "expires_at": exp}, "platform": map[string]any{"token": platformToken, "expires_at": exp},
 	})
-	if creds, _ := answer["credentials"].(map[string]any); code != http.StatusOK || creds["cella"] != devices.CredentialValid || creds["platform"] != devices.CredentialValid {
+	if creds, _ := answer["credentials"].(map[string]any); code != http.StatusOK || creds["cella"] != device.CredentialValid || creds["platform"] != device.CredentialValid {
 		t.Fatalf("the tokens answered %d %v", code, answer)
 	}
 
@@ -235,13 +236,13 @@ func TestConnectThroughSocketWithClientCredentials(t *testing.T) {
 		t.Fatalf("the proposal has problems: %v", problems)
 	}
 	stale := map[string]any{"policy": proposal["policy"], "consent": "sha256:0000"}
-	if code, answer := s.call(t, http.MethodPost, "/v1/connect", stale); code != http.StatusUnprocessableEntity || refusalCode(answer) != devices.CodeNotConfirmed {
+	if code, answer := s.call(t, http.MethodPost, "/v1/connect", stale); code != http.StatusUnprocessableEntity || refusalCode(answer) != device.CodeNotConfirmed {
 		t.Errorf("a stale consent answered %d %v", code, answer)
 	}
 	if code, answer := s.call(t, http.MethodPost, "/v1/connect", map[string]any{"policy": proposal["policy"], "consent": proposal["consent"]}); code != http.StatusOK {
 		t.Fatalf("the connect answered %d %v\n%s", code, answer, s.stderr.String())
 	}
-	policy, _, err := devices.LoadPolicy(paths.PolicyFile())
+	policy, _, err := device.LoadPolicy(paths.PolicyFile())
 	if err != nil || !strings.HasPrefix(policy.Device, "dev-") || policy.Name != "Test Mac" || policy.Folders[0].Path != "~/project" ||
 		strings.Join(policy.Network.Hosts, ",") != "github.com" {
 		t.Fatalf("the host policy file reads %+v, %v", policy, err)
@@ -304,7 +305,7 @@ func TestConnectThroughSocketWithClientCredentials(t *testing.T) {
 
 	t.Run("the removal reaches the platform and forgets the device here", func(t *testing.T) {
 		code, answer := s.call(t, http.MethodPost, "/v1/remove", nil)
-		if code != http.StatusOK || answer["state"] != devices.StateNotConnected {
+		if code != http.StatusOK || answer["state"] != device.StateNotConnected {
 			t.Fatalf("the removal answered %d %v", code, answer)
 		}
 		p.mu.Lock()

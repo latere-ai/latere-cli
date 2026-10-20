@@ -20,6 +20,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"latere.ai/x/pkg/otel"
+	"latere.ai/x/sdk-go/latere"
 
 	"github.com/latere-ai/latere-cli/internal/api"
 )
@@ -32,12 +33,6 @@ import (
 
 // defaultPlatformURL is the host platformd's public routes are served at.
 const defaultPlatformURL = "https://platform.latere.ai"
-
-// platformAudience is the aud claim platformd verifies on every bearer its
-// public routes take. It is the production audience whatever
-// --platform-url names: the URL selects the deployment, the audience is
-// what the issuer stamps.
-const platformAudience = "api.latere.ai"
 
 // platformURLUsage is the --platform-url help every repos command shares.
 const platformURLUsage = "platform base URL (default " + defaultPlatformURL + ", or $LATERE_PLATFORM_URL)"
@@ -217,13 +212,16 @@ func resolvePlatformURL(flagURL string) string {
 }
 
 // platformBearer is the bearer a repos command presents: LATERE_PLATFORM_TOKEN
-// as given, else an actor token minted for platformAudience from the saved
-// login, so the login token never reaches the platform.
+// as given, else an actor token minted from the saved login for the aud
+// claim platformd verifies on every bearer its public routes take, the SDK's
+// latere.DefaultAudience, so the login token never reaches the platform. It
+// is the production audience whatever --platform-url names: the URL selects
+// the deployment, the audience is what the issuer stamps.
 func platformBearer(ctx context.Context, base, authURL string) (string, error) {
 	if t := strings.TrimSpace(os.Getenv("LATERE_PLATFORM_TOKEN")); t != "" {
 		return t, nil
 	}
-	token, _, err := api.ActorToken(ctx, api.ResolveAuthURL(base, authURL), platformAudience)
+	token, _, err := api.ActorToken(ctx, api.ResolveAuthURL(base, authURL), latere.DefaultAudience)
 	if err != nil {
 		return "", fmt.Errorf("cannot authenticate to the platform: %w", err)
 	}

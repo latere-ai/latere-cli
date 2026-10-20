@@ -15,20 +15,22 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"latere.ai/x/cella/device"
+
 	"github.com/latere-ai/latere-cli/internal/api"
-	"github.com/latere-ai/latere-cli/internal/devices"
 	"github.com/latere-ai/latere-cli/internal/upgrade"
 )
 
 // deviceHome is a person's computer in temporary directories: the home, the
 // configuration, the state (short, for the control socket) and the cache,
 // with a project folder to share. It answers the engine's paths.
-func deviceHome(t *testing.T) (devices.Paths, string) {
+func deviceHome(t *testing.T) (device.Paths, string) {
 	t.Helper()
 	home, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
@@ -49,7 +51,7 @@ func deviceHome(t *testing.T) (devices.Paths, string) {
 	if err = os.MkdirAll(project, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	paths, err := devices.DefaultPaths()
+	paths, err := device.DefaultPaths()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,6 +108,8 @@ type devicePlatform struct {
 	devices []map[string]any
 	// refuseCreate, when set, answers the create with this detail.
 	refuseCreate string
+	// refuseRename, when set, answers a rename with a server error.
+	refuseRename bool
 	// register answers a worker's registration: by default the stub stops
 	// the worker with worker_replaced, so a connect ends once it serves.
 	register func(w http.ResponseWriter)
@@ -138,8 +142,15 @@ func newDevicePlatform(t *testing.T) *devicePlatform {
 		var body map[string]string
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		p.mu.Lock()
-		p.renamed[r.PathValue("id")] = body["name"]
+		refuse := p.refuseRename
+		if !refuse {
+			p.renamed[r.PathValue("id")] = body["name"]
+		}
 		p.mu.Unlock()
+		if refuse {
+			answer(w, http.StatusServiceUnavailable, map[string]any{"error": map[string]any{"code": "unavailable", "message": "The platform is unavailable."}})
+			return
+		}
 		answer(w, http.StatusOK, map[string]any{"id": r.PathValue("id"), "name": body["name"]})
 	})
 	mux.HandleFunc("DELETE /v1/account/devices/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -224,7 +235,7 @@ func TestConnectRefusesRoot(t *testing.T) {
 	deviceEUID = func() int { return 0 }
 	t.Cleanup(func() { deviceEUID = previous })
 	_, _, err := runDevices(t, "yes\n", "devices", "connect")
-	if devices.CodeOf(err) != devices.CodeRunsAsRoot {
+	if device.CodeOf(err) != device.CodeRunsAsRoot {
 		t.Fatalf("connect as root returned %v", err)
 	}
 	if got := p.seen(); len(got) != 0 {
@@ -238,7 +249,7 @@ func TestConnectRefusesUnverifiedBuild(t *testing.T) {
 	signIn(t, "")
 	t.Cleanup(upgrade.SetReleaseKeysForTest())
 	_, _, err := runDevices(t, "yes\n", "devices", "connect")
-	if devices.CodeOf(err) != devices.CodeUnverifiedBuild {
+	if device.CodeOf(err) != codeUnverifiedBuild {
 		t.Fatalf("connect on a build with no release key returned %v", err)
 	}
 	if got := p.seen(); len(got) != 0 {
@@ -251,7 +262,7 @@ func TestConnectRefusesOrgContext(t *testing.T) {
 	p := newDevicePlatform(t)
 	signIn(t, "org-1")
 	_, _, err := runDevices(t, "yes\n", "devices", "connect")
-	if devices.CodeOf(err) != devices.CodeOrgContext || !strings.Contains(err.Error(), "latere org --personal") {
+	if device.CodeOf(err) != device.CodeOrgContext || !strings.Contains(err.Error(), "latere org --personal") {
 		t.Fatalf("connect in an organization's context returned %v", err)
 	}
 	if got := p.seen(); len(got) != 0 {
@@ -263,7 +274,7 @@ func TestConnectNeedsASignIn(t *testing.T) {
 	deviceHome(t)
 	newDevicePlatform(t)
 	_, _, err := runDevices(t, "yes\n", "devices", "connect")
-	if devices.CodeOf(err) != devices.CodeNoSignIn || !strings.Contains(err.Error(), "latere login") {
+	if device.CodeOf(err) != device.CodeNoSignIn || !strings.Contains(err.Error(), "latere login") {
 		t.Fatalf("connect with no login returned %v", err)
 	}
 }
@@ -275,7 +286,7 @@ func TestConnectScreenNeedsYes(t *testing.T) {
 	signIn(t, "")
 	for _, answer := range []string{"no\n", "y\n", ""} {
 		_, errOut, err := runDevices(t, answer, "devices", "connect", "--folder", project, "--name", "Test Mac")
-		if devices.CodeOf(err) != devices.CodeNotConfirmed {
+		if device.CodeOf(err) != device.CodeNotConfirmed {
 			t.Fatalf("connect answered %q returned %v", answer, err)
 		}
 		for _, want := range []string{
@@ -306,7 +317,7 @@ func TestConnectCreatesTheEnvironment(t *testing.T) {
 	}
 	out, errOut, err := runDevices(t, "yes\n", "devices", "connect", "--folder", project, "--folder", project+"/sub:ro",
 		"--name", "Test Mac", "--host", "github.com")
-	if devices.CodeOf(err) != devices.CodeWorkerReplaced {
+	if device.CodeOf(err) != device.CodeWorkerReplaced {
 		t.Fatalf("connect returned %v; stderr:\n%s", err, errOut)
 	}
 	p.mu.Lock()
@@ -334,7 +345,7 @@ func TestConnectCreatesTheEnvironment(t *testing.T) {
 	}
 	id := env.Metadata.Name
 	if !regexp.MustCompile(`^dev-[a-z2-7]{16}$`).MatchString(id) || env.Kind != "Environment" || env.Spec.Mode != "worker" ||
-		env.Spec.Isolation != "process" || env.Spec.Workers.Max != 1 || env.Spec.Capacity.Sandboxes != deviceSandboxes {
+		env.Spec.Isolation != "process" || env.Spec.Workers.Max != 1 || env.Spec.Capacity.Sandboxes != device.Sandboxes {
 		t.Errorf("the create was %s", created)
 	}
 	for k, v := range map[string]string{"platform.latere.ai/tenant": "p-0123", "platform.latere.ai/principal": "p1", "platform.latere.ai/kind": "device"} {
@@ -348,15 +359,15 @@ func TestConnectCreatesTheEnvironment(t *testing.T) {
 	if !strings.Contains(keyBody, `"ttl":"720h0m0s"`) {
 		t.Errorf("the key was minted with %q, want a ttl of 30 days", keyBody)
 	}
-	key, ok, err := devices.OpenKeys(paths.KeyFile()).Get(id)
+	key, ok, err := device.OpenKeys(paths.KeyFile()).Get(id)
 	if err != nil || !ok || key.Token != "ENVIRONMENT-KEY-SECRET" || key.JTI != "jti-1" {
 		t.Errorf("the keychain holds %+v, %v, %v", key, ok, err)
 	}
 	if _, err := os.Stat(paths.KeyFile()); err == nil {
 		t.Error("a key kept in a working keychain also landed in the file")
 	}
-	policy, _, err := devices.LoadPolicy(paths.PolicyFile())
-	if err != nil || policy.Device != id || policy.Name != "Test Mac" || policy.SessionStart != devices.SessionStartAllow || len(policy.Folders) != 2 ||
+	policy, _, err := device.LoadPolicy(paths.PolicyFile())
+	if err != nil || policy.Device != id || policy.Name != "Test Mac" || policy.SessionStart != device.SessionStartAllow || len(policy.Folders) != 2 ||
 		policy.Folders[0].Path != "~/project" || !policy.Folders[0].Write || policy.Folders[1].Write ||
 		strings.Join(policy.Network.Hosts, ",") != "github.com" {
 		t.Errorf("the host policy file reads %+v, %v", policy, err)
@@ -386,13 +397,13 @@ func TestSecondConnectRefusedLocally(t *testing.T) {
 	paths, _ := deviceHome(t)
 	p := newDevicePlatform(t)
 	signIn(t, "")
-	lock, err := devices.TakeLock(paths.LockFile())
+	lock, err := device.TakeLock(paths.LockFile())
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = lock.Release() })
 	_, _, err = runDevices(t, "yes\n", "devices", "connect")
-	if devices.CodeOf(err) != devices.CodeAlreadyServed || !strings.Contains(err.Error(), "already being served") {
+	if device.CodeOf(err) != device.CodeAlreadyServed || !strings.Contains(err.Error(), "already being served") {
 		t.Fatalf("a second connect returned %v", err)
 	}
 	if got := p.seen(); len(got) != 0 {
@@ -407,7 +418,7 @@ func TestConnectedComputerServesWithoutTheScreen(t *testing.T) {
 	signIn(t, "")
 	connectedHere(t, paths, project)
 	_, errOut, err := runDevices(t, "", "devices", "connect")
-	if devices.CodeOf(err) != devices.CodeWorkerReplaced {
+	if device.CodeOf(err) != device.CodeWorkerReplaced {
 		t.Fatalf("connect returned %v", err)
 	}
 	if strings.Contains(errOut, "Type yes") {
@@ -418,27 +429,27 @@ func TestConnectedComputerServesWithoutTheScreen(t *testing.T) {
 			t.Errorf("a connected computer created another environment: %v", p.seen())
 		}
 	}
-	if _, _, err := runDevices(t, "", "devices", "connect", "--folder", project); devices.CodeOf(err) != devices.CodeAlreadyConnected {
+	if _, _, err := runDevices(t, "", "devices", "connect", "--folder", project); device.CodeOf(err) != device.CodeAlreadyConnected {
 		t.Errorf("flags on a connected computer returned %v", err)
 	}
-	if _, _, err := runDevices(t, "", "devices", "serve"); devices.CodeOf(err) != devices.CodeWorkerReplaced {
+	if _, _, err := runDevices(t, "", "devices", "serve"); device.CodeOf(err) != device.CodeWorkerReplaced {
 		t.Errorf("serve returned %v", err)
 	}
 }
 
 // connectedHere writes the host policy of a connected computer and keeps a
 // key for it.
-func connectedHere(t *testing.T, paths devices.Paths, project string) string {
+func connectedHere(t *testing.T, paths device.Paths, project string) string {
 	t.Helper()
 	const id = "dev-abcdefghijklmnop"
-	if err := devices.SavePolicy(paths.PolicyFile(), devices.Policy{
-		Device: id, Name: "Test Mac", Folders: []devices.Folder{{Path: project, Write: true}},
-		Network: devices.Network{Mode: devices.NetworkNone},
+	if err := device.SavePolicy(paths.PolicyFile(), device.Policy{
+		Device: id, Name: "Test Mac", Folders: []device.Folder{{Path: project, Write: true}},
+		Network: device.Network{Mode: device.NetworkNone},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	if err := devices.OpenKeys(paths.KeyFile()).Put(devices.Key{Environment: id, Token: "k", JTI: "j", MintedAt: now, ExpiresAt: now.Add(devices.KeyTTL)}); err != nil {
+	if err := device.OpenKeys(paths.KeyFile()).Put(device.Key{Environment: id, Token: "k", JTI: "j", MintedAt: now, ExpiresAt: now.Add(device.KeyTTL)}); err != nil {
 		t.Fatal(err)
 	}
 	return id
@@ -448,12 +459,12 @@ func TestConnectRefusalsFromThePlatform(t *testing.T) {
 	for _, tc := range []struct {
 		detail, code, hint string
 	}{
-		{"forbidden: environment.create: device_limit", devices.CodeLimit, "You have 2 devices, and one person may connect 10."},
-		{"forbidden: environment.create: device_personal_only", devices.CodePersonalOnly, "latere org --personal"},
-		{"forbidden: environment.create: sign_in_required", devices.CodeSignInRequired, "latere login"},
-		{"forbidden: environment.create: device_key_refused", devices.CodeKeyRefused, "latere login"},
-		{"forbidden: environment.create: device_invalid", devices.CodeInvalid, ""},
-		{"forbidden: environment.create: Something Else", devices.CodeRefused, ""},
+		{"forbidden: environment.create: device_limit", device.CodeLimit, "You have 2 devices, and one person may connect 10."},
+		{"forbidden: environment.create: device_personal_only", device.CodePersonalOnly, "latere org --personal"},
+		{"forbidden: environment.create: sign_in_required", device.CodeSignInRequired, "latere login"},
+		{"forbidden: environment.create: device_key_refused", device.CodeKeyRefused, "latere login"},
+		{"forbidden: environment.create: device_invalid", device.CodeInvalid, ""},
+		{"forbidden: environment.create: Something Else", device.CodeRefused, ""},
 	} {
 		t.Run(tc.code, func(t *testing.T) {
 			_, project := deviceHome(t)
@@ -463,8 +474,16 @@ func TestConnectRefusalsFromThePlatform(t *testing.T) {
 			p.devices = []map[string]any{{"id": "dev-a"}, {"id": "dev-b"}}
 			signIn(t, "")
 			_, _, err := runDevices(t, "yes\n", "devices", "connect", "--folder", project)
-			if devices.CodeOf(err) != tc.code || !strings.Contains(err.Error(), tc.hint) {
+			if device.CodeOf(err) != tc.code || !strings.Contains(err.Error(), tc.hint) {
 				t.Errorf("a create refused with %q returned %v", tc.detail, err)
+			}
+			if tc.code == device.CodeLimit {
+				p.mu.Lock()
+				bearers := append([]string(nil), p.bearers...)
+				p.mu.Unlock()
+				if !slices.Contains(bearers, "GET /v1/account/devices platform-bearer") {
+					t.Errorf("the device list for the limit presented %v, want the person's platform bearer", bearers)
+				}
 			}
 		})
 	}
@@ -510,14 +529,14 @@ func TestDevicesRenameAndRemove(t *testing.T) {
 	if _, _, err := runDevices(t, "", "devices", "rename", "Other", "dev-zzzzzzzzzzzzzzzz"); err != nil {
 		t.Fatal(err)
 	}
-	policy, _, _ := devices.LoadPolicy(paths.PolicyFile())
+	policy, _, _ := device.LoadPolicy(paths.PolicyFile())
 	if p.renamed[id] != "New Name" || p.renamed["dev-zzzzzzzzzzzzzzzz"] != "Other" || policy.Name != "New Name" {
 		t.Errorf("renamed %v, and the file names %q", p.renamed, policy.Name)
 	}
 	if _, _, err := runDevices(t, "", "devices", "remove", "dev-zzzzzzzzzzzzzzzz"); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok, _ := devices.OpenKeys(paths.KeyFile()).Get(id); !ok {
+	if _, ok, _ := device.OpenKeys(paths.KeyFile()).Get(id); !ok {
 		t.Error("removing another device deleted this computer's key")
 	}
 	if _, _, err := runDevices(t, "", "devices", "remove"); err != nil {
@@ -526,14 +545,14 @@ func TestDevicesRenameAndRemove(t *testing.T) {
 	if strings.Join(p.removed, ",") != "dev-zzzzzzzzzzzzzzzz,"+id {
 		t.Errorf("removed %v", p.removed)
 	}
-	if _, ok, _ := devices.OpenKeys(paths.KeyFile()).Get(id); ok {
+	if _, ok, _ := device.OpenKeys(paths.KeyFile()).Get(id); ok {
 		t.Error("removing this computer kept its key")
 	}
 	if _, err := os.Stat(paths.PolicyFile()); err == nil {
 		t.Error("removing this computer kept its host policy file")
 	}
 	for _, args := range [][]string{{"devices", "remove"}, {"devices", "rename", "x"}, {"devices", "activity"}} {
-		if _, _, err := runDevices(t, "", args...); devices.CodeOf(err) != devices.CodeNotConnected {
+		if _, _, err := runDevices(t, "", args...); device.CodeOf(err) != device.CodeNotConnected {
 			t.Errorf("%v on a computer not connected returned %v", args, err)
 		}
 	}
@@ -541,14 +560,14 @@ func TestDevicesRenameAndRemove(t *testing.T) {
 
 func TestDevicesPolicy(t *testing.T) {
 	paths, project := deviceHome(t)
-	if _, _, err := runDevices(t, "", "devices", "policy"); devices.CodeOf(err) != devices.CodeNotConnected {
+	if _, _, err := runDevices(t, "", "devices", "policy"); device.CodeOf(err) != device.CodeNotConnected {
 		t.Errorf("policy with no file returned %v", err)
 	}
 	connectedHere(t, paths, project)
-	policy, _, _ := devices.LoadPolicy(paths.PolicyFile())
+	policy, _, _ := device.LoadPolicy(paths.PolicyFile())
 	policy.Remember("trg_1", "4", time.Now())
-	policy.RememberedTriggers = append(policy.RememberedTriggers, devices.Remembered{Trigger: "trg_old", AgentVersion: "1", Until: time.Now().Add(-time.Hour)})
-	if err := devices.SavePolicy(paths.PolicyFile(), policy); err != nil {
+	policy.RememberedTriggers = append(policy.RememberedTriggers, device.Remembered{Trigger: "trg_old", AgentVersion: "1", Until: time.Now().Add(-time.Hour)})
+	if err := device.SavePolicy(paths.PolicyFile(), policy); err != nil {
 		t.Fatal(err)
 	}
 	out, _, err := runDevices(t, "", "devices", "policy")
@@ -568,33 +587,33 @@ func TestDevicesPolicy(t *testing.T) {
 	if err != nil || !strings.Contains(errOut, "session_start is ask from the next session on.") {
 		t.Fatalf("policy --session-start ask returned %v:\n%s", err, errOut)
 	}
-	if policy, _, _ = devices.LoadPolicy(paths.PolicyFile()); policy.SessionStart != devices.SessionStartAsk || !policy.Remembers("trg_1", "4", time.Now()) {
+	if policy, _, _ = device.LoadPolicy(paths.PolicyFile()); policy.SessionStart != device.SessionStartAsk || !policy.Remembers("trg_1", "4", time.Now()) {
 		t.Errorf("after --session-start ask the file reads %+v", policy)
 	}
 	if out, _, _ = runDevices(t, "", "devices", "policy"); !strings.Contains(out, "Each session asks for your approval here") {
 		t.Errorf("policy under ask does not say so:\n%s", out)
 	}
-	if _, _, err = runDevices(t, "", "devices", "policy", "--session-start", "sometimes"); devices.CodeOf(err) != devices.CodePolicyInvalid {
+	if _, _, err = runDevices(t, "", "devices", "policy", "--session-start", "sometimes"); device.CodeOf(err) != device.CodePolicyInvalid {
 		t.Errorf("policy --session-start sometimes returned %v", err)
 	}
-	if policy, _, _ = devices.LoadPolicy(paths.PolicyFile()); policy.SessionStart != devices.SessionStartAsk {
+	if policy, _, _ = device.LoadPolicy(paths.PolicyFile()); policy.SessionStart != device.SessionStartAsk {
 		t.Errorf("a refused --session-start changed the file: %+v", policy)
 	}
 	if _, _, err = runDevices(t, "", "devices", "policy", "--forget", "trg_1"); err != nil {
 		t.Fatal(err)
 	}
-	policy, _, _ = devices.LoadPolicy(paths.PolicyFile())
+	policy, _, _ = device.LoadPolicy(paths.PolicyFile())
 	if policy.Remembers("trg_1", "4", time.Now()) {
 		t.Error("a forgotten trigger is still remembered")
 	}
-	if _, _, err = runDevices(t, "", "devices", "policy", "--forget", "trg_none"); devices.CodeOf(err) != devices.CodePolicyInvalid {
+	if _, _, err = runDevices(t, "", "devices", "policy", "--forget", "trg_none"); device.CodeOf(err) != device.CodePolicyInvalid {
 		t.Errorf("forgetting an unknown trigger returned %v", err)
 	}
-	policy.Folders = append(policy.Folders, devices.Folder{Path: paths.Home})
-	if err := devices.SavePolicy(paths.PolicyFile(), policy); err != nil {
+	policy.Folders = append(policy.Folders, device.Folder{Path: paths.Home})
+	if err := device.SavePolicy(paths.PolicyFile(), policy); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err = runDevices(t, "", "devices", "policy"); devices.CodeOf(err) != devices.CodePolicyInvalid || !strings.Contains(err.Error(), "home directory") {
+	if _, _, err = runDevices(t, "", "devices", "policy"); device.CodeOf(err) != device.CodePolicyInvalid || !strings.Contains(err.Error(), "home directory") {
 		t.Errorf("a policy granting the home directory returned %v", err)
 	}
 }
@@ -602,12 +621,12 @@ func TestDevicesPolicy(t *testing.T) {
 func TestDevicesActivity(t *testing.T) {
 	paths, project := deviceHome(t)
 	id := connectedHere(t, paths, project)
-	log, err := devices.OpenActivity(paths.ActivityDir(id))
+	log, err := device.OpenActivity(paths.ActivityDir(id))
 	if err != nil {
 		t.Fatal(err)
 	}
 	old := time.Now().Add(-2 * time.Hour)
-	for _, e := range []devices.Entry{
+	for _, e := range []device.Entry{
 		{Time: old, Type: "Exec", Session: "ses_old", Command: []string{"make"}},
 		{Time: time.Now(), Type: "Write", Session: "ses_new", Path: filepath.Join(paths.Home, "project", "a.go")},
 	} {
@@ -631,33 +650,38 @@ func TestDevicesActivity(t *testing.T) {
 	}
 }
 
-func TestPlatformReason(t *testing.T) {
-	for detail, want := range map[string]string{
-		"forbidden: environment.create: device_limit": "device_limit",
-		"no reason":                         "",
-		"forbidden: environment.create: Oh": "",
-		"forbidden: x: ":                    "",
-	} {
-		if got := platformReason(detail); got != want {
-			t.Errorf("platformReason(%q) = %q, want %q", detail, got, want)
-		}
+// What a connect through the control socket did is printed for serve's own
+// output: the device it connected as, and the platform's refusal of its
+// name, which leaves the computer connected and is answered to the client.
+func TestServePrintsWhatAConnectDid(t *testing.T) {
+	paths, project := deviceHome(t)
+	p := newDevicePlatform(t)
+	signIn(t, "")
+	auth := deviceAuth{}
+	client, err := auth.cella()
+	if err != nil {
+		t.Fatal(err)
 	}
-}
-
-func TestCleanDeviceName(t *testing.T) {
-	long := strings.Repeat("é", 70)
-	for in, want := range map[string]string{
-		"  MacBook Pro  ": "MacBook Pro",
-		"a\x00b\u202ec":   "abc",
-		"":                "This computer",
-		long:              strings.Repeat("é", 64),
-	} {
-		if got := devices.CleanName(in); got != want {
-			t.Errorf("CleanName(%q) = %q, want %q", in, got, want)
+	policy := device.Policy{Name: "Test Mac", Folders: []device.Folder{{Path: project, Write: true}}, Network: device.Network{Mode: device.NetworkNone}}
+	for _, refuse := range []bool{false, true} {
+		p.mu.Lock()
+		p.refuseRename = refuse
+		p.mu.Unlock()
+		if err := os.RemoveAll(paths.PolicyFile()); err != nil {
+			t.Fatal(err)
 		}
-	}
-	if name := defaultComputerName(); name == "" {
-		t.Error("the computer has no name")
+		var out bytes.Buffer
+		done, err := deviceEnroller{Enrollment: newEnrollment(paths, client, auth), errOut: &out}.Connect(t.Context(), policy)
+		if err != nil {
+			t.Fatalf("connect: %v", err)
+		}
+		if !strings.Contains(out.String(), "Connected this computer as Test Mac ("+done.Policy.Device+").") {
+			t.Errorf("serve printed %q, want the device it connected as", out.String())
+		}
+		noted := strings.Contains(out.String(), "Note: this computer is connected, and its name was not set (")
+		if noted != refuse || (done.NameError != nil) != refuse {
+			t.Errorf("with the rename refused %v, serve printed %q and answered the name error %v", refuse, out.String(), done.NameError)
+		}
 	}
 }
 
@@ -668,7 +692,7 @@ func TestConnectReadsLabelsFromTheFlaggedPlatform(t *testing.T) {
 	signIn(t, "")
 	t.Setenv("LATERE_PLATFORM_URL", "http://127.0.0.1:1")
 	_, errOut, err := runDevices(t, "yes\n", "devices", "connect", "--folder", project, "--platform-url", p.srv.URL)
-	if devices.CodeOf(err) != devices.CodeWorkerReplaced {
+	if device.CodeOf(err) != device.CodeWorkerReplaced {
 		t.Fatalf("connect with --platform-url returned %v:\n%s", err, errOut)
 	}
 	labels, renamed := false, false

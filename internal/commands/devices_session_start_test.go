@@ -14,33 +14,32 @@ import (
 	"sync"
 	"testing"
 
+	"latere.ai/x/cella/device"
 	"latere.ai/x/pkg/httpjson"
-
-	"github.com/latere-ai/latere-cli/internal/devices"
 )
 
 // connect proposes session_start from --session-start, then from an earlier
 // file, then allow.
 func TestConnectProposesSessionStart(t *testing.T) {
 	home := t.TempDir()
-	base := connectRequest{folders: []string{home + "/project"}, network: devices.NetworkNone, sessionStart: devices.SessionStartAllow}
+	base := connectRequest{folders: []string{home + "/project"}, network: device.NetworkNone, sessionStart: device.SessionStartAllow}
 	for _, tc := range []struct {
 		name     string
 		previous string
 		flag     string
 		want     string
 	}{
-		{"the default", "", "", devices.SessionStartAllow},
-		{"the flag", "", devices.SessionStartAsk, devices.SessionStartAsk},
-		{"an earlier file", devices.SessionStartAsk, "", devices.SessionStartAsk},
-		{"the flag over an earlier file", devices.SessionStartAsk, devices.SessionStartAllow, devices.SessionStartAllow},
+		{"the default", "", "", device.SessionStartAllow},
+		{"the flag", "", device.SessionStartAsk, device.SessionStartAsk},
+		{"an earlier file", device.SessionStartAsk, "", device.SessionStartAsk},
+		{"the flag over an earlier file", device.SessionStartAsk, device.SessionStartAllow, device.SessionStartAllow},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := base
 			if tc.flag != "" {
 				r.sessionStart, r.sessionStartSet = tc.flag, true
 			}
-			p, err := r.proposal(devices.Policy{SessionStart: tc.previous}, home)
+			p, err := r.proposal(device.Policy{SessionStart: tc.previous}, home)
 			if err != nil || p.SessionStart != tc.want {
 				t.Errorf("proposal = %q, %v; want %q", p.SessionStart, err, tc.want)
 			}
@@ -55,7 +54,7 @@ func TestConnectSessionStartFlag(t *testing.T) {
 	signIn(t, "")
 	// A value that is neither is refused before anything is shown or made.
 	_, errOut, err := runDevices(t, "yes\n", "devices", "connect", "--folder", project, "--session-start", "sometimes")
-	if devices.CodeOf(err) != devices.CodePolicyInvalid || !strings.Contains(err.Error(), "session_start") || strings.Contains(errOut, "Type yes") {
+	if device.CodeOf(err) != device.CodePolicyInvalid || !strings.Contains(err.Error(), "session_start") || strings.Contains(errOut, "Type yes") {
 		t.Errorf("--session-start sometimes returned %v:\n%s", err, errOut)
 	}
 	if got := p.seen(); len(got) != 0 {
@@ -63,15 +62,15 @@ func TestConnectSessionStartFlag(t *testing.T) {
 	}
 	// ask is shown on the screen before the typed yes.
 	_, errOut, err = runDevices(t, "no\n", "devices", "connect", "--folder", project, "--session-start", "ask")
-	if devices.CodeOf(err) != devices.CodeNotConfirmed || !strings.Contains(errOut, "Each session asks for your approval here before it starts.") {
+	if device.CodeOf(err) != device.CodeNotConfirmed || !strings.Contains(errOut, "Each session asks for your approval here before it starts.") {
 		t.Errorf("--session-start ask showed:\n%s\nand returned %v", errOut, err)
 	}
 	// On a connected computer the flag is refused like the others: the
 	// host policy file, or `latere devices policy --session-start`, is
 	// where it changes.
 	connectedHere(t, paths, project)
-	if _, _, err = runDevices(t, "", "devices", "connect", "--session-start", "ask"); devices.CodeOf(err) != devices.CodeAlreadyConnected ||
-		!strings.Contains(devices.Fail(devices.CodeAlreadyConnected, "", nil).Hint, "latere devices policy --session-start") {
+	if _, _, err = runDevices(t, "", "devices", "connect", "--session-start", "ask"); device.CodeOf(err) != device.CodeAlreadyConnected ||
+		!strings.Contains(device.Fail(device.CodeAlreadyConnected, "", nil).Hint, "latere devices policy --session-start") {
 		t.Errorf("--session-start on a connected computer returned %v", err)
 	}
 }
@@ -81,7 +80,7 @@ func TestConnectSessionStartFlag(t *testing.T) {
 func TestDevicesPauseAndResume(t *testing.T) {
 	paths, _ := deviceHome(t)
 	for _, verb := range []string{"pause", "resume"} {
-		if _, errOut, err := runDevices(t, "", "devices", verb); devices.CodeOf(err) != devices.CodeNotServing || errOut != "" {
+		if _, errOut, err := runDevices(t, "", "devices", verb); device.CodeOf(err) != device.CodeNotServing || errOut != "" {
 			t.Errorf("%s with nothing serving returned %v, %q", verb, err, errOut)
 		}
 	}
@@ -102,7 +101,7 @@ func TestDevicesPauseAndResume(t *testing.T) {
 			mu.Lock()
 			asked = append(asked, route)
 			mu.Unlock()
-			httpjson.Write(w, http.StatusOK, devices.Status{State: devices.StatePaused})
+			httpjson.Write(w, http.StatusOK, device.Status{State: device.StatePaused})
 		})
 	}
 	srv := &http.Server{Handler: mux}

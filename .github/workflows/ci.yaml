@@ -30,13 +30,14 @@ jobs:
 
   # `latere devices` under the real sandbox on Linux. The gate's runners have
   # no srt, so there the device tests run each command unconfined under a
-  # stand-in, and the confinement tests skip. This job installs srt and what
-  # it uses on Linux (bubblewrap, socat, ripgrep), so the engine's tests, the
-  # command's tests and the end-to-end run against a real cellad all go
-  # through Cella's local driver confined by srt over bubblewrap. Ubuntu's
-  # AppArmor blocks the unprivileged user namespaces bubblewrap needs until
-  # they are allowed. A test of this job that skips, or a run that falls back
-  # to the stand-in, fails the job, since it would prove nothing here.
+  # stand-in. This job installs srt and what it uses on Linux (bubblewrap,
+  # socat, ripgrep), so the command's tests and the end-to-end run against a
+  # real cellad go through Cella's local driver confined by srt over
+  # bubblewrap. The engine's own tests, confinement among them, run under the
+  # real sandbox in Cella's CI. Ubuntu's AppArmor blocks the unprivileged user
+  # namespaces bubblewrap needs until they are allowed. A test of this job
+  # that skips, or a run that falls back to the stand-in, fails the job, since
+  # it would prove nothing here.
   device:
     name: devices under the real sandbox on Linux
     runs-on: ubuntu-latest
@@ -56,9 +57,8 @@ jobs:
       - name: The device tests with the real srt
         run: |
           set -o pipefail
-          go test -count=1 -v ./internal/devices/ 2>&1 | tee devices.log
           go test -count=1 -v -run '^Test(Connect|Serve|SecondConnect|Devices|LogoutWarns)' ./internal/commands/ ./cmd/latere/ 2>&1 | tee commands.log
-          if grep -E -- '--- SKIP|under a stand-in' devices.log commands.log; then
+          if grep -E -- '--- SKIP|under a stand-in' commands.log; then
             echo "a device test skipped or ran under the stand-in, so the real sandbox did not run it" >&2
             exit 1
           fi

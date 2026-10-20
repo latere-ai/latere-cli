@@ -24,7 +24,7 @@ affects:
   - docs/devices.md, CHANGELOG.md
 effort: medium
 created: 2026-10-19
-updated: 2026-10-19
+updated: 2026-10-21
 author: changkun
 ---
 
@@ -279,3 +279,8 @@ person's removal answer never forgets the device, and the stop is
 clean. F (paths a client denies) and G (logout on a
 computer an application serves) are not built yet; tests 8 and 9 come
 with them.
+
+Since 2026-10-21 the engine these routes belong to is Cella's
+`latere.ai/x/cella/device` (Cella v0.20.0): the `internal/devices` files
+in `affects` moved there with their tests, and `serve` embeds it with the
+platform's part of a connect over the platform's API.

@@ -14,13 +14,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/latere-ai/latere-cli/internal/devices"
+	"latere.ai/x/cella/device"
 )
 
 // connectedForLogout seeds a login on a computer connected as a device, and
 // a server that is both the issuer and the platform, recording what each
 // was asked in order.
-func connectedForLogout(t *testing.T, deleteStatus int) (paths devices.Paths, authPath string, srv *httptest.Server, order func() []string) {
+func connectedForLogout(t *testing.T, deleteStatus int) (paths device.Paths, authPath string, srv *httptest.Server, order func() []string) {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -47,17 +47,17 @@ func connectedForLogout(t *testing.T, deleteStatus int) (paths devices.Paths, au
 	t.Setenv("LATERE_PLATFORM_URL", srv.URL)
 	t.Setenv("LATERE_PLATFORM_TOKEN", "platform-bearer")
 	var err error
-	if paths, err = devices.DefaultPaths(); err != nil {
+	if paths, err = device.DefaultPaths(); err != nil {
 		t.Fatal(err)
 	}
-	if err = devices.SavePolicy(paths.PolicyFile(), devices.Policy{
-		Device: "dev-abcdefghijklmnop", Name: "Test Mac", Folders: []devices.Folder{{Path: "~/project", Write: true}},
-		Network: devices.Network{Mode: devices.NetworkNone},
+	if err = device.SavePolicy(paths.PolicyFile(), device.Policy{
+		Device: "dev-abcdefghijklmnop", Name: "Test Mac", Folders: []device.Folder{{Path: "~/project", Write: true}},
+		Network: device.Network{Mode: device.NetworkNone},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	if err = devices.OpenKeys(paths.KeyFile()).Put(devices.Key{Environment: "dev-abcdefghijklmnop", Token: "k", JTI: "j", MintedAt: now, ExpiresAt: now.Add(devices.KeyTTL)}); err != nil {
+	if err = device.OpenKeys(paths.KeyFile()).Put(device.Key{Environment: "dev-abcdefghijklmnop", Token: "k", JTI: "j", MintedAt: now, ExpiresAt: now.Add(device.KeyTTL)}); err != nil {
 		t.Fatal(err)
 	}
 	return paths, authPath, srv, func() []string {
@@ -83,7 +83,7 @@ func TestLogoutWarnsOnAConnectedComputer(t *testing.T) {
 	t.Run("a no keeps the login and the device", func(t *testing.T) {
 		paths, authPath, srv, order := connectedForLogout(t, http.StatusNoContent)
 		errOut, err := logoutWith(t, "n\n", "--auth-url", srv.URL)
-		if devices.CodeOf(err) != devices.CodeLogoutCancelled {
+		if device.CodeOf(err) != codeLogoutCancelled {
 			t.Fatalf("logout answered no returned %v", err)
 		}
 		if !strings.Contains(errOut, `connected as your device "Test Mac"`) || !strings.Contains(errOut, "removes it from your devices") ||
@@ -96,7 +96,7 @@ func TestLogoutWarnsOnAConnectedComputer(t *testing.T) {
 		if _, err := os.Stat(authPath); err != nil {
 			t.Errorf("a refused logout removed the login: %v", err)
 		}
-		if _, ok, _ := devices.OpenKeys(paths.KeyFile()).Get("dev-abcdefghijklmnop"); !ok {
+		if _, ok, _ := device.OpenKeys(paths.KeyFile()).Get("dev-abcdefghijklmnop"); !ok {
 			t.Error("a refused logout deleted the key")
 		}
 	})
@@ -109,10 +109,10 @@ func TestLogoutWarnsOnAConnectedComputer(t *testing.T) {
 		if got := strings.Join(order(), ", "); got != "remove dev-abcdefghijklmnop, revoke" {
 			t.Errorf("logout asked %q; want the device removed, then the login revoked", got)
 		}
-		if _, ok, _ := devices.OpenKeys(paths.KeyFile()).Get("dev-abcdefghijklmnop"); ok {
+		if _, ok, _ := device.OpenKeys(paths.KeyFile()).Get("dev-abcdefghijklmnop"); ok {
 			t.Error("the removed device's key is kept")
 		}
-		policy, ok, _ := devices.LoadPolicy(paths.PolicyFile())
+		policy, ok, _ := device.LoadPolicy(paths.PolicyFile())
 		if !ok || policy.Device != "" || len(policy.Folders) != 1 {
 			t.Errorf("the host policy file reads %+v, %v; want its folders and no device", policy, ok)
 		}
@@ -136,7 +136,7 @@ func TestLogoutWarnsOnAConnectedComputer(t *testing.T) {
 	t.Run("a device that cannot be removed keeps the login", func(t *testing.T) {
 		_, authPath, srv, order := connectedForLogout(t, http.StatusServiceUnavailable)
 		_, err := logoutWith(t, "yes\n", "--auth-url", srv.URL)
-		if devices.CodeOf(err) != devices.CodeLogoutBlocked {
+		if device.CodeOf(err) != codeLogoutBlocked {
 			t.Fatalf("logout with the platform down returned %v", err)
 		}
 		if got := strings.Join(order(), ", "); got != "remove dev-abcdefghijklmnop" {

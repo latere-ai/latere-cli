@@ -180,11 +180,12 @@ type appPlatform struct {
 
 // newAppPlatform resolves the platform's address as the repository commands
 // do, and its bearer: LATERE_PLATFORM_TOKEN as given, else an actor token
-// minted for platformAudience from the saved login at the first request.
+// minted for the platform's audience from the saved login at the first
+// request.
 func newAppPlatform(flagURL, authURL string) (*appPlatform, error) {
 	base := resolvePlatformURL(flagURL)
 	cfg, err := api.Product{
-		BaseURL: base, AuthURL: authURL, Audience: platformAudience,
+		BaseURL: base, AuthURL: authURL, Audience: latere.DefaultAudience,
 		Token: strings.TrimSpace(os.Getenv("LATERE_PLATFORM_TOKEN")), Timeout: platformTimeout,
 	}.Config()
 	if err != nil {

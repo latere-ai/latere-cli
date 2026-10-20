@@ -3,7 +3,11 @@
 
 //go:build darwin || linux
 
-package devices
+// Package deviceterm is the terminal client of the device engine that
+// `latere devices connect` and `serve` run: the status line, a line per
+// operation and notice, and the person's answer to each session typed in
+// the terminal.
+package deviceterm
 
 import (
 	"bufio"
@@ -12,10 +16,25 @@ import (
 	"io"
 	"slices"
 	"strings"
+
+	"latere.ai/x/cella/device"
 )
 
 // terminalClient is how an answer typed in the terminal names its client.
 const terminalClient = "this terminal"
+
+// answerNoOne is the answer the engine gives a waiting create when the last
+// client that could answer it detached.
+const answerNoOne = "no_one_here"
+
+// Engine is what the terminal asks of the engine it is a client of;
+// *device.Engine is one.
+type Engine interface {
+	Subscribe() (<-chan device.Event, func())
+	Attach() (detach func())
+	Status() device.Status
+	Answer(id, answer, by string) error
+}
 
 // quietTypes are operations the terminal does not print a line for: they
 // read the sandbox's state for the control plane and name no command or
@@ -28,7 +47,7 @@ var quietTypes = []string{"Inspect", "List", "Watch", "Touch"}
 // prints and asks nothing, so a create waits for another client or is
 // refused.
 type Terminal struct {
-	Engine *Engine
+	Engine Engine
 	In     io.Reader
 	Out    io.Writer
 	// Interactive is whether a person can answer at In.
@@ -58,11 +77,11 @@ func (t Terminal) Run(ctx context.Context) {
 			}
 		}()
 	}
-	var waiting []Approval
+	var waiting []device.Approval
 	last := ""
 	// A serve that waits to be connected may have said so before this
 	// terminal subscribed; it says it once here.
-	if s := t.Engine.Status(); s.State == StateNotConnected {
+	if s := t.Engine.Status(); s.State == device.StateNotConnected {
 		last = statusLine(s)
 		t.print(last)
 	}
@@ -78,20 +97,20 @@ func (t Terminal) Run(ctx context.Context) {
 				continue
 			}
 			switch ev.Kind {
-			case EventStatus:
+			case device.EventStatus:
 				if line := statusLine(*ev.Status); line != last {
 					last = line
 					t.print(line)
 				}
-			case EventActivity:
+			case device.EventActivity:
 				if !slices.Contains(quietTypes, ev.Activity.Type) {
 					t.print(ev.Activity.Line(t.Home))
 				}
-			case EventNotice:
+			case device.EventNotice:
 				t.print("Note: " + ev.Notice)
-			case EventStarted:
+			case device.EventStarted:
 				t.print(StartedLine(*ev.Approval, t.Home))
-			case EventAsked:
+			case device.EventAsked:
 				if !t.Interactive {
 					continue
 				}
@@ -99,14 +118,14 @@ func (t Terminal) Run(ctx context.Context) {
 				if len(waiting) == 1 {
 					t.print(Prompt(waiting[0], t.Home))
 				}
-			case EventAnswered, EventWithdrawn:
-				i := slices.IndexFunc(waiting, func(a Approval) bool { return a.ID == ev.Approval.ID })
+			case device.EventAnswered, device.EventWithdrawn:
+				i := slices.IndexFunc(waiting, func(a device.Approval) bool { return a.ID == ev.Approval.ID })
 				if i < 0 {
 					continue
 				}
 				if i == 0 {
 					switch {
-					case ev.Kind == EventWithdrawn:
+					case ev.Kind == device.EventWithdrawn:
 						t.print("The session stopped waiting for an answer.")
 					case ev.By != terminalClient:
 						t.print(answeredElsewhere(ev.Answer, ev.By))
@@ -138,7 +157,7 @@ func (t Terminal) print(line string) { _, _ = fmt.Fprintln(t.Out, line) }
 
 // StartedLine is the line that tells the person a session started on the
 // computer: the agent, the session and who started it, and the folder.
-func StartedLine(a Approval, home string) string {
+func StartedLine(a device.Approval, home string) string {
 	agent := a.Agent
 	if agent == "" {
 		agent = "An unnamed agent"
@@ -150,40 +169,15 @@ func StartedLine(a Approval, home string) string {
 	folder := "its own scratch directory"
 	switch {
 	case a.Folder != "" && a.Write:
-		folder = Shorten(home, a.Folder) + " (read-write)"
+		folder = device.Shorten(home, a.Folder) + " (read-write)"
 	case a.Folder != "":
-		folder = Shorten(home, a.Folder) + " (read-only)"
+		folder = device.Shorten(home, a.Folder) + " (read-only)"
 	}
-	return fmt.Sprintf("%s (%s, %s) is using %s.", agent, session, a.startedWords(), folder)
-}
-
-// The sentences that tell the person how sessions start here, and how to
-// change it, at every start and on the connect screen.
-const (
-	sessionStartAllowWords = "Sessions you start, and your triggers that run on a schedule, start on\n" +
-		"this computer without asking here. A trigger that runs on mail or a\n" +
-		"webhook asks here first, since anyone with its address can send it input.\n" +
-		"Each command that changes something is still approved in the chat,\n" +
-		"unless you approved a matching one before."
-	sessionStartAskWords = "Each session asks for your approval here before it starts. Each command\n" +
-		"that changes something is also approved in the chat, unless you approved\n" +
-		"a matching one before."
-	switchToAsk   = "To be asked here before every session starts, run\n`latere devices policy --session-start ask`."
-	switchToAllow = "To let your own sessions and scheduled triggers start without asking\nhere, run `latere devices policy --session-start allow`."
-)
-
-// SessionStartNotice is what the engine says at every start about how
-// sessions start, so a computer connected before session_start existed
-// learns the default it now has.
-func SessionStartNotice(p Policy) string {
-	if p.SessionStart == SessionStartAsk {
-		return strings.ReplaceAll(sessionStartAskWords+" "+switchToAllow, "\n", " ")
-	}
-	return strings.ReplaceAll(sessionStartAllowWords+" "+switchToAsk, "\n", " ")
+	return fmt.Sprintf("%s (%s, %s) is using %s.", agent, session, a.StartedWords(), folder)
 }
 
 // Prompt is the question a create puts to the person.
-func Prompt(a Approval, home string) string {
+func Prompt(a device.Approval, home string) string {
 	var b strings.Builder
 	b.WriteString("A session wants to use this computer.\n")
 	agent := a.Agent
@@ -208,9 +202,9 @@ func Prompt(a Approval, home string) string {
 	case a.Folder == "":
 		b.WriteString("  folder   none; the session works in its own scratch directory\n")
 	case a.Write:
-		fmt.Fprintf(&b, "  folder   %s (read-write)\n", Shorten(home, a.Folder))
+		fmt.Fprintf(&b, "  folder   %s (read-write)\n", device.Shorten(home, a.Folder))
 	default:
-		fmt.Fprintf(&b, "  folder   %s (read-only)\n", Shorten(home, a.Folder))
+		fmt.Fprintf(&b, "  folder   %s (read-only)\n", device.Shorten(home, a.Folder))
 	}
 	if a.Rememberable {
 		b.WriteString("Remembering lets this trigger run here with no one asked, until its agent changes or 30 days pass.\n")
@@ -226,12 +220,12 @@ func Prompt(a Approval, home string) string {
 func ParseAnswer(line string, rememberable bool) string {
 	switch strings.ToLower(strings.TrimSpace(line)) {
 	case "y", "yes":
-		return AnswerAllow
+		return device.AnswerAllow
 	case "n", "no":
-		return AnswerDeny
+		return device.AnswerDeny
 	case "r", "remember":
 		if rememberable {
-			return AnswerRemember
+			return device.AnswerRemember
 		}
 	}
 	return ""
@@ -247,11 +241,11 @@ func answerHint(rememberable bool) string {
 // answeredElsewhere tells the terminal that another client answered.
 func answeredElsewhere(answer, by string) string {
 	switch answer {
-	case AnswerAllow:
+	case device.AnswerAllow:
 		return "Allowed in " + by + "."
-	case AnswerRemember:
+	case device.AnswerRemember:
 		return "Allowed and remembered for 30 days in " + by + "."
-	case AnswerDeny:
+	case device.AnswerDeny:
 		return "Refused in " + by + "."
 	case answerNoOne:
 		return "Refused: no one was left to answer."
@@ -260,9 +254,9 @@ func answeredElsewhere(answer, by string) string {
 }
 
 // statusLine is the status as the terminal prints it.
-func statusLine(s Status) string {
+func statusLine(s device.Status) string {
 	switch s.State {
-	case StateOnline:
+	case device.StateOnline:
 		switch s.Sessions {
 		case 0:
 			return "Online. No session is using this computer."
@@ -270,33 +264,15 @@ func statusLine(s Status) string {
 			return "Online. 1 session is using this computer."
 		}
 		return fmt.Sprintf("Online. %d sessions are using this computer.", s.Sessions)
-	case StateOffline:
+	case device.StateOffline:
 		if s.Detail != "" {
 			return "Offline: " + s.Detail + "."
 		}
 		return "Offline. Reconnecting."
-	case StatePaused:
+	case device.StatePaused:
 		return "Paused. Sessions cannot use this computer until it resumes."
-	case StateNotConnected:
+	case device.StateNotConnected:
 		return "Not connected. Waiting for a client to connect this computer through the control socket."
 	}
 	return "Connecting."
-}
-
-// ConnectScreen is what the person is shown before a computer is
-// connected: what sessions may use, what the agent reads, and who may ask.
-// GET /v1/connect answers the same facts.
-func ConnectScreen(p Policy) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "Connect this computer to Latere as %q?\n\n", p.Name)
-	for _, f := range connectFacts(p) {
-		b.WriteString(f.screen())
-		// The folders run into what is readable in them; every other fact
-		// ends with a blank line.
-		if f.Kind != FactFolders {
-			b.WriteString("\n")
-		}
-	}
-	b.WriteString("Type yes to connect this computer: ")
-	return b.String()
 }

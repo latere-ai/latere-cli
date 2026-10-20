@@ -15,6 +15,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"latere.ai/x/sdk-go/latere"
 )
 
 // stubPlatform is platformd's repository routes for the commands: the
@@ -374,7 +376,7 @@ func TestReposMintsForThePlatformsAudience(t *testing.T) {
 	if err := root.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	if audience != platformAudience || p.bearers[0] != "Bearer platform-actor" {
+	if audience != latere.DefaultAudience || p.bearers[0] != "Bearer platform-actor" {
 		t.Errorf("audience = %q, bearer = %q", audience, p.bearers[0])
 	}
 }

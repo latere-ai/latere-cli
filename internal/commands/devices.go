@@ -21,7 +21,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/latere-ai/latere-cli/internal/devices"
+	"latere.ai/x/cella/device"
 )
 
 // newDevicesCmd is the `latere devices ...` command tree (spec 016): this
@@ -77,14 +77,14 @@ use it as before.`,
 
 // thisDevice is the device this computer is, from the host policy file, ""
 // when it is not connected.
-func thisDevice() (devices.Paths, devices.Policy, error) {
-	paths, err := devices.DefaultPaths()
+func thisDevice() (device.Paths, device.Policy, error) {
+	paths, err := device.DefaultPaths()
 	if err != nil {
-		return devices.Paths{}, devices.Policy{}, devices.Fail(devices.CodeServeFailed, "resolve the configuration directory", err)
+		return device.Paths{}, device.Policy{}, device.Fail(device.CodeServeFailed, "resolve the configuration directory", err)
 	}
-	policy, _, err := devices.LoadPolicy(paths.PolicyFile())
+	policy, _, err := device.LoadPolicy(paths.PolicyFile())
 	if err != nil {
-		return paths, devices.Policy{}, devices.Fail(devices.CodePolicyInvalid, "", err)
+		return paths, device.Policy{}, device.Fail(device.CodePolicyInvalid, "", err)
 	}
 	return paths, policy, nil
 }
@@ -178,21 +178,21 @@ func newDevicesRenameCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			name := devices.CleanName(args[0])
+			name := device.CleanName(args[0])
 			id := policy.Device
 			if len(args) == 2 {
 				id = args[1]
 			}
 			if id == "" {
-				return devices.Fail(devices.CodeNotConnected, "name a device id from `latere devices list`", nil)
+				return device.Fail(device.CodeNotConnected, "name a device id from `latere devices list`", nil)
 			}
 			if err = platformCall(cmd.Context(), platformURL, "", http.MethodPatch, devicesPath+"/"+id, map[string]string{"name": name}, nil); err != nil {
 				return wrapReposErr(err)
 			}
 			if id == policy.Device {
 				policy.Name = name
-				if err = devices.SavePolicy(paths.PolicyFile(), policy); err != nil {
-					return devices.Fail(devices.CodePolicyInvalid, "write the new name into the host policy file", err)
+				if err = device.SavePolicy(paths.PolicyFile(), policy); err != nil {
+					return device.Fail(device.CodePolicyInvalid, "write the new name into the host policy file", err)
 				}
 			}
 			fprintf(cmd.ErrOrStderr(), "Renamed %s to %s.\n", id, name)
@@ -226,14 +226,14 @@ Removing is final. Connecting the computer again makes a new device.`,
 				id = args[0]
 			}
 			if id == "" {
-				return devices.Fail(devices.CodeNotConnected, "name a device id from `latere devices list`", nil)
+				return device.Fail(device.CodeNotConnected, "name a device id from `latere devices list`", nil)
 			}
 			if err = (deviceAuth{platformURL: platformURL}).remove(cmd.Context(), id); err != nil {
-				return devices.Fail(devices.CodeRemoveFailed, "", wrapReposErr(err))
+				return device.Fail(device.CodeRemoveFailed, "", wrapReposErr(err))
 			}
 			if id == policy.Device {
-				if err = devices.Forget(paths.Keys(), paths.PolicyFile(), id, true); err != nil {
-					return devices.Fail(devices.CodeKeyUnavailable, "the device was removed, and on this computer: "+err.Error(), err)
+				if err = device.Forget(paths.Keys(), paths.PolicyFile(), id, true); err != nil {
+					return device.Fail(device.CodeKeyUnavailable, "the device was removed, and on this computer: "+err.Error(), err)
 				}
 			}
 			fprintf(cmd.ErrOrStderr(), "Removed %s.\n", id)
@@ -255,11 +255,11 @@ func newDevicesControlCmd(use, route, short, long, said string) *cobra.Command {
 		Long:    long,
 		Example: "  latere devices " + use,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			paths, err := devices.DefaultPaths()
+			paths, err := device.DefaultPaths()
 			if err != nil {
-				return devices.Fail(devices.CodeServeFailed, "resolve the state directory", err)
+				return device.Fail(device.CodeServeFailed, "resolve the state directory", err)
 			}
-			if _, err = devices.ControlPost(cmd.Context(), paths.Socket(), route); err != nil {
+			if _, err = device.ControlPost(cmd.Context(), paths.Socket(), route); err != nil {
 				return err
 			}
 			fprintln(cmd.ErrOrStderr(), said)
@@ -296,48 +296,48 @@ trigger asks again at its next run, even while this computer is serving.`,
   latere devices policy --session-start ask
   latere devices policy --forget trg_01jaq7v3k9m2wxyz`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			paths, err := devices.DefaultPaths()
+			paths, err := device.DefaultPaths()
 			if err != nil {
-				return devices.Fail(devices.CodeServeFailed, "resolve the configuration directory", err)
+				return device.Fail(device.CodeServeFailed, "resolve the configuration directory", err)
 			}
 			path := paths.PolicyFile()
-			policy, ok, err := devices.LoadPolicy(path)
+			policy, ok, err := device.LoadPolicy(path)
 			if err != nil {
-				return devices.Fail(devices.CodePolicyInvalid, "", err)
+				return device.Fail(device.CodePolicyInvalid, "", err)
 			}
 			if !ok {
-				return devices.Fail(devices.CodeNotConnected, "there is no host policy file at "+path, nil)
+				return device.Fail(device.CodeNotConnected, "there is no host policy file at "+path, nil)
 			}
 			out := cmd.OutOrStdout()
 			if cmd.Flags().Changed("session-start") {
-				if sessionStart != devices.SessionStartAllow && sessionStart != devices.SessionStartAsk {
-					return devices.Fail(devices.CodePolicyInvalid, fmt.Sprintf("--session-start is %q; it is allow or ask", sessionStart), nil)
+				if sessionStart != device.SessionStartAllow && sessionStart != device.SessionStartAsk {
+					return device.Fail(device.CodePolicyInvalid, fmt.Sprintf("--session-start is %q; it is allow or ask", sessionStart), nil)
 				}
 				policy.SessionStart = sessionStart
-				if err = devices.SavePolicy(path, policy); err != nil {
-					return devices.Fail(devices.CodePolicyInvalid, "write the host policy file", err)
+				if err = device.SavePolicy(path, policy); err != nil {
+					return device.Fail(device.CodePolicyInvalid, "write the host policy file", err)
 				}
 				fprintf(cmd.ErrOrStderr(), "session_start is %s from the next session on.\n", sessionStart)
 			}
 			if len(forget) > 0 {
 				for _, trigger := range forget {
 					if !policy.Forget(trigger) {
-						return devices.Fail(devices.CodePolicyInvalid, "no remembered trigger is named "+trigger, nil)
+						return device.Fail(device.CodePolicyInvalid, "no remembered trigger is named "+trigger, nil)
 					}
 				}
-				if err = devices.SavePolicy(path, policy); err != nil {
-					return devices.Fail(devices.CodePolicyInvalid, "write the host policy file", err)
+				if err = device.SavePolicy(path, policy); err != nil {
+					return device.Fail(device.CodePolicyInvalid, "write the host policy file", err)
 				}
 				fprintf(cmd.ErrOrStderr(), "Forgot %s; it asks again at its next run.\n", strings.Join(forget, ", "))
 			}
 			raw, err := os.ReadFile(path)
 			if err != nil {
-				return devices.Fail(devices.CodePolicyInvalid, "", err)
+				return device.Fail(device.CodePolicyInvalid, "", err)
 			}
-			fprintf(out, "%s\n\n%s\n\n%s\n", path, strings.TrimRight(string(raw), "\n"), devices.SessionStartNotice(policy))
+			fprintf(out, "%s\n\n%s\n\n%s\n", path, strings.TrimRight(string(raw), "\n"), device.SessionStartNotice(policy))
 			problems := policy.Problems(paths.Home)
 			if len(problems) == 0 {
-				if err := devices.CheckDriver(policy, paths, goruntime.GOOS, deviceDriver); err != nil {
+				if err := device.CheckDriver(policy, paths, goruntime.GOOS, deviceDriver); err != nil {
 					problems = append(problems, err.Error())
 				}
 			}
@@ -353,7 +353,7 @@ trigger asks again at its next run, even while this computer is serving.`,
 				}
 			}
 			if len(problems) > 0 {
-				return devices.Fail(devices.CodePolicyInvalid, path+": "+strings.Join(problems, "; "), nil)
+				return device.Fail(device.CodePolicyInvalid, path+": "+strings.Join(problems, "; "), nil)
 			}
 			fprintln(out, "\nThe host policy file is valid.")
 			return nil
@@ -366,10 +366,10 @@ trigger asks again at its next run, even while this computer is serving.`,
 
 func newDevicesActivityCmd() *cobra.Command {
 	var (
-		followF bool
-		since   string
-		device  string
-		jsonF   bool
+		followF  bool
+		since    string
+		deviceID string
+		jsonF    bool
 	)
 	cmd := &cobra.Command{
 		Use:   "activity",
@@ -389,16 +389,16 @@ kept whatever the platform records.
 			if err != nil {
 				return err
 			}
-			id := defaultStr(device, policy.Device)
+			id := defaultStr(deviceID, policy.Device)
 			if id == "" {
-				return devices.Fail(devices.CodeNotConnected, "name the device whose log to read with --device", nil)
+				return device.Fail(device.CodeNotConnected, "name the device whose log to read with --device", nil)
 			}
-			from, err := devices.ParseSince(since, time.Now())
+			from, err := device.ParseSince(since, time.Now())
 			if err != nil {
 				return fmt.Errorf("--since: %w", err)
 			}
 			out := cmd.OutOrStdout()
-			show := func(e devices.Entry) error {
+			show := func(e device.Entry) error {
 				if jsonF {
 					return json.NewEncoder(out).Encode(e)
 				}
@@ -409,11 +409,11 @@ kept whatever the platform records.
 			if followF {
 				ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 				defer stop()
-				return devices.FollowActivity(ctx, dir, from, show)
+				return device.FollowActivity(ctx, dir, from, show)
 			}
-			entries, err := devices.ReadActivity(dir, from)
+			entries, err := device.ReadActivity(dir, from)
 			if err != nil {
-				return devices.Fail(devices.CodeServeFailed, "read the activity log", err)
+				return device.Fail(device.CodeServeFailed, "read the activity log", err)
 			}
 			for _, e := range entries {
 				if err = show(e); err != nil {
@@ -426,7 +426,7 @@ kept whatever the platform records.
 	f := cmd.Flags()
 	f.BoolVarP(&followF, "follow", "f", false, "keep printing lines as they are written")
 	f.StringVar(&since, "since", "", "print from this time or this long ago")
-	f.StringVar(&device, "device", "", "read the log of another device this computer was, by its id")
+	f.StringVar(&deviceID, "device", "", "read the log of another device this computer was, by its id")
 	f.BoolVar(&jsonF, "json", false, "print each line as JSON")
 	return cmd
 }
