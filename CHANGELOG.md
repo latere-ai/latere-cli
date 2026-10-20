@@ -10,6 +10,16 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Changed
+
+- **`latere agents review` reports what its critics spend.** Each critic
+  round is one call to the critic model through the Latere API, with your
+  model key as before, and its tokens now count toward `--cost-cap`
+  beside the proposer's. The flags, the output and the exit codes are as
+  they were. `--models-url` and `LATERE_MODELS_URL` must end in
+  `/v1/models`, as the default does; another address is refused before a
+  round runs.
+
 ### Security
 
 - Built with Go 1.27.3, which fixes GO-2026-6809.

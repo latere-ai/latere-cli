@@ -30,8 +30,12 @@ import (
 // Model in that dialect, so it reaches none. The credential of every call
 // is the model key (models_key.go).
 
+// modelsPath is where the origin serves the core, under which its doors
+// sit.
+const modelsPath = "/v1/models"
+
 // defaultModelsURL is the base of the core's doors at the origin.
-const defaultModelsURL = "https://api.latere.ai/v1/models"
+const defaultModelsURL = "https://api.latere.ai" + modelsPath
 
 // defaultCatalogModel is the Model review's critics and the local Topos
 // agent call when none is named. Models are named as the catalog names

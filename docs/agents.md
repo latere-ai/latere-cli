@@ -110,7 +110,7 @@ latere agents review && git push     # push only if the review is clean
 | `--state-dir` | `$XDG_STATE_HOME/latere/reviews/<repo-key>/` | Where to write review logs |
 | `--forks` | `1` | Number of independent critic forks |
 | `--max-rounds` | `4` | Per-fork debate-round cap |
-| `--cost-cap` | `50000` | Soft token budget (proposer tokens; the critics report no usage yet) |
+| `--cost-cap` | `50000` | Soft token budget, the proposer's and the critics' tokens together |
 | `--model` | `anthropic/claude-sonnet-4.6` | Critic model, named as `latere models` lists it |
 | `--proposer-timeout` | `5m` | Per-round deadline for the proposer's claude call (large sessions may need more) |
 | `--models-url` | `LATERE_MODELS_URL` or `https://api.latere.ai/v1/models` | Override the models base URL |
@@ -135,7 +135,7 @@ The global state directory is not cleaned when a repo is cleaned, so `latere age
 
 1. Resolves the Claude Code session to fork (newest transcript under `--dir`, or `--session`).
 2. Computes the working-tree diff and skips if trivial.
-3. Forks the session as a proposer (local `claude`), and runs read-only critics in the Latere agent, whose model calls go to the Latere API with your model key.
+3. Forks the session as a proposer (local `claude`), and runs the critics, each round of which is one model call through the Latere API with your model key.
 4. Runs the debate to a steady state and prints a summary, writing per-fork artifacts under the review-log location above.
 
 The critic model is billed to your current context; the console's Billing section shows the spend.

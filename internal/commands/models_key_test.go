@@ -95,7 +95,7 @@ func newKeyWorld(t *testing.T, orgID string) *keyWorld {
 			w.revoked = append(w.revoked, strings.TrimPrefix(r.URL.Path, "/me/keys/"))
 			w.mu.Unlock()
 			rw.WriteHeader(http.StatusNoContent)
-		case strings.HasPrefix(r.URL.Path, "/v1/models/openai/v1/"):
+		case strings.HasPrefix(r.URL.Path, "/v1/models/openai/v1/"), r.URL.Path == "/v1/models/lux/v1/generate":
 			w.serveCore(t, rw, r)
 		default:
 			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
@@ -123,7 +123,8 @@ func newKeyWorld(t *testing.T, orgID string) *keyWorld {
 }
 
 // serveCore is the stub core's OpenAI door: the model list, and Chat
-// Completions answered whole or as an event stream.
+// Completions answered whole or as an event stream; and its Lux door's
+// generate, answered whole.
 func (w *keyWorld) serveCore(t *testing.T, rw http.ResponseWriter, r *http.Request) {
 	n := w.calls.Add(1)
 	bearer := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
@@ -162,6 +163,8 @@ func (w *keyWorld) serveCore(t *testing.T, rw http.ResponseWriter, r *http.Reque
 		}
 	case r.Method == http.MethodPost && r.URL.Path == "/v1/models/openai/v1/chat/completions":
 		_, _ = io.WriteString(rw, `{"choices":[{"message":{"content":"hi"}}]}`)
+	case r.Method == http.MethodPost && r.URL.Path == "/v1/models/lux/v1/generate":
+		_, _ = io.WriteString(rw, `{"id":"g1","model":"`+body.Model+`","blocks":[{"type":"text","text":"no findings"}],"stop_reason":"end_turn","usage":{"input_tokens":9,"output_tokens":3}}`)
 	default:
 		t.Errorf("unexpected core %s %s", r.Method, r.URL.Path)
 		http.NotFound(rw, r)

@@ -18,6 +18,7 @@ require (
 	golang.org/x/sys v0.48.0
 	golang.org/x/term v0.46.0
 	gopkg.in/yaml.v3 v3.0.1
+	latere.ai/x/agon v0.3.0
 	latere.ai/x/cella v0.18.0
 	latere.ai/x/pkg v0.103.0
 	latere.ai/x/sdk-go v0.1.0

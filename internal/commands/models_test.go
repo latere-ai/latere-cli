@@ -64,11 +64,13 @@ func TestModelsReplacesLux(t *testing.T) {
 
 // TestNoSourceNamesTheHostedPlane is criterion 3's grep half: no Go source
 // file, and no live document, names the hosted plane's host, its API path,
-// or its base URL variable.
+// or its base URL variable. The core's Lux door at the origin, under
+// /v1/models, shares the API path's words and is not the hosted plane.
 func TestNoSourceNamesTheHostedPlane(t *testing.T) {
 	root := moduleRoot(t)
 	// Built by concatenation so this file does not name them itself.
 	retired := []string{"lux." + "latere.ai", "/lux" + "/v1/", "LUX_" + "API_URL"}
+	door := []byte("/v1/models" + "/lux" + "/v1/")
 	var scanned int
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -97,7 +99,7 @@ func TestNoSourceNamesTheHostedPlane(t *testing.T) {
 		}
 		scanned++
 		for _, r := range retired {
-			if bytes.Contains(b, []byte(r)) {
+			if bytes.Count(b, []byte(r)) > bytes.Count(b, door)*bytes.Count(door, []byte(r)) {
 				t.Errorf("%s names %q", rel, r)
 			}
 		}

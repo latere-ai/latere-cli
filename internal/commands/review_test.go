@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	adversarial "latere.ai/x/topos/adversarial"
-	"latere.ai/x/topos/adversarial/critic"
-	"latere.ai/x/topos/adversarial/input"
+	"latere.ai/x/agon"
+	"latere.ai/x/agon/critic"
+	"latere.ai/x/agon/input"
 )
 
 // TestReviewFlagDefaults pins the documented defaults so a careless flag
@@ -52,19 +52,22 @@ func TestReviewFlagDefaults(t *testing.T) {
 }
 
 // TestReviewCriticCallsTheDoor is criterion 4 for review: a critic round
-// sends its model call to the core's OpenAI door with the model key and the
-// catalog name of the default critic model, once the core accepted the key.
+// sends its model call to the core's Lux door with the model key and the
+// catalog name of the default critic model, once the core accepted the key,
+// and reports the call's usage.
 func TestReviewCriticCallsTheDoor(t *testing.T) {
 	w := newKeyWorld(t, "")
 	t.Setenv("AUTH_URL", w.srv.URL)
-	key := modelKeySource(w.modelsURL(), "")
-	if _, err := key(t.Context()); err != nil {
+	key, err := modelKeySource(w.modelsURL(), "")(t.Context())
+	if err != nil {
 		t.Fatalf("key source: %v", err)
 	}
-	critics := critic.NewCriticFactory(critic.Config{
-		Model: reviewCriticModel(defaultCatalogModel, w.modelsURL(), key),
-	})
-	res, err := critics(1).Round(t.Context(), adversarial.CriticInput{
+	model, err := reviewCriticModel(w.modelsURL(), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	critics := critic.NewCriticFactory(critic.Config{Model: model, Name: defaultCatalogModel})
+	res, err := critics(1).Round(t.Context(), agon.CriticInput{
 		AspectName: "correctness", SystemPrompt: "you are a critic", CriticIndex: 1, Round: 1,
 		TaskContext: "a task", DiffPatch: "--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n",
 		Cwd: t.TempDir(), Deadline: 10 * time.Second,
@@ -75,20 +78,34 @@ func TestReviewCriticCallsTheDoor(t *testing.T) {
 	if !strings.Contains(res.Markdown, "no findings") {
 		t.Fatalf("critic answered %q, want the stub's reply", res.Markdown)
 	}
-	var chats int
+	if res.Tokens != 12 {
+		t.Errorf("critic reported %d tokens, want the stub's 12", res.Tokens)
+	}
+	var generates int
 	for _, c := range w.coreCalls() {
 		if c.bearer != "pat_k1.value" {
 			t.Errorf("%s presented %q, want the model key", c.path, c.bearer)
 		}
-		if c.path == "/v1/models/openai/v1/chat/completions" {
-			chats++
-			if c.model != "anthropic/claude-sonnet-4.6" || !c.stream {
-				t.Errorf("chat call = %+v, want a stream of anthropic/claude-sonnet-4.6", c)
+		if c.path == "/v1/models/lux/v1/generate" {
+			generates++
+			if c.model != "anthropic/claude-sonnet-4.6" || c.stream {
+				t.Errorf("generate call = %+v, want one answer of anthropic/claude-sonnet-4.6", c)
 			}
 		}
 	}
-	if chats != 1 {
-		t.Fatalf("chat calls = %d, want 1: %+v", chats, w.coreCalls())
+	if generates != 1 {
+		t.Fatalf("generate calls = %d, want 1: %+v", generates, w.coreCalls())
+	}
+}
+
+// A models URL that is not served under /v1/models names no origin the
+// critics' client can build its paths on, and is refused before a round.
+func TestReviewCriticNeedsTheModelsPath(t *testing.T) {
+	if _, err := reviewCriticModel("https://models.example/other", "pat_k1.value"); err == nil || !strings.Contains(err.Error(), "/v1/models") {
+		t.Fatalf("reviewCriticModel = %v, want a refusal naming /v1/models", err)
+	}
+	if origin, err := modelsOrigin("https://api.example/v1/models/"); err != nil || origin != "https://api.example" {
+		t.Fatalf("modelsOrigin = %q, %v", origin, err)
 	}
 }
 

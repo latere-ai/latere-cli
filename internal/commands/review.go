@@ -14,22 +14,22 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"latere.ai/x/pkg/luxsdk"
-	xtopos "latere.ai/x/topos"
-	adversarial "latere.ai/x/topos/adversarial"
-	"latere.ai/x/topos/adversarial/claude"
-	"latere.ai/x/topos/adversarial/critic"
-	"latere.ai/x/topos/adversarial/input"
+	"latere.ai/x/agon"
+	"latere.ai/x/agon/claude"
+	"latere.ai/x/agon/critic"
+	"latere.ai/x/agon/input"
+	"latere.ai/x/sdk-go/llm"
 
+	"github.com/latere-ai/latere-cli/internal/api"
 	"github.com/latere-ai/latere-cli/internal/reviews"
 )
 
 // review runs adversarial review locally on the developer machine. The
 // proposer forks the developer's real Claude Code session
-// (claude --resume <id> --fork-session, full fidelity), while the critics
-// run through topos with their model calls sent to the core's OpenAI door
-// at the origin with the model key, so critic cost is drawn from the key's
-// context and no provider key is needed locally.
+// (claude --resume <id> --fork-session, full fidelity), while each critic
+// round is one model call through the Latere API's models, with the model
+// key, so critic cost is drawn from the key's context and no provider key is
+// needed locally.
 //
 // See specs/002-review-local-subcommand.md and
 // specs/007-models-at-the-origin.md.
@@ -58,8 +58,8 @@ recent Claude Code session.
 
 The proposer forks your real Claude Code session
 (claude --resume <id> --fork-session) so it argues with the full
-transcript, harness context, and working tree. The critics run in the
-Latere agent and call their model through the Latere API with your model key
+transcript, harness context, and working tree. Each critic round is one
+call to the critic model through the Latere API with your model key
 (see 'latere models key'), so critic cost is drawn from your current
 context with no provider key needed locally.
 
@@ -85,7 +85,7 @@ repo. Old sessions are pruned automatically; --state-dir overrides.`,
 	cmd.Flags().StringVar(&o.stateDir, "state-dir", "", "where to write review logs (default: $XDG_STATE_HOME/latere/reviews/<repo-key>/)")
 	cmd.Flags().IntVar(&o.forks, "forks", 1, "number of independent critic forks")
 	cmd.Flags().IntVar(&o.maxRounds, "max-rounds", 4, "per-fork internal-round cap")
-	cmd.Flags().IntVar(&o.costCap, "cost-cap", 50000, "soft token budget (proposer tokens; the critics report no usage yet)")
+	cmd.Flags().IntVar(&o.costCap, "cost-cap", 50000, "soft token budget, the proposer's and the critics' tokens together")
 	cmd.Flags().StringVar(&o.model, "model", defaultCatalogModel, "critic model, as 'latere models' lists it")
 	cmd.Flags().DurationVar(&o.propTO, "proposer-timeout", 5*time.Minute, "per-round deadline for the proposer's claude call (large sessions may need more)")
 	cmd.Flags().StringVar(&o.modelsURL, "models-url", "", "override the models base URL (overrides LATERE_MODELS_URL)")
@@ -93,17 +93,30 @@ repo. Old sessions are pruned automatically; --state-dir overrides.`,
 	return cmd
 }
 
-// reviewCriticModel is the critics' model connection: the core's OpenAI door
-// in luxsdk's direct mode, which translates the critic's requests to Chat
-// Completions on this machine, with the model key as the bearer.
-func reviewCriticModel(model, modelsURL string, key func(context.Context) (string, error)) xtopos.ModelOptions {
-	return xtopos.ModelOptions{
-		Kind:         xtopos.ModelDirect,
-		Provider:     string(luxsdk.ProviderOpenAI),
-		Model:        model,
-		BaseURL:      resolveModelsURL(modelsURL) + openAIDoor,
-		BearerSource: key,
+// reviewCriticModel is the critics' model: the Latere models client at the
+// origin the models URL is served under, presenting key, a model key the
+// core already accepted.
+func reviewCriticModel(modelsURL, key string) (*llm.Client, error) {
+	origin, err := modelsOrigin(modelsURL)
+	if err != nil {
+		return nil, err
 	}
+	cfg, err := api.Product{BaseURL: origin, Token: key}.Config()
+	if err != nil {
+		return nil, err
+	}
+	return llm.New(cfg), nil
+}
+
+// modelsOrigin is the origin the models URL is served under, which the
+// Latere models client builds its paths on: the URL without its /v1/models.
+func modelsOrigin(modelsURL string) (string, error) {
+	base := resolveModelsURL(modelsURL)
+	origin, ok := strings.CutSuffix(base, modelsPath)
+	if !ok {
+		return "", fmt.Errorf("the models URL %s does not end in %s, so the critics cannot reach the models from it", base, modelsPath)
+	}
+	return origin, nil
 }
 
 func runReview(ctx context.Context, cmd *cobra.Command, o *reviewOpts) error {
@@ -126,10 +139,13 @@ func runReview(ctx context.Context, cmd *cobra.Command, o *reviewOpts) error {
 
 	// Have the core accept the model key up front: this checks that the user
 	// is signed in, and waits out a key created now, before a proposer round
-	// is spent. The same source is handed to topos, which presents the
-	// accepted key on every critic call.
-	keySource := modelKeySource(o.modelsURL, o.authURL)
-	if _, err := keySource(ctx); err != nil {
+	// is spent. Every critic call presents the accepted key.
+	key, err := modelKeySource(o.modelsURL, o.authURL)(ctx)
+	if err != nil {
+		return err
+	}
+	model, err := reviewCriticModel(o.modelsURL, key)
+	if err != nil {
 		return err
 	}
 
@@ -180,11 +196,9 @@ func runReview(ctx context.Context, cmd *cobra.Command, o *reviewOpts) error {
 	}
 
 	proposer := claude.NewProposer(sessionID, cwd, claude.WithProposerDeadline(o.propTO))
-	critics := critic.NewCriticFactory(critic.Config{
-		Model: reviewCriticModel(o.model, o.modelsURL, keySource),
-	})
+	critics := critic.NewCriticFactory(critic.Config{Model: model, Name: o.model})
 
-	summary, err := (&adversarial.Engine{
+	summary, err := (&agon.Engine{
 		StateDir:    stateDir,
 		Cwd:         cwd,
 		ForkCount:   o.forks,
@@ -257,7 +271,7 @@ func mostRecentSession(home, cwd string) (sessionID, path string, err error) {
 	return sessionID, path, nil
 }
 
-func printReviewSummary(cmd *cobra.Command, s *adversarial.Summary) {
+func printReviewSummary(cmd *cobra.Command, s *agon.Summary) {
 	out := cmd.OutOrStdout()
 	printWrappedField("termination", defaultStr(s.Termination, "-"))
 	printWrappedField("forks", fmt.Sprintf("%d", len(s.Forks)))
