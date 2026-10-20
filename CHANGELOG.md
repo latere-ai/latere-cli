@@ -10,8 +10,6 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
-## v0.28.0 - 2026-10-20
-
 ### Changed
 
 - **`latere apps` reaches the platform through the Latere Go SDK.** Its
@@ -19,6 +17,17 @@ committed: the commit log already holds that.
   `LATERE_APPS_URL` must end in `/v1/apps`, as the help has always said;
   another address is refused before anything is sent. `latere apps list`
   ends at the page that names no next one.
+- **`latere apps` rides out a brief outage.** A read or a removal the
+  platform answers with a temporary error (429 or 5xx), or that a dropped
+  connection cuts off, is sent again after a short wait, and a request
+  answered 401 is sent once more with a fresh token. A followed build log
+  that drops picks up after the last line it showed. A refusal that lasts
+  is reported as before.
+
+## v0.28.0 - 2026-10-20
+
+### Changed
+
 - **A model command makes your personal key whatever your wallet holds.**
   In your personal account, `latere models` and the other model commands
   no longer stop with "no model key was made" when your wallet has never
