@@ -518,7 +518,10 @@ func TestStatusCanBeFollowed(t *testing.T) {
 		}
 	}
 	next("the token is needed", func(s Status) bool { return s.Credentials.Platform == CredentialNeeded })
-	exp := time.Now().Add(credentialsMargin + time.Second)
+	// A token valid for a few seconds past the margin, so the stream says
+	// valid and then needed again. The expiry is whole seconds, so one second
+	// past the margin can round down into it on a slow runner and be refused.
+	exp := time.Now().Add(credentialsMargin + 3*time.Second)
 	body := fmt.Sprintf(`{"platform":{"token":%q}}`, tokenFor(AudiencePlatform, "alice", "", exp))
 	if code, out := send(t, c, http.MethodPut, "/v1/credentials", body); code != http.StatusOK {
 		t.Fatalf("the token answered %d %s", code, out)
