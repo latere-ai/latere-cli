@@ -12,13 +12,14 @@ import (
 	"fmt"
 	"io"
 	"math/big"
-	"net/http"
 	"os"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
+
+	"latere.ai/x/sdk-go/apps"
 )
 
 // A password opens a private app for anyone who types it at the app's
@@ -139,31 +140,38 @@ when --generate made it. A password you typed or piped is in no output.`,
 				}
 			}
 			ctx := cmd.Context()
-			c := newAppClient(*apiURL, *authURL)
-			a, rawApp, err := readAppForAccess(ctx, c, slug, fromRemote)
+			c, err := newAppClient(*apiURL, *authURL)
+			if err != nil {
+				return err
+			}
+			a, err := readAppForAccess(ctx, c, slug, fromRemote)
+			if err != nil {
+				return err
+			}
+			platform, err := newAppPlatform(platformURL, *authURL)
 			if err != nil {
 				return err
 			}
 			// The platform says whether it takes passwords at all before the
 			// app is touched: making an app private for a password that
 			// cannot be set would close it to everyone but the people invited.
-			access, _, err := readAccess(ctx, platformURL, *authURL, a)
+			access, err := readAccess(ctx, platform, a)
 			if err != nil {
 				return err
 			}
-			if !access.offersPasswords() {
+			if !offersPasswords(access) {
 				return &platformError{Code: passwordsUnconfigured, Message: passwordsUnavailable + " Nothing was changed."}
 			}
 			out := cmd.OutOrStdout()
 			if remove {
 				had := access.Password != nil
 				if had {
-					if err := platformCall(ctx, platformURL, *authURL, http.MethodDelete, accessPath(a.ID, "password"), nil, nil); err != nil {
-						return explainAccessRefusal(err, a.Slug, nil)
+					if err := platform.apps.RemovePassword(ctx, a.ID); err != nil {
+						return explainAccessRefusal(platform.refused(err), a.Slug, nil)
 					}
 				}
 				if jsonF {
-					return printJSON(out, passwordResult(rawApp, false, ""))
+					return printJSON(out, passwordResult(a.RawJSON(), false, ""))
 				}
 				return printPasswordRemoved(out, a, had)
 			}
@@ -182,11 +190,11 @@ when --generate made it. A password you typed or piped is in no output.`,
 			}
 			after, madePrivate := a, a.Visibility != visibilityPrivate
 			if madePrivate {
-				if after, rawApp, err = c.setVisibility(ctx, a.Slug, visibilityPrivate); err != nil {
+				if after, err = c.setVisibility(ctx, a.Slug, visibilityPrivate); err != nil {
 					return err
 				}
 			}
-			if err := putPassword(ctx, platformURL, *authURL, a, password); err != nil {
+			if err := putPassword(ctx, platform, a, password); err != nil {
 				if madePrivate {
 					return fmt.Errorf("%w\n%s was made private before the password was sent, and stays private. `latere apps access %s` says whether a password is set, and `latere apps visibility %s %s` opens the app to anyone with the link again", err, a.Slug, a.Slug, visibilityUnlisted, a.Slug)
 				}
@@ -196,7 +204,7 @@ when --generate made it. A password you typed or piped is in no output.`,
 				password = ""
 			}
 			if jsonF {
-				return printJSON(out, passwordResult(rawApp, true, password))
+				return printJSON(out, passwordResult(after.RawJSON(), true, password))
 			}
 			return printPasswordSet(out, a, after, access.Password != nil, password)
 		},
@@ -278,7 +286,7 @@ func promptPassword(prompts io.Writer, typed func() (string, error), slug string
 // answer leaves out is the platform's to hold. Text that is not UTF-8 is
 // refused as well: it would be sent as other characters than were given,
 // and no one could type the result.
-func checkPassword(password string, access appAccess) error {
+func checkPassword(password string, access *apps.Access) error {
 	if !utf8.ValidString(password) {
 		return errors.New("the password is not UTF-8 text, so it could not be typed again as it was given. Nothing was changed")
 	}
@@ -293,11 +301,12 @@ func checkPassword(password string, access appAccess) error {
 }
 
 // putPassword sets the app's password at the platform, or replaces it.
-func putPassword(ctx context.Context, platformURL, authURL string, a appResource, password string) error {
-	err := platformCall(ctx, platformURL, authURL, http.MethodPut, accessPath(a.ID, "password"), map[string]string{"password": password}, nil)
+func putPassword(ctx context.Context, platform *appPlatform, a *apps.App, password string) error {
+	err := platform.apps.SetPassword(ctx, a.ID, password)
 	if err == nil {
 		return nil
 	}
+	err = platform.refused(err)
 	// An answer that is no refusal of the platform's, such as a proxy's
 	// page, may repeat the request it was sent, so none of its text is kept.
 	if e, ok := errors.AsType[*platformError](err); ok && e.Code == "" {
@@ -323,17 +332,17 @@ func passwordResult(app json.RawMessage, set bool, generated string) any {
 // now, what setting it changed, and last the password when the command made
 // it, alone on its line. before is the app as it was, and replaced whether
 // it had a password already.
-func printPasswordSet(out io.Writer, before, a appResource, replaced bool, generated string) error {
+func printPasswordSet(out io.Writer, before, a *apps.App, replaced bool, generated string) error {
 	var b strings.Builder
 	b.WriteString(formatWrappedField("app", a.Slug))
 	b.WriteString(formatWrappedField("address", a.URL))
-	b.WriteString(formatWrappedField("visibility", a.Visibility))
+	b.WriteString(formatWrappedField("visibility", string(a.Visibility)))
 	if replaced {
 		fmt.Fprintf(&b, "\nThe password of %s is replaced. The one before stops opening the app within about a minute.\n", a.Slug)
 	} else {
 		fmt.Fprintf(&b, "\nThe password of %s is set.\n", a.Slug)
 	}
-	b.WriteString(generalAccess(a, &appPassword{}))
+	b.WriteString(generalAccess(a, &apps.Password{}))
 	if before.Visibility != a.Visibility {
 		fmt.Fprintf(&b, "The app was %s before and is %s now, so its address alone no longer opens it.\n", before.Visibility, a.Visibility)
 		if ended := leftGallery(before.Visibility); ended != "" {
@@ -352,7 +361,7 @@ func printPasswordSet(out io.Writer, before, a appResource, replaced bool, gener
 
 // printPasswordRemoved says that the app has no password: that one was
 // removed and what that changes, or that there was none.
-func printPasswordRemoved(out io.Writer, a appResource, had bool) error {
+func printPasswordRemoved(out io.Writer, a *apps.App, had bool) error {
 	var b strings.Builder
 	if had {
 		fmt.Fprintf(&b, "Removed the password of %s. %s\n", a.Slug, passwordGone(a))

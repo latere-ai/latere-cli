@@ -4,16 +4,15 @@
 package commands
 
 import (
-	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"latere.ai/x/sdk-go/apps"
 )
 
 // An app's slug is its address and the name of its repository, so a rename
@@ -79,12 +78,15 @@ on standard error.`,
 					return err
 				}
 			}
-			c := newAppClient(*apiURL, *authURL)
+			c, err := newAppClient(*apiURL, *authURL)
+			if err != nil {
+				return err
+			}
 			// The answer of the rename carries the new push URL alone, and
 			// the remote to move is the one that holds the old.
-			before, rawBefore, err := c.getApp(ctx, slug)
+			before, err := c.apps.GetApp(ctx, slug)
 			if err != nil {
-				return withSlugSource(err, slug, fromRemote)
+				return withSlugSource(c.refused(err), slug, fromRemote)
 			}
 			out, notes := cmd.OutOrStdout(), cmd.OutOrStdout()
 			if jsonF {
@@ -94,7 +96,7 @@ on standard error.`,
 			// so none is asked for.
 			if to == before.Slug {
 				if jsonF {
-					if err := printRawJSON(out, rawBefore); err != nil {
+					if err := printRawJSON(out, before.RawJSON()); err != nil {
 						return err
 					}
 				} else if err := printAppAddress(out, before); err != nil {
@@ -103,12 +105,12 @@ on standard error.`,
 				fprintf(notes, "\n%s has this slug already, so nothing changed.\n", before.Slug)
 				return nil
 			}
-			a, raw, err := c.renameApp(ctx, slug, to)
+			a, err := c.apps.UpdateApp(ctx, slug, &apps.UpdateAppParams{Slug: to})
 			if err != nil {
-				return withSlugSource(err, slug, fromRemote)
+				return withSlugSource(explainRenameRefusal(c.refused(err), slug, to), slug, fromRemote)
 			}
 			if jsonF {
-				if err := printRawJSON(out, raw); err != nil {
+				if err := printRawJSON(out, a.RawJSON()); err != nil {
 					return err
 				}
 			} else if err := printRenamedApp(out, before, a); err != nil {
@@ -141,20 +143,6 @@ on standard error.`,
 	}
 	cmd.Flags().BoolVar(&jsonF, "json", false, "print the app as JSON")
 	return cmd
-}
-
-// renameApp gives the app the slug to and answers the app as the change
-// leaves it, with the API's own bytes for --json.
-func (c *appClient) renameApp(ctx context.Context, slug, to string) (appResource, json.RawMessage, error) {
-	raw, err := c.call(ctx, http.MethodPatch, appPath(slug), map[string]string{"slug": to})
-	if err != nil {
-		return appResource{}, nil, explainRenameRefusal(err, slug, to)
-	}
-	var a appResource
-	if err := json.Unmarshal(raw, &a); err != nil {
-		return appResource{}, nil, fmt.Errorf("parse the Apps API's answer: %w", err)
-	}
-	return a, raw, nil
 }
 
 // explainRenameRefusal puts what each refusal of a rename names into its
@@ -195,7 +183,7 @@ func explainRenameRefusal(err error, from, to string) error {
 }
 
 // printAppAddress writes where an app answers and where it is pushed to.
-func printAppAddress(out io.Writer, a appResource) error {
+func printAppAddress(out io.Writer, a *apps.App) error {
 	var b strings.Builder
 	b.WriteString(formatWrappedField("app", a.Slug))
 	b.WriteString(formatWrappedField("address", a.URL))
@@ -210,12 +198,12 @@ func printAppAddress(out io.Writer, a appResource) error {
 // printRenamedApp says what a rename left: the app at its new address, that
 // the old address stopped and is not redirected, and who the old slug is
 // held for, with the command that takes it back.
-func printRenamedApp(out io.Writer, before, a appResource) error {
+func printRenamedApp(out io.Writer, before, a *apps.App) error {
 	if err := printAppAddress(out, a); err != nil {
 		return err
 	}
 	holder := "your account"
-	if a.Owner.Kind == "organization" {
+	if a.Owner.Kind == apps.OwnerOrganization {
 		holder = "the organization that owns the app"
 	}
 	var b strings.Builder

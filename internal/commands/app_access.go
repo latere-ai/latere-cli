@@ -9,21 +9,27 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"net/url"
+	"os"
 	"slices"
 	"strings"
 	"text/tabwriter"
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"latere.ai/x/sdk-go/apps"
+	"latere.ai/x/sdk-go/latere"
+
+	"github.com/latere-ai/latere-cli/internal/api"
 )
 
 // Who can open an app is kept in two places. The app's visibility is a field
 // of the app, read and changed at the Apps API. The people invited to a
 // private app and its password are the platform's, kept under the app's id,
 // which takes a bearer for the platform's own audience: the one the
-// repository commands mint, at the address they resolve.
+// repository commands mint, at the address they resolve. Both are reached
+// with the SDK's apps package, each through a configuration of its own.
 
 // The values of an app's visibility. A person chooses between private and
 // unlisted. Only the platform makes an app public, when it shows the app in
@@ -33,15 +39,6 @@ const (
 	visibilityUnlisted = "unlisted"
 	visibilityPublic   = "public"
 )
-
-// accessRoleViewer is the role every invitation is made with: a viewer opens
-// the app at its address and nothing else of it.
-const accessRoleViewer = "viewer"
-
-// accessActionSetPassword is the action the platform's answer names where it
-// sets and removes app passwords. An answer without it does neither, and
-// says of every app that it has no password.
-const accessActionSetPassword = "set_password"
 
 // The three choices of who can open an app, in the words every Latere
 // surface names them by: a private app without a password, a private app
@@ -71,8 +68,8 @@ func checkVisibility(v string) error {
 // whoSignsIn names the people a private app opens for once they sign in, by
 // whether an organization owns it: those it opens for without an invitation,
 // and the people invited.
-func whoSignsIn(a appResource) (owners, invited string) {
-	if a.Owner.Kind == "organization" {
+func whoSignsIn(a *apps.App) (owners, invited string) {
+	if a.Owner.Kind == apps.OwnerOrganization {
 		return "the members of its organization", "the people invited"
 	}
 	return "you", "the people you invite"
@@ -82,7 +79,7 @@ func whoSignsIn(a appResource) (owners, invited string) {
 // and whether an organization owns it, as a clause about the app. It is for
 // a command that does not read the platform, so it says nothing of a
 // password. A visibility this version does not know has none.
-func whoOpens(a appResource) string {
+func whoOpens(a *apps.App) string {
 	switch a.Visibility {
 	case visibilityPrivate:
 		owners, invited := whoSignsIn(a)
@@ -97,7 +94,7 @@ func whoOpens(a appResource) string {
 
 // whoOpensSentence is whoOpens as a sentence of its own, "" when there is
 // none.
-func whoOpensSentence(a appResource) string {
+func whoOpensSentence(a *apps.App) string {
 	who := whoOpens(a)
 	if who == "" {
 		return ""
@@ -113,7 +110,7 @@ func upperFirst(s string) string {
 // opensToAnyone reports whether the app's visibility lets in anyone who has
 // its address, so that an invitation or a password decides nothing while it
 // lasts.
-func opensToAnyone(a appResource) bool {
+func opensToAnyone(a *apps.App) bool {
 	return a.Visibility == visibilityUnlisted || a.Visibility == visibilityPublic
 }
 
@@ -123,7 +120,7 @@ func opensToAnyone(a appResource) bool {
 // without a moment is one the command just set. A password left on an app
 // anyone with the link opens gets lines of its own, with the command that
 // removes it. A visibility this version does not know has no sentence.
-func generalAccess(a appResource, password *appPassword) string {
+func generalAccess(a *apps.App, password *apps.Password) string {
 	var listing string
 	switch a.Visibility {
 	case visibilityPrivate:
@@ -132,7 +129,7 @@ func generalAccess(a appResource, password *appPassword) string {
 			return fmt.Sprintf("%s: it opens for them and for %s, each after signing in with a Latere account.\n", choiceInvited, owners)
 		}
 		return fmt.Sprintf("%s%s: whoever types it at the app's address opens the app, with no Latere account.\n%s and %s still open the app by signing in with a Latere account.\n",
-			choicePassword, password.since(", set "), upperFirst(owners), invited)
+			choicePassword, passwordSince(password, ", set "), upperFirst(owners), invited)
 	case visibilityUnlisted:
 		listing = "is kept out of search engines"
 	case visibilityPublic:
@@ -143,37 +140,16 @@ func generalAccess(a appResource, password *appPassword) string {
 	who := fmt.Sprintf("%s: it opens without signing in, and %s.\n", choiceLink, listing)
 	if password != nil {
 		who += fmt.Sprintf("A password is set%s. It decides nothing while anyone with the link opens the app, and opens the app again once it is private.\nRemove it with: latere apps password --remove %s\n",
-			password.since(" since "), a.Slug)
+			passwordSince(password, " since "), a.Slug)
 	}
 	return who
 }
 
 // ---- the wire ----
 
-// appAccess is what the platform keeps of who can open an app: the people
-// invited, the password when one is set, what the caller may do, and the
-// bounds of a password.
-type appAccess struct {
-	People   []appAccessPerson `json:"people"`
-	Password *appPassword      `json:"password"`
-	Actions  []string          `json:"actions"`
-	// Limits are the fewest and the most characters a password has. A
-	// platform that names neither leaves both zero.
-	Limits struct {
-		MinPassword int `json:"min_password"`
-		MaxPassword int `json:"max_password"`
-	} `json:"limits"`
-}
-
-// appPassword is what the platform says of a password that is set: when, and
-// nothing of the password.
-type appPassword struct {
-	SetAt time.Time `json:"set_at"`
-}
-
-// since is the moment the password was set, after lead, or "" for a password
-// whose moment is not known.
-func (p *appPassword) since(lead string) string {
+// passwordSince is the moment the password was set, after lead, or "" for a
+// password whose moment is not known.
+func passwordSince(p *apps.Password, lead string) string {
 	if p.SetAt.IsZero() {
 		return ""
 	}
@@ -181,32 +157,10 @@ func (p *appPassword) since(lead string) string {
 }
 
 // offersPasswords reports whether the platform sets and removes app
-// passwords for the caller.
-func (a appAccess) offersPasswords() bool {
-	return slices.Contains(a.Actions, accessActionSetPassword)
-}
-
-// appAccessPerson is one invitation: pending until a person signs in at the
-// app with the invited address, active from then on, with their name.
-type appAccessPerson struct {
-	ID     string `json:"id"`
-	Email  string `json:"email"`
-	State  string `json:"state"`
-	Person *struct {
-		DisplayName string `json:"display_name"`
-		Handle      string `json:"handle"`
-	} `json:"person"`
-	InvitedAt time.Time `json:"invited_at"`
-}
-
-// appInvites is the answer of an invite: the invitations it made, and the
-// addresses it left out with the reason for each.
-type appInvites struct {
-	People  []appAccessPerson `json:"people"`
-	Skipped []struct {
-		Email  string `json:"email"`
-		Reason string `json:"reason"`
-	} `json:"skipped"`
+// passwords for the caller. An answer without the action does neither, and
+// says of every app that it has no password.
+func offersPasswords(access *apps.Access) bool {
+	return slices.Contains(access.Actions, apps.AccessSetPassword)
 }
 
 // skipReasons says why an invite left an address out, by the reason the
@@ -216,52 +170,83 @@ var skipReasons = map[string]string{
 	"listed": "already invited",
 }
 
-// accessPath is the platform's path of who can open the app whose id is
-// given, then each segment of rest, every one escaped.
-func accessPath(appID string, rest ...string) string {
-	parts := []string{"/v1/account/apps", url.PathEscape(appID), "access"}
-	for _, r := range rest {
-		parts = append(parts, url.PathEscape(r))
+// appPlatform is one command's connection to the platform for who can open
+// an app: the SDK's apps client, and the base URL as resolved, which
+// messages name.
+type appPlatform struct {
+	base string
+	apps *apps.Client
+}
+
+// newAppPlatform resolves the platform's address as the repository commands
+// do, and its bearer: LATERE_PLATFORM_TOKEN as given, else an actor token
+// minted for platformAudience from the saved login at the first request.
+func newAppPlatform(flagURL, authURL string) (*appPlatform, error) {
+	base := resolvePlatformURL(flagURL)
+	cfg, err := api.Product{
+		BaseURL: base, AuthURL: authURL, Audience: platformAudience,
+		Token: strings.TrimSpace(os.Getenv("LATERE_PLATFORM_TOKEN")), Timeout: platformTimeout,
+	}.Config()
+	if err != nil {
+		return nil, err
 	}
-	return strings.Join(parts, "/")
+	return &appPlatform{base: base, apps: apps.New(cfg)}, nil
+}
+
+// refused is what a command says of an error a call to the platform
+// answered: a refusal as a *platformError, with the detail its details
+// carry, and the rest each in a sentence of its own, as the repository
+// commands word them.
+func (p *appPlatform) refused(err error) error {
+	if e, ok := errors.AsType[*api.AuthError](err); ok {
+		return fmt.Errorf("cannot authenticate to the platform: %w", e.Err)
+	}
+	if e, ok := errors.AsType[*latere.Error](err); ok {
+		pe := &platformError{Status: e.StatusCode, Code: e.Code, Message: answerText(e), Details: e.Details}
+		pe.Detail, _ = e.Details["detail"].(string)
+		return pe
+	}
+	if e, ok := errors.AsType[*url.Error](err); ok {
+		return fmt.Errorf("reach the platform at %s: %w", p.base, e)
+	}
+	if e := jsonError(err); e != nil {
+		return fmt.Errorf("parse the platform's answer: %w", e)
+	}
+	return err
 }
 
 // appForAccess reads the app a command that asks the platform acts on. The
 // platform keeps the people invited and the password under the app's id,
 // which only the app's answer names.
-func appForAccess(cmd *cobra.Command, c *appClient, arg string) (appResource, json.RawMessage, error) {
+func appForAccess(cmd *cobra.Command, c *appClient, arg string) (*apps.App, error) {
 	slug, fromRemote, err := resolveAppSlug(cmd, arg)
 	if err != nil {
-		return appResource{}, nil, err
+		return nil, err
 	}
 	return readAppForAccess(cmd.Context(), c, slug, fromRemote)
 }
 
 // readAppForAccess is appForAccess for a slug already resolved, with where
 // it came from.
-func readAppForAccess(ctx context.Context, c *appClient, slug string, fromRemote bool) (appResource, json.RawMessage, error) {
-	a, raw, err := c.getApp(ctx, slug)
+func readAppForAccess(ctx context.Context, c *appClient, slug string, fromRemote bool) (*apps.App, error) {
+	a, err := c.apps.GetApp(ctx, slug)
 	if err != nil {
-		return appResource{}, nil, withSlugSource(err, slug, fromRemote)
+		return nil, withSlugSource(c.refused(err), slug, fromRemote)
 	}
 	if a.ID == "" {
-		return appResource{}, nil, fmt.Errorf("the Apps API's answer names no id for %s, and the people invited and the password are kept under it", slug)
+		return nil, fmt.Errorf("the Apps API's answer names no id for %s, and the people invited and the password are kept under it", slug)
 	}
-	return a, raw, nil
+	return a, nil
 }
 
 // readAccess reads the people invited to the app and whether it has a
-// password, keeping the raw bytes for --json.
-func readAccess(ctx context.Context, platformURL, authURL string, a appResource) (appAccess, json.RawMessage, error) {
-	var raw json.RawMessage
-	if err := platformCall(ctx, platformURL, authURL, http.MethodGet, accessPath(a.ID), nil, &raw); err != nil {
-		return appAccess{}, nil, explainAccessRefusal(err, a.Slug, nil)
+// password.
+func readAccess(ctx context.Context, p *appPlatform, a *apps.App) (*apps.Access, error) {
+	access, err := p.apps.GetAccess(ctx, a.ID)
+	if err != nil {
+		return nil, explainAccessRefusal(p.refused(err), a.Slug, nil)
 	}
-	var access appAccess
-	if err := json.Unmarshal(raw, &access); err != nil {
-		return appAccess{}, nil, fmt.Errorf("parse the platform's answer: %w", err)
-	}
-	return access, raw, nil
+	return access, nil
 }
 
 // shareArgs splits the arguments of share and unshare into the slug, "" when
@@ -286,17 +271,13 @@ func shareArgs(cmd *cobra.Command, args []string) (slug string, emails []string,
 }
 
 // setVisibility changes the app's visibility and answers the app as the
-// change leaves it, with the API's own bytes for --json.
-func (c *appClient) setVisibility(ctx context.Context, slug, visibility string) (appResource, json.RawMessage, error) {
-	raw, err := c.call(ctx, http.MethodPatch, appPath(slug), map[string]string{"visibility": visibility})
+// change leaves it.
+func (c *appClient) setVisibility(ctx context.Context, slug, visibility string) (*apps.App, error) {
+	a, err := c.apps.UpdateApp(ctx, slug, &apps.UpdateAppParams{Visibility: apps.Visibility(visibility)})
 	if err != nil {
-		return appResource{}, nil, explainVisibilityRefusal(err, slug)
+		return nil, explainVisibilityRefusal(c.refused(err), slug)
 	}
-	var a appResource
-	if err := json.Unmarshal(raw, &a); err != nil {
-		return appResource{}, nil, fmt.Errorf("parse the Apps API's answer: %w", err)
-	}
-	return a, raw, nil
+	return a, nil
 }
 
 // explainVisibilityRefusal puts what a refusal of a visibility change names
@@ -435,12 +416,15 @@ is said on standard error.`,
 				return err
 			}
 			ctx := cmd.Context()
-			c := newAppClient(*apiURL, *authURL)
+			c, err := newAppClient(*apiURL, *authURL)
+			if err != nil {
+				return err
+			}
 			// The answer of the change carries the new visibility alone, and
 			// what the change ends depends on the one before it.
-			before, _, err := c.getApp(ctx, slug)
+			before, err := c.apps.GetApp(ctx, slug)
 			if err != nil {
-				return withSlugSource(err, slug, fromRemote)
+				return withSlugSource(c.refused(err), slug, fromRemote)
 			}
 			// Whether the app has a password is the platform's to say, and
 			// the visibility the Apps API's to change. A caller that reaches
@@ -448,14 +432,20 @@ is said on standard error.`,
 			// apps had passwords, so a platform that does not say stops
 			// nothing: the change is made, and what could not be done for
 			// the password is said after it.
-			var access appAccess
-			var unread error
+			var (
+				platform *appPlatform
+				access   = &apps.Access{}
+				unread   error
+			)
 			if before.ID == "" {
 				unread = fmt.Errorf("the Apps API's answer names no id for %s, and its password is kept under it", slug)
-			} else {
-				access, _, unread = readAccess(ctx, platformURL, *authURL, before)
+			} else if platform, unread = newAppPlatform(platformURL, *authURL); unread == nil {
+				var read *apps.Access
+				if read, unread = readAccess(ctx, platform, before); unread == nil {
+					access = read
+				}
 			}
-			a, raw, err := c.setVisibility(ctx, slug, args[0])
+			a, err := c.setVisibility(ctx, slug, args[0])
 			if err != nil {
 				return err
 			}
@@ -471,16 +461,16 @@ is said on standard error.`,
 					who += "\n"
 				}
 				undone = fmt.Sprintf("The password of %s, if it has one, could not be checked or removed (%s). Remove one with: latere apps password --remove %s", slug, oneLine(unread.Error()), slug)
-			} else if access.offersPasswords() && access.Password != nil {
-				if err := platformCall(ctx, platformURL, *authURL, http.MethodDelete, accessPath(before.ID, "password"), nil, nil); err != nil {
-					undone = fmt.Sprintf("The password of %s could not be removed and is still set (%s). Remove it with: latere apps password --remove %s", slug, oneLine(explainAccessRefusal(err, slug, nil).Error()), slug)
+			} else if offersPasswords(access) && access.Password != nil {
+				if err := platform.apps.RemovePassword(ctx, before.ID); err != nil {
+					undone = fmt.Sprintf("The password of %s could not be removed and is still set (%s). Remove it with: latere apps password --remove %s", slug, oneLine(explainAccessRefusal(platform.refused(err), slug, nil).Error()), slug)
 				} else {
 					who, removed = generalAccess(a, nil), true
 				}
 			}
 			out, notes := cmd.OutOrStdout(), cmd.ErrOrStderr()
 			if jsonF {
-				if err := printRawJSON(out, raw); err != nil {
+				if err := printRawJSON(out, a.RawJSON()); err != nil {
 					return err
 				}
 				if removed {
@@ -504,7 +494,7 @@ is said on standard error.`,
 // gallery, by the visibility before it: the card of a public app, or the
 // request an unlisted app had waiting for review. "" for a private app,
 // which had neither.
-func leftGallery(before string) string {
+func leftGallery(before apps.Visibility) string {
 	switch before {
 	case visibilityPublic:
 		return "If it was shown in the gallery, it has left the gallery."
@@ -516,7 +506,7 @@ func leftGallery(before string) string {
 
 // passwordGone says what the removal of a password changes, for the app as
 // it is now.
-func passwordGone(a appResource) string {
+func passwordGone(a *apps.App) string {
 	if opensToAnyone(a) {
 		return "Anyone with the link opens the app, where a password decides nothing, and one left set would open the app again once it is private."
 	}
@@ -526,11 +516,11 @@ func passwordGone(a appResource) string {
 // printVisibility says what a change of visibility left: the app, who can
 // open it, what the change ended, and whether the app's password went with
 // it. who is the lines that say who can open the app, "" for none.
-func printVisibility(out io.Writer, before, a appResource, who string, removed bool) error {
+func printVisibility(out io.Writer, before, a *apps.App, who string, removed bool) error {
 	var b strings.Builder
 	b.WriteString(formatWrappedField("app", a.Slug))
 	b.WriteString(formatWrappedField("address", a.URL))
-	b.WriteString(formatWrappedField("visibility", a.Visibility))
+	b.WriteString(formatWrappedField("visibility", string(a.Visibility)))
 	if who != "" {
 		b.WriteString("\n" + who)
 	}
@@ -603,11 +593,19 @@ one was set, or null.`,
   latere apps access hello --json`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			a, rawApp, err := appForAccess(cmd, newAppClient(*apiURL, *authURL), firstArg(args))
+			c, err := newAppClient(*apiURL, *authURL)
 			if err != nil {
 				return err
 			}
-			access, rawAccess, err := readAccess(cmd.Context(), platformURL, *authURL, a)
+			a, err := appForAccess(cmd, c, firstArg(args))
+			if err != nil {
+				return err
+			}
+			platform, err := newAppPlatform(platformURL, *authURL)
+			if err != nil {
+				return err
+			}
+			access, err := readAccess(cmd.Context(), platform, a)
 			if err != nil {
 				return err
 			}
@@ -616,7 +614,7 @@ one was set, or null.`,
 				return printJSON(out, struct {
 					App    json.RawMessage `json:"app"`
 					Access json.RawMessage `json:"access"`
-				}{App: rawApp, Access: rawAccess})
+				}{App: a.RawJSON(), Access: access.RawJSON()})
 			}
 			return printAccess(out, a, access)
 		},
@@ -626,11 +624,11 @@ one was set, or null.`,
 	return cmd
 }
 
-func printAccess(out io.Writer, a appResource, access appAccess) error {
+func printAccess(out io.Writer, a *apps.App, access *apps.Access) error {
 	var b strings.Builder
 	b.WriteString(formatWrappedField("app", a.Slug))
 	b.WriteString(formatWrappedField("address", a.URL))
-	b.WriteString(formatWrappedField("visibility", a.Visibility))
+	b.WriteString(formatWrappedField("visibility", string(a.Visibility)))
 	if who := generalAccess(a, access.Password); who != "" {
 		b.WriteString("\n" + who)
 	}
@@ -645,8 +643,8 @@ func printAccess(out io.Writer, a appResource, access appAccess) error {
 		fprintln(w, "EMAIL\tSTATE\tNAME\tINVITED")
 		for _, p := range access.People {
 			name := ""
-			if p.Person != nil {
-				name = defaultStr(p.Person.DisplayName, p.Person.Handle)
+			if p.Account != nil {
+				name = defaultStr(p.Account.DisplayName, p.Account.Handle)
 			}
 			fprintf(w, "%s\t%s\t%s\t%s\n", p.Email, p.State, defaultStr(name, "-"), humanAge(p.InvitedAt))
 		}
@@ -698,22 +696,27 @@ the platform answers them.`,
 			if err != nil {
 				return err
 			}
-			a, _, err := appForAccess(cmd, newAppClient(*apiURL, *authURL), slugArg)
+			c, err := newAppClient(*apiURL, *authURL)
 			if err != nil {
 				return err
 			}
-			var raw json.RawMessage
-			body := map[string]any{"emails": emails, "role": accessRoleViewer}
-			if err := platformCall(cmd.Context(), platformURL, *authURL, http.MethodPost, accessPath(a.ID, "invites"), body, &raw); err != nil {
-				return explainAccessRefusal(err, a.Slug, emails)
+			a, err := appForAccess(cmd, c, slugArg)
+			if err != nil {
+				return err
+			}
+			platform, err := newAppPlatform(platformURL, *authURL)
+			if err != nil {
+				return err
+			}
+			// Every invitation is made with the viewer role: a viewer opens
+			// the app at its address and nothing else of it.
+			invited, err := platform.apps.Invite(cmd.Context(), a.ID, &apps.InviteParams{Emails: emails, Role: apps.RoleViewer})
+			if err != nil {
+				return explainAccessRefusal(platform.refused(err), a.Slug, emails)
 			}
 			out := cmd.OutOrStdout()
 			if jsonF {
-				return printRawJSON(out, raw)
-			}
-			var invited appInvites
-			if err := json.Unmarshal(raw, &invited); err != nil {
-				return fmt.Errorf("parse the platform's answer: %w", err)
+				return printRawJSON(out, invited.RawJSON())
 			}
 			return printInvited(out, a, invited)
 		},
@@ -723,7 +726,7 @@ the platform answers them.`,
 	return cmd
 }
 
-func printInvited(out io.Writer, a appResource, invited appInvites) error {
+func printInvited(out io.Writer, a *apps.App, invited *apps.Invites) error {
 	var b strings.Builder
 	if len(invited.People) == 0 {
 		fmt.Fprintf(&b, "No one new was invited to %s.\n", a.Slug)
@@ -781,11 +784,19 @@ owner, or an owner or admin of the organization that owns it.`,
 				return err
 			}
 			ctx := cmd.Context()
-			a, _, err := appForAccess(cmd, newAppClient(*apiURL, *authURL), slugArg)
+			c, err := newAppClient(*apiURL, *authURL)
 			if err != nil {
 				return err
 			}
-			access, _, err := readAccess(ctx, platformURL, *authURL, a)
+			a, err := appForAccess(cmd, c, slugArg)
+			if err != nil {
+				return err
+			}
+			platform, err := newAppPlatform(platformURL, *authURL)
+			if err != nil {
+				return err
+			}
+			access, err := readAccess(ctx, platform, a)
 			if err != nil {
 				return err
 			}
@@ -805,8 +816,8 @@ owner, or an owner or admin of the organization that owns it.`,
 					absent = append(absent, email)
 					continue
 				}
-				if err := platformCall(ctx, platformURL, *authURL, http.MethodDelete, accessPath(a.ID, id), nil, nil); err != nil {
-					failed = fmt.Errorf("take back the invitation of %s: %w", email, explainAccessRefusal(err, a.Slug, nil))
+				if err := platform.apps.RevokeAccess(ctx, a.ID, id); err != nil {
+					failed = fmt.Errorf("take back the invitation of %s: %w", email, explainAccessRefusal(platform.refused(err), a.Slug, nil))
 					break
 				}
 				removed = append(removed, email)
@@ -823,7 +834,7 @@ owner, or an owner or admin of the organization that owns it.`,
 	return cmd
 }
 
-func printUninvited(out io.Writer, a appResource, removed, absent []string) error {
+func printUninvited(out io.Writer, a *apps.App, removed, absent []string) error {
 	var b strings.Builder
 	if len(removed) > 0 {
 		fmt.Fprintf(&b, "No longer invited to %s:\n", a.Slug)

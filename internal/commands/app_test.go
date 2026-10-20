@@ -16,6 +16,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"latere.ai/x/sdk-go/apps"
 )
 
 // The ids of the stub's two deploys of hello: the newest, a preview of
@@ -228,12 +230,12 @@ func newStubApps(t *testing.T) *stubApps {
 		s.patched = body
 		status, answer := s.patchStatus, s.patchBody
 		if to := body["slug"]; status == 0 && to != "" {
-			var was appResource
+			var was apps.App
 			if err := json.Unmarshal([]byte(s.apps[slug]), &was); err != nil {
 				t.Errorf("the stub's app %s: %v", slug, err)
 			}
 			delete(s.apps, slug)
-			s.apps[to] = stubAppAs(to, was.Visibility, s.owner)
+			s.apps[to] = stubAppAs(to, string(was.Visibility), s.owner)
 			answer = s.apps[to]
 		} else if status == 0 {
 			s.apps[slug] = stubAppAs(slug, body["visibility"], s.owner)
@@ -878,11 +880,18 @@ func TestAppListOfAnEmptyContext(t *testing.T) {
 	}
 }
 
-func TestAppListWithAMissingNextPage(t *testing.T) {
+// The list ends at the page that names no next one, as the SDK pages every
+// list, whatever else the page says.
+func TestAppListEndsAtAPageWithoutANextCursor(t *testing.T) {
 	s := newStubApps(t)
-	s.pages = []string{`{"items":[],"has_more":true,"next_cursor":null}`}
-	if _, _, err := runApp(t, s, "list"); err == nil || !strings.Contains(err.Error(), "named no next page") {
-		t.Errorf("list = %v", err)
+	s.pages = []string{`{"items":[` + stubAppJSON("hello") + `],"has_more":true,"next_cursor":null}`}
+	out, _, err := runApp(t, s, "list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantContains(t, out, "hello")
+	if got := s.seen(); len(got) != 2 || !strings.HasPrefix(got[0], "GET /v1/apps/apps?") {
+		t.Errorf("requests = %v, want one page and the release list", got)
 	}
 }
 
@@ -1162,6 +1171,23 @@ func TestAppWithNoLoginSaysToSignIn(t *testing.T) {
 	}
 }
 
+// An answer that is not the model it should be is said as one that could
+// not be read, at either API, and nothing is printed for it.
+func TestAppAnswersThatCannotBeRead(t *testing.T) {
+	s := newStubApps(t)
+	s.apps["hello"] = `{"slug":7}`
+	out, _, err := runApp(t, s, "show", "hello")
+	if err == nil || !strings.HasPrefix(err.Error(), "parse the Apps API's answer: json: cannot unmarshal number") || out != "" {
+		t.Errorf("show = %q, %v", out, err)
+	}
+	s = newStubApps(t)
+	s.access = `{"people":"none"}`
+	out, _, err = runApp(t, s, "access", "hello")
+	if err == nil || !strings.HasPrefix(err.Error(), "parse the platform's answer: json: cannot unmarshal string") || out != "" {
+		t.Errorf("access = %q, %v", out, err)
+	}
+}
+
 func TestAppUnreachableAPI(t *testing.T) {
 	s := newStubApps(t)
 	t.Setenv("LATERE_APPS_TOKEN", "given-bearer")
@@ -1179,16 +1205,29 @@ func TestAppUnreachableAPI(t *testing.T) {
 }
 
 func TestAppURLDefaultAndOverride(t *testing.T) {
+	base := func(flagURL string) string {
+		t.Helper()
+		c, err := newAppClient(flagURL, "")
+		if err != nil {
+			t.Fatalf("newAppClient(%q) = %v", flagURL, err)
+		}
+		return c.base
+	}
 	t.Setenv("LATERE_APPS_URL", "")
-	if got := newAppClient("", "").base; got != defaultAppURL {
+	if got := base(""); got != defaultAppURL {
 		t.Errorf("default = %q", got)
 	}
 	t.Setenv("LATERE_APPS_URL", "https://apps.example/v1/apps/")
-	if got := newAppClient("", "").base; got != "https://apps.example/v1/apps" {
+	if got := base(""); got != "https://apps.example/v1/apps" {
 		t.Errorf("environment = %q", got)
 	}
-	if got := newAppClient("http://localhost:8080/v1/", "").base; got != "http://localhost:8080/v1" {
+	if got := base("http://localhost:8080/v1/apps"); got != "http://localhost:8080/v1/apps" {
 		t.Errorf("flag = %q", got)
+	}
+	// The SDK writes the API's paths under the origin's /v1/apps, so an
+	// address without it, such as the API's own root, cannot be reached.
+	if _, err := newAppClient("http://localhost:8080/v1/", ""); err == nil || !strings.Contains(err.Error(), "ends in /v1/apps") {
+		t.Errorf("a base URL without /v1/apps = %v", err)
 	}
 }
 

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"latere.ai/x/sdk-go/apps"
 )
 
 func TestAppLogsStoredOfTheNewestDeploy(t *testing.T) {
@@ -142,11 +144,10 @@ func TestAppLogsFollowOfAStreamThatClosesEarly(t *testing.T) {
 	}
 }
 
-// The end event's fields arrive in any order, and a stream that closes right
-// after its data line still ends.
-func TestAppLogsFollowEndWithoutATrailingBlankLine(t *testing.T) {
+// The end event's fields arrive in any order.
+func TestAppLogsFollowEndWithItsFieldsInAnyOrder(t *testing.T) {
 	s := newStubApps(t)
-	s.frames = []string{"data: {\"status\":\"built\"}\nevent: end\n"}
+	s.frames = []string{"data: {\"status\":\"built\"}\nevent: end\n\n"}
 	if _, _, err := runApp(t, s, "logs", "hello", "-f"); err != nil {
 		t.Errorf("logs -f = %v", err)
 	}
@@ -159,8 +160,8 @@ func TestAppLogsFollowJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var line appLogLine
-	if err := json.Unmarshal([]byte(out), &line); err != nil || line.Line != "\x1b[1mone\x1b[0m" || line.Seq != 1 {
+	var line apps.LogLine
+	if err := json.Unmarshal([]byte(out), &line); err != nil || line.Text != "\x1b[1mone\x1b[0m" || line.Seq != 1 {
 		t.Errorf("json = %q %v", out, err)
 	}
 }

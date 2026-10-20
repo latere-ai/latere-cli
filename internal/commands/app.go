@@ -22,16 +22,16 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 
-	"latere.ai/x/pkg/otel"
+	"latere.ai/x/sdk-go/apps"
+	"latere.ai/x/sdk-go/latere"
 
 	"github.com/latere-ai/latere-cli/internal/api"
 )
 
-// The app commands reach the Apps API under the platform origin. The API's
-// own routes are written under /v1; at the origin that root is /v1/apps, so
-// the API's /v1/apps/{slug} is served at /v1/apps/apps/{slug}. The base URL
-// carries the origin's path and every path below is the API's own with /v1
-// cut off.
+// The app commands reach the Apps API under the platform origin through the
+// SDK's apps package, which writes the API's paths under the origin's
+// /v1/apps. The base URL a person gives includes that path, as the API's
+// address at the origin, and the commands cut it off to name the origin.
 
 // defaultAppURL is the Apps API at the platform origin, its base path
 // included.
@@ -60,14 +60,6 @@ const appSlugHold = "seven days"
 // appTimeout bounds one JSON request. A create holds its answer until the
 // app's repository exists, which is one round trip to the git host.
 const appTimeout = 60 * time.Second
-
-// maxAppResponse bounds a response the CLI reads whole. The deploys of an
-// app come in one answer without pages, each deploy about a kilobyte.
-const maxAppResponse = 16 << 20
-
-// maxLogLine bounds one line of a build log, as NDJSON or as one SSE data
-// field.
-const maxLogLine = 1 << 20
 
 // appListPage is the page size `app list` asks for: the API's largest.
 const appListPage = 200
@@ -158,70 +150,9 @@ LATERE_PLATFORM_TOKEN presents that bearer as given.`,
 
 // ---- the wire ----
 
-// appResource is the App of the API, the fields the commands print. --json
-// prints the API's own bytes, so a field read nowhere here still reaches a
-// program.
-type appResource struct {
-	ID    string `json:"id"`
-	Slug  string `json:"slug"`
-	Name  string `json:"name"`
-	Owner struct {
-		Kind string `json:"kind"`
-	} `json:"owner"`
-	Visibility string `json:"visibility"`
-	State      string `json:"state"`
-	Health     string `json:"health"`
-	URL        string `json:"url"`
-	PreviewURL string `json:"preview_url"`
-	Repository struct {
-		CloneURL string `json:"clone_url"`
-		PushURL  string `json:"push_url"`
-	} `json:"repository"`
-	Restored bool `json:"restored"`
-}
-
-// appDeploy is the Deploy of the API.
-type appDeploy struct {
-	ID         string `json:"id"`
-	Status     string `json:"status"`
-	Preview    bool   `json:"preview"`
-	CommitSHA  string `json:"commit_sha"`
-	FromDeploy string `json:"from_deploy"`
-	Ref        string `json:"ref"`
-	URL        string `json:"url"`
-	PreviewURL string `json:"preview_url"`
-	Components []struct {
-		Name string `json:"name"`
-	} `json:"components"`
-	CreatedAt time.Time `json:"created_at"`
-}
-
-// appRelease is the Release of the API.
-type appRelease struct {
-	Tag    string `json:"tag"`
-	Status string `json:"status"`
-	Deploy string `json:"deploy"`
-}
-
-// appLogLine is one LogLine of a build log.
-type appLogLine struct {
-	Seq       int64     `json:"seq"`
-	TS        time.Time `json:"ts"`
-	Src       string    `json:"src"`
-	Component string    `json:"component"`
-	Line      string    `json:"line"`
-}
-
-// appLogEnd is the LogEnd of a build log stream, its last event.
-type appLogEnd struct {
-	Status string `json:"status"`
-	Error  *struct {
-		Code      string `json:"code"`
-		Message   string `json:"message"`
-		Hint      string `json:"hint"`
-		Component string `json:"component"`
-	} `json:"error"`
-}
+// appBasePath is the path the origin serves the Apps API under, which the
+// API's base URL ends in.
+const appBasePath = "/v1/apps"
 
 // appError is a refusal of the Apps API: the code to branch on, the fixed
 // sentence for a person, and the details, which carry the hint and what the
@@ -275,233 +206,105 @@ func (e *appError) detail(key string) string {
 	}
 }
 
-// parseAppError reads a refusal. The API answers its envelope
-// {"error": {"code", "message", "details"}}, except for a body it cannot
-// read, which it refuses with 400 as plain text; that text, bounded, is the
-// sentence.
-func parseAppError(status int, body []byte) *appError {
-	e := &appError{Status: status}
-	var envelope struct {
-		Error struct {
-			Code    string         `json:"code"`
-			Message string         `json:"message"`
-			Details map[string]any `json:"details"`
-		} `json:"error"`
+// answerText is the sentence of a refusal: the API's message, or the text
+// of an answer that is not the API's envelope, such as a proxy's page.
+// An empty answer has none, where the SDK puts the status's own text.
+func answerText(e *latere.Error) string {
+	if e.Code == "" && e.Message == http.StatusText(e.StatusCode) {
+		return ""
 	}
-	if json.Unmarshal(body, &envelope) == nil && envelope.Error.Code != "" {
-		e.Code, e.Message, e.Details = envelope.Error.Code, envelope.Error.Message, envelope.Error.Details
+	return e.Message
+}
+
+// jsonError is the JSON decoding error err wraps, or nil.
+func jsonError(err error) error {
+	if e, ok := errors.AsType[*json.SyntaxError](err); ok {
 		return e
 	}
-	text := strings.TrimSpace(string(body))
-	if len(text) > 512 {
-		text = text[:512]
+	if e, ok := errors.AsType[*json.UnmarshalTypeError](err); ok {
+		return e
 	}
-	e.Message = text
-	return e
+	return nil
 }
 
-// appClient is one command's connection to the Apps API: the base URL and
-// the bearer, minted on first use and held for the command.
+// appClient is one command's connection to the Apps API: the SDK's apps
+// client, and the base URL as the command was given it, which messages
+// name.
 type appClient struct {
-	base    string
-	authURL string
-	bearer  string
-	// envErr is a retired variable set without its replacement.
-	envErr error
+	base string
+	apps *apps.Client
 }
 
-// newAppClient resolves the API's address: the flag, then $LATERE_APPS_URL,
-// then the platform origin. A retired variable set without its replacement
-// is kept as envErr, which the client's first request answers with.
-func newAppClient(flagURL, authURL string) *appClient {
-	c := &appClient{authURL: authURL}
+// newAppClient resolves the API's address, the flag, then $LATERE_APPS_URL,
+// then the platform origin, and its bearer: LATERE_APPS_TOKEN as given,
+// else an actor token minted for appAudience from the saved login at the
+// first request, so the login token never reaches the API. One token
+// serves the command while it lives.
+func newAppClient(flagURL, authURL string) (*appClient, error) {
 	u := flagURL
 	if u == "" {
-		u, c.envErr = capabilityEnv(envAppsURL)
+		var err error
+		if u, err = capabilityEnv(envAppsURL); err != nil {
+			return nil, err
+		}
 	}
 	if u == "" {
 		u = defaultAppURL
 	}
-	c.base = strings.TrimRight(u, "/")
-	return c
-}
-
-// token is the bearer: LATERE_APPS_TOKEN as given, else an actor token minted
-// for appAudience from the saved login, so the login token never reaches
-// the API. One token serves the command; it lives five minutes, and a log
-// stream needs it only to open.
-func (c *appClient) token(ctx context.Context) (string, error) {
-	if c.envErr != nil {
-		return "", c.envErr
-	}
-	if c.bearer != "" {
-		return c.bearer, nil
+	base := strings.TrimRight(u, "/")
+	origin, ok := strings.CutSuffix(base, appBasePath)
+	if !ok {
+		return nil, fmt.Errorf("%s is not an Apps API base URL: it ends in %s, as %s does", base, appBasePath, defaultAppURL)
 	}
 	given, err := capabilityEnv(envAppsToken)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	if t := strings.TrimSpace(given); t != "" {
-		c.bearer = t
-		return t, nil
-	}
-	t, _, err := api.ActorToken(ctx, api.ResolveAuthURL(c.base, c.authURL), appAudience)
-	if err != nil {
-		return "", fmt.Errorf("cannot authenticate to Apps: %w", err)
-	}
-	c.bearer = t
-	return t, nil
-}
-
-// request builds one request with the bearer attached.
-func (c *appClient) request(ctx context.Context, method, path string, body io.Reader) (*http.Request, error) {
-	bearer, err := c.token(ctx)
+	cfg, err := api.Product{
+		BaseURL: origin, AuthURL: authURL, Audience: appAudience,
+		Token: strings.TrimSpace(given), Timeout: appTimeout,
+	}.Config()
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, method, c.base+path, body)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+bearer)
-	req.Header.Set("User-Agent", "latere-cli")
-	return req, nil
+	return &appClient{base: base, apps: apps.New(cfg)}, nil
 }
 
-// call sends one JSON request and answers the body of a 2xx answer. Any
-// other answer is an *appError.
-func (c *appClient) call(ctx context.Context, method, path string, body any) ([]byte, error) {
-	var reader io.Reader
-	if body != nil {
-		b, err := json.Marshal(body)
-		if err != nil {
-			return nil, err
-		}
-		reader = bytes.NewReader(b)
+// refused is what a command says of an error a call to the Apps API
+// answered: a refusal as an *appError, which the commands explain; a
+// bearer that could not be had, an API that could not be reached and an
+// answer that could not be read, each in a sentence of its own.
+func (c *appClient) refused(err error) error {
+	if e, ok := errors.AsType[*api.AuthError](err); ok {
+		return fmt.Errorf("cannot authenticate to Apps: %w", e.Err)
 	}
-	req, err := c.request(ctx, method, path, reader)
-	if err != nil {
-		return nil, err
+	if e, ok := errors.AsType[*latere.Error](err); ok {
+		return &appError{Status: e.StatusCode, Code: e.Code, Message: answerText(e), Details: e.Details}
 	}
-	req.Header.Set("Accept", "application/json")
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
+	if e, ok := errors.AsType[*url.Error](err); ok {
+		return fmt.Errorf("reach the Apps API at %s: %w", c.base, e)
 	}
-	client := &http.Client{Timeout: appTimeout, Transport: otel.Transport(nil), CheckRedirect: api.PreserveMethodOnRedirect}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("reach the Apps API at %s: %w", c.base, err)
+	if e := jsonError(err); e != nil {
+		return fmt.Errorf("parse the Apps API's answer: %w", e)
 	}
-	defer func() { _ = resp.Body.Close() }()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxAppResponse+1))
-	if err != nil {
-		return nil, fmt.Errorf("read the Apps API's answer: %w", err)
-	}
-	if len(raw) > maxAppResponse {
-		return nil, errors.New("the Apps API's answer exceeds 16 MiB")
-	}
-	if resp.StatusCode/100 != 2 {
-		return nil, parseAppError(resp.StatusCode, raw)
-	}
-	return raw, nil
+	return err
 }
 
-// get sends a GET and decodes the answer into out, keeping the raw bytes
-// for --json.
-func (c *appClient) get(ctx context.Context, path string, out any) (json.RawMessage, error) {
-	raw, err := c.call(ctx, http.MethodGet, path, nil)
-	if err != nil {
-		return nil, err
+// rawJSON is the API's own bytes of each model, for --json: an empty list
+// is [] rather than null.
+func rawJSON[T interface{ RawJSON() json.RawMessage }](models []T) []json.RawMessage {
+	raws := make([]json.RawMessage, 0, len(models))
+	for _, m := range models {
+		raws = append(raws, m.RawJSON())
 	}
-	if err := json.Unmarshal(raw, out); err != nil {
-		return nil, fmt.Errorf("parse the Apps API's answer: %w", err)
-	}
-	return raw, nil
-}
-
-// stream opens a build log. It has no Timeout: a followed log stays open
-// for as long as the build runs, and the command's context bounds it.
-func (c *appClient) stream(ctx context.Context, path, accept string) (*http.Response, error) {
-	req, err := c.request(ctx, http.MethodGet, path, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Accept", accept)
-	client := &http.Client{Transport: otel.Transport(nil), CheckRedirect: api.PreserveMethodOnRedirect}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("reach the Apps API at %s: %w", c.base, err)
-	}
-	if resp.StatusCode/100 != 2 {
-		defer func() { _ = resp.Body.Close() }()
-		raw, err := io.ReadAll(io.LimitReader(resp.Body, maxAppResponse))
-		if err != nil {
-			return nil, fmt.Errorf("read the Apps API's answer: %w", err)
-		}
-		return nil, parseAppError(resp.StatusCode, raw)
-	}
-	return resp, nil
-}
-
-// appPath is the path of an app's resource: the app, then each segment of
-// rest, every one escaped.
-func appPath(slug string, rest ...string) string {
-	parts := []string{"/apps", url.PathEscape(slug)}
-	for _, r := range rest {
-		parts = append(parts, url.PathEscape(r))
-	}
-	return strings.Join(parts, "/")
-}
-
-// getApp reads one app.
-func (c *appClient) getApp(ctx context.Context, slug string) (appResource, json.RawMessage, error) {
-	var a appResource
-	raw, err := c.get(ctx, appPath(slug), &a)
-	return a, raw, err
-}
-
-// listDeploys reads every deploy of the app, newest first.
-func (c *appClient) listDeploys(ctx context.Context, slug string) ([]appDeploy, []json.RawMessage, error) {
-	var list struct {
-		Deploys []json.RawMessage `json:"deploys"`
-	}
-	if _, err := c.get(ctx, appPath(slug, "deploys"), &list); err != nil {
-		return nil, nil, err
-	}
-	deploys := make([]appDeploy, len(list.Deploys))
-	for i, raw := range list.Deploys {
-		if err := json.Unmarshal(raw, &deploys[i]); err != nil {
-			return nil, nil, fmt.Errorf("parse the Apps API's answer: %w", err)
-		}
-	}
-	if list.Deploys == nil {
-		list.Deploys = []json.RawMessage{}
-	}
-	return deploys, list.Deploys, nil
-}
-
-// listReleases reads every release of the app, newest first.
-func (c *appClient) listReleases(ctx context.Context, slug string) ([]appRelease, []json.RawMessage, error) {
-	var list struct {
-		Releases []json.RawMessage `json:"releases"`
-	}
-	if _, err := c.get(ctx, appPath(slug, "releases"), &list); err != nil {
-		return nil, nil, err
-	}
-	releases := make([]appRelease, len(list.Releases))
-	for i, raw := range list.Releases {
-		if err := json.Unmarshal(raw, &releases[i]); err != nil {
-			return nil, nil, fmt.Errorf("parse the Apps API's answer: %w", err)
-		}
-	}
-	return releases, list.Releases, nil
+	return raws
 }
 
 // liveRelease is the newest release with status released, the one the
 // app's address serves, and its index; -1 when there is none.
-func liveRelease(releases []appRelease) int {
+func liveRelease(releases []*apps.Release) int {
 	for i, r := range releases {
-		if r.Status == "released" {
+		if r.Status == apps.ReleaseReleased {
 			return i
 		}
 	}
@@ -510,7 +313,7 @@ func liveRelease(releases []appRelease) int {
 
 // newestPreview is the index of the newest preview deploy; -1 when there is
 // none.
-func newestPreview(deploys []appDeploy) int {
+func newestPreview(deploys []*apps.Deploy) int {
 	for i, d := range deploys {
 		if d.Preview {
 			return i
@@ -700,28 +503,21 @@ exists for another app the command refuses and creates nothing.`,
 			}
 			// A create that names no visibility leaves it to the platform, which
 			// decides what a new app starts as.
-			body := map[string]string{}
+			params := &apps.CreateAppParams{Name: firstArg(args), Slug: slug}
 			if cmd.Flags().Changed("visibility") {
-				body["visibility"] = visibility
+				params.Visibility = apps.Visibility(visibility)
 			}
-			if len(args) == 1 {
-				body["name"] = args[0]
-			}
-			if slug != "" {
-				body["slug"] = slug
-			}
-			c := newAppClient(*apiURL, *authURL)
-			raw, err := c.call(ctx, http.MethodPost, "/apps", body)
+			c, err := newAppClient(*apiURL, *authURL)
 			if err != nil {
-				return explainCreateRefusal(err, slug)
+				return err
 			}
-			var a appResource
-			if err := json.Unmarshal(raw, &a); err != nil {
-				return fmt.Errorf("parse the Apps API's answer: %w", err)
+			a, err := c.apps.CreateApp(ctx, params)
+			if err != nil {
+				return explainCreateRefusal(c.refused(err), slug)
 			}
 			out, notes := cmd.OutOrStdout(), cmd.OutOrStdout()
 			if jsonF {
-				if err := printRawJSON(out, raw); err != nil {
+				if err := printRawJSON(out, a.RawJSON()); err != nil {
 					return err
 				}
 				notes = cmd.ErrOrStderr()
@@ -762,13 +558,13 @@ exists for another app the command refuses and creates nothing.`,
 	return cmd
 }
 
-func printCreatedApp(out io.Writer, a appResource) error {
+func printCreatedApp(out io.Writer, a *apps.App) error {
 	var b strings.Builder
 	b.WriteString(formatWrappedField("app", a.Slug))
 	b.WriteString(formatWrappedField("address", a.URL))
 	b.WriteString(formatWrappedField("preview", a.PreviewURL))
 	b.WriteString(formatWrappedField("push", a.Repository.PushURL))
-	b.WriteString(formatWrappedField("visibility", a.Visibility))
+	b.WriteString(formatWrappedField("visibility", string(a.Visibility)))
 	if who := whoOpensSentence(a); who != "" {
 		fmt.Fprintf(&b, "\n%s\n", who)
 	}
@@ -914,79 +710,44 @@ them.`,
   latere apps list --json`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			c := newAppClient(*apiURL, *authURL)
-			apps, raws, err := listApps(cmd.Context(), c)
+			c, err := newAppClient(*apiURL, *authURL)
 			if err != nil {
 				return err
+			}
+			var list []*apps.App
+			for a, err := range c.apps.ListApps(cmd.Context(), &apps.ListAppsParams{Limit: appListPage}) {
+				if err != nil {
+					return c.refused(err)
+				}
+				list = append(list, a)
 			}
 			out := cmd.OutOrStdout()
 			if jsonF {
-				return printJSON(out, raws)
+				return printJSON(out, rawJSON(list))
 			}
-			production, err := productionTags(cmd.Context(), c, apps)
+			production, err := productionTags(cmd.Context(), c, list)
 			if err != nil {
 				return err
 			}
-			return printAppList(out, apps, production)
+			return printAppList(out, list, production)
 		},
 	}
 	cmd.Flags().BoolVar(&jsonF, "json", false, "JSON output")
 	return cmd
 }
 
-// listApps reads every page of the context's apps.
-func listApps(ctx context.Context, c *appClient) ([]appResource, []json.RawMessage, error) {
-	apps, raws := []appResource{}, []json.RawMessage{}
-	cursor := ""
-	for {
-		q := url.Values{"limit": {fmt.Sprint(appListPage)}}
-		if cursor != "" {
-			q.Set("cursor", cursor)
-		}
-		var page struct {
-			Items      []json.RawMessage `json:"items"`
-			HasMore    bool              `json:"has_more"`
-			NextCursor string            `json:"next_cursor"`
-		}
-		if _, err := c.get(ctx, "/apps?"+q.Encode(), &page); err != nil {
-			return nil, nil, err
-		}
-		for _, raw := range page.Items {
-			var a appResource
-			if err := json.Unmarshal(raw, &a); err != nil {
-				return nil, nil, fmt.Errorf("parse the Apps API's answer: %w", err)
-			}
-			apps, raws = append(apps, a), append(raws, raw)
-		}
-		if !page.HasMore {
-			return apps, raws, nil
-		}
-		if page.NextCursor == "" || page.NextCursor == cursor {
-			return nil, nil, errors.New("the Apps API said more apps follow and named no next page")
-		}
-		cursor = page.NextCursor
-	}
-}
-
 // productionTags is the release tag each app's address serves, "-" for one
 // that serves none. An app answers no deploy of its own, so each tag is one
 // read of the app's releases.
-func productionTags(ctx context.Context, c *appClient, apps []appResource) ([]string, error) {
-	tags := make([]string, len(apps))
-	if len(apps) == 0 {
-		return tags, nil
-	}
-	// Mint before the reads fan out, so they share one token.
-	if _, err := c.token(ctx); err != nil {
-		return nil, err
-	}
+func productionTags(ctx context.Context, c *appClient, list []*apps.App) ([]string, error) {
+	tags := make([]string, len(list))
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(appReleaseReads)
-	for i, a := range apps {
+	for i, a := range list {
 		g.Go(func() error {
-			releases, _, err := c.listReleases(gctx, a.Slug)
+			releases, err := c.apps.ListReleases(gctx, a.Slug)
 			if err != nil {
-				return fmt.Errorf("read the releases of %s: %w", a.Slug, err)
+				return fmt.Errorf("read the releases of %s: %w", a.Slug, c.refused(err))
 			}
 			tags[i] = "-"
 			if j := liveRelease(releases); j >= 0 {
@@ -1001,15 +762,15 @@ func productionTags(ctx context.Context, c *appClient, apps []appResource) ([]st
 	return tags, nil
 }
 
-func printAppList(out io.Writer, apps []appResource, production []string) error {
+func printAppList(out io.Writer, list []*apps.App, production []string) error {
 	var b strings.Builder
-	if len(apps) == 0 {
+	if len(list) == 0 {
 		b.WriteString("No apps in your current context. Create one with: latere apps create\n")
 	} else {
 		w := tabwriter.NewWriter(&b, 0, 4, 2, ' ', 0)
 		fprintln(w, "SLUG\tSTATE\tVISIBILITY\tPRODUCTION\tADDRESS")
-		for i, a := range apps {
-			fprintf(w, "%s\t%s\t%s\t%s\t%s\n", a.Slug, a.State, defaultStr(a.Visibility, "-"), production[i], a.URL)
+		for i, a := range list {
+			fprintf(w, "%s\t%s\t%s\t%s\t%s\n", a.Slug, a.State, defaultStr(string(a.Visibility), "-"), production[i], a.URL)
 		}
 		_ = w.Flush()
 	}
@@ -1045,18 +806,21 @@ preview deploy, each as the API answers it, or null.`,
 				return err
 			}
 			ctx := cmd.Context()
-			c := newAppClient(*apiURL, *authURL)
-			a, rawApp, err := c.getApp(ctx, slug)
-			if err != nil {
-				return withSlugSource(err, slug, fromRemote)
-			}
-			releases, rawReleases, err := c.listReleases(ctx, slug)
+			c, err := newAppClient(*apiURL, *authURL)
 			if err != nil {
 				return err
 			}
-			deploys, rawDeploys, err := c.listDeploys(ctx, slug)
+			a, err := c.apps.GetApp(ctx, slug)
 			if err != nil {
-				return err
+				return withSlugSource(c.refused(err), slug, fromRemote)
+			}
+			releases, err := c.apps.ListReleases(ctx, slug)
+			if err != nil {
+				return c.refused(err)
+			}
+			deploys, err := c.apps.ListDeploys(ctx, slug)
+			if err != nil {
+				return c.refused(err)
 			}
 			live, preview := liveRelease(releases), newestPreview(deploys)
 			out := cmd.OutOrStdout()
@@ -1065,12 +829,12 @@ preview deploy, each as the API answers it, or null.`,
 					App     json.RawMessage `json:"app"`
 					Release json.RawMessage `json:"release"`
 					Preview json.RawMessage `json:"preview"`
-				}{App: rawApp, Release: json.RawMessage("null"), Preview: json.RawMessage("null")}
+				}{App: a.RawJSON(), Release: json.RawMessage("null"), Preview: json.RawMessage("null")}
 				if live >= 0 {
-					shown.Release = rawReleases[live]
+					shown.Release = releases[live].RawJSON()
 				}
 				if preview >= 0 {
-					shown.Preview = rawDeploys[preview]
+					shown.Preview = deploys[preview].RawJSON()
 				}
 				return printJSON(out, shown)
 			}
@@ -1088,19 +852,19 @@ func firstArg(args []string) string {
 	return args[0]
 }
 
-func printApp(out io.Writer, a appResource, releases []appRelease, live int, deploys []appDeploy, preview int) error {
+func printApp(out io.Writer, a *apps.App, releases []*apps.Release, live int, deploys []*apps.Deploy, preview int) error {
 	var b strings.Builder
 	b.WriteString(formatWrappedField("app", a.Slug))
 	if a.Name != a.Slug {
 		b.WriteString(formatWrappedField("name", a.Name))
 	}
-	b.WriteString(formatWrappedField("state", a.State))
-	visibility := a.Visibility
+	b.WriteString(formatWrappedField("state", string(a.State)))
+	visibility := string(a.Visibility)
 	if who := whoOpens(a); who != "" {
 		visibility += " (" + who + ")"
 	}
 	b.WriteString(formatWrappedField("visibility", visibility))
-	b.WriteString(formatWrappedField("health", a.Health))
+	b.WriteString(formatWrappedField("health", string(a.Health)))
 	b.WriteString(formatWrappedField("address", a.URL))
 	b.WriteString(formatWrappedField("previews", a.PreviewURL))
 	production := "none"
@@ -1111,7 +875,7 @@ func printApp(out io.Writer, a appResource, releases []appRelease, live int, dep
 			production += ", deploy " + shortID(r.Deploy)
 			for _, d := range deploys {
 				if d.ID == r.Deploy {
-					production += " (" + d.Status + ")"
+					production += " (" + string(d.Status) + ")"
 					break
 				}
 			}
@@ -1156,13 +920,17 @@ the deploys as the API answers them.`,
 			if err != nil {
 				return err
 			}
-			deploys, raws, err := newAppClient(*apiURL, *authURL).listDeploys(cmd.Context(), slug)
+			c, err := newAppClient(*apiURL, *authURL)
 			if err != nil {
-				return withSlugSource(err, slug, fromRemote)
+				return err
+			}
+			deploys, err := c.apps.ListDeploys(cmd.Context(), slug)
+			if err != nil {
+				return withSlugSource(c.refused(err), slug, fromRemote)
 			}
 			out := cmd.OutOrStdout()
 			if jsonF {
-				return printJSON(out, raws)
+				return printJSON(out, rawJSON(deploys))
 			}
 			return printDeploys(out, slug, deploys)
 		},
@@ -1171,7 +939,7 @@ the deploys as the API answers them.`,
 	return cmd
 }
 
-func printDeploys(out io.Writer, slug string, deploys []appDeploy) error {
+func printDeploys(out io.Writer, slug string, deploys []*apps.Deploy) error {
 	var b strings.Builder
 	if len(deploys) == 0 {
 		fmt.Fprintf(&b, "No deploys of %s yet. A push builds one: git push %s main\n", slug, appRemote)
@@ -1217,8 +985,12 @@ an app with that slug within them restores the app and its repository.`,
 					return fmt.Errorf("the typed slug does not match %s; nothing was deleted. Pass --yes to delete without asking", slug)
 				}
 			}
-			if _, err := newAppClient(*apiURL, *authURL).call(cmd.Context(), http.MethodDelete, appPath(slug), nil); err != nil {
+			c, err := newAppClient(*apiURL, *authURL)
+			if err != nil {
 				return err
+			}
+			if err := c.apps.DeleteApp(cmd.Context(), slug); err != nil {
+				return c.refused(err)
 			}
 			fprintf(cmd.OutOrStdout(), "Deleting %s. Its address no longer serves it.\nThe slug stays held for your account for %s; `latere apps create --slug %s` restores the app until then.\n", slug, appSlugHold, slug)
 			return nil

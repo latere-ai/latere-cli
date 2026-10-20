@@ -14,6 +14,11 @@ committed: the commit log already holds that.
 
 ### Changed
 
+- **`latere apps` reaches the platform through the Latere Go SDK.** Its
+  commands, flags, output and exit codes are as they were. `--api-url` and
+  `LATERE_APPS_URL` must end in `/v1/apps`, as the help has always said;
+  another address is refused before anything is sent. `latere apps list`
+  ends at the page that names no next one.
 - **A model command makes your personal key whatever your wallet holds.**
   In your personal account, `latere models` and the other model commands
   no longer stop with "no model key was made" when your wallet has never

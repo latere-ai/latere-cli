@@ -7,7 +7,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -18,6 +17,8 @@ import (
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
+
+	"latere.ai/x/sdk-go/apps"
 )
 
 // outputIsTerminal reports whether w is a terminal, where a log line's
@@ -80,8 +81,12 @@ otherwise. --json prints each line as the API's JSON, one per line.`,
 			if len(args) == 2 {
 				deployArg = args[1]
 			}
+			c, err := newAppClient(*apiURL, *authURL)
+			if err != nil {
+				return err
+			}
 			l := appLogs{
-				client: newAppClient(*apiURL, *authURL),
+				client: c,
 				slug:   slug, json: jsonF,
 				out: cmd.OutOrStdout(), errOut: cmd.ErrOrStderr(),
 			}
@@ -97,7 +102,7 @@ otherwise. --json prints each line as the API's JSON, one per line.`,
 			}
 			l.toSource()
 			if follow {
-				if d := l.deploy; d != nil && (d.Status == "waiting" || d.Status == "queued") {
+				if d := l.deploy; d != nil && (d.Status == apps.DeployWaiting || d.Status == apps.DeployQueued) {
 					fprintln(l.errOut, "Waiting for the build to start...")
 				}
 				return l.follow(cmd.Context())
@@ -118,12 +123,12 @@ type appLogs struct {
 	// id is the deploy's id or the prefix given for it.
 	id string
 	// deploy is the deploy id names, when the app's list has it.
-	deploy *appDeploy
+	deploy *apps.Deploy
 	// deploys is the app's list deploy was picked from.
-	deploys []appDeploy
+	deploys []*apps.Deploy
 	// release is the deploy of a release whose log was asked for, when the
 	// log read is that of the preview it released.
-	release *appDeploy
+	release *apps.Deploy
 	json    bool
 	// raw keeps a line's escape sequences: on a terminal, and in JSON.
 	raw         bool
@@ -156,9 +161,9 @@ func headCommit(ctx context.Context) string {
 // resolves when it is a prefix; else the newest of the commit head, waiting
 // for it to appear, when head is given; else the newest.
 func (l *appLogs) resolve(ctx context.Context, arg, head string) error {
-	deploys, _, err := l.client.listDeploys(ctx, l.slug)
+	deploys, err := l.client.apps.ListDeploys(ctx, l.slug)
 	if err != nil {
-		return err
+		return l.client.refused(err)
 	}
 	l.deploys = deploys
 	if arg == "" && head != "" {
@@ -168,7 +173,7 @@ func (l *appLogs) resolve(ctx context.Context, arg, head string) error {
 		if len(deploys) == 0 {
 			return fmt.Errorf("%s has no deploys yet. A push builds one: git push %s main", l.slug, appRemote)
 		}
-		l.id, l.deploy = deploys[0].ID, &deploys[0]
+		l.id, l.deploy = deploys[0].ID, deploys[0]
 		return nil
 	}
 	l.id = arg
@@ -179,7 +184,7 @@ func (l *appLogs) resolve(ctx context.Context, arg, head string) error {
 				l.deploy = nil // two deploys share it; the API refuses it
 				break
 			}
-			l.deploy = &deploys[i]
+			l.deploy = deploys[i]
 		}
 	}
 	return nil
@@ -187,13 +192,13 @@ func (l *appLogs) resolve(ctx context.Context, arg, head string) error {
 
 // awaitCommit picks the newest deploy of the commit head, reading the
 // deploys again until it appears or appDeployWait has passed.
-func (l *appLogs) awaitCommit(ctx context.Context, deploys []appDeploy, head string) error {
+func (l *appLogs) awaitCommit(ctx context.Context, deploys []*apps.Deploy, head string) error {
 	short := head[:min(7, len(head))]
 	deadline := time.Now().Add(appDeployWait)
 	for waited := false; ; waited = true {
 		for i := range deploys {
 			if deploys[i].CommitSHA == head {
-				l.id, l.deploy, l.deploys = deploys[i].ID, &deploys[i], deploys
+				l.id, l.deploy, l.deploys = deploys[i].ID, deploys[i], deploys
 				return nil
 			}
 		}
@@ -209,8 +214,8 @@ func (l *appLogs) awaitCommit(ctx context.Context, deploys []appDeploy, head str
 		case <-time.After(min(appDeployPoll, time.Until(deadline))):
 		}
 		var err error
-		if deploys, _, err = l.client.listDeploys(ctx, l.slug); err != nil {
-			return err
+		if deploys, err = l.client.apps.ListDeploys(ctx, l.slug); err != nil {
+			return l.client.refused(err)
 		}
 	}
 }
@@ -227,136 +232,86 @@ func (l *appLogs) toSource() {
 	l.release, l.id, l.deploy = d, d.FromDeploy, nil
 	for i := range l.deploys {
 		if l.deploys[i].ID == d.FromDeploy {
-			l.deploy = &l.deploys[i]
+			l.deploy = l.deploys[i]
 			break
 		}
 	}
 }
 
-func (l *appLogs) path(follow bool) string {
-	p := appPath(l.slug, "deploys", l.id, "logs")
-	if follow {
-		p += "?follow=1"
-	}
-	return p
-}
-
 // print writes one line of the log: the API's JSON with --json, else the
 // time, the step and the text, with the component when the deploy builds
 // more than one.
-func (l *appLogs) print(data []byte) error {
+func (l *appLogs) print(line *apps.LogLine) {
 	if l.json {
-		fprintf(l.out, "%s\n", bytes.TrimSpace(data))
-		return nil
+		fprintf(l.out, "%s\n", bytes.TrimSpace(line.RawJSON()))
+		return
 	}
-	var line appLogLine
-	if err := json.Unmarshal(data, &line); err != nil {
-		return fmt.Errorf("parse a build log line: %w", err)
-	}
-	text := line.Line
+	text := line.Text
 	if !l.raw {
 		text = stripANSI(text)
 	}
 	ts := "--:--:--"
-	if !line.TS.IsZero() {
-		ts = line.TS.Local().Format("15:04:05")
+	if !line.Time.IsZero() {
+		ts = line.Time.Local().Format("15:04:05")
 	}
 	if l.deploy == nil || len(l.deploy.Components) != 1 {
-		fprintf(l.out, "%s %s %-8s %s\n", ts, line.Component, line.Src, text)
+		fprintf(l.out, "%s %s %-8s %s\n", ts, line.Component, line.Step, text)
 	} else {
-		fprintf(l.out, "%s %-8s %s\n", ts, line.Src, text)
+		fprintf(l.out, "%s %-8s %s\n", ts, line.Step, text)
 	}
-	return nil
 }
 
-// stored prints the log stored so far, as NDJSON.
+// refused is what the command says of an error reading the log answered:
+// a line that could not be read, or a line longer than the SDK reads, in
+// its own words, and the rest as every app command says it.
+func (l *appLogs) refused(err error) error {
+	if e := jsonError(err); e != nil {
+		return fmt.Errorf("parse the build log: %w", e)
+	}
+	if errors.Is(err, bufio.ErrTooLong) {
+		return fmt.Errorf("read the build log: %w", bufio.ErrTooLong)
+	}
+	return l.client.refused(err)
+}
+
+// stored prints the log stored so far.
 func (l *appLogs) stored(ctx context.Context) error {
-	resp, err := l.client.stream(ctx, l.path(false), "application/x-ndjson")
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	sc := bufio.NewScanner(resp.Body)
-	sc.Buffer(make([]byte, 0, 64<<10), maxLogLine)
-	for sc.Scan() {
-		if len(bytes.TrimSpace(sc.Bytes())) == 0 {
-			continue
+	for line, err := range l.client.apps.ReadDeployLog(ctx, l.slug, l.id, nil) {
+		if err != nil {
+			return l.refused(err)
 		}
-		if err := l.print(sc.Bytes()); err != nil {
-			return err
-		}
-	}
-	if err := sc.Err(); err != nil {
-		return fmt.Errorf("read the build log: %w", err)
+		l.print(line)
 	}
 	return nil
 }
 
-// follow streams the log as server-sent events until the end event, and
-// answers the build's outcome.
+// follow streams the log until its end, and answers the build's outcome. A
+// stream that closes first is reported rather than opened again, as the
+// command always has.
 func (l *appLogs) follow(ctx context.Context) error {
-	resp, err := l.client.stream(ctx, l.path(true), "text/event-stream")
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	sc := bufio.NewScanner(resp.Body)
-	sc.Buffer(make([]byte, 0, 64<<10), maxLogLine)
-	var (
-		event string
-		data  []byte
-	)
-	for sc.Scan() {
-		line := sc.Bytes()
-		switch {
-		case len(line) == 0:
-			// A blank line dispatches the event its fields built.
-			if event == "end" {
-				return l.end(data)
-			}
-			if len(data) > 0 && (event == "" || event == "message") {
-				if err := l.print(data); err != nil {
-					return err
-				}
-			}
-			event, data = "", nil
-		case line[0] == ':':
-			// A comment: the heartbeat a quiet build sends.
-		default:
-			field, value, _ := bytes.Cut(line, []byte(":"))
-			value = bytes.TrimPrefix(value, []byte(" "))
-			switch string(field) {
-			case "event":
-				event = string(value)
-			case "data":
-				if data != nil {
-					data = append(data, '\n')
-				}
-				data = append(data, value...)
-			}
+	for ev, err := range l.client.apps.FollowDeployLog(ctx, l.slug, l.id, nil) {
+		if errors.Is(err, io.ErrUnexpectedEOF) {
+			break
 		}
-	}
-	if err := sc.Err(); err != nil {
-		return fmt.Errorf("read the build log: %w", err)
-	}
-	if event == "end" {
-		return l.end(data)
+		if err != nil {
+			return l.refused(err)
+		}
+		if ev.End != nil {
+			return l.end(ev.End)
+		}
+		l.print(ev.Line)
 	}
 	return fmt.Errorf("the build log of %s closed before the build ended; run the command again to follow it", shortID(l.id))
 }
 
 // end reads the stream's last event. A build that built answers nil; one
 // that failed or was canceled answers its code and message.
-func (l *appLogs) end(data []byte) error {
-	var end appLogEnd
-	if err := json.Unmarshal(data, &end); err != nil {
-		return fmt.Errorf("parse the end of the build log: %w", err)
-	}
+func (l *appLogs) end(end *apps.LogEnd) error {
 	id := shortID(l.id)
 	switch end.Status {
 	// built is a finished build; ready and live are the deploy statuses past
 	// it.
-	case "built", "ready", "live":
+	case apps.BuildBuilt, "ready", "live":
 		fprintf(l.errOut, "Deploy %s built.\n", id)
 		if r := l.release; r != nil {
 			if r.URL != "" {
@@ -370,9 +325,9 @@ func (l *appLogs) end(data []byte) error {
 			}
 		}
 		return nil
-	case "canceled":
+	case apps.BuildCanceled:
 		return fmt.Errorf("deploy %s was canceled", id)
-	case "failed":
+	case apps.BuildFailed:
 		if end.Error == nil {
 			return fmt.Errorf("deploy %s failed", id)
 		}
