@@ -10,6 +10,14 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Changed
+
+- **The `latere apps` commands use the Go SDK's first release, v0.1.0.**
+  A rename or visibility change the platform answers with a server error
+  is tried again, as a read already was. A refusal that is not the
+  platform's JSON, such as a proxy's page, still shows its own text, now
+  cut at a whole character rather than in the middle of one.
+
 ## v0.29.0 - 2026-10-20
 
 ### Changed
