@@ -198,7 +198,7 @@ func newAppPlatform(flagURL, authURL string) (*appPlatform, error) {
 // carry, and the rest each in a sentence of its own, as the repository
 // commands word them.
 func (p *appPlatform) refused(err error) error {
-	if e, ok := errors.AsType[*api.AuthError](err); ok {
+	if e, ok := errors.AsType[*latere.TokenError](err); ok {
 		return fmt.Errorf("cannot authenticate to the platform: %w", e.Err)
 	}
 	if e, ok := errors.AsType[*latere.Error](err); ok {

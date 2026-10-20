@@ -275,7 +275,7 @@ func newAppClient(flagURL, authURL string) (*appClient, error) {
 // bearer that could not be had, an API that could not be reached and an
 // answer that could not be read, each in a sentence of its own.
 func (c *appClient) refused(err error) error {
-	if e, ok := errors.AsType[*api.AuthError](err); ok {
+	if e, ok := errors.AsType[*latere.TokenError](err); ok {
 		return fmt.Errorf("cannot authenticate to Apps: %w", e.Err)
 	}
 	if e, ok := errors.AsType[*latere.Error](err); ok {

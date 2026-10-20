@@ -286,8 +286,9 @@ func (l *appLogs) stored(ctx context.Context) error {
 }
 
 // follow streams the log until its end, and answers the build's outcome. A
-// stream that closes first is reported rather than opened again, as the
-// command always has.
+// stream that drops is opened again after the last line read, as the SDK
+// does for a stream; one that keeps closing before the build ends is
+// reported once the SDK's retries are spent.
 func (l *appLogs) follow(ctx context.Context) error {
 	for ev, err := range l.client.apps.FollowDeployLog(ctx, l.slug, l.id, nil) {
 		if errors.Is(err, io.ErrUnexpectedEOF) {
