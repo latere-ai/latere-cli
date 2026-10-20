@@ -173,3 +173,28 @@ func TestProductConfigMintsAgainAfterA401(t *testing.T) {
 		t.Errorf("mints = %d, want 2: one dropped after the 401", n)
 	}
 }
+
+// A refusal reads the API's message, or, for an answer without the API's
+// envelope, the answer's own text, which the SDK keeps in Body behind the
+// status's text: trimmed, cut on a character boundary, and empty for an
+// empty answer.
+func TestRefusalText(t *testing.T) {
+	long := strings.Repeat("a", maxRefusalText-1) + "é and more"
+	for _, tc := range []struct {
+		name string
+		err  *latere.Error
+		want string
+	}{
+		{"the envelope's message", &latere.Error{StatusCode: 400, Code: "invalid_request", Message: "The slug is taken."}, "The slug is taken."},
+		{"a plain-text answer", &latere.Error{StatusCode: 404, Message: "Not Found", Body: []byte("404 page not found\n")}, "404 page not found"},
+		{"an empty answer", &latere.Error{StatusCode: 502, Message: "Bad Gateway"}, ""},
+		{"an envelope whose message is the status's text", &latere.Error{StatusCode: 404, Message: "Not Found", Body: []byte(`{"error":{"message":"Not Found"}}`)}, "Not Found"},
+		{"a long answer cut on a character", &latere.Error{StatusCode: 400, Message: "Bad Request", Body: []byte(long)}, strings.Repeat("a", maxRefusalText-1)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := RefusalText(tc.err); got != tc.want {
+				t.Errorf("RefusalText = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

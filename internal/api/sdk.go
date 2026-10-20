@@ -7,7 +7,9 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"latere.ai/x/pkg/otel"
 	"latere.ai/x/sdk-go/latere"
@@ -92,3 +94,31 @@ func (p Product) Config() (*latere.Config, error) {
 	}
 	return cfg, nil
 }
+
+// RefusalText is the sentence of a refusal: the API's message, or the text
+// of an answer that is not the API's envelope, such as a proxy's page or an
+// issuer's plain-text refusal. The SDK names such an answer by its status's
+// text and keeps its bytes in Body, so the text comes from Body, trimmed and
+// cut to maxRefusalText bytes on a character boundary. An empty answer has
+// none.
+func RefusalText(e *latere.Error) string {
+	if e.Code != "" || e.Message != http.StatusText(e.StatusCode) {
+		return e.Message
+	}
+	text := strings.TrimSpace(string(e.Body))
+	if strings.HasPrefix(text, "{") {
+		// The API's envelope whose message is the status's own text.
+		return e.Message
+	}
+	if len(text) > maxRefusalText {
+		cut := maxRefusalText
+		for cut > 0 && !utf8.RuneStart(text[cut]) {
+			cut--
+		}
+		text = text[:cut]
+	}
+	return text
+}
+
+// maxRefusalText bounds the text a refusal without the API's envelope shows.
+const maxRefusalText = 200

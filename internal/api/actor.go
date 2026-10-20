@@ -102,6 +102,14 @@ func ActorToken(ctx context.Context, authURL, audience string) (string, time.Tim
 	defer cancel()
 	token, err := actor.Token(mintCtx)
 	if err != nil {
+		// The issuer refuses in plain text, which the SDK keeps in the
+		// error's body behind the status's text; the reason is what the
+		// person can act on, so it goes into the message.
+		if e, ok := errors.AsType[*latere.Error](err); ok {
+			if text := RefusalText(e); text != "" && text != e.Message {
+				err = fmt.Errorf("%w: %s", err, text)
+			}
+		}
 		return "", time.Time{}, fmt.Errorf("actor token for %s: %w; if this persists run `latere login`", audience, err)
 	}
 	return token.Value, token.Expiry, nil

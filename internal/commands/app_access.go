@@ -202,7 +202,7 @@ func (p *appPlatform) refused(err error) error {
 		return fmt.Errorf("cannot authenticate to the platform: %w", e.Err)
 	}
 	if e, ok := errors.AsType[*latere.Error](err); ok {
-		pe := &platformError{Status: e.StatusCode, Code: e.Code, Message: answerText(e), Details: e.Details}
+		pe := &platformError{Status: e.StatusCode, Code: e.Code, Message: api.RefusalText(e), Details: e.Details}
 		pe.Detail, _ = e.Details["detail"].(string)
 		return pe
 	}

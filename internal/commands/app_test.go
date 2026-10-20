@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"latere.ai/x/sdk-go/apps"
-	"latere.ai/x/sdk-go/latere"
 )
 
 // The ids of the stub's two deploys of hello: the newest, a preview of
@@ -1277,30 +1276,5 @@ func TestAppWithoutASubcommandShowsHelp(t *testing.T) {
 		if strings.Contains(out, offer) {
 			t.Errorf("the help offers public as a choice (%q):\n%s", offer, out)
 		}
-	}
-}
-
-// A refusal reads the API's message, or, for an answer without the API's
-// envelope, the answer's own text, which the SDK keeps in Body behind the
-// status's text: trimmed, cut on a character boundary, and empty for an
-// empty answer.
-func TestAnswerText(t *testing.T) {
-	long := strings.Repeat("a", maxAnswerText-1) + "é and more"
-	for _, tc := range []struct {
-		name string
-		err  *latere.Error
-		want string
-	}{
-		{"the envelope's message", &latere.Error{StatusCode: 400, Code: "invalid_request", Message: "The slug is taken."}, "The slug is taken."},
-		{"a plain-text answer", &latere.Error{StatusCode: 404, Message: "Not Found", Body: []byte("404 page not found\n")}, "404 page not found"},
-		{"an empty answer", &latere.Error{StatusCode: 502, Message: "Bad Gateway"}, ""},
-		{"an envelope whose message is the status's text", &latere.Error{StatusCode: 404, Message: "Not Found", Body: []byte(`{"error":{"message":"Not Found"}}`)}, "Not Found"},
-		{"a long answer cut on a character", &latere.Error{StatusCode: 400, Message: "Bad Request", Body: []byte(long)}, strings.Repeat("a", maxAnswerText-1)},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := answerText(tc.err); got != tc.want {
-				t.Errorf("answerText = %q, want %q", got, tc.want)
-			}
-		})
 	}
 }
