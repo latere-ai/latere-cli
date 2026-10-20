@@ -18,15 +18,14 @@ import (
 )
 
 // The auth picker shown by `latere agents run` when no model credential is
-// configured: choose a provider and sign in / enter a key, like opencode's auth
-// flow. Only providers whose SDK adapter actually works are offered (Anthropic,
-// Ollama); OpenAI/Gemini are pending their adapters.
+// configured: choose a provider and enter its key, like opencode's auth
+// flow: an Anthropic API key, or Ollama. A Claude sign-in is no longer a
+// provider.
 
 type authChoice int
 
 const (
 	authCancel authChoice = iota
-	authClaude            // Claude OAuth (browser)
 	authAPIKey            // Anthropic API key
 	authOllama            // local Ollama
 )
@@ -55,7 +54,6 @@ func newAuthModel() authModel {
 	in.Prompt = "API key: "
 	return authModel{
 		options: []authOption{
-			{"Sign in with Claude (opens your browser)", authClaude},
 			{"Use an Anthropic API key", authAPIKey},
 			{"Use Ollama (local models, no key)", authOllama},
 		},
@@ -136,9 +134,9 @@ func (m authModel) View() string {
 	return b.String()
 }
 
-// runAuthPicker shows the provider picker and applies the choice: a Claude OAuth
-// login, a stored Anthropic API key, or Ollama. It returns an error if the user
-// cancels or the chosen step fails.
+// runAuthPicker shows the provider picker and applies the choice: a stored
+// Anthropic API key, or Ollama. It returns an error if the user cancels or
+// the chosen step fails.
 func runAuthPicker(ctx context.Context) error {
 	p := tea.NewProgram(newAuthModel(), tea.WithContext(ctx))
 	fm, err := p.Run()
@@ -148,8 +146,6 @@ func runAuthPicker(ctx context.Context) error {
 	// Run returns the model it was given, so this is the authModel above.
 	res := fm.(authModel).result //nolint:errcheck // tea.Program.Run returns the same model it was started with
 	switch res.choice {
-	case authClaude:
-		return loopbackClaudeLogin(ctx)
 	case authAPIKey:
 		if res.apiKey == "" {
 			return errors.New("no API key entered")

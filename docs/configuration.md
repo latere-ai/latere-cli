@@ -25,9 +25,7 @@ setting, and each command's `--help` names the flags it takes.
 | `LATERE_MODEL_KEY` | none | A model key to present to the Latere API instead of the one the CLI keeps. With it, the model commands need no login. |
 | `LATERE_MODEL_KEYS_FILE` | `~/.config/latere/model-keys.json` | Where model keys are kept on a machine with no system keychain. |
 | `LATERE_AGENT_PROVIDER_FILE` | `agent-provider.json` in your user configuration directory | The model provider `latere agents provider` saved for `latere agents run`. |
-| `LATERE_CLAUDE_TOKEN_FILE` | `claude.json` in your user configuration directory | The Claude sign-in `latere agents provider` saved. |
 | `ANTHROPIC_API_KEY` | none | An Anthropic API key. When set, `latere agents run` calls Anthropic directly with it, ahead of every other provider. |
-| `CLAUDE_CODE_OAUTH_TOKEN` | none | A Claude Code token `latere agents run` falls back to when you have no saved provider and no `latere` login. |
 | `LATERE_APPS_URL` | `https://api.latere.ai/v1/apps` | The Apps API base URL, including its `/v1/apps` path, which `latere apps` calls. `--api-url` overrides it. |
 | `LATERE_APPS_TOKEN` | none | A bearer to present to the Apps API instead of minting one. |
 | `LATERE_PLATFORM_URL` | `https://platform.latere.ai` | The platform `latere repos` creates, lists and reads repositories on, `latere apps visibility`, `password`, `access`, `share` and `unshare` reach the people invited to an app and its password on, and `latere devices` lists, names and removes your devices on. `--platform-url` overrides it. |
@@ -75,7 +73,7 @@ In your user configuration directory, under `latere/`:
 | File | What it holds |
 |------|---------------|
 | `agent-provider.json` | The model provider `latere agents run` uses, and an Anthropic API key when you chose one. A choice saved by an earlier version under another name is moved here the first time it is read. |
-| `claude.json` | The Claude sign-in `latere agents provider` saved. |
+| `claude.json` | A Claude sign-in an earlier version saved. Nothing reads it any more, and you can delete it. |
 
 `latere agents review` writes each run's logs to
 `$XDG_STATE_HOME/latere/reviews/<repo-key>/` and prunes old ones; see

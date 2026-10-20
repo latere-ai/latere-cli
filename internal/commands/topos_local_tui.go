@@ -9,7 +9,7 @@ package commands
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -24,23 +24,18 @@ import (
 	"github.com/charmbracelet/glamour/ansi"
 	"github.com/charmbracelet/glamour/styles"
 	"github.com/charmbracelet/lipgloss"
-
-	"latere.ai/x/topos"
-	"latere.ai/x/topos/harness/tools"
-	"latere.ai/x/topos/models"
-	"latere.ai/x/topos/sandbox"
 )
 
 // The full-screen TUI for `latere agents run`, in the spirit of Claude Code /
 // Codex: an alt-screen app with a header, a scrolling transcript that streams, a
-// bordered input, and a status line. It reuses the verified core (buildLocalModel,
-// host sandbox, tools, model switching) unchanged — this is presentation only.
+// bordered input, and a status line. It drives the same local agent and model
+// switching as the line REPL: this is presentation only.
 //
 // The transcript is a list of typed blocks (user / assistant / tool / result /
 // notice) rendered to strings and joined with blank lines for breathing room.
 // Assistant text is rendered as Markdown via glamour once a turn settles (raw
-// while streaming, so it stays fast). A run streams asynchronously: runner.Turn
-// executes in a goroutine and the Observer forwards each event via prog.Send;
+// while streaming, so it stays fast). A run streams asynchronously: the turn
+// executes in a goroutine and forwards each event via prog.Send;
 // nothing writes to stdout/stderr (a stray write corrupts the alt-screen), so SDK
 // logs go to io.Discard for the session.
 
@@ -49,14 +44,13 @@ import (
 const collapseThreshold = 6
 
 // localEventMsg carries one run event into the Bubble Tea update loop.
-type localEventMsg struct{ ev topos.Event }
+type localEventMsg struct{ ev localEvent }
 
-// localTurnDoneMsg reports a completed (or failed) turn, its transcript, and how
-// long it took (for the "✻ …for Ns" footer).
+// localTurnDoneMsg reports a completed (or failed) turn and how long it took
+// (for the "✻ …for Ns" footer).
 type localTurnDoneMsg struct {
-	transcript []models.Message
-	err        error
-	elapsed    time.Duration
+	err     error
+	elapsed time.Duration
 }
 
 type blockKind int
@@ -90,10 +84,7 @@ type localTUI struct {
 	version string
 	cwd     string
 
-	sb       sandbox.Provider
-	builtins *tools.Registry
-	runner   *topos.Runner
-	curModel string
+	agent *localAgent
 
 	vp        viewport.Model
 	input     textinput.Model
@@ -101,22 +92,23 @@ type localTUI struct {
 	glam      *glamour.TermRenderer
 	glamWidth int
 
-	blocks     []block
-	transcript []models.Message // conversation threaded to the runner
-	running    bool
-	turnStart  time.Time
-	turnVerb   string
-	turnTip    string
-	turnCount  int
-	inTok      int
-	outTok     int
-	expand     bool // Ctrl+O: show tool output in full
-	ready      bool // a WindowSizeMsg has sized the layout
-	width      int
-	height     int
+	blocks    []block
+	running   bool
+	turnStart time.Time
+	turnVerb  string
+	turnTip   string
+	turnCount int
+	inTok     int64
+	outTok    int64
+	expand    bool // Ctrl+O: show tool output in full
+	ready     bool // a WindowSizeMsg has sized the layout
+	width     int
+	height    int
 }
 
-func newLocalTUI(ctx context.Context, version, cwd string, sb sandbox.Provider, builtins *tools.Registry, brain models.Model) (*localTUI, error) {
+// newLocalTUI starts the local agent in dir on brain, its events sent to the
+// program once runLocalTUI sets it.
+func newLocalTUI(ctx context.Context, version, dir string, brain localModel) (*localTUI, error) {
 	in := textinput.New()
 	in.Placeholder = "Ask anything, or /help"
 	in.Prompt = "❯ "
@@ -124,26 +116,17 @@ func newLocalTUI(ctx context.Context, version, cwd string, sb sandbox.Provider, 
 	sp := spinner.New()
 	// A rotating arc — distinct from other assistants' star/braille spinners.
 	sp.Spinner = spinner.Spinner{Frames: []string{"◜", "◠", "◝", "◞", "◡", "◟"}, FPS: time.Second / 8}
-	m := &localTUI{ctx: ctx, version: version, cwd: cwd, sb: sb, builtins: builtins, input: in, spin: sp}
-	if err := m.rebuild(brain); err != nil {
-		return nil, err
-	}
-	return m, nil
-}
-
-// rebuild points the runner at a new model, keeping the same async Observer.
-func (m *localTUI) rebuild(b models.Model) error {
-	obs := func(e topos.Event) {
+	m := &localTUI{ctx: ctx, version: version, input: in, spin: sp}
+	agent, err := newLocalAgent(ctx, dir, brain, func(e localEvent) {
 		if m.prog != nil {
 			m.prog.Send(localEventMsg{ev: e})
 		}
-	}
-	rn, err := topos.NewRunner(topos.Options{Model: topos.ModelOptions{Client: b}, Sandbox: m.sb, Observer: obs})
+	})
 	if err != nil {
-		return err
+		return nil, err
 	}
-	m.runner, m.curModel = rn, modelString(b)
-	return nil
+	m.agent, m.cwd = agent, agent.workdir
+	return m, nil
 }
 
 func (m *localTUI) Init() tea.Cmd { return textinput.Blink }
@@ -165,7 +148,6 @@ func (m *localTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.appendNotice(styleErr.Render("error: "+msg.err.Error()), true)
 		} else {
-			m.transcript = msg.transcript
 			m.appendNotice(styleDim.Render(m.footer(msg.elapsed)), false)
 		}
 		m.refresh()
@@ -233,18 +215,10 @@ func (m *localTUI) startTurn(prompt string) (tea.Model, tea.Cmd) {
 	m.turnTip = workTips[m.turnCount%len(workTips)]
 	m.turnCount++
 	m.refresh()
-	tr := m.transcript
 	go func() {
 		start := time.Now()
-		res, err := m.runner.Turn(m.ctx, topos.TurnInput{
-			Sandbox:           m.sb,
-			SandboxID:         "local",
-			SystemPrompt:      localSystemPrompt,
-			Tools:             m.builtins,
-			InitialTranscript: tr,
-			UserPrompt:        prompt,
-		})
-		m.prog.Send(localTurnDoneMsg{transcript: res.Transcript, err: err, elapsed: time.Since(start)})
+		err := m.agent.turn(m.ctx, prompt)
+		m.prog.Send(localTurnDoneMsg{err: err, elapsed: time.Since(start)})
 	}()
 	return m, m.spin.Tick
 }
@@ -286,44 +260,26 @@ func (m *localTUI) switchModel(name string) {
 		m.appendNotice(styleErr.Render("switch failed: "+err.Error()), true)
 		return
 	}
-	if err := m.rebuild(b); err != nil {
-		m.appendNotice(styleErr.Render(err.Error()), true)
-		return
-	}
-	m.appendNotice(styleDim.Render("switched to "+m.curModel), false)
+	m.agent.setModel(b)
+	m.appendNotice(styleDim.Render("switched to "+m.agent.modelName()), false)
 }
 
 // appendEvent folds one run event into the transcript blocks.
-func (m *localTUI) appendEvent(e topos.Event) {
-	switch e.Name {
-	case topos.EventTextDelta:
-		var p textDeltaPayload
-		if json.Unmarshal(e.PayloadJSON, &p) != nil || p.Text == "" {
-			return
-		}
+func (m *localTUI) appendEvent(e localEvent) {
+	switch e.kind {
+	case localText:
 		if a := m.openAssistant(); a != nil {
-			a.text += p.Text
+			a.text += e.text
 		} else {
-			m.blocks = append(m.blocks, block{kind: blkAssistant, text: p.Text, streaming: true})
+			m.blocks = append(m.blocks, block{kind: blkAssistant, text: e.text, streaming: true})
 		}
-	case "PreToolUse":
-		var p preToolUsePayload
-		if json.Unmarshal(e.PayloadJSON, &p) != nil {
-			return
-		}
+	case localToolUse:
 		m.closeStreaming()
-		m.blocks = append(m.blocks, block{kind: blkTool, name: p.ToolCall.Name, args: summarizeToolInput(p.ToolCall.Input)})
-	case topos.EventPostToolUse:
-		var p postToolUsePayload
-		if json.Unmarshal(e.PayloadJSON, &p) != nil {
-			return
-		}
-		m.blocks = append(m.blocks, block{kind: blkResult, text: p.Result.Content, isErr: p.Result.IsError, collapsed: !m.expand})
-	case topos.EventUsage:
-		var p usagePayload
-		if json.Unmarshal(e.PayloadJSON, &p) == nil {
-			m.inTok, m.outTok = p.Total.InputTokens, p.Total.OutputTokens
-		}
+		m.blocks = append(m.blocks, block{kind: blkTool, name: e.name, args: summarizeToolInput(e.input)})
+	case localToolResult:
+		m.blocks = append(m.blocks, block{kind: blkResult, text: e.text, isErr: e.isErr, collapsed: !m.expand})
+	case localUsage:
+		m.inTok, m.outTok = e.in, e.out
 	default:
 		return
 	}
@@ -562,7 +518,7 @@ func (m *localTUI) bannerView() string {
 	bar := lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Render("▌")
 	l1 := bar + " " + lipgloss.NewStyle().Bold(true).Render("Latere agent") + styleDim.Render("  local · v"+m.version)
 	return l1 + "\n" +
-		"  " + styleDim.Render(m.curModel) + "\n" +
+		"  " + styleDim.Render(m.agent.modelName()) + "\n" +
 		"  " + styleDim.Render(homeAbbrev(m.cwd))
 }
 
@@ -571,7 +527,7 @@ func (m *localTUI) statusView() string {
 	// (and a working spinner) on the left, key hints on the right.
 	// The banner scrolls away, so the always-visible model lives here alongside
 	// token usage (and a spinner while working); key hints sit on the right.
-	left := fmt.Sprintf("%s  ·  %d↑ %d↓ tok", m.curModel, m.inTok, m.outTok)
+	left := fmt.Sprintf("%s  ·  %d↑ %d↓ tok", m.agent.modelName(), m.inTok, m.outTok)
 	if m.running {
 		left = m.spin.View() + " " + left
 	}
@@ -616,14 +572,15 @@ var (
 )
 
 // runLocalTUI launches the full-screen local TUI.
-func runLocalTUI(ctx context.Context, version, cwd string, sb sandbox.Provider, builtins *tools.Registry, brain models.Model) error {
+func runLocalTUI(ctx context.Context, version, dir string, brain localModel) (err error) {
 	// Alt-screen: a stray stdout/stderr write corrupts the display, so silence
-	// the SDK's logger for the session (failures still surface in the transcript).
+	// the runtime's logger for the session (failures still surface in the transcript).
 	slog.SetDefault(slog.New(slog.DiscardHandler))
-	m, err := newLocalTUI(ctx, version, cwd, sb, builtins, brain)
+	m, err := newLocalTUI(ctx, version, dir, brain)
 	if err != nil {
 		return err
 	}
+	defer func() { err = errors.Join(err, m.agent.close(context.WithoutCancel(ctx))) }()
 	// No mouse capture: it would disable the terminal's native text selection.
 	// Scrolling is via the keyboard (↑/↓, PgUp/PgDn).
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithContext(ctx))

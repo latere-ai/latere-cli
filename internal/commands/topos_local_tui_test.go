@@ -17,9 +17,6 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"latere.ai/x/topos"
-	"latere.ai/x/topos/harness/tools"
-	"latere.ai/x/topos/models/fake"
 )
 
 var ansiRE = regexp.MustCompile(`\x1b\[[0-9;]*m`)
@@ -31,10 +28,10 @@ var ansiRE = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 func TestLocalTUIFrameLayout(t *testing.T) {
 	m := newTestTUI(t)
 	m.turnVerb = "Churning"
-	m.Update(localEventMsg{ev: event(t, topos.EventTextDelta, textDeltaPayload{
-		Text: "A **bold** word and a paragraph long enough that it must wrap at the viewport width rather than running off the right edge of the terminal, plus a `code` span.",
-	})})
-	m.Update(localEventMsg{ev: event(t, "PreToolUse", preToolUsePayload{ToolCall: toolCall{Name: "bash", Input: json.RawMessage(`{"command":"go build ./..."}`)}})})
+	m.Update(localEventMsg{ev: localEvent{kind: localText,
+		text: "A **bold** word and a paragraph long enough that it must wrap at the viewport width rather than running off the right edge of the terminal, plus a `code` span.",
+	}})
+	m.Update(localEventMsg{ev: localEvent{kind: localToolUse, name: "bash", input: json.RawMessage(`{"command":"go build ./..."}`)}})
 	m.Update(localTurnDoneMsg{elapsed: 3 * time.Second})
 
 	frame := ansiRE.ReplaceAllString(m.View(), "")
@@ -51,20 +48,22 @@ func TestLocalTUIFrameLayout(t *testing.T) {
 	}
 }
 
-// newTestTUI builds a sized localTUI with a fake brain for driving Update.
+// newTestTUI builds a sized localTUI with a scripted model for driving
+// Update.
 func newTestTUI(t *testing.T) *localTUI {
 	t.Helper()
 	// A deterministic credential so /model switches resolve without network.
 	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
 	t.Setenv("LATERE_AGENT_PROVIDER_FILE", filepath.Join(t.TempDir(), "provider.json"))
-	sb, err := newHostSandbox(t.TempDir())
+	m, err := newLocalTUI(context.Background(), "9.9.9", t.TempDir(), scriptedModel(t, "steps: []\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	m, err := newLocalTUI(context.Background(), "9.9.9", "/work", sb, tools.Builtins(), fake.New())
-	if err != nil {
-		t.Fatal(err)
-	}
+	t.Cleanup(func() {
+		if err := m.agent.close(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
 	m.Update(tea.WindowSizeMsg{Width: 100, Height: 30}) // size the layout
 	return m
 }
@@ -79,15 +78,6 @@ func (m *localTUI) rawText() string {
 	return b.String()
 }
 
-func event(t *testing.T, name string, payload any) topos.Event {
-	t.Helper()
-	b, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return topos.Event{Name: name, PayloadJSON: b}
-}
-
 func TestLocalTUISizingAndStreaming(t *testing.T) {
 	m := newTestTUI(t)
 	if !m.ready {
@@ -98,16 +88,14 @@ func TestLocalTUISizingAndStreaming(t *testing.T) {
 	}
 
 	// Assistant text streams into a single open assistant block.
-	m.Update(localEventMsg{ev: event(t, topos.EventTextDelta, textDeltaPayload{Text: "hello "})})
-	m.Update(localEventMsg{ev: event(t, topos.EventTextDelta, textDeltaPayload{Text: "world"})})
+	m.Update(localEventMsg{ev: localEvent{kind: localText, text: "hello "}})
+	m.Update(localEventMsg{ev: localEvent{kind: localText, text: "world"}})
 	if a := m.openAssistant(); a == nil || a.text != "hello world" {
 		t.Fatalf("assistant block = %+v, want streamed 'hello world'", a)
 	}
 
 	// A tool call closes the assistant block and records name + arg hint.
-	m.Update(localEventMsg{ev: event(t, "PreToolUse", preToolUsePayload{
-		ToolCall: toolCall{Name: "glob", Input: json.RawMessage(`{"pattern":"*.go"}`)},
-	})})
+	m.Update(localEventMsg{ev: localEvent{kind: localToolUse, name: "glob", input: json.RawMessage(`{"pattern":"*.go"}`)}})
 	if m.openAssistant() != nil {
 		t.Fatal("a tool call should close the assistant block")
 	}
@@ -117,17 +105,14 @@ func TestLocalTUISizingAndStreaming(t *testing.T) {
 	}
 
 	// A tool result is captured as a result block.
-	m.Update(localEventMsg{ev: event(t, topos.EventPostToolUse, postToolUsePayload{
-		ToolCall: toolCall{Name: "glob"},
-		Result:   toolResult{Content: "a.go b.go"},
-	})})
+	m.Update(localEventMsg{ev: localEvent{kind: localToolResult, text: "a.go b.go"}})
 	if last := m.blocks[len(m.blocks)-1]; last.kind != blkResult || last.text != "a.go b.go" {
 		t.Fatalf("result block = %+v, want the tool content", last)
 	}
 
 	// Usage updates the status counters without adding a block.
 	n := len(m.blocks)
-	m.Update(localEventMsg{ev: event(t, topos.EventUsage, usagePayload{Total: usageTotals{InputTokens: 12, OutputTokens: 7}})})
+	m.Update(localEventMsg{ev: localEvent{kind: localUsage, in: 12, out: 7}})
 	if m.inTok != 12 || m.outTok != 7 {
 		t.Fatalf("usage = %d/%d, want 12/7", m.inTok, m.outTok)
 	}
@@ -138,7 +123,7 @@ func TestLocalTUISizingAndStreaming(t *testing.T) {
 
 func TestLocalTUINoticeClosesAssistant(t *testing.T) {
 	m := newTestTUI(t)
-	m.Update(localEventMsg{ev: event(t, topos.EventTextDelta, textDeltaPayload{Text: "text"})})
+	m.Update(localEventMsg{ev: localEvent{kind: localText, text: "text"}})
 	m.onSlash("/help")
 	// The assistant block is separate from the help notice (blocks can't concatenate).
 	if m.openAssistant() != nil {
@@ -192,10 +177,7 @@ func TestLocalTUIScrolls(t *testing.T) {
 func TestLocalTUIResultFolding(t *testing.T) {
 	m := newTestTUI(t)
 	long := strings.Repeat("x\n", collapseThreshold+5)
-	m.Update(localEventMsg{ev: event(t, topos.EventPostToolUse, postToolUsePayload{
-		ToolCall: toolCall{Name: "bash"},
-		Result:   toolResult{Content: long},
-	})})
+	m.Update(localEventMsg{ev: localEvent{kind: localToolResult, text: long}})
 	// Collapsed by default: summary mentions the hidden line count.
 	if got := m.renderBlock(len(m.blocks) - 1); !strings.Contains(got, "lines") {
 		t.Fatalf("collapsed result = %q, want a '+N lines' summary", got)
@@ -215,7 +197,7 @@ func TestLocalTUITurnDone(t *testing.T) {
 
 	// A successful turn stops running and appends the timing footer.
 	m.outTok = 42
-	m.Update(localTurnDoneMsg{transcript: nil, elapsed: 3 * time.Second})
+	m.Update(localTurnDoneMsg{elapsed: 3 * time.Second})
 	if m.running {
 		t.Fatal("turn done should clear running")
 	}
@@ -236,8 +218,8 @@ func TestLocalTUISlashCommands(t *testing.T) {
 
 	// /model <name> switches the active model in place.
 	m.onSlash("/model claude-switched-9")
-	if m.curModel != "claude-switched-9" {
-		t.Fatalf("curModel = %q, want claude-switched-9", m.curModel)
+	if got := m.agent.modelName(); got != "claude-switched-9" {
+		t.Fatalf("the model is %q, want claude-switched-9", got)
 	}
 	if !strings.Contains(m.rawText(), "switched to claude-switched-9") {
 		t.Fatalf("transcript missing switch notice: %q", m.rawText())

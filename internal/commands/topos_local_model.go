@@ -14,13 +14,12 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"latere.ai/x/topos/models"
 )
 
 // handleLocalCommand runs a slash command typed at the `latere agents run`
-// prompt. It returns quit=true when the session should end. rebuild swaps the
-// runner's model (used by /model); curModel points at the header's model label.
-func handleLocalCommand(ctx context.Context, line string, curModel *string, rebuild func(models.Model) error) (quit bool) {
+// prompt. It returns quit=true when the session should end. /model switches
+// the model agent's next turn runs on.
+func handleLocalCommand(ctx context.Context, line string, agent *localAgent) (quit bool) {
 	cmd := strings.Fields(line)[0]
 	switch cmd {
 	case "/quit", "/exit":
@@ -28,7 +27,7 @@ func handleLocalCommand(ctx context.Context, line string, curModel *string, rebu
 	case "/help":
 		printLocalHelp()
 	case "/model":
-		switchLocalModel(ctx, strings.TrimSpace(strings.TrimPrefix(line, cmd)), curModel, rebuild)
+		switchLocalModel(ctx, strings.TrimSpace(strings.TrimPrefix(line, cmd)), agent)
 	default:
 		fmt.Printf("unknown command %q — /help for the list\n", cmd)
 	}
@@ -45,9 +44,9 @@ Commands:
 }
 
 // switchLocalModel changes the active model. With no name it opens a picker over
-// the models the model key reaches; with a name it switches directly (works for
-// any provider, e.g. an Ollama tag).
-func switchLocalModel(ctx context.Context, name string, curModel *string, rebuild func(models.Model) error) {
+// the models the model key reaches; with a name it switches directly, on the
+// provider the session runs on.
+func switchLocalModel(ctx context.Context, name string, agent *localAgent) {
 	target := name
 	if target == "" {
 		list, err := fetchKeyModels(ctx)
@@ -59,7 +58,7 @@ func switchLocalModel(ctx context.Context, name string, curModel *string, rebuil
 			fmt.Println(styleDim.Render("your key reaches no models; use /model <name>"))
 			return
 		}
-		chosen, perr := runModelPicker(ctx, list, *curModel)
+		chosen, perr := runModelPicker(ctx, list, agent.modelName())
 		if perr != nil || chosen == "" {
 			return
 		}
@@ -70,16 +69,13 @@ func switchLocalModel(ctx context.Context, name string, curModel *string, rebuil
 		fmt.Println(styleErr.Render("switch failed: " + err.Error()))
 		return
 	}
-	if err := rebuild(b); err != nil {
-		fmt.Println(styleErr.Render(err.Error()))
-		return
-	}
-	fmt.Printf("switched to %s\n", *curModel)
+	agent.setModel(b)
+	fmt.Printf("switched to %s\n", agent.modelName())
 }
 
 // fetchKeyModels returns the names of the models the model key reaches, the
-// list `latere models` prints. The local agent calls them through the OpenAI
-// door, which reaches a Model of any provider.
+// list `latere models` prints, which the local agent reaches through the
+// door of each model's family.
 func fetchKeyModels(ctx context.Context) ([]string, error) {
 	entries, _, err := listModels(ctx, "", "")
 	if err != nil {

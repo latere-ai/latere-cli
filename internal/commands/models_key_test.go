@@ -5,6 +5,7 @@ package commands
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -95,7 +96,12 @@ func newKeyWorld(t *testing.T, orgID string) *keyWorld {
 			w.revoked = append(w.revoked, strings.TrimPrefix(r.URL.Path, "/me/keys/"))
 			w.mu.Unlock()
 			rw.WriteHeader(http.StatusNoContent)
-		case strings.HasPrefix(r.URL.Path, "/v1/models/openai/v1/"), r.URL.Path == "/v1/models/lux/v1/generate":
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/models/.well-known/lux":
+			_ = json.NewEncoder(rw).Encode(map[string]any{"name": "lux", "doors": map[string]string{
+				"anthropic": w.modelsURL() + "/anthropic", "openai": w.modelsURL() + "/openai", "lux": w.modelsURL() + "/lux",
+			}})
+		case strings.HasPrefix(r.URL.Path, "/v1/models/openai/v1/"), strings.HasPrefix(r.URL.Path, "/v1/models/anthropic/v1/"),
+			r.URL.Path == "/v1/models/lux/v1/generate":
 			w.serveCore(t, rw, r)
 		default:
 			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
@@ -123,11 +129,13 @@ func newKeyWorld(t *testing.T, orgID string) *keyWorld {
 }
 
 // serveCore is the stub core's OpenAI door: the model list, and Chat
-// Completions answered whole or as an event stream; and its Lux door's
-// generate, answered whole.
+// Completions answered whole or as an event stream; its Anthropic door: the
+// model list with its figures, and Messages as an event stream; and its Lux
+// door's generate, answered whole. The Anthropic door takes the key as
+// x-api-key, the others as the bearer.
 func (w *keyWorld) serveCore(t *testing.T, rw http.ResponseWriter, r *http.Request) {
 	n := w.calls.Add(1)
-	bearer := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	bearer := cmp.Or(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "), r.Header.Get("x-api-key"))
 	var body struct {
 		Model  string `json:"model"`
 		Stream bool   `json:"stream"`
@@ -163,6 +171,20 @@ func (w *keyWorld) serveCore(t *testing.T, rw http.ResponseWriter, r *http.Reque
 		}
 	case r.Method == http.MethodPost && r.URL.Path == "/v1/models/openai/v1/chat/completions":
 		_, _ = io.WriteString(rw, `{"choices":[{"message":{"content":"hi"}}]}`)
+	case r.Method == http.MethodGet && r.URL.Path == "/v1/models/anthropic/v1/models":
+		_, _ = io.WriteString(rw, `{"data":[{"id":"anthropic/claude-sonnet-4.6","context_window":1000000,"max_output_tokens":64000}]}`)
+	case r.Method == http.MethodPost && r.URL.Path == "/v1/models/anthropic/v1/messages" && body.Stream:
+		rw.Header().Set("Content-Type", "text/event-stream")
+		for _, ev := range [][2]string{
+			{"message_start", `{"type":"message_start","message":{"id":"m1","type":"message","role":"assistant","model":"` + body.Model + `","content":[],"stop_reason":null,"usage":{"input_tokens":9,"output_tokens":0}}}`},
+			{"content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`},
+			{"content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"no findings"}}`},
+			{"content_block_stop", `{"type":"content_block_stop","index":0}`},
+			{"message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":3}}`},
+			{"message_stop", `{"type":"message_stop"}`},
+		} {
+			_, _ = io.WriteString(rw, "event: "+ev[0]+"\ndata: "+ev[1]+"\n\n")
+		}
 	case r.Method == http.MethodPost && r.URL.Path == "/v1/models/lux/v1/generate":
 		_, _ = io.WriteString(rw, `{"id":"g1","model":"`+body.Model+`","blocks":[{"type":"text","text":"no findings"}],"stop_reason":"end_turn","usage":{"input_tokens":9,"output_tokens":3}}`)
 	default:

@@ -19,6 +19,25 @@ committed: the commit log already holds that.
   they were. `--models-url` and `LATERE_MODELS_URL` must end in
   `/v1/models`, as the default does; another address is refused before a
   round runs.
+- **`latere agents run` runs on Topos's current runtime.** The interactive
+  session, `-p`, `--dir`, `--model`, `/model`, `/help` and `/quit` work
+  as before, and so does the model order: `ANTHROPIC_API_KEY`, then the
+  provider `latere agents provider` saved, then the Latere API with your
+  model key. Ollama works as before, through its OpenAI endpoint; the
+  agent reads the model's context length from Ollama at the session's
+  first turn, and refuses a model Ollama reports none for. The agent still
+  runs every call without asking. Its file tools now reach the working
+  directory alone and refuse your credential files, and a model it has no
+  context window or output limit for is refused when the turn starts.
+
+### Removed
+
+- **Claude sign-in is no longer a provider for `latere agents run`; use an
+  Anthropic API key or the Latere API.** `latere agents provider` no
+  longer offers the browser sign-in, `CLAUDE_CODE_OAUTH_TOKEN` is no
+  longer read, and a Claude sign-in saved by an earlier version stops the
+  agent with a message that names `latere agents provider`. The
+  `claude.json` an earlier version saved is no longer read.
 
 ### Security
 

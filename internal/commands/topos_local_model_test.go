@@ -12,7 +12,6 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"latere.ai/x/topos/models"
 )
 
 func TestModelPickerSelection(t *testing.T) {
@@ -42,20 +41,32 @@ func TestModelPickerSelection(t *testing.T) {
 }
 
 func TestHandleLocalCommand(t *testing.T) {
-	noop := func(models.Model) error { return nil }
-	cur := "claude-opus-4-8"
+	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
+	agent, err := newLocalAgent(t.Context(), t.TempDir(), anthropicDirect("sk-test", "claude-opus-4-8"), func(localEvent) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := agent.close(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
 
-	if quit := handleLocalCommand(context.Background(), "/quit", &cur, noop); !quit {
+	if quit := handleLocalCommand(context.Background(), "/quit", agent); !quit {
 		t.Fatal("/quit should end the session")
 	}
-	if quit := handleLocalCommand(context.Background(), "/exit", &cur, noop); !quit {
+	if quit := handleLocalCommand(context.Background(), "/exit", agent); !quit {
 		t.Fatal("/exit should end the session")
 	}
 	// Non-terminating commands return false.
-	if quit := handleLocalCommand(context.Background(), "/help", &cur, noop); quit {
+	if quit := handleLocalCommand(context.Background(), "/help", agent); quit {
 		t.Fatal("/help should not end the session")
 	}
-	if quit := handleLocalCommand(context.Background(), "/bogus", &cur, noop); quit {
+	if quit := handleLocalCommand(context.Background(), "/bogus", agent); quit {
 		t.Fatal("unknown command should not end the session")
+	}
+	// /model <name> switches the model the next turn runs on.
+	if quit := handleLocalCommand(context.Background(), "/model claude-haiku-4-5", agent); quit || agent.modelName() != "claude-haiku-4-5" {
+		t.Fatalf("/model switched to %q", agent.modelName())
 	}
 }

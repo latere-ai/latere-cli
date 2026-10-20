@@ -8,17 +8,23 @@
 package commands
 
 import (
+	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 
-	"latere.ai/x/pkg/luxsdk"
+	"latere.ai/x/pkg/llmdialect/ir"
 	"latere.ai/x/topos/models"
-	toposlux "latere.ai/x/topos/models/lux"
+	"latere.ai/x/topos/models/dialect"
 
 	"github.com/latere-ai/latere-cli/internal/api"
 	"github.com/latere-ai/latere-cli/internal/modelkey"
@@ -28,12 +34,14 @@ import (
 // the caller should run the auth picker.
 var errNeedAuth = errors.New("no model credential configured")
 
-// providerConfig is the persisted choice of model provider for the local agent.
-// It is not a credential store for OAuth (that lives in claude.json); it records
-// the provider and any API key / Ollama settings.
+// providerConfig is the persisted choice of model provider for the local
+// agent: the provider and any API key / Ollama settings. A Claude sign-in
+// (anthropic with method oauth) was a choice of earlier versions, which is
+// no longer a provider; a file that holds one is refused with the command
+// that chooses again.
 type providerConfig struct {
-	Provider   string `json:"provider"`              // "anthropic" | "ollama"
-	Method     string `json:"method,omitempty"`      // anthropic: "oauth" | "apikey"
+	Provider   string `json:"provider"`              // "anthropic" | "ollama" | "lux"
+	Method     string `json:"method,omitempty"`      // anthropic: "apikey"
 	APIKey     string `json:"api_key,omitempty"`     // anthropic api key
 	Model      string `json:"model,omitempty"`       // optional model override
 	OllamaHost string `json:"ollama_host,omitempty"` // ollama base URL
@@ -106,134 +114,235 @@ func saveProviderConfig(c providerConfig) error {
 	return os.WriteFile(p, b, 0o600)
 }
 
+// localModel is the model a local session runs on: its name as the session
+// shows it, and connect, which answers the model a turn streams through,
+// where its requests go and the model's figures. connect is asked at each
+// turn, so choosing a model reaches nothing until a turn runs on it.
+type localModel struct {
+	name    string
+	connect func(ctx context.Context) (models.Model, models.Connection, models.Entry, error)
+}
+
+// localDialect is the model over HTTP every local turn streams through,
+// with the CLI's traced client.
+var localDialect = &dialect.Model{Client: api.HTTPClient()}
+
+// The direct Anthropic connection: Anthropic's API, and the model a session
+// runs when none is named.
+const (
+	anthropicURL          = "https://api.anthropic.com"
+	defaultAnthropicModel = "claude-opus-4-8"
+)
+
+// errRetiredProvider is a saved Claude sign-in, which is no longer a
+// provider.
+var errRetiredProvider = errors.New("the saved provider is a Claude sign-in, which is no longer a provider; use an Anthropic API key, chosen with `latere agents provider` or set as ANTHROPIC_API_KEY, or the Latere API after `latere login`")
+
 // buildLocalModel resolves the model for `latere agents run`. Resolution
-// order: an explicit ANTHROPIC_API_KEY; a saved provider choice (the picker);
-// the Latere models at the origin when signed in to latere or handed a model
-// key (the default, billed to the key's context); an ambient
-// CLAUDE_CODE_OAUTH_TOKEN; a legacy stored Claude login. If nothing is
-// available it returns errNeedAuth so the caller runs the picker.
-func buildLocalModel(ctx context.Context, modelName string) (models.Model, error) {
+// order: an explicit ANTHROPIC_API_KEY; a saved provider choice (the
+// picker); the Latere models at the origin when signed in to latere or
+// handed a model key (the default, billed to the key's context). If
+// nothing is available it returns errNeedAuth so the caller runs the
+// picker.
+func buildLocalModel(ctx context.Context, modelName string) (localModel, error) {
 	// 1. An explicit API key always wins.
 	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
-		return anthropicDirect(key, false, modelName)
+		return anthropicDirect(key, modelName), nil
 	}
 
 	// 2. An explicit provider choice (the picker / `latere agents provider`)
-	// wins over the ambient defaults below. A retired variable naming the
-	// file is an error, not a reason to fall through to another provider.
+	// wins over the default below. A retired variable naming the file is
+	// an error, not a reason to fall through to another provider.
 	cfg, err := loadProviderConfig()
 	if _, renamed := errors.AsType[*renamedEnvError](err); renamed {
-		return nil, err
+		return localModel{}, err
 	}
 	if err == nil && cfg.Provider != "" {
-		return modelFromProviderConfig(ctx, cfg, modelName)
+		return modelFromProviderConfig(cfg, modelName)
 	}
 
 	// 3. The Latere models at the origin (the default once signed in to
 	// latere). The call presents the model key and the core holds the
-	// upstream provider credentials, so this does not share (or get
-	// rate-limited alongside) a Claude Code subscription token. This is the
-	// "it just works after login" path: no provider credential, cost drawn
-	// from the key's context.
+	// upstream provider credentials, so no provider credential is on this
+	// machine and the cost is drawn from the key's context.
 	_, handedKey := modelkey.FromEnv()
 	if _, err := api.LoadAuthToken(); err == nil || handedKey {
-		return originLocalModel(modelName)
+		return originLocalModel(modelName), nil
 	}
+	return localModel{}, errNeedAuth
+}
 
-	// 4. The ambient Claude Code OAuth token (shared with Claude Code; this is the
-	// rate-limited subscription token — only used when not signed in to latere).
-	for _, env := range []string{"CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN_AUTO"} {
-		if tok := os.Getenv(env); tok != "" {
-			return anthropicDirect(tok, true, modelName)
+// anthropicDirect is a model at Anthropic's API, called with key: the
+// requests are Anthropic's Messages, with no gateway in the path.
+func anthropicDirect(key, modelName string) localModel {
+	name := cmp.Or(modelName, defaultAnthropicModel)
+	return localModel{name: name, connect: func(context.Context) (models.Model, models.Connection, models.Entry, error) {
+		entry, err := catalogEntry(name)
+		if err != nil {
+			return nil, models.Connection{}, models.Entry{}, err
 		}
-	}
-
-	// 5. A stored Claude login with no provider config (legacy).
-	if tok, berr := claudeOAuthBearer(ctx); berr == nil && tok != "" {
-		return anthropicDirect(tok, true, modelName)
-	}
-	return nil, errNeedAuth
+		return localDialect, models.Connection{
+			BaseURL: anthropicURL, Model: name, Family: models.FamilyAnthropic,
+			Dialect: ir.DialectAnthropicMessages, Credential: key,
+		}, entry, nil
+	}}
 }
 
-// anthropicDirect builds a provider-direct Anthropic model via luxsdk:
-// the lux format translated client-side, no gateway in the path. oauth
-// selects bearer + OAuth-beta auth (Claude subscription tokens) over
-// x-api-key.
-func anthropicDirect(credential string, oauth bool, modelName string) (models.Model, error) {
-	var opts []luxsdk.Option
-	if oauth {
-		opts = append(opts, luxsdk.WithOAuthToken())
-	}
-	d, err := luxsdk.NewDirect(luxsdk.ProviderAnthropic, credential, "", opts...)
+// catalogEntry is the figures of a model the catalog built into topos
+// names; a model it does not know is refused.
+func catalogEntry(name string) (models.Entry, error) {
+	cat, err := models.Embedded()
 	if err != nil {
-		return nil, err
+		return models.Entry{}, err
 	}
-	var lopts []toposlux.Option
-	if modelName != "" {
-		lopts = append(lopts, toposlux.WithModel(modelName))
-	}
-	return toposlux.NewFromCaller(d, lopts...), nil
+	return cat.Resolve(name)
 }
 
-// originLocalModel calls models through the core's OpenAI door at the
-// origin: luxsdk's direct mode translates the agent's requests to Chat
-// Completions on this machine, and the door translates again for a Model
-// whose provider speaks another dialect. The bearer is the model key, which
-// modelKeySource has the core accept before the first call.
-func originLocalModel(modelName string) (models.Model, error) {
-	model := modelName
-	if model == "" {
-		model = defaultCatalogModel
-	}
-	d, err := luxsdk.NewDirect(luxsdk.ProviderOpenAI, "", resolveModelsURL("")+openAIDoor,
-		luxsdk.WithTokenSource(bearerSource(modelKeySource("", ""))))
-	if err != nil {
-		return nil, err
-	}
-	return toposlux.NewFromCaller(d, toposlux.WithModel(model)), nil
+// originLocalModel calls models through the core at the origin, which the
+// models URL names as a Lux root: each request goes to the door of its
+// model's family, with the model key, which modelKeySource has the core
+// accept before the first call, and the figures are the catalog's overlaid
+// by those the door lists for the key.
+func originLocalModel(modelName string) localModel {
+	name := cmp.Or(modelName, defaultCatalogModel)
+	key := modelKeySource("", "")
+	base := resolveModelsURL("")
+	var (
+		mu    sync.Mutex
+		doors models.Doors
+		found bool
+	)
+	return localModel{name: name, connect: func(ctx context.Context) (models.Model, models.Connection, models.Entry, error) {
+		credential, err := key(ctx)
+		if err != nil {
+			return nil, models.Connection{}, models.Entry{}, err
+		}
+		mu.Lock()
+		if !found {
+			if doors, err = dialect.Discover(ctx, api.HTTPClient(), base); err == nil {
+				found = true
+			}
+		}
+		at := doors
+		mu.Unlock()
+		if err != nil {
+			return nil, models.Connection{}, models.Entry{}, fmt.Errorf("read the models at %s: %w", base, err)
+		}
+		cat, err := models.Embedded()
+		if err != nil {
+			return nil, models.Connection{}, models.Entry{}, err
+		}
+		first := cat.Overlay(name)
+		conn := models.Connection{BaseURL: base, Model: name, Family: first.Family, Dialect: first.Dialect, Credential: credential}
+		conn.BaseURL = at.Door(base, conn.EffectiveDialect())
+		var served models.Entry
+		if models.NamesADoor(conn.BaseURL) {
+			if served, err = dialect.Served(ctx, api.HTTPClient(), conn); err != nil {
+				return nil, models.Connection{}, models.Entry{}, err
+			}
+		}
+		entry, err := cat.Resolve(name, served)
+		if err != nil {
+			return nil, models.Connection{}, models.Entry{}, err
+		}
+		conn.Family, conn.Dialect = entry.Family, entry.Dialect
+		return localDialect, conn, entry, nil
+	}}
 }
-
-// bearerSource adapts a bearer function to luxsdk.TokenSource.
-type bearerSource func(ctx context.Context) (string, error)
-
-// Token answers the bearer of one call.
-func (f bearerSource) Token(ctx context.Context) (string, error) { return f(ctx) }
 
 // modelFromProviderConfig builds the model for an explicit provider choice.
-func modelFromProviderConfig(ctx context.Context, cfg providerConfig, modelName string) (models.Model, error) {
-	model := modelName
-	if model == "" {
-		model = cfg.Model
+func modelFromProviderConfig(cfg providerConfig, modelName string) (localModel, error) {
+	model := cmp.Or(modelName, cfg.Model)
+	switch {
+	case cfg.Provider == "lux":
+		return originLocalModel(model), nil
+	case cfg.Provider == "anthropic" && cfg.Method == "apikey" && cfg.APIKey != "":
+		return anthropicDirect(cfg.APIKey, model), nil
+	case cfg.Provider == "anthropic" && cfg.Method == "oauth":
+		return localModel{}, errRetiredProvider
+	case cfg.Provider == "ollama":
+		return ollamaModel(cmp.Or(cfg.OllamaHost, defaultOllamaHost), cmp.Or(model, defaultOllamaModel)), nil
 	}
-	switch cfg.Provider {
-	case "lux":
-		return originLocalModel(model)
-	case "anthropic":
-		if cfg.Method == "apikey" && cfg.APIKey != "" {
-			return anthropicDirect(cfg.APIKey, false, model)
+	return localModel{}, errNeedAuth
+}
+
+// The Ollama connection: the host it serves on, the model a session runs
+// when none is named, and the output limit of every request, the one the
+// agent's earlier runtime asked of Ollama, since Ollama answers none.
+const (
+	defaultOllamaHost  = "http://localhost:11434"
+	defaultOllamaModel = "llama3.1"
+	ollamaMaxOutput    = 8192
+)
+
+// maxOllamaShow bounds Ollama's answer about a model, which without
+// verbose names its parameters, template and metadata.
+const maxOllamaShow = 4 << 20
+
+// ollamaModel is a model Ollama serves at host, called through its OpenAI
+// Chat Completions endpoint with no credential. The input window is the
+// context length Ollama reports for the model, read once at the session's
+// first turn; a model it reports none for is refused, since the agent
+// needs one to know when to compact the context.
+func ollamaModel(host, name string) localModel {
+	host = strings.TrimRight(host, "/")
+	var (
+		mu     sync.Mutex
+		window int64
+	)
+	return localModel{name: name, connect: func(ctx context.Context) (models.Model, models.Connection, models.Entry, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if window == 0 {
+			w, err := ollamaContextLength(ctx, host, name)
+			if err != nil {
+				return nil, models.Connection{}, models.Entry{}, err
+			}
+			window = w
 		}
-		tok, err := claudeOAuthBearer(ctx)
-		if err != nil {
-			return nil, err
-		}
-		if tok == "" {
-			return nil, errNeedAuth
-		}
-		return anthropicDirect(tok, true, model)
-	case "ollama":
-		host := cfg.OllamaHost
-		if host == "" {
-			host = "http://localhost:11434"
-		}
-		if model == "" {
-			model = "llama3.1" // the old adapter's default tool-capable model
-		}
-		d, err := luxsdk.NewDirect(luxsdk.ProviderOllama, "", host)
-		if err != nil {
-			return nil, err
-		}
-		return toposlux.NewFromCaller(d, toposlux.WithModel(model)), nil
-	default:
-		return nil, errNeedAuth
+		return localDialect, models.Connection{
+			BaseURL: host, Model: name, Family: models.FamilyOther, Dialect: ir.DialectOpenAIChat,
+		}, models.Entry{
+			Name: name, Family: models.FamilyOther, Dialect: ir.DialectOpenAIChat,
+			InputWindow: window, MaxOutputTokens: ollamaMaxOutput,
+		}, nil
+	}}
+}
+
+// ollamaContextLength is the context length Ollama reports for model at
+// host: the "<architecture>.context_length" of its POST /api/show answer.
+func ollamaContextLength(ctx context.Context, host, model string) (int64, error) {
+	body, err := json.Marshal(map[string]string{"model": model})
+	if err != nil {
+		return 0, err
 	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, host+"/api/show", bytes.NewReader(body))
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := api.HTTPClient().Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("reach Ollama at %s: %w", host, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxOllamaShow))
+	if err != nil {
+		return 0, fmt.Errorf("read Ollama's answer about %s: %w", model, err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("the Ollama at %s answered %d about %s: %s", host, resp.StatusCode, model, truncLine(string(raw), 200))
+	}
+	var show struct {
+		ModelInfo map[string]any `json:"model_info"`
+	}
+	if err := json.Unmarshal(raw, &show); err != nil {
+		return 0, fmt.Errorf("read Ollama's answer about %s: %w", model, err)
+	}
+	arch, _ := show.ModelInfo["general.architecture"].(string)
+	length, _ := show.ModelInfo[arch+".context_length"].(float64)
+	if arch == "" || length < 1 {
+		return 0, fmt.Errorf("the Ollama at %s reports no context length for %s, and the agent needs one to know when to compact the conversation; choose another model with /model or --model", host, model)
+	}
+	return int64(length), nil
 }

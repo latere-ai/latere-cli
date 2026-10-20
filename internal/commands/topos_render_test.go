@@ -11,8 +11,6 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-
-	toposlux "latere.ai/x/topos/models/lux"
 )
 
 func TestSummarizeToolInput(t *testing.T) {
@@ -34,13 +32,6 @@ func TestSummarizeToolInput(t *testing.T) {
 				t.Fatalf("summarizeToolInput(%s) = %q, want %q", tc.in, got, tc.want)
 			}
 		})
-	}
-}
-
-func TestModelString(t *testing.T) {
-	m := toposlux.New("k", "", toposlux.WithModel("claude-test-9"))
-	if got := modelString(m); got != "claude-test-9" {
-		t.Fatalf("modelString = %q, want claude-test-9", got)
 	}
 }
 

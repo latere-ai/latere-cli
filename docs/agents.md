@@ -21,9 +21,12 @@ latere agents run --model anthropic/claude-sonnet-4.6   # pick the model
 ```
 
 The agent reads, edits, and runs commands directly in the working
-directory, as you, with no isolation and no approval prompt. Run it where
-you would run a coding assistant of your own, not in a directory you do
-not want changed. It needs no workload and no hosted session.
+directory, as you, with no approval prompt. Its file tools reach the
+working directory alone and refuse your credential files; its commands run
+as your own processes, with no sandbox. Run it where you would run a coding
+assistant of your own, not in a directory you do not want changed. It
+needs no workload and no hosted session, and keeps no record of the session
+once it exits.
 
 Inside the interactive session, `/model <name>` switches the model,
 `/model` alone lists the models your model key reaches, `/help` lists the
@@ -33,7 +36,8 @@ commands, and `/quit` leaves.
 
 `latere agents run` uses the first of these that is available:
 
-1. `ANTHROPIC_API_KEY`, calling Anthropic directly.
+1. `ANTHROPIC_API_KEY`, calling Anthropic directly. The default model is
+   `claude-opus-4-8`.
 2. The provider you chose with `latere agents provider`.
 3. The Latere API, when you are signed in with `latere login` or hand the
    CLI a key with `LATERE_MODEL_KEY`: the call presents your
@@ -41,23 +45,34 @@ commands, and `/quit` leaves.
    with no provider key on your machine. This is the default once you are
    signed in. Name a model as `latere models` lists it; the default is
    `anthropic/claude-sonnet-4.6`.
-4. `CLAUDE_CODE_OAUTH_TOKEN`, the token Claude Code uses, which shares
-   Claude Code's rate limit.
 
 With none of them, an interactive session opens the provider picker, and
 `-p` or a run without a terminal stops with an error that names what to
-set.
+set. A model the agent has no figures for, its context window and output
+limit, is refused when the turn starts.
 
 ```sh
 latere agents provider
 ```
 
-opens the same picker: sign in with Claude in your browser, paste an
-Anthropic API key, or use Ollama for models running on this machine. The
-choice is saved in your user configuration directory and wins over
-`CLAUDE_CODE_OAUTH_TOKEN`, so an API key or Ollama keeps the local agent
-off Claude Code's shared rate limit. A choice saved by an earlier version
-is moved to the current file the first time it is read.
+opens the same picker: paste an Anthropic API key, or use Ollama for models
+running on this machine. The choice is saved in your user configuration
+directory and wins over the Latere API. A choice saved by an earlier
+version under another name is moved to the current file the first time it
+is read.
+
+With Ollama, the agent calls the models Ollama serves on this machine,
+`http://localhost:11434` unless the saved choice names another host, with
+no key; the default model is `llama3.1`. At the session's first turn it
+reads the model's context length from Ollama, and asks at most 8192 tokens
+of each answer. A model Ollama reports no context length for is refused,
+with a message that says to choose another with `/model` or `--model`.
+
+Claude sign-in is no longer a provider; use an Anthropic API key or the
+Latere API. Neither the browser sign-in `latere agents provider` used to
+offer nor `CLAUDE_CODE_OAUTH_TOKEN` is read, and a Claude sign-in saved by
+an earlier version stops the agent with a message that names
+`latere agents provider`.
 
 ## Reviewing a Claude Code session
 
@@ -144,7 +159,7 @@ The critic model is billed to your current context; the console's Billing sectio
 
 | Setting | Purpose |
 |---------|---------|
-| `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN` | Model credentials for `latere agents run`, in the order above. |
+| `ANTHROPIC_API_KEY` | The Anthropic API key `latere agents run` calls Anthropic with, ahead of every other provider. |
 | `LATERE_AGENT_PROVIDER_FILE` | Where `latere agents provider` keeps the choice. |
 
 [configuration.md](configuration.md) lists the files `latere agents provider`

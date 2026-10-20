@@ -20,9 +20,9 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 	latere.ai/x/agon v0.3.0
 	latere.ai/x/cella v0.18.0
-	latere.ai/x/pkg v0.103.0
+	latere.ai/x/pkg v0.106.0
 	latere.ai/x/sdk-go v0.1.0
-	latere.ai/x/topos v0.7.0
+	latere.ai/x/topos v0.50.2
 )
 
 require (
@@ -68,6 +68,7 @@ require (
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/bridges/otelslog v0.20.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.71.0 // indirect
+	go.opentelemetry.io/contrib/instrumentation/runtime v0.71.0 // indirect
 	go.opentelemetry.io/otel v1.46.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp v0.22.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp v1.46.0 // indirect

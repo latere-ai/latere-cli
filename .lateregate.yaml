@@ -3,10 +3,10 @@
 # fails the same way on a laptop.
 
 hermetic:
-  # One directory, for one binary. The host-sandbox tests run commands through
-  # sh, which is /bin/sh on both a laptop and a runner; with allow: [] three
-  # of them fail rather than skip, so the entry is measured rather than
-  # assumed. Nothing else is on PATH: the upgrade path is tested against a
+  # One directory, for one binary. The local agent's tests run commands
+  # through the host machine's shell, /bin/sh on both a laptop and a runner;
+  # with allow: [] they fail rather than skip, so the entry is measured
+  # rather than assumed. Nothing else is on PATH: the upgrade path is tested against a
   # synthesised archive rather than by running one, and every network test
   # talks to an httptest server.
   allow: [/bin]
