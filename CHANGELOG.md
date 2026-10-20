@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.27.1 - 2026-10-20
+
 ### Fixed
 
 - **`latere` builds for Windows again.** v0.27.0 was tagged but not
