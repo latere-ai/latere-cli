@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.29.0 - 2026-10-20
+
 ### Changed
 
 - **`latere apps` reaches the platform through the Latere Go SDK.** Its
