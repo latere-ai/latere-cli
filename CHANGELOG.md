@@ -12,12 +12,11 @@ committed: the commit log already holds that.
 
 ### Changed
 
-- **A model command makes your personal key before you add credit.** In
-  your personal account, `latere models` and the other model commands no
-  longer stop with "no model key was made" when your wallet has never
-  held credit you bought. They make the key, and a model call with it
-  says the key calls no model yet and where to add credit. After your
-  first top-up the same key works, without being made again.
+- **A model command makes your personal key whatever your wallet holds.**
+  In your personal account, `latere models` and the other model commands
+  no longer stop with "no model key was made" when your wallet has never
+  held credit you bought. They make the key, and its calls spend your
+  wallet, the monthly credit Latere gives you included.
 
 ## v0.27.1 - 2026-10-20
 

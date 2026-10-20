@@ -48,25 +48,7 @@ type keyWorld struct {
 	accept func(bearer string, call int32) bool
 	calls  atomic.Int32
 	n      int
-	// wallet is what the platform's wallet read answers, and walletReads
-	// the bearer of each read.
-	wallet      string
-	walletReads []string
-	// refusal is what the core answers a bearer accept turns down: a key
-	// it does not know, unless set.
-	refusal string
 }
-
-// refusedDisabled is the core's answer for a Key it holds disabled.
-const refusedDisabled = `{"error":{"code":"key_disabled","message":"This key is disabled."}}`
-
-// walletBought is the platform's wallet read of a person whose wallet has
-// held bought credit, and walletGiven one whose wallet holds only credit
-// Latere gave.
-const (
-	walletBought = `{"state":"active","spendable_micro":5000000,"bought":true}`
-	walletGiven  = `{"state":"active","spendable_micro":1000000,"bought":false}`
-)
 
 // modelsURL is the stub core's base, the one the origin serves at
 // /v1/models.
@@ -84,7 +66,7 @@ func newKeyWorld(t *testing.T, orgID string) *keyWorld {
 	t.Setenv("LATERE_NO_UPDATE_CHECK", "1")
 	t.Setenv(modelkey.EnvKey, "")
 	t.Setenv("LATERE_MODELS_URL", "")
-	w := &keyWorld{status: "active", accept: func(string, int32) bool { return true }, wallet: walletBought}
+	w := &keyWorld{status: "active", accept: func(string, int32) bool { return true }}
 	w.store = modelkey.File{Path: filepath.Join(t.TempDir(), "model-keys.json")}
 	w.srv = httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		switch {
@@ -115,23 +97,12 @@ func newKeyWorld(t *testing.T, orgID string) *keyWorld {
 			rw.WriteHeader(http.StatusNoContent)
 		case strings.HasPrefix(r.URL.Path, "/v1/models/openai/v1/"):
 			w.serveCore(t, rw, r)
-		case r.Method == http.MethodGet && r.URL.Path == "/v1/account/wallet":
-			w.mu.Lock()
-			w.walletReads = append(w.walletReads, r.Header.Get("Authorization"))
-			answer := w.wallet
-			w.mu.Unlock()
-			if strings.Contains(answer, `"error"`) {
-				rw.WriteHeader(http.StatusServiceUnavailable)
-			}
-			_, _ = io.WriteString(rw, answer)
 		default:
 			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
 			http.NotFound(rw, r)
 		}
 	}))
 	t.Cleanup(w.srv.Close)
-	t.Setenv("LATERE_PLATFORM_URL", w.srv.URL)
-	t.Setenv("LATERE_PLATFORM_TOKEN", "platform-token")
 
 	claims := map[string]any{"sub": "u1", "principal_type": "user", "org_id": orgID,
 		"exp": time.Now().Add(time.Hour).Unix()}
@@ -169,11 +140,6 @@ func (w *keyWorld) serveCore(t *testing.T, rw http.ResponseWriter, r *http.Reque
 	w.core = append(w.core, coreCall{path: r.URL.Path, bearer: bearer, model: body.Model, stream: body.Stream})
 	w.mu.Unlock()
 	if !w.accept(bearer, n) {
-		if w.refusal != "" {
-			rw.WriteHeader(http.StatusForbidden)
-			_, _ = io.WriteString(rw, w.refusal)
-			return
-		}
 		rw.WriteHeader(http.StatusUnauthorized)
 		_, _ = io.WriteString(rw, `{"error":{"code":"unauthenticated","message":"This request needs a valid credential."}}`)
 		return
@@ -429,65 +395,4 @@ func TestModelKeySourceReportsARefusedHandedKey(t *testing.T) {
 	if len(w.requests) != 0 || w.calls.Load() != 1 {
 		t.Fatalf("created %d keys, %d core calls; want none and one", len(w.requests), w.calls.Load())
 	}
-}
-
-// A personal key is made at any time; the platform opens it at the model
-// service only once the person's wallet has held credit they bought. So a
-// model command in the personal context makes the key without asking the
-// wallet, and when the core answers key_disabled for it, the command reads
-// the wallet and says the key waits for credit and where to add it. A key
-// whose wallet has held bought credit, a key of an organization's context
-// and a deployment without wallets answer the core's own refusal.
-func TestAPersonalModelKeyWaitsForBoughtCredit(t *testing.T) {
-	disabled := func(w *keyWorld) { w.accept = func(string, int32) bool { return false }; w.refusal = refusedDisabled }
-	t.Run("never bought", func(t *testing.T) {
-		w := newKeyWorld(t, "")
-		w.wallet = walletGiven
-		disabled(w)
-		out, _, err := w.run(t, "models")
-		if err == nil || !strings.Contains(err.Error(), "credit you bought") || !strings.Contains(err.Error(), "/console/billing") || out != "" {
-			t.Fatalf("models = %q %v, want why the key calls no model and where to add credit", out, err)
-		}
-		if len(w.requests) != 1 {
-			t.Fatalf("auth was asked for %d keys, want the one made before credit", len(w.requests))
-		}
-		if len(w.walletReads) != 1 || w.walletReads[0] != "Bearer platform-token" {
-			t.Fatalf("wallet reads = %v, want one with the platform's bearer, after the core's refusal", w.walletReads)
-		}
-		// The key is kept: a top-up opens it, and the next command uses it.
-		w.accept = func(string, int32) bool { return true }
-		if _, _, err := w.run(t, "models"); err != nil || len(w.requests) != 1 {
-			t.Fatalf("after a top-up: %v, %d keys made", err, len(w.requests))
-		}
-	})
-	for name, set := range map[string]func(*keyWorld){
-		"bought": func(w *keyWorld) {},
-		"no wallets on the deployment": func(w *keyWorld) {
-			w.wallet = `{"error":{"code":"wallet_unconfigured","message":"The wallet is not available on this deployment."}}`
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			w := newKeyWorld(t, "")
-			set(w)
-			disabled(w)
-			if _, _, err := w.run(t, "models"); err == nil || !strings.Contains(err.Error(), "key_disabled") || strings.Contains(err.Error(), "credit you bought") {
-				t.Fatalf("models = %v, want the core's refusal", err)
-			}
-		})
-	}
-	t.Run("organization", func(t *testing.T) {
-		w := newKeyWorld(t, "org-1")
-		w.wallet = walletGiven
-		disabled(w)
-		if _, _, err := w.run(t, "models"); err == nil || !strings.Contains(err.Error(), "key_disabled") || len(w.walletReads) != 0 {
-			t.Fatalf("models = %v with wallet reads %v, want the core's refusal and no read", err, w.walletReads)
-		}
-	})
-	t.Run("a key that works reads no wallet", func(t *testing.T) {
-		w := newKeyWorld(t, "")
-		w.wallet = walletGiven
-		if _, _, err := w.run(t, "models"); err != nil || len(w.walletReads) != 0 {
-			t.Fatalf("models = %v with wallet reads %v", err, w.walletReads)
-		}
-	})
 }

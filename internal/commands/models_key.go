@@ -95,9 +95,6 @@ func callWithModelKey(ctx context.Context, keys *modelkey.Keys, l modelkey.Login
 			if err != nil && res.Record.Status == "pending_approval" && errors.As(err, &ae) && ae.Status == http.StatusUnauthorized {
 				return nil, errors.New("the model key waits for an org admin's approval; ask one to approve it in the console")
 			}
-			if err != nil && !res.FromEnv && errors.As(err, &ae) && ae.Status == http.StatusForbidden && ae.Code == "key_disabled" {
-				return nil, explainDisabled(ctx, l, res.Record, err)
-			}
 			return raw, err
 		}
 		fmt.Fprintf(os.Stderr, "note: the model key %s was refused; replacing it\n", res.Record.Prefix)
@@ -107,37 +104,6 @@ func callWithModelKey(ctx context.Context, keys *modelkey.Keys, l modelkey.Login
 		}
 		res, replaced = next, true
 	}
-}
-
-// accountWalletPath is the platform's read of the wallet of the token's
-// context, which answers whether it has held bought credit.
-const accountWalletPath = "/v1/account/wallet"
-
-// explainDisabled says why the core answered key_disabled for the login's
-// own key. A personal key is created at any time, but the platform opens
-// it at the model service only once the person's wallet has held bought
-// credit, a top-up or a platform administrator's grant, since the credit
-// Latere gives is spent through agent sessions alone. When the wallet read
-// says it has held none, the answer is that sentence and where to add
-// credit; otherwise it is the core's own refusal.
-func explainDisabled(ctx context.Context, l modelkey.Login, r modelkey.Record, disabled error) error {
-	if l.OrgID != "" {
-		return disabled
-	}
-	var wallet struct {
-		Bought *bool `json:"bought"`
-	}
-	err := platformCall(ctx, "", l.AuthBase, http.MethodGet, accountWalletPath, nil, &wallet)
-	if pe, ok := errors.AsType[*platformError](err); ok && pe.Code == "wallet_unconfigured" {
-		return disabled
-	}
-	if err != nil {
-		return fmt.Errorf("%w (whether your wallet has held bought credit could not be read: %w)", disabled, wrapReposErr(err))
-	}
-	if wallet.Bought == nil || *wallet.Bought {
-		return disabled
-	}
-	return fmt.Errorf("the model key %s calls no model yet: in your personal account a key calls models once your wallet has held credit you bought, and the credit Latere gives you is spent through agent sessions. Add credit at https://platform.latere.ai/console/billing and the key works without being made again, or switch to an organization with `latere org`", r.Prefix)
 }
 
 // callWhileFresh makes the call, and retries its 401 while the key is young
