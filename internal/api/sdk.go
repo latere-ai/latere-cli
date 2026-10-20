@@ -22,38 +22,20 @@ const userAgent = "latere-cli"
 // that lapses on the way.
 const actorEarly = 30 * time.Second
 
-// AuthError is a failure to get the bearer a product command presents,
-// before any request reached the product: no saved login, a login that
-// cannot be refreshed, or an actor token the issuer did not mint. Err is
-// what ActorToken said.
-type AuthError struct {
-	Err error
-}
-
-func (e *AuthError) Error() string { return e.Err.Error() }
-
-func (e *AuthError) Unwrap() error { return e.Err }
-
 // actorTokens returns the actor tokens for audience minted from the saved
 // login at the issuer authURL resolves, each held until shortly before it
-// expires. Concurrent calls share one mint. A failure is an *AuthError.
-// The source has no Reset, so a product's 401 is not sent again with a
-// new token: the command reports it, as it always has.
+// expires. Concurrent calls share one mint. A failure to mint reaches the
+// command as a *latere.TokenError, before any request is sent. The source
+// can drop its token, so a product's 401 is sent once more with a token
+// minted again, which rides out a token revoked or expired early.
 func actorTokens(authURL, audience string) latere.TokenSource {
-	minted := latere.ReuseToken(latere.TokenSourceFunc(func(ctx context.Context) (latere.Token, error) {
+	return latere.ReuseToken(latere.TokenSourceFunc(func(ctx context.Context) (latere.Token, error) {
 		t, expiry, err := ActorToken(ctx, authURL, audience)
 		if err != nil {
 			return latere.Token{}, err
 		}
 		return latere.Token{Value: t, Expiry: expiry}, nil
 	}), actorEarly)
-	return latere.TokenSourceFunc(func(ctx context.Context) (latere.Token, error) {
-		t, err := minted.Token(ctx)
-		if err != nil {
-			return latere.Token{}, &AuthError{Err: err}
-		}
-		return t, nil
-	})
 }
 
 // HTTPClient is the client the CLI's SDK configurations send with: traced,
@@ -86,8 +68,10 @@ type Product struct {
 // Config builds the SDK configuration for p: the given token, or actor
 // tokens for p.Audience minted from the saved login and minted again as
 // they lapse, so a long command keeps working; the CLI's traced HTTP
-// client; and the CLI's User-Agent. Every request is sent once: a command
-// reports a failure rather than retrying it, as the CLI always has.
+// client; and the CLI's User-Agent. The SDK's retries stay on: a request
+// that is safe to repeat is sent again after a network failure or a
+// temporary refusal (429, 5xx), so a command rides out a brief outage
+// instead of failing on it.
 func (p Product) Config() (*latere.Config, error) {
 	tokens := actorTokens(ResolveAuthURL(p.BaseURL, p.AuthURL), p.Audience)
 	if p.Token != "" {
@@ -98,7 +82,6 @@ func (p Product) Config() (*latere.Config, error) {
 		latere.WithBaseURL(p.BaseURL),
 		latere.WithHTTPClient(HTTPClient()),
 		latere.WithUserAgent(userAgent),
-		latere.WithMaxRetries(0),
 	}
 	if p.Timeout > 0 {
 		opts = append(opts, latere.WithTimeout(p.Timeout))
