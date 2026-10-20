@@ -20,6 +20,7 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 	latere.ai/x/cella v0.18.0
 	latere.ai/x/pkg v0.103.0
+	latere.ai/x/sdk-go v0.0.0-00010101000000-000000000000
 	latere.ai/x/topos v0.7.0
 )
 
@@ -91,3 +92,5 @@ require (
 )
 
 tool latere.ai/x/ci-gate/cmd/lateregate
+
+replace latere.ai/x/sdk-go => ../sdk-cli

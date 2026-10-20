@@ -17,6 +17,7 @@ import (
 	"golang.org/x/oauth2"
 	"latere.ai/x/pkg/authkit/oidc"
 	"latere.ai/x/pkg/otel"
+	"latere.ai/x/sdk-go/latere"
 )
 
 // LoginScopes is the single scope set the CLI requests from auth, at
@@ -85,13 +86,25 @@ func ActorToken(ctx context.Context, authURL, audience string) (string, time.Tim
 	if err != nil {
 		return "", time.Time{}, err
 	}
+	// The login is read first, so its own failures reach the caller as
+	// they always have; the exchange is the SDK's, through a configuration
+	// that sends it with the CLI's traced client and User-Agent.
+	actor, err := latere.NewActorTokens(latere.StaticToken(access),
+		latere.WithIssuer(authBase), latere.WithAudience(audience))
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	if _, err := latere.NewConfig(latere.WithTokenSource(actor), latere.WithHTTPClient(HTTPClient()),
+		latere.WithUserAgent(userAgent)); err != nil {
+		return "", time.Time{}, err
+	}
 	mintCtx, cancel := context.WithTimeout(ctx, actorMintTimeout)
 	defer cancel()
-	token, expiry, err := oidc.MintActorToken(mintCtx, authBase, access, audience)
+	token, err := actor.Token(mintCtx)
 	if err != nil {
-		return "", time.Time{}, fmt.Errorf("%w; if this persists run `latere login`", err)
+		return "", time.Time{}, fmt.Errorf("actor token for %s: %w; if this persists run `latere login`", audience, err)
 	}
-	return token, expiry, nil
+	return token.Value, token.Expiry, nil
 }
 
 // LoginToken returns the saved login token's access token and the issuer
