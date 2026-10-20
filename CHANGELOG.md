@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.27.0 - 2026-10-20
+
 ### Changed
 
 - **On macOS, `latere devices` needs nothing installed.** Every command a
