@@ -121,10 +121,12 @@ type localModel struct {
 var localDialect = &dialect.Model{Client: api.HTTPClient()}
 
 // The direct Anthropic connection: Anthropic's API, and the model a session
-// runs when none is named.
+// runs when none is named. The model is the newest Opus the catalog built
+// into Topos gives figures for; a name the catalog does not know is refused
+// at the turn.
 const (
 	anthropicURL          = "https://api.anthropic.com"
-	defaultAnthropicModel = "claude-opus-4-8"
+	defaultAnthropicModel = "claude-opus-5"
 )
 
 // errRetiredProvider is a saved Claude sign-in, which is no longer a

@@ -47,6 +47,12 @@ committed: the commit log already holds that.
   `~/Library/Caches/ai.latere.studio`, where the app keeps its local copy
   of your conversations. The app denied them already when it serves the
   computer; now `latere devices connect` and `serve` deny them too.
+- **The default models are from the Claude 5 family.** `latere agents run`
+  calls `claude-opus-5` when it calls Anthropic directly with
+  `ANTHROPIC_API_KEY`, where it called `claude-opus-4-8`, and
+  `anthropic/claude-sonnet-5` through the Latere API, where it called
+  `anthropic/claude-sonnet-4.6`; `latere agents review`'s critics default
+  to `anthropic/claude-sonnet-5` too. `--model` still picks another.
 
 ### Removed
 

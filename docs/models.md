@@ -11,7 +11,7 @@ latere models         # the models your key reaches, one name per line
 latere models --json  # the same list as JSON
 ```
 
-A model is named as the catalog names it, with its provider in front: `anthropic/claude-sonnet-4.6`, `openai/gpt-4.1-mini`. That name is what every other command, and every SDK call, takes.
+A model is named as the catalog names it, with its provider in front: `anthropic/claude-sonnet-5.5`, `openai/gpt-4.1-mini`. That name is what every other command, and every SDK call, takes.
 
 The list carries names only. Prices per million tokens are in the console's Models section, and what you spent is in its Billing section.
 
@@ -29,7 +29,7 @@ eval "$(latere models env --provider anthropic)"  # Anthropic SDK: ANTHROPIC_BAS
 | `openai` (the default) | `https://api.latere.ai/v1/models/openai/v1` | `OPENAI_API_KEY` |
 | `anthropic` | `https://api.latere.ai/v1/models/anthropic` | `ANTHROPIC_API_KEY` |
 
-`--provider` picks the SDK's dialect, not who serves the model. Both doors reach every model in the catalog, and a call to a model whose provider speaks another dialect is translated both ways. So the Anthropic SDK can call `openai/gpt-4.1-mini`, and the OpenAI SDK can call `anthropic/claude-sonnet-4.6`.
+`--provider` picks the SDK's dialect, not who serves the model. Both doors reach every model in the catalog, and a call to a model whose provider speaks another dialect is translated both ways. So the Anthropic SDK can call `openai/gpt-4.1-mini`, and the OpenAI SDK can call `anthropic/claude-sonnet-5.5`.
 
 There is no `gemini` choice. The Latere API has a Gemini door, but it is never translated and every catalog model is served in the OpenAI dialect, so it reaches none of them, and naming `gemini` says so and exits 1. Call Google's models, such as `google/gemini-2.5-flash`, through the OpenAI or the Anthropic SDK.
 
@@ -49,7 +49,7 @@ curl https://api.latere.ai/v1/models/openai/v1/chat/completions \
 `invoke` sends one prompt through the OpenAI door and prints the reply: no tools, no session. Use it to check that a model answers your key; for assistant work, run an agent instead: `latere agents run -p "<prompt>"` on this machine.
 
 ```sh
-latere models invoke --model anthropic/claude-sonnet-4.6 "Say hi"
+latere models invoke --model anthropic/claude-sonnet-5.5 "Say hi"
 latere models invoke --model openai/gpt-4.1-mini --json "Say hi"   # the whole response
 ```
 

@@ -39,8 +39,10 @@ const defaultModelsURL = "https://api.latere.ai" + modelsPath
 
 // defaultCatalogModel is the Model review's critics and the local Topos
 // agent call when none is named. Models are named as the catalog names
-// them, the provider in front.
-const defaultCatalogModel = "anthropic/claude-sonnet-4.6"
+// them, the provider in front. It is a model the catalog built into Topos
+// knows, so the agent reaches it through its own family's door: a name that
+// catalog lacks has no family, and its requests take the OpenAI door.
+const defaultCatalogModel = "anthropic/claude-sonnet-5"
 
 // openAIDoor is the core's OpenAI door under the base. The CLI's own model
 // calls go through it: it serves the model list and Chat Completions, and a
@@ -109,13 +111,13 @@ keychain. 'latere models key' shows it. Run 'latere login' first.
 
 With no subcommand, 'latere models' lists the models your key reaches.
 Models are named as the catalog names them, with the provider in front:
-anthropic/claude-sonnet-4.6, openai/gpt-4.1-mini.
+anthropic/claude-sonnet-5.5, openai/gpt-4.1-mini.
 
 The base URL defaults to https://api.latere.ai/v1/models; LATERE_MODELS_URL
 or --models-url overrides it.`,
 		Example: `  latere models
   eval "$(latere models env)"
-  latere models invoke --model anthropic/claude-sonnet-4.6 "Say hi"
+  latere models invoke --model anthropic/claude-sonnet-5.5 "Say hi"
   latere models key`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -318,7 +320,7 @@ Use it to see that a model answers your key. For assistant work, run
 'latere agents run -p "<prompt>"'.
 
 Name the model as 'latere models' lists it.`,
-		Example: `  latere models invoke --model anthropic/claude-sonnet-4.6 "Say hi"
+		Example: `  latere models invoke --model anthropic/claude-sonnet-5.5 "Say hi"
   latere models invoke --model openai/gpt-4.1-mini --json "Say hi"`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
