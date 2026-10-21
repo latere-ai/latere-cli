@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.30.0 - 2026-10-21
+
 ### Changed
 
 - **`latere agents review` reports what its critics spend.** Each critic
