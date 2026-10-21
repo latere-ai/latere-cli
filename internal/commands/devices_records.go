@@ -38,10 +38,7 @@ func (a deviceAuth) cella() (*cellaclient.Client, error) {
 	if a.held == nil {
 		return cellaClient(a.apiURL)
 	}
-	base, err := resolveCellaURL(a.apiURL)
-	if err != nil {
-		return nil, err
-	}
+	base := resolveCellaURL(a.apiURL)
 	held := a.held
 	return cellaclient.New(cellaclient.Config{
 		URL: base, HTTPClient: cellaHTTPClient(), UserAgent: "latere-cli",

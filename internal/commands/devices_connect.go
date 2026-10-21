@@ -322,10 +322,7 @@ func savedLoginSubject() string {
 // terminal as a client when attended. Unattended, it is `serve`, which waits
 // to be connected through the socket.
 func serveDevice(ctx context.Context, cmd *cobra.Command, paths device.Paths, auth deviceAuth, version string, attended bool) error {
-	base, err := resolveCellaURL(auth.apiURL)
-	if err != nil {
-		return err
-	}
+	base := resolveCellaURL(auth.apiURL)
 	loginSubject := ""
 	if auth.held == nil {
 		loginSubject = savedLoginSubject()

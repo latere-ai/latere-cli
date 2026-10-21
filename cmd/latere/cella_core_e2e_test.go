@@ -257,49 +257,20 @@ func TestRemovedCellaCommandE2E(t *testing.T) {
 	}
 }
 
-// The words named after the open cores (spec 011) exit 1 with their
-// replacement and reach nothing: `latere cella list` names `latere
-// environments`, and `latere topos --local` names `latere agents run`.
+// The words named after the open cores (spec 011) are unknown commands:
+// each exits 1 saying so and reaches nothing.
 func TestRetiredCommandWordsE2E(t *testing.T) {
 	if testing.Short() {
 		t.Skip("binary e2e skipped with -short")
 	}
 	c := newE2ECore(t)
-	for _, tc := range []struct {
-		args []string
-		want string
-	}{
-		{[]string{"cella", "list"}, "'latere cella' is now 'latere environments', with the same commands"},
-		{[]string{"sandbox", "list"}, "'latere sandbox' is now 'latere environments', with the same commands"},
-		{[]string{"topos", "--local"}, "'latere topos --local' is now 'latere agents run'"},
-		{[]string{"review"}, "'latere review' is now 'latere agents review'"},
-	} {
-		out, errOut, code := c.run(t, "", tc.args...)
-		if code != 1 || out != "" || strings.TrimSpace(errOut) == "" || !strings.Contains(errOut, tc.want) {
-			t.Errorf("%v = %d %q %q, want exit 1 naming the replacement", tc.args, code, out, errOut)
+	for _, args := range [][]string{{"cella", "list"}, {"sandbox", "list"}, {"topos", "--local"}, {"review"}, {"app", "list"}} {
+		out, errOut, code := c.run(t, "", args...)
+		if code != 1 || out != "" || !strings.Contains(errOut, `unknown command "`+args[0]+`"`) {
+			t.Errorf("%v = %d %q %q, want exit 1 as an unknown command", args, code, out, errOut)
 		}
 	}
 	if got := c.requests(); len(got) != 0 {
 		t.Errorf("requests = %v, want none", got)
-	}
-}
-
-// The control plane's retired variable set alone is refused with the new
-// name; set beside the new one, the new one wins.
-func TestRetiredEnvironmentsVariableE2E(t *testing.T) {
-	if testing.Short() {
-		t.Skip("binary e2e skipped with -short")
-	}
-	c := newE2ECore(t)
-	_, errOut, code := c.runWith(t, "", []string{"LATERE_CELLA_URL=" + c.srv.URL + "/v1/environments", "LATERE_ENVIRONMENTS_URL=", "LATERE_ENVIRONMENTS_TOKEN=e2e-token"}, "environments", "list")
-	if code != 1 || !strings.Contains(errOut, "LATERE_CELLA_URL is now LATERE_ENVIRONMENTS_URL") {
-		t.Fatalf("old variable alone = %d %q, want the refusal", code, errOut)
-	}
-	if got := c.requests(); len(got) != 0 {
-		t.Errorf("requests = %v, want none", got)
-	}
-	out, errOut, code := c.runWith(t, "", []string{"LATERE_CELLA_URL=http://127.0.0.1:1/v1/environments", "LATERE_ENVIRONMENTS_URL=" + c.srv.URL + "/v1/environments", "LATERE_ENVIRONMENTS_TOKEN=e2e-token"}, "environments", "list")
-	if code != 0 || !strings.Contains(out, "sbx-dev") {
-		t.Fatalf("both set = %d %q %q, want the new variable's control plane", code, out, errOut)
 	}
 }

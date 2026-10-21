@@ -10,6 +10,26 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Removed
+
+- **The old command words and variables are gone.** They were refused with
+  their replacement since v0.17.0, and are now unknown commands and unread
+  variables. Use the capability names:
+  - `latere cella` and `latere sandbox` are `latere environments`.
+  - `latere topos --local` is `latere agents run`, and `latere topos login`
+    is `latere agents provider`.
+  - `latere review` is `latere agents review`.
+  - `latere app` is `latere apps`.
+  - `LATERE_CELLA_URL` and `LATERE_CELLA_TOKEN` are
+    `LATERE_ENVIRONMENTS_URL` and `LATERE_ENVIRONMENTS_TOKEN`.
+  - `LATERE_TOPOS_PROVIDER_FILE` is `LATERE_AGENT_PROVIDER_FILE`.
+  - `LATERE_APP_URL` and `LATERE_APP_TOKEN` are `LATERE_APPS_URL` and
+    `LATERE_APPS_TOKEN`.
+
+  An old variable left in your shell is now ignored rather than refused,
+  so a script that still sets one reaches the default address instead of
+  the one it named.
+
 ## v0.31.0 - 2026-10-21
 
 ### Changed

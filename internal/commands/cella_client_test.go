@@ -5,7 +5,6 @@ package commands
 
 import (
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -21,52 +20,15 @@ import (
 
 func TestResolveCellaURL(t *testing.T) {
 	t.Setenv("LATERE_ENVIRONMENTS_URL", "")
-	t.Setenv("LATERE_CELLA_URL", "")
-	resolve := func(flag string) string {
-		t.Helper()
-		got, err := resolveCellaURL(flag)
-		if err != nil {
-			t.Fatalf("resolveCellaURL(%q): %v", flag, err)
-		}
-		return got
-	}
-	if got := resolve(""); got != "https://api.latere.ai/v1/environments" {
+	if got := resolveCellaURL(""); got != "https://api.latere.ai/v1/environments" {
 		t.Errorf("default = %q, want the hosted control plane under the platform origin", got)
 	}
 	t.Setenv("LATERE_ENVIRONMENTS_URL", "http://localhost:8080/v1/environments/")
-	if got := resolve(""); got != "http://localhost:8080/v1/environments" {
+	if got := resolveCellaURL(""); got != "http://localhost:8080/v1/environments" {
 		t.Errorf("env = %q", got)
 	}
-	if got := resolve("https://environments.example.com/"); got != "https://environments.example.com" {
+	if got := resolveCellaURL("https://environments.example.com/"); got != "https://environments.example.com" {
 		t.Errorf("flag = %q, want the flag over the environment", got)
-	}
-}
-
-// The retired variable set alone is refused with its replacement, so a
-// script pointing at a staging control plane does not reach production. With
-// both set, the current one wins; the flag wins over both.
-func TestRetiredEnvironmentsVariables(t *testing.T) {
-	t.Setenv("LATERE_ENVIRONMENTS_URL", "")
-	t.Setenv("LATERE_CELLA_URL", "http://staging.example/v1/environments")
-	_, err := resolveCellaURL("")
-	if renamed, ok := errors.AsType[*renamedEnvError](err); !ok || renamed.current != "LATERE_ENVIRONMENTS_URL" {
-		t.Fatalf("old variable alone: %v, want a refusal naming LATERE_ENVIRONMENTS_URL", err)
-	}
-	if !strings.Contains(err.Error(), "LATERE_CELLA_URL is now LATERE_ENVIRONMENTS_URL") {
-		t.Errorf("message = %q", err)
-	}
-	if got, err := resolveCellaURL("https://flag.example"); err != nil || got != "https://flag.example" {
-		t.Errorf("flag with the old variable set: %q, %v", got, err)
-	}
-	t.Setenv("LATERE_ENVIRONMENTS_URL", "http://current.example/v1/environments")
-	if got, err := resolveCellaURL(""); err != nil || got != "http://current.example/v1/environments" {
-		t.Errorf("both set: %q, %v, want the current variable", got, err)
-	}
-
-	t.Setenv("LATERE_ENVIRONMENTS_TOKEN", "")
-	t.Setenv("LATERE_CELLA_TOKEN", "tok")
-	if _, err := cellaClient("https://flag.example"); err == nil || !strings.Contains(err.Error(), "LATERE_CELLA_TOKEN is now LATERE_ENVIRONMENTS_TOKEN") {
-		t.Errorf("old token variable alone: %v", err)
 	}
 }
 

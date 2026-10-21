@@ -233,10 +233,7 @@ type appClient struct {
 func newAppClient(flagURL, authURL string) (*appClient, error) {
 	u := flagURL
 	if u == "" {
-		var err error
-		if u, err = capabilityEnv(envAppsURL); err != nil {
-			return nil, err
-		}
+		u = os.Getenv(envAppsURL)
 	}
 	if u == "" {
 		u = defaultAppURL
@@ -246,13 +243,9 @@ func newAppClient(flagURL, authURL string) (*appClient, error) {
 	if !ok {
 		return nil, fmt.Errorf("%s is not an Apps API base URL: it ends in %s, as %s does", base, appBasePath, defaultAppURL)
 	}
-	given, err := capabilityEnv(envAppsToken)
-	if err != nil {
-		return nil, err
-	}
 	cfg, err := api.Product{
 		BaseURL: origin, AuthURL: authURL, Audience: appAudience,
-		Token: strings.TrimSpace(given), Timeout: appTimeout,
+		Token: strings.TrimSpace(os.Getenv(envAppsToken)), Timeout: appTimeout,
 	}.Config()
 	if err != nil {
 		return nil, err

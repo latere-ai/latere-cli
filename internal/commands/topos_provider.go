@@ -56,13 +56,12 @@ const (
 )
 
 // providerConfigPath is $LATERE_AGENT_PROVIDER_FILE, or providerFile in the
-// user's configuration directory. The retired variable set alone is refused.
-func providerConfigPath() (string, error) {
-	p, err := capabilityEnv(envAgentProviderFile)
-	if err != nil || p != "" {
-		return p, err
+// user's configuration directory.
+func providerConfigPath() string {
+	if p := os.Getenv(envAgentProviderFile); p != "" {
+		return p
 	}
-	return filepath.Join(latereConfigDir(), providerFile), nil
+	return filepath.Join(latereConfigDir(), providerFile)
 }
 
 func latereConfigDir() string {
@@ -79,10 +78,7 @@ func latereConfigDir() string {
 // file, is moved to the current name first.
 func loadProviderConfig() (providerConfig, error) {
 	var c providerConfig
-	p, err := providerConfigPath()
-	if err != nil {
-		return c, err
-	}
+	p := providerConfigPath()
 	b, err := os.ReadFile(p)
 	if errors.Is(err, fs.ErrNotExist) && os.Getenv(envAgentProviderFile) == "" {
 		legacy := filepath.Join(latereConfigDir(), legacyProviderFile)
@@ -100,10 +96,7 @@ func loadProviderConfig() (providerConfig, error) {
 }
 
 func saveProviderConfig(c providerConfig) error {
-	p, err := providerConfigPath()
-	if err != nil {
-		return err
-	}
+	p := providerConfigPath()
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return err
 	}
@@ -151,12 +144,8 @@ func buildLocalModel(ctx context.Context, modelName string) (localModel, error) 
 	}
 
 	// 2. An explicit provider choice (the picker / `latere agents provider`)
-	// wins over the default below. A retired variable naming the file is
-	// an error, not a reason to fall through to another provider.
+	// wins over the default below.
 	cfg, err := loadProviderConfig()
-	if _, renamed := errors.AsType[*renamedEnvError](err); renamed {
-		return localModel{}, err
-	}
 	if err == nil && cfg.Provider != "" {
 		return modelFromProviderConfig(cfg, modelName)
 	}

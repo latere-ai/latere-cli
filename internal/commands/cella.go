@@ -160,21 +160,16 @@ var removedCellaCommands = map[string]string{
 // ---- the client ----
 
 // resolveCellaURL returns the control plane's address: the flag, then
-// $LATERE_ENVIRONMENTS_URL, then the hosted control plane. The retired
-// variable set alone is refused rather than ignored.
-func resolveCellaURL(flagURL string) (string, error) {
+// $LATERE_ENVIRONMENTS_URL, then the hosted control plane.
+func resolveCellaURL(flagURL string) string {
 	u := flagURL
 	if u == "" {
-		v, err := capabilityEnv(envEnvironmentsURL)
-		if err != nil {
-			return "", err
-		}
-		u = v
+		u = os.Getenv(envEnvironmentsURL)
 	}
 	if u == "" {
 		u = defaultCellaURL
 	}
-	return strings.TrimRight(u, "/"), nil
+	return strings.TrimRight(u, "/")
 }
 
 // cellaHTTPClient carries every Cella request, the attach socket included.
@@ -195,16 +190,9 @@ func cellaHTTPClient() *http.Client {
 // LATERE_ENVIRONMENTS_TOKEN presents a bearer as given, for a development
 // deployment or a test, the same escape every other capability has.
 func cellaClient(apiURL string) (*cellaclient.Client, error) {
-	base, err := resolveCellaURL(apiURL)
-	if err != nil {
-		return nil, err
-	}
-	given, err := capabilityEnv(envEnvironmentsToken)
-	if err != nil {
-		return nil, err
-	}
+	base := resolveCellaURL(apiURL)
 	var token cellaclient.TokenSource
-	if t := strings.TrimSpace(given); t != "" {
+	if t := strings.TrimSpace(os.Getenv(envEnvironmentsToken)); t != "" {
 		token = cellaclient.StaticToken(t)
 	} else {
 		token = mintedCellaToken(api.ResolveAuthURL(base, ""))

@@ -303,7 +303,6 @@ func TestProviderConfigMovesFromLegacyName(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", config)
 	t.Setenv("HOME", config)
 	t.Setenv("LATERE_AGENT_PROVIDER_FILE", "")
-	t.Setenv("LATERE_TOPOS_PROVIDER_FILE", "")
 	dir := latereConfigDir()
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
@@ -321,18 +320,6 @@ func TestProviderConfigMovesFromLegacyName(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "agent-provider.json")); err != nil {
 		t.Errorf("the choice was not moved to agent-provider.json: %v", err)
-	}
-
-	// The retired variable alone is refused, not read and not ignored. An
-	// explicit API key wins before the provider file is read, so the case
-	// clears one the environment running the suite may hold.
-	t.Setenv("ANTHROPIC_API_KEY", "")
-	t.Setenv("LATERE_TOPOS_PROVIDER_FILE", filepath.Join(config, "elsewhere.json"))
-	if _, err := loadProviderConfig(); err == nil || !strings.Contains(err.Error(), "LATERE_TOPOS_PROVIDER_FILE is now LATERE_AGENT_PROVIDER_FILE") {
-		t.Errorf("retired variable: %v, want a refusal naming the new one", err)
-	}
-	if _, err := buildLocalModel(context.Background(), ""); err == nil || !strings.Contains(err.Error(), "LATERE_AGENT_PROVIDER_FILE") {
-		t.Errorf("buildLocalModel with the retired variable: %v, want the refusal rather than another provider", err)
 	}
 }
 
