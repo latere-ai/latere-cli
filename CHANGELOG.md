@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.31.0 - 2026-10-21
+
 ### Changed
 
 - **`latere devices` reaches the platform through the Latere Go SDK
