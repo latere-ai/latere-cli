@@ -35,6 +35,8 @@ committed: the commit log already holds that.
   path now stay in place for a session's commands, and a path whose links
   cannot be resolved stops the command with an error naming it, instead
   of running with a rule that would not hold.
+- **On macOS, a session cannot copy a folder holding a denied file, nor
+  create a missing folder on the way to a denied path.**
 
 ## v0.32.0 - 2026-10-21
 

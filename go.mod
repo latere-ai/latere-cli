@@ -19,7 +19,7 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 	latere.ai/x/agon v0.3.0
 	latere.ai/x/cella v0.20.1
-	latere.ai/x/pkg v0.107.0
+	latere.ai/x/pkg v0.108.0
 	latere.ai/x/sdk-go v0.3.0
 	latere.ai/x/topos v0.51.0
 )
