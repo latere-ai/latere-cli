@@ -25,7 +25,7 @@ specs/
   015-evals-commands.md              (in-progress: latere evals replaces latere eval; suites, experiments, comparisons, harness lease and import, publishing)
   016-devices-command.md             (complete: latere devices connects this computer as an environment the person's sessions work on; their own sessions start there unasked)
   017-signed-upgrades.md             (complete: releases sign their checksums; upgrade and auto-upgrade verify the signature, and an SSH signature beside it for the installer)
-  018-a-desktop-client-of-the-device-engine.md (in-progress: serve connects, takes a client's tokens, changes the policy and removes the device through its socket, built; a client's denied paths and logout beside an application, to come)
+  018-a-desktop-client-of-the-device-engine.md (complete: serve connects, takes a client's tokens, changes the policy and removes the device through its socket; Latere Studio's folders denied, and logout keeps a device another process serves)
 ```
 
 ## Status
@@ -126,9 +126,10 @@ Where each spec stands:
   with the consent the application showed, takes short-lived Cella and
   platform tokens from the application in place of the saved login,
   changes the host policy and removes the device through the socket,
-  makes no release check under `LATERE_NO_UPDATE_CHECK`, denies paths the
-  application names, and `logout` keeps a device the application serves.
-  Drafted on 2026-10-19 for Latere Studio's This Mac.
+  makes no release check under `LATERE_NO_UPDATE_CHECK`, denies Latere
+  Studio's data and cache to every session on macOS, and `logout` keeps a
+  device another process serves. Drafted on 2026-10-19 for Latere Studio's
+  This Mac; F and G built on 2026-10-21, not released.
 
 Two surfaces shipped without a dedicated design record: the token-lifecycle
 work, which [docs/login-and-tokens.md](../docs/login-and-tokens.md) documents,

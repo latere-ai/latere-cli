@@ -1,6 +1,6 @@
 ---
 title: "A desktop client of the device engine: `latere devices serve` starts on a computer not yet connected and serves its control socket in every state, connects through the socket with the consent a desktop application showed, takes short-lived Cella and platform tokens from that client in place of the saved login, changes the host policy and removes the device through the socket, and makes no release check when told not to"
-status: in-progress
+status: complete
 depends_on:
   - specs/016-devices-command.md
   - specs/017-signed-upgrades.md
@@ -12,13 +12,13 @@ affects:
   - internal/devices/connect.go (new: the connect's facts, terms and consent; the engine's connect, policy, credentials and removal)
   - internal/devices/engine.go (an engine that serves its socket before it is connected; credentials from the client; the policy and removal routes)
   - internal/devices/credentials.go (new: the tokens a client hands the engine, and when it needs more)
-  - internal/devices/policy.go (the policy checked and applied through the socket; extra denied paths)
-  - internal/devices/paths.go (`Deny` adds the policy's denied paths; `OwnerFile`, whose device this computer serves)
+  - internal/devices/policy.go (the policy checked and applied through the socket)
+  - internal/devices/paths.go (`OwnerFile`, whose device this computer serves)
   - internal/devices/owner.go (new: the record of whose device this computer serves)
   - internal/devices/events.go (`Status` says the connection state and the credentials needed)
-  - internal/commands/devices_connect.go (enrolment shared by connect and `POST /v1/connect`; `serve --credentials client`; the release check off under `LATERE_NO_UPDATE_CHECK`)
+  - internal/commands/devices_connect.go (enrollment shared by connect and `POST /v1/connect`; `serve --credentials client`; the release check off under `LATERE_NO_UPDATE_CHECK`; Latere Studio's folders denied; whether another process serves the computer)
   - internal/commands/devices.go (`remove` shares its local half with `POST /v1/remove`)
-  - internal/commands/devices_records.go (`deviceAuth`: the saved login or the client's tokens, for every call a device makes as the person)
+  - internal/commands/devices_records.go (`deviceAuth`: the saved login or the client's tokens, for every call a device makes as the person; `logout` keeps a device another process serves)
   - internal/upgrade/notify.go (`Disabled`, which `serve` asks before it checks for releases)
   - internal/commands/auth.go (`logout` on a computer a desktop application serves)
   - docs/devices.md, CHANGELOG.md
@@ -44,7 +44,7 @@ As built, a desktop client cannot get a computer from nothing to
 serving, keep it serving, or change it, without a terminal:
 
 - `serve` refuses a computer not yet connected (`device_not_connected`), and connecting is only `latere devices connect`, which waits for a typed yes in a terminal (`enrollDevice`, `internal/commands/devices_connect.go`).
-- The engine's `Account` and the enrolment take the person's tokens from the saved login, `~/.config/latere/auth-token.json`, refreshed as the `latere-cli` client (`cellaClient`, `platformCall`). A desktop app has its own sign-in and must not share its refresh token: a refresh token is spent once (auth spec 090), so two holders of one strand each other. The static escapes, `LATERE_ENVIRONMENTS_TOKEN` and `LATERE_PLATFORM_TOKEN`, expire under a serve that runs for weeks.
+- The engine's `Account` and the enrollment take the person's tokens from the saved login, `~/.config/latere/auth-token.json`, refreshed as the `latere-cli` client (`cellaClient`, `platformCall`). A desktop app has its own sign-in and must not share its refresh token: a refresh token is spent once (auth spec 090), so two holders of one strand each other. The static escapes, `LATERE_ENVIRONMENTS_TOKEN` and `LATERE_PLATFORM_TOKEN`, expire under a serve that runs for weeks.
 - A change of folders or network is an edit of `device.yaml` and `POST /v1/reload`, so a client would write the file's format itself, and a check the engine makes at connect (`Policy.Problems`, `CheckDriver`) would not be made.
 - Removing the device is `latere devices remove`, which reads the saved login.
 - `serve` asks GitHub for the newest release once a day (`upgradeAvailable`) even under `LATERE_NO_UPDATE_CHECK`, which a bundled copy never acts on.
@@ -137,7 +137,7 @@ audience and expiry, that it names a person, and that it is in that
 person's own context (`credentials_org_context` otherwise: a device is
 personal); tokens handed together must name one person. It keeps them in
 memory only and uses them for `MintKey`, `RevokeKey`, `Exists` and the
-enrolment's platform calls. A token is never written to a file or the
+enrollment's platform calls. A token is never written to a file or the
 activity log.
 
 The tokens are tied to the person whose device the computer serves,
@@ -218,19 +218,43 @@ its device. The record of the owner goes with the device.
 is set or `CI` is, as every other release awareness already honors
 (`disabled`, `internal/upgrade/notify.go`).
 
-### F. Paths a client denies
+### F. Latere Studio's folders denied to every session
 
-The host policy gains `deny`, a list of paths (absolute or `~`) added to
-`Paths.Deny` for every session, written through `PUT /v1/policy` like
-the rest. A desktop application adds its own data directory.
+On macOS the engine `latere devices` runs denies every session Latere
+Studio's data and cache, `~/Library/Application Support/ai.latere.studio`
+and `~/Library/Caches/ai.latere.studio`, beside the engine's own paths.
+The app's own engine denies them too (gradus spec 014), so a session never
+reads the app's local copy of conversations, whichever process serves the
+computer. Elsewhere there is no such app and nothing more is denied.
 
-### G. Logout on a computer an application serves
+The engine's `Config` has no deny list of its own: it builds the local
+driver's options from the host policy and `Paths.Deny`, and hands them to
+the embedder's `NewDriver`. The command's `sessionDriver` adds the two
+paths there, and the policy checks of `connect` and `latere devices policy`
+build the same driver, so a read path inside the app's data is refused
+before a session starts. The first design, a `deny` list in the host
+policy written through `PUT /v1/policy`, is not built: the folders are the
+app's and fixed, so neither the person nor a client needs to write them.
 
-`latere logout` on a connected computer whose engine runs under
-`--credentials client` (its status says so) signs out of the command
-alone and leaves the device, saying "This computer stays connected for
-Latere Studio." Removing it is `latere devices remove`. Without such an
-engine, `logout` asks as 016 says.
+### G. Logout on a computer another process serves
+
+`latere logout` on a connected computer takes the engine's lock and lets
+it go at once. When another process holds it (`device_already_served`),
+such as Latere Studio or `latere devices` in another terminal, the device
+is that process's too: logout signs out, keeps the device, asks nothing,
+also under `--yes`, and says so in one sentence: "Latere Studio or
+`latere devices` in another terminal serves this computer, so it stays
+connected as your device "Work laptop" (dev-…); to remove it, run
+`latere devices remove` while you are signed in." With the lock free,
+`logout` asks and removes as 016 says. A lock that cannot be taken for
+another reason stays signed in with `device_logout_blocked`.
+
+The first design read the engine's status for `--credentials client`.
+Latere Studio embeds the engine rather than running `serve`, so the lock,
+which every embedder takes, is what says another process serves. No flag
+removes the device anyway: `latere devices remove` does, as logout's
+blocked refusal already says, and `--yes` keeps meaning only the answer to
+logout's question.
 
 ### Out of scope
 
@@ -249,8 +273,8 @@ engine, `logout` asks as 016 says.
 | 5 | `TestPolicyThroughSocket`: a bad folder is refused with its problem; a refused rename writes nothing; a good change reloads and the driver serves the new grants; a remembered trigger is forgotten | `internal/devices/socket_test.go` |
 | 6 | `TestRemoveThroughSocket` and its `local` form, with `serve` waiting again afterwards | `internal/devices/socket_test.go`, `internal/commands/devices_socket_test.go` |
 | 7 | `TestServeHonorsNoUpdateCheck`: no release lookup under `LATERE_NO_UPDATE_CHECK` or `CI` | `internal/commands/devices_account_test.go` |
-| 8 | `TestDenyFromPolicy`: a denied path is unreadable to a stage, skipped where `srt` is missing | `internal/devices/engine_test.go` (with F) |
-| 9 | `TestLogoutKeepsAnApplicationsDevice` | `internal/commands/logout_device_test.go` (with G) |
+| 8 | `TestServedSessionsAreDeniedStudiosFolders`: on macOS every driver the engine builds denies Latere Studio's data and cache beside the engine's own paths, and `latere devices policy` refuses a read path in the app's data; `TestSessionDenyIsMacOSOnly`: nothing more is denied elsewhere | `internal/commands/devices_deny_darwin_test.go`, `internal/commands/devices_test.go` |
+| 9 | `TestLogoutKeepsAnApplicationsDevice`: with the lock held by a child process, logout with and without `--yes` revokes the login, keeps the key and the device, asks nothing and says so; with the lock free it removes the device and leaves the lock free | `internal/commands/logout_served_test.go` |
 | 10 | `TestDevicesServeThroughTheSocketEndToEnd`: the built binary under `--credentials client` with no saved login, against a real cellad, from tokens through connect, rename and remove | `cmd/latere/devices_e2e_test.go` |
 | 11 | `TestRenameLeavesRunningSessionsAlone` and `TestRenameRunsOutsideTheFileLock`: a rename, an empty change and the same folders restart no worker, a change of the folders does, and a session start reads the file during a slow rename | `internal/devices/client_engine_test.go` |
 | 12 | `TestTokensAreTiedToTheDevicesOwner`, `TestAnUnconfirmedPersonNeverForgetsTheDevice`, `TestSavedLoginIsRecordedAsTheOwner` and `TestConnectCreatesTheEnvironment`: an organization's token and two people's are refused; with a recorded owner another person's is refused and the device is not forgotten; without one, another person's tokens are dropped and the device kept, and the owner is recorded once the platform mints for them; the saved login and a terminal connect record the owner; after a removal anyone's are taken | `internal/devices/client_engine_test.go`, `internal/commands/devices_test.go` |
@@ -276,11 +300,20 @@ not hold for a device connected before the record existed, and that a
 stop during a key renewal's wait ended with a refusal; both are fixed:
 the owner is recorded only as the platform confirms it, an unconfirmed
 person's removal answer never forgets the device, and the stop is
-clean. F (paths a client denies) and G (logout on a
-computer an application serves) are not built yet; tests 8 and 9 come
-with them.
+clean. F and G are built (2026-10-21) with tests 8 and 9, on Cella
+v0.20.1.
 
 Since 2026-10-21 the engine these routes belong to is Cella's
 `latere.ai/x/cella/device` (Cella v0.20.0): the `internal/devices` files
 in `affects` moved there with their tests, and `serve` embeds it with the
 platform's part of a connect over the platform's API.
+
+## Outcome
+
+A to G are built, each with its verification items. A to E were released
+in v0.25.0; F and G are built on 2026-10-21, not released. Two parts
+diverged from the first design, as their sections say: F denies Latere
+Studio's fixed folders in the command's driver builder instead of a `deny`
+list in the host policy, and G asks the engine's lock whether another
+process serves the computer instead of the engine's status, since the app
+embeds the engine rather than running `serve`.
