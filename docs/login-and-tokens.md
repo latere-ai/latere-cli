@@ -94,6 +94,7 @@ model call, which presents the model key.
 | `latere repos ...` | a token with audience `api.latere.ai`, the platform's, valid 5 minutes | minted per command at auth |
 | `latere apps ...` | a token with audience `insula`, the Apps API's, valid 5 minutes | minted per command at auth |
 | `latere apps visibility`, `password`, `access`, `share`, `unshare` | besides the Apps API's token, a token with audience `api.latere.ai`, the platform's, which keeps the people invited to an app and its password, valid 5 minutes | minted per request at auth |
+| `latere evals ...` | a token with audience `examen`, the Evals API's, valid 5 minutes; a watch mints the next one when the stream closes at its expiry | minted at auth when the command starts, and again as it lapses |
 | `git` against `code.latere.ai` | a token with audience `origo`, valid 5 minutes | minted per git operation at auth |
 | `latere whoami` | the login token, only to refresh it when it is due | the claims it prints are read from the saved token, not asked of auth |
 
@@ -227,7 +228,7 @@ The CLI keeps one rule, which is the platform's:
 In CLI terms: you sign in once, and every product call mints its
 credential from that login. A `cella` token is only ever presented to the
 Environments API, an `origo` token only to Latere Code, an `api.latere.ai` token
-only to the platform, an `insula` token only to the Apps API, the model key only to the model endpoints, and the device key only to the Environments API. Whichever
+only to the platform, an `insula` token only to the Apps API, an `examen` token only to the Evals API, the model key only to the model endpoints, and the device key only to the Environments API. Whichever
 credential is on the wire, the person it acts for is you.
 
 ## Scripting

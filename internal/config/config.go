@@ -14,8 +14,7 @@ import (
 
 // Dir returns $XDG_CONFIG_HOME/latere, falling back to ~/.config/latere.
 // It returns "" when neither resolves (no XDG_CONFIG_HOME and no home dir),
-// matching the degrade contract callers rely on: api treats "" as not-logged-in,
-// upgrade and the sandbox tunnel's machine id treat "" as skip-persist.
+// which the release check's state reads as nothing to persist.
 func Dir() string {
 	dir := os.Getenv("XDG_CONFIG_HOME")
 	if dir == "" {

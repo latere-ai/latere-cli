@@ -6,8 +6,8 @@ the hosts its egress boundary admits. `latere environments` talks to the
 Environments API at `https://api.latere.ai/v1/environments`. Run
 `latere login` first (see [Sign in](../README.md#sign-in)).
 
-Until v0.16 this command group was `cella`, with the alias `sandbox`. For
-one release those words exit 1 and name this group; then they are removed.
+Until v0.16 this command group was `cella`, with the alias `sandbox`.
+Those words are no longer commands.
 
 ## Quick start
 
