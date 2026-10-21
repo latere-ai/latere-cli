@@ -13,7 +13,9 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	goruntime "runtime"
+	"slices"
 	"strings"
 	"syscall"
 
@@ -44,6 +46,33 @@ var (
 	deviceDriver  = func(o local.Options) (runtime.Driver, error) { return local.New(o) }
 	latestRelease = upgrade.ResolveLatest
 )
+
+// studioBundle is Latere Studio's bundle id, the name of its data and cache
+// folders under ~/Library on macOS.
+const studioBundle = "ai.latere.studio"
+
+// sessionDeny is what `latere devices` denies every session on top of the
+// engine's own paths: on macOS, Latere Studio's data and cache, where the app
+// keeps its local copy of the person's conversations. The app's own engine
+// denies them too, so no session reads them, whichever of the two serves the
+// computer. Elsewhere there is no such app, and nothing more is denied.
+func sessionDeny(goos, home string) []string {
+	if goos != "darwin" {
+		return nil
+	}
+	return []string{
+		filepath.Join(home, "Library", "Application Support", studioBundle),
+		filepath.Join(home, "Library", "Caches", studioBundle),
+	}
+}
+
+// sessionDriver is the driver the engine runs and the policy checks build:
+// deviceDriver over the engine's options, with sessionDeny added to its
+// denied paths.
+func sessionDriver(o local.Options) (runtime.Driver, error) {
+	o.Deny = append(slices.Clone(o.Deny), sessionDeny(goruntime.GOOS, o.Home)...)
+	return deviceDriver(o)
+}
 
 func newDevicesConnectCmd(version string) *cobra.Command {
 	var (
@@ -254,7 +283,7 @@ func enrollDevice(ctx context.Context, cmd *cobra.Command, paths device.Paths, p
 	if problems := p.Problems(paths.Home); len(problems) > 0 {
 		return device.Policy{}, device.Fail(device.CodePolicyInvalid, strings.Join(problems, "; "), nil)
 	}
-	if err = device.CheckDriver(p, paths, goruntime.GOOS, deviceDriver); err != nil {
+	if err = device.CheckDriver(p, paths, goruntime.GOOS, sessionDriver); err != nil {
 		return device.Policy{}, device.Fail(device.CodePolicyInvalid, "", err)
 	}
 	fprint(errOut, device.ConnectScreen(p))
@@ -335,7 +364,7 @@ func serveDevice(ctx context.Context, cmd *cobra.Command, paths device.Paths, au
 	}
 	engine := device.New(device.Config{
 		Paths: paths, URL: base, Keys: paths.Keys(),
-		Account: device.NewCellaAccount(client), Version: version, NewDriver: deviceDriver,
+		Account: device.NewCellaAccount(client), Version: version, NewDriver: sessionDriver,
 		Labels:      toposLabels,
 		Upgrade:     serveUpgrade(version),
 		Enroll:      deviceEnroller{Enrollment: newEnrollment(paths, client, auth), errOut: cmd.ErrOrStderr()},

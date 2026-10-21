@@ -20,6 +20,14 @@ committed: the commit log already holds that.
   does not declare in `spec.network.ports` is refused before it listens,
   since only a declared port is reached.
 
+### Changed
+
+- **On macOS, sessions on this computer cannot read Latere Studio's data or
+  cache,** `~/Library/Application Support/ai.latere.studio` and
+  `~/Library/Caches/ai.latere.studio`, where the app keeps its local copy
+  of your conversations. The app denied them already when it serves the
+  computer; now `latere devices connect` and `serve` deny them too.
+
 ### Removed
 
 - **The old command words and variables are gone.** They were refused with

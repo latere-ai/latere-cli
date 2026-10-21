@@ -338,7 +338,7 @@ trigger asks again at its next run, even while this computer is serving.`,
 			fprintf(out, "%s\n\n%s\n\n%s\n", path, strings.TrimRight(string(raw), "\n"), device.SessionStartNotice(policy))
 			problems := policy.Problems(paths.Home)
 			if len(problems) == 0 {
-				if err := device.CheckDriver(policy, paths, goruntime.GOOS, deviceDriver); err != nil {
+				if err := device.CheckDriver(policy, paths, goruntime.GOOS, sessionDriver); err != nil {
 					problems = append(problems, err.Error())
 				}
 			}

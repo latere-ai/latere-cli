@@ -163,7 +163,12 @@ paths are denied even inside a folder you shared:
 - `latere`'s own configuration (your login token, the host policy file,
   the key file) and its state (the activity log, the control socket);
 - your keychains, and your browsers' profiles: Chrome, Chromium, Firefox,
-  Edge, Brave, Arc and Safari.
+  Edge, Brave, Arc and Safari;
+- on macOS, Latere Studio's data and cache,
+  `~/Library/Application Support/ai.latere.studio` and
+  `~/Library/Caches/ai.latere.studio`, where the app keeps its local copy
+  of your conversations, whether the app or `latere devices` serves the
+  computer.
 
 On macOS a command also cannot write, inside a folder you shared, the
 files your own tools later run as code: shell startup files (`.zshrc`,

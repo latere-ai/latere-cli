@@ -399,6 +399,18 @@ func TestConnectCreatesTheEnvironment(t *testing.T) {
 	}
 }
 
+// Latere Studio runs on macOS alone, so elsewhere a session is denied
+// nothing beyond the engine's own paths.
+func TestSessionDenyIsMacOSOnly(t *testing.T) {
+	if got := sessionDeny("linux", "/home/p"); len(got) != 0 {
+		t.Errorf("on Linux sessions are also denied %v", got)
+	}
+	want := []string{"/Users/p/Library/Application Support/ai.latere.studio", "/Users/p/Library/Caches/ai.latere.studio"}
+	if got := sessionDeny("darwin", "/Users/p"); !slices.Equal(got, want) {
+		t.Errorf("on macOS sessions are also denied %v, want %v", got, want)
+	}
+}
+
 func TestSecondConnectRefusedLocally(t *testing.T) {
 	paths, _ := deviceHome(t)
 	p := newDevicePlatform(t)
