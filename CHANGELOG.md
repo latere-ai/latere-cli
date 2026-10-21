@@ -10,6 +10,16 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Fixed
+
+- **`latere devices remove` deletes the host policy file while
+  `latere devices connect` serves the computer.** The serving engine saw
+  the removal first and cleared the device from the file, and the file
+  then stayed behind with its folders. Through `latere.ai/x/cella`
+  v0.20.4, which also creates `~/.config` and `~/.docker` before a
+  computer serves a writable folder above your home directory, so a tool
+  that keeps its settings there works in a session granted that folder.
+
 ## v0.33.0 - 2026-10-21
 
 ### Changed
