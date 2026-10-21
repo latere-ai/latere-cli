@@ -128,7 +128,8 @@ latere org                    # the active context
 latere org <org-uuid>         # switch to an organization, without signing in again
 latere org --personal         # switch to your personal account
 latere logout                 # revoke the session and the model keys it created, then clear the login;
-                              # on a connected computer, remove it from your devices first
+                              # on a connected computer, remove it from your devices first,
+                              # unless Latere Studio or another terminal serves it
 
 latere login --token <token>  # save a token issued elsewhere, for CI
 latere print-token            # print the login token, for scripts that call auth

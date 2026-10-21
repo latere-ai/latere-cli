@@ -230,6 +230,20 @@ func deviceStart() (device.Paths, *device.Lock, error) {
 	return paths, lock, nil
 }
 
+// servedElsewhere is whether another process holds the lock that keeps one
+// engine per computer, such as Latere Studio or `latere devices` in another
+// terminal. It takes the lock and lets it go at once.
+func servedElsewhere(paths device.Paths) (bool, error) {
+	lock, err := device.TakeLock(paths.LockFile())
+	if device.CodeOf(err) == device.CodeAlreadyServed {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return false, lock.Release()
+}
+
 // connectRequest is what connect was asked for on its command line.
 type connectRequest struct {
 	name, network, sessionStart           string

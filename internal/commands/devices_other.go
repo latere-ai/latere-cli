@@ -26,3 +26,7 @@ func newDevicesCmd(string) *cobra.Command {
 		},
 	}
 }
+
+// servedElsewhere is false: no engine serves a computer here, since devices
+// run on macOS and Linux.
+func servedElsewhere(device.Paths) (bool, error) { return false, nil }

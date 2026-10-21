@@ -152,7 +152,9 @@ func (p laterePlatform) Devices(ctx context.Context) (have, limit int, err error
 // leaveBeforeLogout is what `latere logout` does on a connected computer:
 // it says that signing out removes the computer from the person's devices,
 // asks, and removes it at the platform and here before the login is
-// revoked. A computer that is not connected is signed out of as before.
+// revoked. A computer another process serves, such as Latere Studio, keeps
+// its device, which is that process's too, and logout says so and asks
+// nothing. A computer that is not connected is signed out of as before.
 func leaveBeforeLogout(ctx context.Context, in io.Reader, errOut io.Writer, platformURL string, yes bool) error {
 	paths, err := device.DefaultPaths()
 	if err != nil {
@@ -163,6 +165,14 @@ func leaveBeforeLogout(ctx context.Context, in io.Reader, errOut io.Writer, plat
 		return device.Fail(device.CodePolicyInvalid, "", err)
 	}
 	if !ok || policy.Device == "" {
+		return nil
+	}
+	served, err := servedElsewhere(paths)
+	if err != nil {
+		return cliRefusal(codeLogoutBlocked, "", err)
+	}
+	if served {
+		fprintf(errOut, "Latere Studio or `latere devices` in another terminal serves this computer, so it stays connected as\nyour device %q (%s); to remove it, run `latere devices remove` while you are signed in.\n", policy.Name, policy.Device)
 		return nil
 	}
 	fprintf(errOut, "This computer is connected as your device %q (%s). Signing out removes it from your devices,\nand sessions can no longer use it.\n", policy.Name, policy.Device)

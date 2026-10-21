@@ -200,7 +200,9 @@ Logout revokes your session on the server, not only the local file:
 
 1. On a computer connected with `latere devices connect`, it says that
    signing out removes the computer from your devices, asks, and removes
-   it. If it cannot, you stay signed in. `--yes` answers for you.
+   it. If it cannot, you stay signed in. `--yes` answers for you. While
+   Latere Studio or `latere devices` in another terminal serves the
+   computer, it stays connected, and `latere devices remove` removes it.
 2. It revokes the model keys this login created on this machine.
 3. It revokes the refresh token at auth (`POST /revoke`, RFC 7009), so the
    login can mint nothing further.

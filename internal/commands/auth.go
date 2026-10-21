@@ -710,7 +710,10 @@ each lapses within five minutes.
 
 On a computer connected with 'latere devices connect', signing out first
 removes the computer from your devices. It says so and asks; --yes
-answers for you. If the device cannot be removed, you stay signed in.`,
+answers for you. If the device cannot be removed, you stay signed in.
+While Latere Studio or 'latere devices' in another terminal serves the
+computer, it stays connected and nothing is asked; 'latere devices
+remove' removes it.`,
 		Example: `  latere logout
   latere logout --yes
   latere login`,
@@ -728,7 +731,7 @@ answers for you. If the device cannot be removed, you stay signed in.`,
 		},
 	}
 	cmd.Flags().StringVar(&authURL, "auth-url", "", "override auth base URL (default $AUTH_URL or https://auth.latere.ai)")
-	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "on a connected computer, remove it from your devices without asking")
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "on a connected computer no other program serves, remove it from your devices without asking")
 	return cmd
 }
 

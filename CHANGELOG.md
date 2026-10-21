@@ -22,6 +22,12 @@ committed: the commit log already holds that.
 
 ### Changed
 
+- **`latere logout` keeps a computer Latere Studio serves.** While the app,
+  or `latere devices` in another terminal, serves this computer, signing
+  out leaves it connected as your device, says so, and asks nothing, with
+  or without `--yes`. Before, logout removed it from your devices, and the
+  app lost it too. To remove it, run `latere devices remove` while you are
+  signed in.
 - **On macOS, sessions on this computer cannot read Latere Studio's data or
   cache,** `~/Library/Application Support/ai.latere.studio` and
   `~/Library/Caches/ai.latere.studio`, where the app keeps its local copy

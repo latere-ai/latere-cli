@@ -25,6 +25,8 @@ func connectedForLogout(t *testing.T, deleteStatus int) (paths device.Paths, aut
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(home, ".local", "state"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
 	authPath = seedLogin(t)
 	var mu sync.Mutex
 	var steps []string

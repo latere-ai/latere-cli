@@ -266,7 +266,11 @@ remove a device from the console or the chat.
 
 `latere logout` on a connected computer removes it from your devices before
 it signs out. It says so and asks; `latere logout --yes` answers for you. If
-the device cannot be removed, you stay signed in.
+the device cannot be removed, you stay signed in. While Latere Studio or
+`latere devices` in another terminal serves the computer, the device is that
+program's too: `logout` signs you out, keeps the computer connected, says
+so, and asks nothing. To remove it, run `latere devices remove` while you
+are signed in.
 
 ## For a desktop application
 
