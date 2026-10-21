@@ -4,69 +4,52 @@
 package commands
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
-	"time"
 
 	"latere.ai/x/cella/device"
-	"latere.ai/x/pkg/authkit/jwt"
+	"latere.ai/x/sdk-go/agents"
+	"latere.ai/x/sdk-go/latere"
 )
 
-// The Latere values `latere devices` embeds Cella's device engine with: the
-// keys Topos names a session under on a sandbox, the mark of a device's
-// environment, how the platform's tokens carry a person and a context, and
-// the refusals that are this command's own rather than the engine's. The
-// platform token's audience is the SDK's latere.DefaultAudience, which the
-// held credentials and the platform calls name directly. This file builds
-// on every platform, since `latere logout` refuses with the codes below
-// wherever it runs.
+// The Latere values `latere devices` embeds Cella's device engine with, in
+// the engine's types: the keys Topos names a session under on a sandbox,
+// and how the platform's tokens carry a person and a context. The values
+// themselves are the SDK's, as are the device kind label and the platform
+// token's audience, which the commands name directly. Beside them are the
+// refusals that are this command's own rather than the engine's. This file
+// builds on every platform, since `latere logout` refuses with the codes
+// below wherever it runs.
 
 // toposLabels are the keys Topos sets on a session's sandbox, which the
 // engine shows in an approval and records in the activity log.
 var toposLabels = device.SessionLabels{
-	Session:        "topos.latere.ai/session",
-	Agent:          "topos.latere.ai/agent",
-	AgentVersion:   "topos.latere.ai/agent-version",
-	Trigger:        "topos.latere.ai/trigger",
-	TriggerFiresOn: "topos.latere.ai/trigger-fires-on",
-	AgentName:      "topos.latere.ai/agent-name",
+	Session:        agents.LabelSession,
+	Agent:          agents.LabelAgent,
+	AgentVersion:   agents.LabelAgentVersion,
+	Trigger:        agents.LabelTrigger,
+	TriggerFiresOn: agents.LabelTriggerFiresOn,
+	AgentName:      agents.AnnotationAgentName,
 }
 
-// The device kind label every device environment carries beside its
-// owner's tenant labels (platform spec 220).
-const (
-	deviceKindLabel = "platform.latere.ai/kind"
-	deviceKindValue = "device"
-)
-
 // readDeviceToken reads the claims of a token a client hands `serve
-// --credentials client`, as the platform's issuer writes them: aud as one
-// string or a list, sub, exp in seconds, and org_id for a token in an
-// organization's context. It verifies nothing; the service the token is
-// presented to does.
+// --credentials client` with the SDK's reader of the platform's tokens:
+// aud as one string or a list, sub, exp when it names one, and org_id for
+// a token in an organization's context. A token that names no audience is
+// refused here. It verifies nothing; the service the token is presented to
+// does.
 func readDeviceToken(token string) (device.TokenClaims, error) {
-	var claims struct {
-		Aud   json.RawMessage `json:"aud"`
-		Exp   int64           `json:"exp"`
-		Sub   string          `json:"sub"`
-		OrgID string          `json:"org_id"`
-	}
-	if err := jwt.DecodePayload(token, &claims); err != nil {
+	claims, err := latere.ReadUnverifiedClaims(token)
+	if err != nil {
 		return device.TokenClaims{}, fmt.Errorf("it is not a JWT whose claims decode: %w", err)
 	}
-	var audiences []string
-	var one string
-	if err := json.Unmarshal(claims.Aud, &one); err == nil {
-		audiences = []string{one}
-	} else if err = json.Unmarshal(claims.Aud, &audiences); err != nil {
+	if len(claims.Audiences) == 0 {
 		return device.TokenClaims{}, errors.New("it names no audience")
 	}
-	out := device.TokenClaims{Audiences: audiences, Subject: claims.Sub, Personal: claims.OrgID == "", Context: claims.OrgID}
-	if claims.Exp > 0 {
-		out.Expiry = time.Unix(claims.Exp, 0)
-	}
-	return out, nil
+	return device.TokenClaims{
+		Audiences: claims.Audiences, Subject: claims.Subject, Expiry: claims.Expiry,
+		Personal: claims.OrgID == "", Context: claims.OrgID,
+	}, nil
 }
 
 // The refusals of `latere devices` and `latere logout` that the engine does

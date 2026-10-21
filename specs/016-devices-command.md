@@ -384,7 +384,12 @@ Cella's, run under the real `srt` in Cella's CI, and the terminal client
 is `internal/deviceterm`, with its own tests. The command embeds the engine
 with the Topos label keys, the platform's audience and its three own
 refusals (`internal/commands/devices_latere.go`), and the files on disk
-are the same, so a computer connected before is served as it is.
+are the same, so a computer connected before is served as it is. From
+the Go SDK's v0.3.0, which Latere Studio imports too, every Latere value
+among them is the SDK's: the label keys, the device kind label, the
+platform's audience, the reader of a handed token's claims, and the
+platform's device and labels routes. `devices_latere.go` maps them into
+the engine's types.
 
 Where the build differs from the design, or adds to it:
 

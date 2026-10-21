@@ -8,9 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"strings"
-	"time"
 
 	cellaclient "latere.ai/x/cella/client"
 	"latere.ai/x/cella/device"
@@ -21,44 +19,10 @@ import (
 )
 
 // The person's devices at the platform (platform spec 220): listed, renamed
-// and removed with the person's own token. What a device is on this computer
-// (the host policy file, the key) is Cella's device engine's. This file
-// builds on every platform, since `latere logout` removes a connected
-// computer wherever it runs.
-
-// devicesPath is the platform's list of the person's devices.
-const devicesPath = "/v1/account/devices"
-
-// deviceRecord is one device as the platform lists it.
-type deviceRecord struct {
-	ID       string     `json:"id"`
-	Name     string     `json:"name"`
-	Status   string     `json:"status"`
-	Online   bool       `json:"online"`
-	OS       string     `json:"os"`
-	Arch     string     `json:"arch"`
-	LastSeen *time.Time `json:"last_seen"`
-	Folders  []struct {
-		Path  string `json:"path"`
-		Write bool   `json:"write"`
-	} `json:"folders"`
-	Network *struct {
-		Mode  string   `json:"mode"`
-		Hosts []string `json:"hosts"`
-	} `json:"network"`
-	CreatedAt time.Time `json:"created_at"`
-}
-
-// deviceList is the platform's answer to the list: the devices, and how many
-// one person may connect.
-type deviceList struct {
-	Items []deviceRecord `json:"items"`
-	Limit int            `json:"limit"`
-}
-
-// platformRequest is one request to the platform with a bearer its caller
-// chose, decoding a JSON answer into out.
-type platformRequest func(ctx context.Context, method, path string, body, out any) error
+// and removed with the person's own token through the SDK's account client.
+// What a device is on this computer (the host policy file, the key) is
+// Cella's device engine's. This file builds on every platform, since
+// `latere logout` removes a connected computer wherever it runs.
 
 // deviceAuth is where a device's calls as the person get their bearers: the
 // saved login, or under `serve --credentials client` the tokens the client
@@ -85,9 +49,10 @@ func (a deviceAuth) cella() (*cellaclient.Client, error) {
 	})
 }
 
-// platform sends one request to the platform as the person.
-func (a deviceAuth) platform(ctx context.Context, method, path string, body, out any) error {
-	return platformCallWith(ctx, a.platformURL, a.bearer, method, path, body, out)
+// accountCall runs call with the SDK's account client at the platform, as
+// the person.
+func (a deviceAuth) accountCall(ctx context.Context, call func(*account.Client) error) error {
+	return accountCallWith(ctx, a.platformURL, a.bearer, call)
 }
 
 // bearer is the person's bearer for the platform at base: the client's
@@ -97,20 +62,6 @@ func (a deviceAuth) bearer(ctx context.Context, base string) (string, error) {
 		return a.held.Token(ctx, latere.DefaultAudience)
 	}
 	return platformBearer(ctx, base, "")
-}
-
-// account is the SDK's account client at the platform, as the person.
-func (a deviceAuth) account(ctx context.Context) (*account.Client, error) {
-	base := resolvePlatformURL(a.platformURL)
-	bearer, err := a.bearer(ctx, base)
-	if err != nil {
-		return nil, err
-	}
-	cfg, err := api.Product{BaseURL: base, Token: bearer}.Config()
-	if err != nil {
-		return nil, err
-	}
-	return account.New(cfg), nil
 }
 
 // orgContext is the organization the person's bearer is in, "" for their
@@ -138,15 +89,30 @@ func (a deviceAuth) orgContext(ctx context.Context) (string, error) {
 	return info.OrgID, nil
 }
 
+// devices lists the person's devices at the platform, with how many one
+// person may connect.
+func (a deviceAuth) devices(ctx context.Context) (*account.Devices, error) {
+	var list *account.Devices
+	err := a.accountCall(ctx, func(c *account.Client) (err error) {
+		list, err = c.ListDevices(ctx)
+		return err
+	})
+	return list, err
+}
+
+// rename names a device in the platform's records.
+func (a deviceAuth) rename(ctx context.Context, id, name string) error {
+	return a.accountCall(ctx, func(c *account.Client) error {
+		_, err := c.RenameDevice(ctx, id, name)
+		return err
+	})
+}
+
 // remove removes a device at the platform, which deletes its environment at
 // Cella, revokes its keys and ends its sandboxes. A device the platform no
-// longer has is already removed.
+// longer has is already removed, and its removal succeeds.
 func (a deviceAuth) remove(ctx context.Context, id string) error {
-	err := a.platform(ctx, http.MethodDelete, devicesPath+"/"+id, nil, nil)
-	if pe, ok := errors.AsType[*platformError](err); ok && pe.Status == http.StatusNotFound {
-		return nil
-	}
-	return err
+	return a.accountCall(ctx, func(c *account.Client) error { return c.RemoveDevice(ctx, id) })
 }
 
 // laterePlatform is the platform's part of a connect, for the engine's
@@ -157,7 +123,7 @@ type laterePlatform struct{ auth deviceAuth }
 
 // Labels are the tenant labels of the sign-in's context.
 func (p laterePlatform) Labels(ctx context.Context) (map[string]string, error) {
-	return readTenantLabels(ctx, p.auth.platform)
+	return readTenantLabels(ctx, p.auth.accountCall)
 }
 
 // Context is the organization the sign-in is in, "" for the person's own.
@@ -167,7 +133,7 @@ func (p laterePlatform) Context(ctx context.Context) (string, error) {
 
 // Rename names the device in the platform's records.
 func (p laterePlatform) Rename(ctx context.Context, id, name string) error {
-	return p.auth.platform(ctx, http.MethodPatch, devicesPath+"/"+id, map[string]string{"name": name}, nil)
+	return p.auth.rename(ctx, id, name)
 }
 
 // Remove removes the device at the platform; one it no longer has is
@@ -179,11 +145,7 @@ func (p laterePlatform) Remove(ctx context.Context, id string) error {
 // Devices answers how many devices the person has and how many one person
 // may connect.
 func (p laterePlatform) Devices(ctx context.Context) (have, limit int, err error) {
-	client, err := p.auth.account(ctx)
-	if err != nil {
-		return 0, 0, err
-	}
-	list, err := client.ListDevices(ctx)
+	list, err := p.auth.devices(ctx)
 	if err != nil {
 		return 0, 0, err
 	}

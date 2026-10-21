@@ -11,41 +11,44 @@ import (
 	"fmt"
 	"io"
 	"maps"
-	"net/http"
 	"slices"
 
 	"gopkg.in/yaml.v3"
+
+	"latere.ai/x/sdk-go/account"
 )
 
 // The platform's decider admits a create at Environments only when the
 // object carries the caller's tenant, principal and, in an organization,
 // org labels under platform.latere.ai/, and the tenant label is a hash of
-// the context. The platform answers them for the token's context at
-// tenantLabelsPath, and every create the CLI makes carries them, as every
-// create the console makes does.
+// the context. The platform answers them for the token's context, which
+// the SDK's account client reads, and every create the CLI makes carries
+// them, as every create the console makes does.
 
-// tenantLabelsPath is the platform's read of the labels a create carries.
-const tenantLabelsPath = "/v1/account/environments/context"
+// accountRequest runs call with the SDK's account client at the platform,
+// with a bearer its caller chose.
+type accountRequest func(ctx context.Context, call func(*account.Client) error) error
 
 // tenantLabels reads the labels of the login's current context from the
 // platform at platformURL ("" for the default), with a bearer for the
 // platform's audience. A read the platform refuses ends the command: without
 // the labels a create is refused.
 func tenantLabels(ctx context.Context, platformURL string) (map[string]string, error) {
-	return readTenantLabels(ctx, func(ctx context.Context, method, path string, body, out any) error {
-		return platformCall(ctx, platformURL, "", method, path, body, out)
+	loginBearer := func(ctx context.Context, base string) (string, error) { return platformBearer(ctx, base, "") }
+	return readTenantLabels(ctx, func(ctx context.Context, call func(*account.Client) error) error {
+		return accountCallWith(ctx, platformURL, loginBearer, call)
 	})
 }
 
-// readTenantLabels is tenantLabels through call, a platform request with a
-// bearer the caller chooses.
-func readTenantLabels(ctx context.Context, call platformRequest) (map[string]string, error) {
-	var answer struct {
-		Tenant struct {
-			Labels map[string]string `json:"labels"`
-		} `json:"tenant"`
-	}
-	if err := call(ctx, http.MethodGet, tenantLabelsPath, nil, &answer); err != nil {
+// readTenantLabels is tenantLabels through request, with a bearer the
+// caller chooses.
+func readTenantLabels(ctx context.Context, request accountRequest) (map[string]string, error) {
+	var answer *account.EnvironmentsContext
+	err := request(ctx, func(c *account.Client) (err error) {
+		answer, err = c.GetEnvironmentsContext(ctx)
+		return err
+	})
+	if err != nil {
 		return nil, fmt.Errorf("cannot read your account's labels for the workload from the platform: %w", wrapReposErr(err))
 	}
 	if len(answer.Tenant.Labels) == 0 {

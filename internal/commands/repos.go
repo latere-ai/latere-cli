@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"text/tabwriter"
@@ -20,6 +21,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"latere.ai/x/pkg/otel"
+	"latere.ai/x/sdk-go/account"
 	"latere.ai/x/sdk-go/latere"
 
 	"github.com/latere-ai/latere-cli/internal/api"
@@ -231,16 +233,8 @@ func platformBearer(ctx context.Context, base, authURL string) (string, error) {
 // platformCall sends one request to the platform with a fresh bearer and
 // decodes a JSON answer into out. A non-2xx answer is a *platformError.
 func platformCall(ctx context.Context, platformURL, authURL, method, path string, body, out any) error {
-	return platformCallWith(ctx, platformURL, func(ctx context.Context, base string) (string, error) {
-		return platformBearer(ctx, base, authURL)
-	}, method, path, body, out)
-}
-
-// platformCallWith is platformCall with the bearer bearer answers for the
-// platform's base URL, so a caller holding its own token presents it.
-func platformCallWith(ctx context.Context, platformURL string, bearerFor func(context.Context, string) (string, error), method, path string, body, out any) error {
 	base := resolvePlatformURL(platformURL)
-	bearer, err := bearerFor(ctx, base)
+	bearer, err := platformBearer(ctx, base, authURL)
 	if err != nil {
 		return err
 	}
@@ -285,6 +279,45 @@ func platformCallWith(ctx context.Context, platformURL string, bearerFor func(co
 		return fmt.Errorf("parse the platform's answer: %w", err)
 	}
 	return nil
+}
+
+// accountCallWith runs call with the SDK's account client at the platform,
+// presenting the bearer bearerFor answers for the platform's base URL, so a
+// caller holding its own token presents it, and words its error as
+// platformCall does.
+func accountCallWith(ctx context.Context, platformURL string, bearerFor func(context.Context, string) (string, error), call func(*account.Client) error) error {
+	base := resolvePlatformURL(platformURL)
+	bearer, err := bearerFor(ctx, base)
+	if err != nil {
+		return err
+	}
+	cfg, err := api.Product{BaseURL: base, Token: bearer, Timeout: platformTimeout}.Config()
+	if err != nil {
+		return err
+	}
+	return platformRefused(base, call(account.New(cfg)))
+}
+
+// platformRefused is what a command says of an error a call through the SDK
+// to the platform at base answered: a refusal as a *platformError, with the
+// detail its details carry, and the rest each in a sentence of its own, as
+// platformCall words them.
+func platformRefused(base string, err error) error {
+	if e, ok := errors.AsType[*latere.TokenError](err); ok {
+		return fmt.Errorf("cannot authenticate to the platform: %w", e.Err)
+	}
+	if e, ok := errors.AsType[*latere.Error](err); ok {
+		pe := &platformError{Status: e.StatusCode, Code: e.Code, Message: api.RefusalText(e), Details: e.Details}
+		pe.Detail, _ = e.Details["detail"].(string)
+		return pe
+	}
+	if e, ok := errors.AsType[*url.Error](err); ok {
+		return fmt.Errorf("reach the platform at %s: %w", base, e)
+	}
+	if e := jsonError(err); e != nil {
+		return fmt.Errorf("parse the platform's answer: %w", e)
+	}
+	return err
 }
 
 // wrapReposErr adds what to do next to a refused token, leaving other

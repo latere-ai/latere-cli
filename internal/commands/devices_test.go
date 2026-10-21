@@ -155,8 +155,14 @@ func newDevicePlatform(t *testing.T) *devicePlatform {
 	})
 	mux.HandleFunc("DELETE /v1/account/devices/{id}", func(w http.ResponseWriter, r *http.Request) {
 		p.mu.Lock()
+		gone := slices.Contains(p.removed, r.PathValue("id"))
 		p.removed = append(p.removed, r.PathValue("id"))
 		p.mu.Unlock()
+		if gone {
+			// The platform's answer for a device it no longer has.
+			answer(w, http.StatusNotFound, map[string]any{"error": map[string]any{"code": "not_found", "message": "There is no such device."}})
+			return
+		}
 		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("POST /v1/environments/environments", func(w http.ResponseWriter, r *http.Request) {
@@ -533,16 +539,21 @@ func TestDevicesRenameAndRemove(t *testing.T) {
 	if p.renamed[id] != "New Name" || p.renamed["dev-zzzzzzzzzzzzzzzz"] != "Other" || policy.Name != "New Name" {
 		t.Errorf("renamed %v, and the file names %q", p.renamed, policy.Name)
 	}
-	if _, _, err := runDevices(t, "", "devices", "remove", "dev-zzzzzzzzzzzzzzzz"); err != nil {
-		t.Fatal(err)
+	if _, errOut, err := runDevices(t, "", "devices", "remove", "dev-zzzzzzzzzzzzzzzz"); err != nil || !strings.Contains(errOut, "Removed dev-zzzzzzzzzzzzzzzz.") {
+		t.Fatalf("remove returned %v:\n%s", err, errOut)
 	}
 	if _, ok, _ := device.OpenKeys(paths.KeyFile()).Get(id); !ok {
 		t.Error("removing another device deleted this computer's key")
 	}
+	// A device the platform no longer has is already removed: removing it
+	// again succeeds and says so in the same words.
+	if _, errOut, err := runDevices(t, "", "devices", "remove", "dev-zzzzzzzzzzzzzzzz"); err != nil || !strings.Contains(errOut, "Removed dev-zzzzzzzzzzzzzzzz.") {
+		t.Fatalf("removing a removed device returned %v:\n%s", err, errOut)
+	}
 	if _, _, err := runDevices(t, "", "devices", "remove"); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(p.removed, ",") != "dev-zzzzzzzzzzzzzzzz,"+id {
+	if strings.Join(p.removed, ",") != "dev-zzzzzzzzzzzzzzzz,dev-zzzzzzzzzzzzzzzz,"+id {
 		t.Errorf("removed %v", p.removed)
 	}
 	if _, ok, _ := device.OpenKeys(paths.KeyFile()).Get(id); ok {

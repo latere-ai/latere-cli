@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/url"
 	"os"
 	"slices"
 	"strings"
@@ -195,26 +194,8 @@ func newAppPlatform(flagURL, authURL string) (*appPlatform, error) {
 }
 
 // refused is what a command says of an error a call to the platform
-// answered: a refusal as a *platformError, with the detail its details
-// carry, and the rest each in a sentence of its own, as the repository
-// commands word them.
-func (p *appPlatform) refused(err error) error {
-	if e, ok := errors.AsType[*latere.TokenError](err); ok {
-		return fmt.Errorf("cannot authenticate to the platform: %w", e.Err)
-	}
-	if e, ok := errors.AsType[*latere.Error](err); ok {
-		pe := &platformError{Status: e.StatusCode, Code: e.Code, Message: api.RefusalText(e), Details: e.Details}
-		pe.Detail, _ = e.Details["detail"].(string)
-		return pe
-	}
-	if e, ok := errors.AsType[*url.Error](err); ok {
-		return fmt.Errorf("reach the platform at %s: %w", p.base, e)
-	}
-	if e := jsonError(err); e != nil {
-		return fmt.Errorf("parse the platform's answer: %w", e)
-	}
-	return err
-}
+// answered, as the repository commands word it.
+func (p *appPlatform) refused(err error) error { return platformRefused(p.base, err) }
 
 // appForAccess reads the app a command that asks the platform acts on. The
 // platform keeps the people invited and the password under the app's id,

@@ -24,6 +24,7 @@ import (
 	"latere.ai/x/cella/device"
 	"latere.ai/x/cella/runtime"
 	"latere.ai/x/cella/runtime/local"
+	"latere.ai/x/sdk-go/account"
 	"latere.ai/x/sdk-go/latere"
 
 	"github.com/latere-ai/latere-cli/internal/api"
@@ -299,7 +300,7 @@ func connectAs(ctx context.Context, paths device.Paths, p device.Policy, auth de
 func newEnrollment(paths device.Paths, client *cellaclient.Client, auth deviceAuth) *device.Enrollment {
 	return device.NewEnrollment(device.EnrollmentOptions{
 		Paths: paths, Cella: client, Platform: laterePlatform{auth: auth},
-		Labels: map[string]string{deviceKindLabel: deviceKindValue},
+		Labels: map[string]string{account.LabelKind: account.KindDevice},
 	})
 }
 

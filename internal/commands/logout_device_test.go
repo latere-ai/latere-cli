@@ -40,6 +40,13 @@ func connectedForLogout(t *testing.T, deleteStatus int) (paths device.Paths, aut
 	})
 	mux.HandleFunc("DELETE /v1/account/devices/{id}", func(w http.ResponseWriter, r *http.Request) {
 		record("remove " + r.PathValue("id"))
+		if deleteStatus == http.StatusNotFound {
+			// The platform's answer for a device it no longer has.
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(deleteStatus)
+			_, _ = w.Write([]byte(`{"error":{"code":"not_found","message":"There is no such device."}}`))
+			return
+		}
 		w.WriteHeader(deleteStatus)
 	})
 	srv = httptest.NewServer(mux)
@@ -123,6 +130,8 @@ func TestLogoutWarnsOnAConnectedComputer(t *testing.T) {
 			t.Errorf("logout did not say it removed the computer:\n%s", errOut)
 		}
 	})
+	// The platform no longer has the device, so it is already removed: the
+	// sign-out goes on and says the computer is removed.
 	t.Run("--yes does not ask", func(t *testing.T) {
 		_, _, srv, order := connectedForLogout(t, http.StatusNotFound)
 		errOut, err := logoutWith(t, "", "--auth-url", srv.URL, "--yes")
@@ -132,6 +141,9 @@ func TestLogoutWarnsOnAConnectedComputer(t *testing.T) {
 		if got := strings.Join(order(), ", "); got != "remove dev-abcdefghijklmnop, revoke" {
 			t.Errorf("logout --yes asked %q", got)
 		}
+		if !strings.Contains(errOut, "Removed this computer from your devices.") {
+			t.Errorf("logout did not say it removed the computer:\n%s", errOut)
+		}
 	})
 	t.Run("a device that cannot be removed keeps the login", func(t *testing.T) {
 		_, authPath, srv, order := connectedForLogout(t, http.StatusServiceUnavailable)
@@ -139,8 +151,17 @@ func TestLogoutWarnsOnAConnectedComputer(t *testing.T) {
 		if device.CodeOf(err) != codeLogoutBlocked {
 			t.Fatalf("logout with the platform down returned %v", err)
 		}
-		if got := strings.Join(order(), ", "); got != "remove dev-abcdefghijklmnop" {
-			t.Errorf("logout asked %q; the login must not be revoked", got)
+		// The removal is sent again after a server error, and the login is
+		// never revoked.
+		got := order()
+		if len(got) == 0 {
+			t.Error("logout did not ask the platform to remove the device")
+		}
+		for _, step := range got {
+			if step != "remove dev-abcdefghijklmnop" {
+				t.Errorf("logout asked %q; the login must not be revoked", got)
+				break
+			}
 		}
 		if _, err := os.Stat(authPath); err != nil {
 			t.Errorf("the login was removed: %v", err)

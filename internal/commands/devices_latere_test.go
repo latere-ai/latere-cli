@@ -28,6 +28,8 @@ func TestReadDeviceToken(t *testing.T) {
 			device.TokenClaims{Audiences: []string{"api.latere.ai", "cella"}, Subject: "p1", Expiry: exp, Personal: true}},
 		{"no exp", map[string]any{"sub": "p1", "aud": "cella"},
 			device.TokenClaims{Audiences: []string{"cella"}, Subject: "p1", Personal: true}},
+		{"an exp of zero", map[string]any{"sub": "p1", "aud": "cella", "exp": 0},
+			device.TokenClaims{Audiences: []string{"cella"}, Subject: "p1", Personal: true}},
 		{"an organization's context", map[string]any{"sub": "p1", "aud": "cella", "exp": exp.Unix(), "org_id": "org-1"},
 			device.TokenClaims{Audiences: []string{"cella"}, Subject: "p1", Expiry: exp, Context: "org-1"}},
 	} {

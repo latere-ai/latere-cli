@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"os/signal"
 	goruntime "runtime"
@@ -22,6 +21,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"latere.ai/x/cella/device"
+	"latere.ai/x/sdk-go/account"
 )
 
 // newDevicesCmd is the `latere devices ...` command tree (spec 016): this
@@ -108,14 +108,15 @@ sessions use. This computer is marked with *.`,
 			if err != nil {
 				return err
 			}
-			var list deviceList
-			if err = platformCall(cmd.Context(), platformURL, "", http.MethodGet, devicesPath, nil, &list); err != nil {
+			list, err := (deviceAuth{platformURL: platformURL}).devices(cmd.Context())
+			if err != nil {
 				return wrapReposErr(err)
 			}
 			if jsonF {
+				// The platform's own answer, with every field it sends.
 				enc := json.NewEncoder(cmd.OutOrStdout())
 				enc.SetIndent("", "  ")
-				return enc.Encode(list)
+				return enc.Encode(list.RawJSON())
 			}
 			return printDevices(cmd.OutOrStdout(), list, policy.Device)
 		},
@@ -126,7 +127,7 @@ sessions use. This computer is marked with *.`,
 }
 
 // printDevices writes the list as a table.
-func printDevices(out io.Writer, list deviceList, here string) error {
+func printDevices(out io.Writer, list *account.Devices, here string) error {
 	var b bytes.Buffer
 	if len(list.Items) == 0 {
 		b.WriteString("You have no devices. Connect this computer with: latere devices connect\n")
@@ -147,12 +148,12 @@ func printDevices(out io.Writer, list deviceList, here string) error {
 				folders = append(folders, f.Path+" ("+access+")")
 			}
 			seen := "-"
-			if d.LastSeen != nil {
-				seen = humanAge(*d.LastSeen) + " ago"
+			if !d.LastSeen.IsZero() {
+				seen = humanAge(d.LastSeen) + " ago"
 			}
 			system := strings.Trim(d.OS+"/"+d.Arch, "/")
 			fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", mark, d.Name, d.ID, defaultStr(system, "-"),
-				defaultStr(d.Status, "-"), seen, defaultStr(strings.Join(folders, ", "), "-"))
+				defaultStr(string(d.Status), "-"), seen, defaultStr(strings.Join(folders, ", "), "-"))
 		}
 		if err := w.Flush(); err != nil {
 			return err
@@ -186,7 +187,7 @@ func newDevicesRenameCmd() *cobra.Command {
 			if id == "" {
 				return device.Fail(device.CodeNotConnected, "name a device id from `latere devices list`", nil)
 			}
-			if err = platformCall(cmd.Context(), platformURL, "", http.MethodPatch, devicesPath+"/"+id, map[string]string{"name": name}, nil); err != nil {
+			if err = (deviceAuth{platformURL: platformURL}).rename(cmd.Context(), id, name); err != nil {
 				return wrapReposErr(err)
 			}
 			if id == policy.Device {

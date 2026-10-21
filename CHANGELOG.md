@@ -10,6 +10,18 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Changed
+
+- **`latere devices` reaches the platform through the Latere Go SDK
+  v0.3.0.** Its commands, flags, words and exit codes are as they were.
+  Listing, renaming and removing a device, and the labels a connect reads
+  for your account, are sent again after a temporary error (429 or 5xx) or
+  a dropped connection, and so is the labels read of `latere environments
+  apply` and `latere environments run --ephemeral`. `latere devices list
+  --json` prints the platform's answer as it is sent: every field, such as
+  `isolation`, and no `os`, `arch`, `last_seen` or `network` for a device
+  that has none, where before they were empty or null.
+
 ## v0.30.0 - 2026-10-21
 
 ### Changed
