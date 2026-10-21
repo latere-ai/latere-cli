@@ -17,6 +17,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -150,5 +151,48 @@ func TestEvalsE2E(t *testing.T) {
 	}
 	if slices.ContainsFunc(bearers, func(b string) bool { return b != "Bearer evals-actor" }) {
 		t.Errorf("bearers = %q, want the actor token alone, never the login", bearers)
+	}
+}
+
+// The retired Eval service's command answers with its replacement and
+// reaches nothing; its URL variable set alone refuses `latere evals`.
+func TestRetiredEvalE2E(t *testing.T) {
+	if testing.Short() {
+		t.Skip("binary e2e skipped with -short")
+	}
+	binary := latereBinary(t)
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusTeapot)
+	}))
+	defer server.Close()
+	run := func(env []string, args ...string) (string, string, int) {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+		defer cancel()
+		command := exec.CommandContext(ctx, binary, args...)
+		command.Env = append(os.Environ(), append(env, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "XDG_CONFIG_HOME="+t.TempDir())...)
+		var stdout, stderr bytes.Buffer
+		command.Stdout, command.Stderr = &stdout, &stderr
+		err := command.Run()
+		code := 0
+		if exit, ok := errors.AsType[*exec.ExitError](err); ok {
+			code = exit.ExitCode()
+		} else if err != nil {
+			t.Fatalf("run %v: %v", args, err)
+		}
+		return stdout.String(), stderr.String(), code
+	}
+	out, errOut, code := run([]string{"EVAL_API_URL=" + server.URL}, "eval", "apply", "-f", "suite.yaml", "--dry-run")
+	if code != 1 || out != "" || errOut != "'latere eval' was the command of the retired Eval service; 'latere evals' reads your suites and experiments in Evals\n" {
+		t.Errorf("latere eval = %d %q %q, want exit 1 naming latere evals", code, out, errOut)
+	}
+	_, errOut, code = run([]string{"EVAL_API_URL=" + server.URL, "LATERE_EVALS_URL=", "LATERE_EVALS_TOKEN=t"}, "evals", "suites", "list")
+	if code != 2 || !strings.Contains(errOut, "EVAL_API_URL is now LATERE_EVALS_URL") {
+		t.Errorf("EVAL_API_URL alone = %d %q, want 2 naming LATERE_EVALS_URL", code, errOut)
+	}
+	if n := requests.Load(); n != 0 {
+		t.Errorf("requests = %d, want none", n)
 	}
 }

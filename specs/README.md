@@ -22,7 +22,7 @@ specs/
   012-app-access.md                  (implemented: a new app is private; latere apps visibility, access, share and unshare)
   013-app-password.md                (implemented: latere apps password; access says a password, and visibility removes one)
   014-app-rename.md                  (implemented: latere apps rename; the app moves to a new slug and the latere remote follows)
-  015-evals-commands.md              (in-progress: latere evals replaces latere eval; suites, experiments, comparisons, harness lease and import, publishing)
+  015-evals-commands.md              (in-progress: latere evals replaces latere eval; definitions and experiments listed, shown and followed, built; apply, run, compare, harness and publishing to come)
   016-devices-command.md             (complete: latere devices connects this computer as an environment the person's sessions work on; their own sessions start there unasked)
   017-signed-upgrades.md             (complete: releases sign their checksums; upgrade and auto-upgrade verify the signature, and an SSH signature beside it for the installer)
   018-a-desktop-client-of-the-device-engine.md (complete: serve connects, takes a client's tokens, changes the policy and removes the device through its socket; Latere Studio's folders denied, and logout keeps a device another process serves)
@@ -69,8 +69,8 @@ Where each spec stands:
 - `011-capability-commands.md`: the command groups are named after the
   platform's capabilities. `latere environments` replaces `latere cella`,
   and `latere agents run`, `provider` and `review` replace `latere topos
-  --local`, `latere topos login` and `latere review`; the old words are
-  refused with their replacement for one release.
+  --local`, `latere topos login` and `latere review`; the old words were
+  refused with their replacement from v0.17.0 and removed on 2026-10-21.
 - `012-app-access.md`: `latere apps create` names no visibility, so a new
   app is private unless `--visibility unlisted` is given.
   `latere apps visibility` changes it between `private` and `unlisted` on
@@ -98,7 +98,10 @@ Where each spec stands:
   experiments run and followed, comparisons in the terminal, an external
   harness's lease, renewal and submit, a harness's past runs imported as
   declared trials, reports, benchmarks and datasets published and shared,
-  and bar checks for CI with fixed exit codes.
+  and bar checks for CI with fixed exit codes. Its first slice was built on
+  2026-10-21: each definition's `list` and `show`, and `experiments list`,
+  `show` and `watch`, with the group's exit codes. `latere eval` is removed
+  and its word refused for one release.
 - `016-devices-command.md`: `latere devices connect` connects this computer
   as one of the person's environments and serves it in the foreground as a
   Cella worker on the local driver, confined to the folders the person
@@ -131,9 +134,8 @@ Where each spec stands:
   device another process serves. Drafted on 2026-10-19 for Latere Studio's
   This Mac; F and G built on 2026-10-21, not released.
 
-Two surfaces shipped without a dedicated design record: the token-lifecycle
-work, which [docs/login-and-tokens.md](../docs/login-and-tokens.md) documents,
-and the top-level `eval` command group, which has code but no spec or guide.
+One surface shipped without a dedicated design record: the token-lifecycle
+work, which [docs/login-and-tokens.md](../docs/login-and-tokens.md) documents.
 That is a recorded decision, not an open action item.
 
 ## Conventions

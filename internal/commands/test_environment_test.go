@@ -48,8 +48,14 @@ func runIsolatedCommandTests(m *testing.M) int {
 		"LATERE_AUTH_TOKEN_FILE":    filepath.Join(root, "latere", "auth-token.json"),
 		"LATERE_ENVIRONMENTS_TOKEN": "",
 		"LATERE_ENVIRONMENTS_URL":   "",
-		"LATERE_APPS_TOKEN":         "",
-		"LATERE_APPS_URL":           "",
+		// The retired variables are refused when set alone (spec 015), so
+		// one left in a developer's shell would fail unrelated tests.
+		"EVAL_API_URL":       "",
+		"EVAL_ADMIN_TOKEN":   "",
+		"LATERE_EVALS_URL":   "",
+		"LATERE_EVALS_TOKEN": "",
+		"LATERE_APPS_TOKEN":  "",
+		"LATERE_APPS_URL":    "",
 		// A handed model key or models URL would route every model test
 		// away from its stub.
 		"LATERE_MODEL_KEY":  "",

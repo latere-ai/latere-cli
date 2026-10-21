@@ -191,23 +191,6 @@ variable the CLI reads and every file it keeps.
 Shell completion comes from the binary: `latere completion <shell>` prints
 the script for bash, zsh, fish, or PowerShell.
 
-### For operators
-
-`latere eval` manages model-evaluation suites on `eval.latere.ai`: a
-manifest declares tasks crossed with a model and harness matrix, and
-`latere eval apply -f suite.yaml` reconciles it, with `--dry-run` to see
-the change first. `latere eval suites` and `latere eval cells --suite <id>`
-list what exists. It is an administration tool and does not use your
-login: it presents the token in `EVAL_ADMIN_TOKEN` or `--token`, which is
-a token the issuer minted for the `eval` audience, held by a platform
-administrator or a service account. A manifest is one YAML document of at
-most 256 KiB after prompt files are inlined; a `file://` prompt is read
-relative to the manifest, and a nonempty `prompt_text` takes precedence
-over `prompt`. Apply never
-deletes a cell and does not retry: when the response does not confirm the
-suite, its status, and the dry-run mode, the command reports that the
-outcome is unknown. `latere eval --help` has the rest.
-
 ## Compatibility
 
 `latere` is released from git tags and is before 1.0. A command that moves

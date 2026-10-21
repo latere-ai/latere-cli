@@ -578,3 +578,31 @@ func TestEvalsRoutesAreExamens(t *testing.T) {
 		}
 	}
 }
+
+// The retired Eval service's variables set alone are refused naming their
+// replacements, before any request, so a script that pointed the old
+// command elsewhere never reaches production unawares; beside their
+// replacements they are ignored.
+func TestRenamedEvalsVariables(t *testing.T) {
+	s := newEvalsStub(t)
+	s.json("GET /suites", http.StatusOK, `{"items":[]}`)
+	url := os.Getenv(envEvalsURL)
+	t.Setenv(envEvalsURL, "")
+	t.Setenv("EVAL_API_URL", "https://eval.example")
+	_, errOut, code := runEvals(t, "suites", "list")
+	if code != 2 || errOut != "EVAL_API_URL is now LATERE_EVALS_URL; set LATERE_EVALS_URL instead\n" {
+		t.Errorf("EVAL_API_URL alone = %d %q", code, errOut)
+	}
+	t.Setenv(envEvalsURL, url)
+	if _, errOut, code := runEvals(t, "suites", "list"); code != 0 {
+		t.Errorf("both set = %d %q, want the current variable", code, errOut)
+	}
+	t.Setenv(envEvalsToken, "")
+	t.Setenv("EVAL_ADMIN_TOKEN", "old-token")
+	if _, errOut, code := runEvals(t, "suites", "list"); code != 2 || !strings.Contains(errOut, "EVAL_ADMIN_TOKEN is now LATERE_EVALS_TOKEN") {
+		t.Errorf("EVAL_ADMIN_TOKEN alone = %d %q", code, errOut)
+	}
+	if got := len(s.seen()); got != 1 {
+		t.Errorf("requests = %d, want the one with both URL variables set", got)
+	}
+}

@@ -16,7 +16,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -165,14 +164,22 @@ type evalsClient struct {
 // from the saved login and minted again as they lapse, so the login token
 // never reaches the API and a long watch keeps working.
 func newEvalsClient(flagURL, authURL string) (*evalsClient, error) {
-	base := strings.TrimRight(cmp.Or(flagURL, os.Getenv(envEvalsURL), defaultEvalsURL), "/")
+	env, err := capabilityEnv(envEvalsURL)
+	if err != nil {
+		return nil, &evalsExitError{code: evalsExitRefused, err: err}
+	}
+	base := strings.TrimRight(cmp.Or(flagURL, env, defaultEvalsURL), "/")
 	origin, ok := strings.CutSuffix(base, evalsBasePath)
 	if !ok {
 		return nil, &evalsExitError{code: evalsExitRefused, err: fmt.Errorf("%s is not an Evals API base URL: it ends in %s, as %s does", base, evalsBasePath, defaultEvalsURL)}
 	}
+	token, err := capabilityEnv(envEvalsToken)
+	if err != nil {
+		return nil, &evalsExitError{code: evalsExitRefused, err: err}
+	}
 	cfg, err := api.Product{
 		BaseURL: origin, AuthURL: authURL, Audience: evalsAudience,
-		Token: strings.TrimSpace(os.Getenv(envEvalsToken)), Timeout: evalsTimeout,
+		Token: strings.TrimSpace(token), Timeout: evalsTimeout,
 	}.Config()
 	if err != nil {
 		return nil, &evalsExitError{code: evalsExitRefused, err: err}

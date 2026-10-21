@@ -69,12 +69,14 @@ load it from your shell startup files.`,
 	root.AddCommand(newGitCredentialCmd())
 	root.AddCommand(newEnvironmentsCmd())
 	root.AddCommand(newAgentsCmd())
-	root.AddCommand(newEvalCmd())
 	root.AddCommand(newEvalsCmd())
 	root.AddCommand(newModelsCmd())
 	root.AddCommand(newReposCmd())
 	root.AddCommand(newAppCmd())
 	root.AddCommand(newDevicesCmd(version))
+	for word := range retiredCommands {
+		root.AddCommand(newRetiredCmd(word))
+	}
 	root.AddCommand(newUpgradeCmd(version))
 	root.AddCommand(newCompletionCmd(root))
 	return root

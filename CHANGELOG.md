@@ -50,6 +50,13 @@ committed: the commit log already holds that.
 
 ### Removed
 
+- **`latere eval` is gone.** It managed suites on the Eval service, which
+  was removed on 2026-10-17, so every command already failed to connect.
+  Evaluation is Evals on the platform now, which `latere evals` reads. For
+  one release `latere eval` answers with that and exits 1, and
+  `EVAL_API_URL` or `EVAL_ADMIN_TOKEN` set without `LATERE_EVALS_URL` or
+  `LATERE_EVALS_TOKEN` stops every `latere evals` command, so a script
+  that pointed at another address does not reach the platform unawares.
 - **The old command words and variables are gone.** They were refused with
   their replacement since v0.17.0, and are now unknown commands and unread
   variables. Use the capability names:

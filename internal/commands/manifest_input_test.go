@@ -20,7 +20,6 @@ import (
 func TestApplyConfiguredManifestInput(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("LATERE_ENVIRONMENTS_TOKEN", "synthetic-token")
-	t.Setenv("EVAL_ADMIN_TOKEN", "synthetic-token")
 	t.Setenv("LATERE_NO_UPDATE_CHECK", "1")
 	process, err := os.CreateTemp(dir, "process-stdin")
 	if err != nil {
@@ -32,11 +31,8 @@ func TestApplyConfiguredManifestInput(t *testing.T) {
 	previous := os.Stdin
 	os.Stdin = process
 	t.Cleanup(func() { os.Stdin = previous; _ = process.Close() })
-	for _, product := range []string{"environments", "eval"} {
+	for _, product := range []string{"environments"} {
 		limit := 64 << 10
-		if product == "eval" {
-			limit = evalMaxManifestBytes
-		}
 		for _, mode := range []string{"stdin", "file", "empty", "read failure", "oversized"} {
 			t.Run(product+"/"+mode, func(t *testing.T) {
 				const manifest = "suite: intended\n"
@@ -72,30 +68,19 @@ func TestApplyConfiguredManifestInput(t *testing.T) {
 						t.Errorf("request=%s %s", r.Method, r.URL)
 					}
 					body, err := io.ReadAll(r.Body)
-					if product == "environments" {
-						// The manifest read is the one applied, carrying the
-						// account's labels beside it.
-						var applied struct {
-							Suite    string
-							Metadata struct{ Labels map[string]string }
-						}
-						if err != nil || yaml.Unmarshal(body, &applied) != nil || applied.Suite != "intended" || applied.Metadata.Labels["platform.latere.ai/tenant"] != "p-1" {
-							t.Errorf("wrong manifest applied: %q %v", body, err)
-						}
-					} else if err != nil || string(body) != manifest {
+					// The manifest read is the one applied, carrying the
+					// account's labels beside it.
+					var applied struct {
+						Suite    string
+						Metadata struct{ Labels map[string]string }
+					}
+					if err != nil || yaml.Unmarshal(body, &applied) != nil || applied.Suite != "intended" || applied.Metadata.Labels["platform.latere.ai/tenant"] != "p-1" {
 						t.Errorf("wrong manifest applied: %q %v", body, err)
 					}
-					if product == "eval" {
-						if r.URL.Path != "/api/v1/suites/apply" {
-							t.Errorf("path=%s", r.URL.Path)
-						}
-						_, _ = io.WriteString(w, `{"dry_run":false,"suite":{"id":"st-1","name":"intended","status":"exists"}}`)
-					} else {
-						if r.URL.Path != "/v1/sandboxes" {
-							t.Errorf("path=%s", r.URL.Path)
-						}
-						_, _ = io.WriteString(w, `{"id":"sb-1","name":"intended"}`)
+					if r.URL.Path != "/v1/sandboxes" {
+						t.Errorf("path=%s", r.URL.Path)
 					}
+					_, _ = io.WriteString(w, `{"id":"sb-1","name":"intended"}`)
 				}))
 				defer server.Close()
 				t.Setenv("LATERE_PLATFORM_URL", server.URL)

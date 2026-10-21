@@ -34,7 +34,7 @@ func TestModelsInvokeConfiguredOutput(t *testing.T) {
 					_, _ = io.WriteString(w, " \n"+body+"\n ")
 				}))
 				defer server.Close()
-				out := &evalOutputWriter{}
+				out := &failingWriter{}
 				sentinel := errors.New("invoke output unavailable")
 				if failAfter >= 0 {
 					out.remaining, out.err = failAfter, sentinel
@@ -87,7 +87,7 @@ func TestModelsListConfiguredOutput(t *testing.T) {
 	}))
 	defer server.Close()
 	for _, failAfter := range []int{-1, 0, 3} {
-		out := &evalOutputWriter{}
+		out := &failingWriter{}
 		sentinel := errors.New("list output unavailable")
 		if failAfter >= 0 {
 			out.remaining, out.err = failAfter, sentinel

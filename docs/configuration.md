@@ -33,9 +33,7 @@ setting, and each command's `--help` names the flags it takes.
 | `LATERE_PLATFORM_URL` | `https://platform.latere.ai` | The platform `latere repos` creates, lists and reads repositories on, `latere apps visibility`, `password`, `access`, `share` and `unshare` reach the people invited to an app and its password on, and `latere devices` lists, names and removes your devices on. `latere evals` links to its console. `--platform-url` overrides it. |
 | `LATERE_PLATFORM_TOKEN` | none | A bearer to present to the platform instead of minting one. |
 | `CODE_HOST` | `code.latere.ai` | The Latere Code host the git credential helper answers for, and the one `latere repos` prints clone URLs for. A nonblank value also allows plain HTTP, for a development host. |
-| `EVAL_API_URL` | `https://eval.latere.ai` | The Eval API. `--api-url` overrides it. |
 | `LATERE_DEVICE_KEYS_FILE` | unset | A file to keep this computer's device key in instead of the keychain, for a computer whose keychain needs a person to unlock it. |
-| `EVAL_ADMIN_TOKEN` | none | The bearer every `latere eval` command presents: a token the issuer minted for the `eval` audience, for a platform administrator or a service account. `--token` overrides it. |
 
 Your user configuration directory is the operating system's: `~/.config`
 on Linux (or `$XDG_CONFIG_HOME`), and `~/Library/Application Support` on

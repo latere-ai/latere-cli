@@ -46,7 +46,7 @@ func TestSharedJSONConfiguredOutput(t *testing.T) {
 					}
 				}))
 				defer server.Close()
-				out := &evalOutputWriter{}
+				out := &failingWriter{}
 				sentinel := errors.New("JSON output unavailable")
 				if failAfter >= 0 {
 					out.remaining, out.err = failAfter, sentinel

@@ -26,7 +26,7 @@ func TestUpgradeAutoOutput(t *testing.T) {
 				if err := upgrade.SaveConfig(upgrade.Config{AutoUpgrade: &previous}); err != nil {
 					t.Fatal(err)
 				}
-				out := &evalOutputWriter{remaining: limit}
+				out := &failingWriter{remaining: limit}
 				if limit >= 0 {
 					out.err = io.ErrClosedPipe
 				}

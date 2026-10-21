@@ -939,6 +939,22 @@ as the platform serves it at `https://api.latere.ai/v1/evals`.
   when it read a frame or lasted `evalsStreamFloor`, and exits 3 on a
   stream that keeps closing at once.
 
+**`latere eval` removed.** `eval.go`, its seven unit test files and its
+six end-to-end files are deleted, and the `eval` case left both manifest
+input tests; a writer helper the eval tests defined, which three other
+tests used, moved to `output_writer_test.go` as `failingWriter`. `eval` is
+the one retired word in `retired.go`: hidden, taking any arguments, it
+prints "'latere eval' was the command of the retired Eval service; 'latere
+evals' reads your suites and experiments in Evals" and exits 1. The
+sentence names what the first slice reads rather than the manifests the
+design's sentence promised, since `apply` is not built. `EVAL_API_URL` and
+`EVAL_ADMIN_TOKEN` set alone refuse every `latere evals` command naming
+`LATERE_EVALS_URL` and `LATERE_EVALS_TOKEN`, and the test entry points
+clear them. The scan's pattern gained `latere eval\b`,
+`EVAL_(API_URL|ADMIN_TOKEN)\b` and `eval\.latere\.ai`. The README's "For
+operators" section and the two configuration rows are gone. The release
+after the one that ships this removes the word and the two variables.
+
 **Not built.** `apply` and each kind's `apply` (the `PUT` routes are
 served), `taxonomies` and `baselines` (served), `experiments run`,
 `cancel`, `close` and `retry` (served), `experiments update` and `delete`

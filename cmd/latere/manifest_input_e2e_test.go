@@ -27,11 +27,8 @@ func TestApplyConfiguredManifestInputE2E(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	for _, product := range []string{"environments", "eval"} {
+	for _, product := range []string{"environments"} {
 		limit := 64 << 10
-		if product == "eval" {
-			limit = 256 << 10
-		}
 		for _, mode := range []string{"valid", "empty", "oversized"} {
 			t.Run(product+"/"+mode, func(t *testing.T) {
 				const manifest = "suite: intended\n"
@@ -59,38 +56,24 @@ func TestApplyConfiguredManifestInputE2E(t *testing.T) {
 						t.Errorf("request=%s %s", r.Method, r.URL)
 					}
 					data, err := io.ReadAll(r.Body)
-					want := manifest
-					if product == "environments" {
-						want += "metadata:\n  labels:\n    platform.latere.ai/principal: \"p1\"\n    platform.latere.ai/tenant: \"p-1\"\n"
-					}
+					want := manifest + "metadata:\n  labels:\n    platform.latere.ai/principal: \"p1\"\n    platform.latere.ai/tenant: \"p-1\"\n"
 					if err != nil || string(data) != want {
 						t.Errorf("wrong manifest applied: %q %v", data, err)
 					}
-					if product == "eval" {
-						if r.URL.Path != "/api/v1/suites/apply" {
-							t.Errorf("path=%s", r.URL.Path)
-						}
-						_, _ = io.WriteString(w, `{"dry_run":false,"suite":{"id":"st-1","name":"intended","status":"exists"}}`)
-					} else {
-						if r.URL.Path != "/v1/environments/sandboxes" {
-							t.Errorf("path=%s", r.URL.Path)
-						}
-						w.WriteHeader(http.StatusCreated)
-						_, _ = io.WriteString(w, `{"kind":"Sandbox","metadata":{"name":"intended"},"status":{"id":"sbx-1","phase":"Running"}}`)
+					if r.URL.Path != "/v1/environments/sandboxes" {
+						t.Errorf("path=%s", r.URL.Path)
 					}
+					w.WriteHeader(http.StatusCreated)
+					_, _ = io.WriteString(w, `{"kind":"Sandbox","metadata":{"name":"intended"},"status":{"id":"sbx-1","phase":"Running"}}`)
 				}))
 				defer server.Close()
 				// The existing helper configures the full command tree's inherited input.
-				apiURL := server.URL
-				if product != "eval" {
-					apiURL += "/v1/environments"
-				}
-				args := []string{"-test.run=^TestConfiguredInputHelperProcess$", "--", product, "apply", "-f", "-", "--api-url", apiURL}
+				args := []string{"-test.run=^TestConfiguredInputHelperProcess$", "--", product, "apply", "-f", "-", "--api-url", server.URL + "/v1/environments"}
 				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 				defer cancel()
 				command := exec.CommandContext(ctx, binary, args...)
 				command.Stdin = strings.NewReader("suite: wrong\n")
-				command.Env = append(os.Environ(), "LATERE_ENVIRONMENTS_TOKEN=synthetic-token", "LATERE_PLATFORM_URL="+server.URL, "LATERE_PLATFORM_TOKEN=synthetic-token", "LATERE_AUTH_TOKEN_FILE="+filepath.Join(dir, "absent-auth.json"), "XDG_CONFIG_HOME="+dir, "EVAL_ADMIN_TOKEN=synthetic-token", "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "LATERE_TEST_CONFIGURED_INPUT="+source)
+				command.Env = append(os.Environ(), "LATERE_ENVIRONMENTS_TOKEN=synthetic-token", "LATERE_PLATFORM_URL="+server.URL, "LATERE_PLATFORM_TOKEN=synthetic-token", "LATERE_AUTH_TOKEN_FILE="+filepath.Join(dir, "absent-auth.json"), "XDG_CONFIG_HOME="+dir, "LATERE_NO_UPDATE_CHECK=1", "OTEL_SDK_DISABLED=true", "LATERE_TEST_CONFIGURED_INPUT="+source)
 				out, err := command.CombinedOutput()
 				if wantError == "" {
 					if err != nil || requests.Load() != 1 {
