@@ -10,6 +10,19 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Fixed
+
+- **On macOS, sessions on your computer run when a folder you granted has
+  a long path.** A granted folder whose path came to about 255 bytes or
+  more, sooner with Chinese or Japanese names, or a long home folder, made
+  the sandbox refuse its whole profile, so every command exited 65 with
+  "Error reading string" and none ran. They run now under the same rules.
+- **On macOS, a path the sandbox denies inside a folder you granted stays
+  denied.** The granted folder and every folder between it and the denied
+  path now stay in place for a session's commands, and a path whose links
+  cannot be resolved stops the command with an error naming it, instead
+  of running with a rule that would not hold.
+
 ## v0.32.0 - 2026-10-21
 
 ### Added
