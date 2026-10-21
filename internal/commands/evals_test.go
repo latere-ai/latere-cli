@@ -44,7 +44,7 @@ func newEvalsStub(t *testing.T) *evalsStub {
 	s.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path, ok := strings.CutPrefix(r.URL.Path, evalsBasePath)
 		s.mu.Lock()
-		s.requests = append(s.requests, r.Clone(context.Background()))
+		s.requests = append(s.requests, r.Clone(r.Context()))
 		s.bearers = append(s.bearers, r.Header.Get("Authorization"))
 		h := s.routes[r.Method+" "+path]
 		s.mu.Unlock()
