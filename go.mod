@@ -2,7 +2,7 @@ module github.com/latere-ai/latere-cli
 
 go 1.27.0
 
-toolchain go1.27.2
+toolchain go1.27.3
 
 require (
 	github.com/charmbracelet/bubbles v1.0.0
