@@ -132,6 +132,7 @@ A create answers as soon as the workload is recorded, usually Pending.
 		newCeShellCmd(),
 		newCeRunCmd(),
 		newCeLogsCmd(),
+		newCePortForwardCmd(),
 		newCeImportCmd(),
 		newCeExportCmd(),
 		newCeCatCmd(),

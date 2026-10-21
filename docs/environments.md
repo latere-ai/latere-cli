@@ -160,6 +160,30 @@ latere environments logs <name|id> --tail 100
 latere environments logs <name|id> --follow --since 2026-09-26T10:00:00Z
 ```
 
+### Ports
+
+A workload's port is not opened in the console. `port-forward` carries a
+port on your machine to a port inside the workload, until you interrupt it:
+
+```sh
+latere environments port-forward <name|id> 8080:8080
+latere environments port-forward <name|id> 0:5432    # the system picks the local port
+```
+
+It listens on `127.0.0.1` only and prints the address. The workload must
+be running, and the port declared in its manifest:
+
+```yaml
+spec:
+  network:
+    ports:
+      - {name: web, port: 8080}
+```
+
+A declared port that nothing listens on yet is not an error: each
+connection to it ends with the reason, and a later one reaches the port
+once a process holds it.
+
 ### One-off runs
 
 `run --ephemeral --rm` creates a disposable workload, waits for it to run,

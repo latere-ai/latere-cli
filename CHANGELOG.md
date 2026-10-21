@@ -10,6 +10,16 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Added
+
+- **`latere environments port-forward <name|id> <local>:<port>`** carries
+  a port on your machine to a port inside a workload, the way into a
+  workload's port now that the console does not open one. It listens on
+  `127.0.0.1`, prints the address, carries every connection over a socket
+  of its own and runs until interrupted. A port the workload's manifest
+  does not declare in `spec.network.ports` is refused before it listens,
+  since only a declared port is reached.
+
 ### Removed
 
 - **The old command words and variables are gone.** They were refused with

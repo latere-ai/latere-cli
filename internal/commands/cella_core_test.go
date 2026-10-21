@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -93,6 +94,9 @@ type fakeCore struct {
 	exportFailure string
 	// attach runs the server's side of the attach socket.
 	attach func(*websocket.Conn)
+	// ports are the ports a read of a sandbox declares; a dial socket to
+	// one of them echoes what it is sent.
+	ports []int
 	// labels are what the platform's labels read answers, and
 	// labelsStatus refuses that read with its status when set.
 	labels       map[string]string
@@ -225,6 +229,11 @@ func (f *fakeCore) serve(w http.ResponseWriter, r *http.Request) {
 		f.serveAttach(w, r)
 		return
 	}
+	if len(parts) == 4 && parts[2] == "dial" {
+		f.record(req)
+		f.serveDial(w, r)
+		return
+	}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		f.t.Errorf("read %s %s: %v", r.Method, r.URL.Path, err)
@@ -248,7 +257,15 @@ func (f *fakeCore) serve(w http.ResponseWriter, r *http.Request) {
 	case len(parts) == 2 && r.Method == http.MethodPut:
 		f.serveCreate(w, r, parts[1])
 	case len(parts) == 2 && r.Method == http.MethodGet:
-		f.answer(w, http.StatusOK, coreSandbox(parts[1], cellaRunning, ""))
+		obj := coreSandbox(parts[1], cellaRunning, "")
+		if len(f.ports) > 0 {
+			var declared []map[string]any
+			for _, p := range f.ports {
+				declared = append(declared, map[string]any{"name": "port-" + strconv.Itoa(p), "port": p})
+			}
+			obj["spec"].(map[string]any)["network"] = map[string]any{"ports": declared}
+		}
+		f.answer(w, http.StatusOK, obj)
 	case len(parts) == 2 && r.Method == http.MethodDelete:
 		if f.deleteStatus != 0 {
 			f.refuse(w, f.deleteStatus, "internal", "The delete failed.")
@@ -416,6 +433,31 @@ func (f *fakeCore) serveAttach(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f.attach(conn)
+}
+
+// serveDial is the dial socket to a declared port: every binary frame it is
+// sent comes back, until the caller closes it.
+func (f *fakeCore) serveDial(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("Authorization") != "Bearer "+coreToken {
+		f.refuse(w, http.StatusUnauthorized, "unauthenticated", "Sign in and send a valid token.")
+		return
+	}
+	upgrader := websocket.Upgrader{Subprotocols: []string{"cella.dial.v1"}, CheckOrigin: func(*http.Request) bool { return true }}
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		f.t.Errorf("upgrade: %v", err)
+		return
+	}
+	defer func() { _ = conn.Close() }()
+	for {
+		kind, payload, err := conn.ReadMessage()
+		if err != nil {
+			return
+		}
+		if err := conn.WriteMessage(kind, payload); err != nil {
+			return
+		}
+	}
 }
 
 // runCella runs one `latere environments` command against the fake core. The base
