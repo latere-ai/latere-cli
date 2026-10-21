@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.33.1 - 2026-10-21
+
 ### Fixed
 
 - **`latere devices remove` deletes the host policy file while
