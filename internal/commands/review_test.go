@@ -27,7 +27,7 @@ func TestReviewFlagDefaults(t *testing.T) {
 		{"forks", "1"},
 		{"max-rounds", "4"},
 		{"cost-cap", "50000"},
-		{"model", "anthropic/claude-sonnet-5"},
+		{"model", "anthropic/claude-sonnet-5.5"},
 		{"proposer-timeout", "5m0s"},
 		{"session", ""},
 		{"state-dir", ""},
@@ -88,8 +88,8 @@ func TestReviewCriticCallsTheDoor(t *testing.T) {
 		}
 		if c.path == "/v1/models/lux/v1/generate" {
 			generates++
-			if c.model != "anthropic/claude-sonnet-5" || c.stream {
-				t.Errorf("generate call = %+v, want one answer of anthropic/claude-sonnet-5", c)
+			if c.model != "anthropic/claude-sonnet-5.5" || c.stream {
+				t.Errorf("generate call = %+v, want one answer of anthropic/claude-sonnet-5.5", c)
 			}
 		}
 	}

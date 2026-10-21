@@ -39,10 +39,9 @@ const defaultModelsURL = "https://api.latere.ai" + modelsPath
 
 // defaultCatalogModel is the Model review's critics and the local Topos
 // agent call when none is named. Models are named as the catalog names
-// them, the provider in front. It is a model the catalog built into Topos
-// knows, so the agent reaches it through its own family's door: a name that
-// catalog lacks has no family, and its requests take the OpenAI door.
-const defaultCatalogModel = "anthropic/claude-sonnet-5"
+// them, the provider in front, which also picks the door the agent's
+// requests take: an anthropic model goes to the Anthropic door.
+const defaultCatalogModel = "anthropic/claude-sonnet-5.5"
 
 // openAIDoor is the core's OpenAI door under the base. The CLI's own model
 // calls go through it: it serves the model list and Chat Completions, and a

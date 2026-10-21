@@ -226,4 +226,5 @@ spec 011, it runs on agon (`latere.ai/x/agon`) rather than
 models through `latere.ai/x/sdk-go/llm` with the model key, at
 `https://api.latere.ai/v1/models` (spec 007). `--lux-url`, `--token` and
 `LUX_API_URL` are gone with the hosted Lux plane. The critic model defaults
-to `anthropic/claude-sonnet-5`.
+to `anthropic/claude-sonnet-5.5` since Topos v0.51.0's catalog knows the
+Claude 5.5 models; v0.32.0 shipped `anthropic/claude-sonnet-5`.

@@ -10,6 +10,19 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Changed
+
+- **The default models are Claude 5.5.** `latere agents run` calls
+  `claude-opus-5-5` when it calls Anthropic directly with
+  `ANTHROPIC_API_KEY`, where it called `claude-opus-5`, and
+  `anthropic/claude-sonnet-5.5` through the Latere API, where it called
+  `anthropic/claude-sonnet-5`; `latere agents review`'s critics default to
+  `anthropic/claude-sonnet-5.5` too. `--model` still picks another. The
+  agent runs on Topos v0.51.0, whose catalog knows every model the Latere
+  API sells, so any of them can be named; a model it does not know yet
+  that is named under `anthropic/` or `openai/` is spoken to in its own
+  provider's API format rather than translated.
+
 ### Fixed
 
 - **On macOS, sessions on your computer run when a folder you granted has

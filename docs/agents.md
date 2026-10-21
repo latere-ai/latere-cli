@@ -17,7 +17,7 @@ replaced them; then they are removed.
 latere agents run                                   # an interactive session in the current directory
 latere agents run --dir ~/code/project              # in another directory
 latere agents run -p "add a test for foo()"         # run one prompt, stream the result, and exit
-latere agents run --model anthropic/claude-opus-5     # pick the model
+latere agents run --model anthropic/claude-opus-5.5   # pick the model
 ```
 
 The agent reads, edits, and runs commands directly in the working
@@ -37,14 +37,14 @@ commands, and `/quit` leaves.
 `latere agents run` uses the first of these that is available:
 
 1. `ANTHROPIC_API_KEY`, calling Anthropic directly. The default model is
-   `claude-opus-5`.
+   `claude-opus-5-5`.
 2. The provider you chose with `latere agents provider`.
 3. The Latere API, when you are signed in with `latere login` or hand the
    CLI a key with `LATERE_MODEL_KEY`: the call presents your
    [model key](models.md#your-model-key) and is billed to its context,
    with no provider key on your machine. This is the default once you are
    signed in. Name a model as `latere models` lists it; the default is
-   `anthropic/claude-sonnet-5`.
+   `anthropic/claude-sonnet-5.5`.
 
 With none of them, an interactive session opens the provider picker, and
 `-p` or a run without a terminal stops with an error that names what to
@@ -126,7 +126,7 @@ latere agents review && git push     # push only if the review is clean
 | `--forks` | `1` | Number of independent critic forks |
 | `--max-rounds` | `4` | Per-fork debate-round cap |
 | `--cost-cap` | `50000` | Soft token budget, the proposer's and the critics' tokens together |
-| `--model` | `anthropic/claude-sonnet-5` | Critic model, named as `latere models` lists it |
+| `--model` | `anthropic/claude-sonnet-5.5` | Critic model, named as `latere models` lists it |
 | `--proposer-timeout` | `5m` | Per-round deadline for the proposer's claude call (large sessions may need more) |
 | `--models-url` | `LATERE_MODELS_URL` or `https://api.latere.ai/v1/models` | Override the models base URL |
 | `--auth-url` | derived from the models URL | Override the auth base URL |

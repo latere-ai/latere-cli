@@ -151,5 +151,8 @@ removed in pkg v0.104.0; its successor is `latere.ai/x/sdk-go/llm`, which
 current runtime, which reaches the doors itself. `latere drive`, which the
 auth e2e tests ran, left with Drive's retirement on 2026-10-02; those tests
 run `latere repos list` and `git-credential get`. The local agent's
-default through the origin is `anthropic/claude-sonnet-5`, and with
-`ANTHROPIC_API_KEY` it is `claude-opus-5`.
+default through the origin is `anthropic/claude-sonnet-5.5`, and with
+`ANTHROPIC_API_KEY` it is `claude-opus-5-5`, since Topos v0.51.0's catalog
+knows the Claude 5.5 models and routes an `anthropic/` model to the
+Anthropic door; v0.32.0 shipped `anthropic/claude-sonnet-5` and
+`claude-opus-5`.
