@@ -10,12 +10,12 @@ affects:
   - internal/commands/cella.go, cella_files.go, pty.go (the group becomes `environments`; every user-facing word says workload)
   - internal/commands/topos.go, topos_*.go (the group becomes `agents run` and `agents provider`; the TUI names the Latere agent)
   - internal/commands/review.go (becomes `agents review`)
-  - internal/commands/retired.go (new: the retired words, refused for one release)
+  - internal/commands/retired.go (new: the retired words, refused for one release; removed in v0.32.0)
   - internal/commands/models.go (the help that points at the local agent)
   - cmd/latere/*_e2e_test.go (the workload set runs as `environments`)
   - docs/environments.md, docs/agents.md (renamed from docs/cella.md, docs/topos.md, docs/review.md), docs/configuration.md, docs/login-and-tokens.md, docs/models.md, README.md, CONTRIBUTING.md, CHANGELOG.md
 created: 2026-10-02
-updated: 2026-10-02
+updated: 2026-10-21
 author: changkun
 ---
 
@@ -130,7 +130,7 @@ Implemented as designed, with these additions:
 - The documentation pages became `docs/environments.md` and
   `docs/agents.md`, the latter merging the local agent's page and the
   review's. Links to platform pages name `/docs/environments/` and
-  `/docs/models/`, which the platform redirects the old paths to.
+  `/docs/models/`; the old platform paths answer 404.
 - The test entry points clear the retired variables, since one left in a
   developer's shell would otherwise fail unrelated tests with the refusal.
 - Go file names (`cella*.go`, `topos*.go`) and identifiers keep the core's
@@ -140,3 +140,8 @@ Implemented as designed, with these additions:
   is the capability's plural. It became `latere apps`, and `app`,
   `LATERE_APP_URL` and `LATERE_APP_TOKEN` are refused like the other old
   words. Spec 010 keeps the name it shipped under.
+- v0.32.0 removed the old words, the old variables and `retired.go`. An
+  old word is now an unknown command and an old variable is not read.
+  Only the tests name them: the scan's pattern in
+  `capability_scan_test.go`, and the command-tree test, which checks that
+  no old word is a command.

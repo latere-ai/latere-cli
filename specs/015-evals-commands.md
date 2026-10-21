@@ -20,14 +20,14 @@ affects:
   - "internal/commands/evals.go, evals_apply.go, evals_watch.go, evals_compare.go, evals_harness.go, evals_import.go, evals_upload.go, evals_publish.go (new: the group, its client, manifests, the stream, the terminal comparison, the harness, the import, the upload of an external trial's outputs, reports, publications, submissions and sharing)"
   - "internal/commands/root.go (the group added, `eval` removed)"
   - "internal/commands/exit.go (the group's exit codes)"
-  - "internal/commands/retired.go, capability_scan_test.go (`eval`, `EVAL_API_URL` and `EVAL_ADMIN_TOKEN` retired)"
+  - "internal/commands/retired.go (new again: `eval` and its variables refused for one release), capability_scan_test.go (`eval`, `EVAL_API_URL` and `EVAL_ADMIN_TOKEN` added to the old names)"
   - "internal/commands/eval.go and eval_*_test.go, cmd/latere/eval_*_e2e_test.go (deleted)"
   - "internal/commands/manifest_input_test.go, cmd/latere/manifest_input_e2e_test.go (the `eval` case removed)"
   - "cmd/latere/evals_e2e_test.go (new: the built binary against a stub of the API and the mint)"
   - ".lateregate.yaml (the identity block's audiences gain examen)"
   - "docs/evals.md (new), docs/configuration.md, docs/login-and-tokens.md, README.md, CHANGELOG.md"
 created: 2026-10-17
-updated: 2026-10-18
+updated: 2026-10-21
 author: changkun
 ---
 
@@ -76,9 +76,9 @@ the command group of the retired Eval service.
   actor token per command for its audience (`appAudience` in
   `internal/commands/app.go`, `api.ActorToken` in
   `internal/api/actor.go`), reads `LATERE_APPS_URL` and
-  `LATERE_APPS_TOKEN` through `capabilityEnv`
-  (`internal/commands/retired.go`), and builds its issuer from the base
-  URL, `AUTH_URL` or `--auth-url`.
+  `LATERE_APPS_TOKEN` from the environment (the names are constants in
+  `internal/commands/capability_env.go`), and builds its issuer from the
+  base URL, `AUTH_URL` or `--auth-url`.
 - **No `examen` audience.** The latere-cli client lists
   `cella, arca, origo, api.latere.ai, insula` as actor audiences
   (`auth/deploy/base/clients.yaml`), and `.lateregate.yaml`'s identity
@@ -88,10 +88,12 @@ the command group of the retired Eval service.
 - **Exit codes.** `HandleExitError` (`internal/commands/exit.go`) passes
   a remote command's code, returns 2 for a review with unresolved
   attacks, and 1 for every other error.
-- **Retired words.** `retired.go` refuses `cella`, `sandbox`, `topos`,
-  `review` and `app` for one release, and refuses a retired variable
-  set without its replacement; `capability_scan_test.go` fails on any
-  other shipped mention of a retired command or variable.
+- **Retired words.** Spec 011's old words `cella`, `sandbox`, `topos`,
+  `review` and `app`, and its old variables, were refused for one release
+  and removed in v0.32.0, together with `retired.go`, which refused them;
+  each is now an unknown command or an unread variable.
+  `capability_scan_test.go` still fails on any shipped mention of an old
+  command or variable.
 - **What Examen defines for the new commands.** Examen's specs 003,
   005 and 013 define what the commands below call and nothing on this
   side exists yet: `POST /experiments/{id}/imports` with `executor:
@@ -749,7 +751,7 @@ outcomes to, for every command, through a typed error
   `LATERE_EVALS_URL` and `LATERE_EVALS_TOKEN`: either set without its
   replacement refuses the command, so a script that pointed the old group
   at another address never reaches production unawares. The test entry
-  points clear them, as they clear the other retired variables.
+  points clear them.
 - The scan's pattern gains `latere eval\b` and
   `EVAL_(API_URL|ADMIN_TOKEN)\b`. The word boundary leaves
   `latere evals` and the shell's `eval "$(latere models env)"` (in
