@@ -46,6 +46,7 @@ func remoteExit(code int) error {
 //   - a remote command's nonzero exit code -> that code, without extra output
 //   - a completed review debate with unresolved attacks -> 2 (the summary is
 //     already on stdout, so nothing is printed here)
+//   - an evals command's error -> the code spec 015 gives it, printed to w
 //   - any other error -> 1, printed to w
 //
 // It lives next to the commands so the exit-code policy is shared with main
@@ -56,6 +57,10 @@ func HandleExitError(w io.Writer, err error) int {
 	}
 	if _, ok := errors.AsType[*unresolvedError](err); ok {
 		return 2
+	}
+	if e, ok := errors.AsType[*evalsExitError](err); ok {
+		fprintln(w, err)
+		return e.code
 	}
 	fprintln(w, err)
 	return 1

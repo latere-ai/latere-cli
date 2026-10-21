@@ -19,6 +19,20 @@ committed: the commit log already holds that.
   of its own and runs until interrupted. A port the workload's manifest
   does not declare in `spec.network.ports` is refused before it listens,
   since only a declared port is reached.
+- **`latere evals` reads Evals, the platform's experiments on agents and
+  programs.** `latere evals suites list`, and the same for `tasks`,
+  `metrics`, `graders` and `candidates`, prints the current version of each
+  definition in your context; `show <ref>` prints one version and its
+  fields, and `--versions` every version of a name. `latere evals
+  experiments list` and `show <id>` print your experiments, one with its
+  progress, its parked cells and its comparisons, and the console's
+  address. `latere evals experiments watch <id>` follows an experiment to
+  its end. Every evals command exits 0 when done, 1 for a failed result
+  such as a canceled experiment, 2 for a refusal that will not change, and
+  3 when no answer came, so a CI job can act on how an experiment ended.
+  The commands call `https://api.latere.ai/v1/evals` with a token minted
+  for your login; `LATERE_EVALS_URL` and `LATERE_EVALS_TOKEN` override the
+  address and the bearer.
 
 ### Changed
 

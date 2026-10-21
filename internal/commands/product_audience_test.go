@@ -124,6 +124,17 @@ func TestProductCredentialsCarryOnlyTheirOwnAudience(t *testing.T) {
 				t.Fatalf("app list: %v", err)
 			}
 		}},
+		{"evals list", evalsAudience, func(t *testing.T, s *productStub) {
+			t.Setenv(envEvalsToken, "")
+			t.Setenv("AUTH_URL", s.srv.URL)
+			cmd := newEvalsCmd()
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+			cmd.SetArgs([]string{"suites", "list", "--api-url", s.srv.URL + "/v1/evals"})
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("evals suites list: %v", err)
+			}
+		}},
 		{"git credential", codeAudience, func(t *testing.T, s *productStub) {
 			out, err := runGitCredential(t, codeGetInput, "get", "--auth-url", s.srv.URL)
 			if err != nil {

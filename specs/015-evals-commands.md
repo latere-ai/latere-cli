@@ -889,3 +889,60 @@ outcomes to, for every command, through a typed error
 | 18 | `publish` sends the kind, name, title, evidence level and visibility, or `--to` for a new version; a dataset requires an SPDX license, reads the owner's CFF fields, and names a complete export or starts one; `--exclude` sends paths as given; with `--wait` a blocked version prints each finding's path, line and rule without its matched text and exits 1; `submissions create` sends the benchmark key, the report version and the candidate and prints `accepted` or `pending` | `TestEvalsPublish`, `TestEvalsPublishBlocked`, `TestEvalsSubmit` |
 | 19 | `share` changes visibility, grants and revokes shares, replaces the link, requests a listing at the platform's account route, and withdraws a version by number after asking on a terminal or with `--yes`; `--visibility public` exits 2 with nothing sent | `TestEvalsShare`, `TestEvalsNoPublicVisibility` |
 | 20 | `experiments update`, `close`, `regrade` and `delete`, `baselines pin`, `taxonomies apply`, `reports create` and `compare --against` or `--task` reach their routes with the members the table names; `experiments run --mode import --benchmark <key>` sends both and carries both in the console link; `--spending-cap` is required and sent as `budget.cap_usd_micro` | `TestEvalsExperimentChanges`, `TestEvalsBaselines`, `TestEvalsTaxonomies`, `TestEvalsReports`, `TestEvalsCompareOnRequest`, `TestEvalsRunSendsPinnedChoices` |
+
+## Outcome
+
+In progress. The first slice shipped on 2026-10-21 against Examen v0.6.4
+as the platform serves it at `https://api.latere.ai/v1/evals`.
+
+**Built.**
+
+- `metrics`, `graders`, `tasks`, `suites` and `candidates`, each with
+  `list [--all] [--json] [-q]` and `show <ref> [--versions] [--json]`.
+- `experiments list [--suite] [--state] [--mode] [--all] [--json] [-q]`,
+  `experiments show <id> [--json]` and `experiments watch <id> [--timeout]
+  [--json]`.
+- The address and credential as designed: `LATERE_EVALS_URL` or
+  `--api-url`, ending in `/v1/evals`; an actor token for `examen` minted
+  from the saved login and minted again as it lapses; `LATERE_EVALS_TOKEN`
+  presented as given. `.lateregate.yaml`'s identity block lists `examen`.
+- The exit-code table, through `evalsExitError`, which `HandleExitError`
+  passes on.
+- Acceptance criteria 1 (`TestEvalsRoutesAreExamens`, against the routes of
+  the served document in `internal/commands/testdata/evals-routes.txt`), 2
+  and 13 are met; 7 and 15 in part (`TestEvalsWatch`,
+  `TestEvalsWatchExitCodes`, `TestEvalsWatchGivesUp`,
+  `cmd/latere/evals_e2e_test.go`).
+
+**Where it differs from the design.**
+
+- The commands send through the Latere Go SDK's request core
+  (`Config.Do`, `Config.Stream`, `latere.Items`), which carries the token,
+  the retries and the API's errors. sdk-go has no `evals` package, so the
+  fields the commands read are declared in `internal/commands/evals.go`,
+  ready to move into one.
+- `experiments show` names the suite, the candidates and the parked cells'
+  tasks by reading each digest's definition; one the caller may not read
+  keeps its digest. It lists the cells parked `blocked` or `over_budget`
+  with their reasons, and each comparison by what it compares, what
+  varies, its confounds, its state and whether its figures are final. It
+  prints no verdict or figure: spec 010 prints a verdict with its interval,
+  its denominators and its reason, which is `compare`'s to format.
+- `watch` prints the off-terminal lines on a terminal too; the redrawn
+  block is not built. It ends with the experiment's state, its progress
+  and the console link rather than each candidate's comparison headline,
+  which needs `compare`. Each line's time is when it was printed, since a
+  stream frame carries none.
+- The SDK's stream connects again after a drop and gives up after a few
+  connections in a row that read no frame, which a quiet experiment's
+  stream does at each token expiry. `watch` connects again after such a run
+  when it read a frame or lasted `evalsStreamFloor`, and exits 3 on a
+  stream that keeps closing at once.
+
+**Not built.** `apply` and each kind's `apply` (the `PUT` routes are
+served), `taxonomies` and `baselines` (served), `experiments run`,
+`cancel`, `close` and `retry` (served), `experiments update` and `delete`
+(not served at v0.6.4), `experiments regrade`, `compare` and `compare` on
+request (served), `trials` (served), `harness lease`, `--renew`, `submit`
+and `import` (served), `reports`, `publish`, `share`, `submissions`,
+`bars` and `exports` (not served at v0.6.4).

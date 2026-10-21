@@ -17,4 +17,9 @@ const (
 	envAppsURL = "LATERE_APPS_URL"
 	// envAppsToken is a bearer presented to Apps as given.
 	envAppsToken = "LATERE_APPS_TOKEN"
+	// envEvalsURL is the Evals API's base URL.
+	envEvalsURL = "LATERE_EVALS_URL"
+	// envEvalsToken is a bearer presented to Evals as given, such as one
+	// exchanged from a key in CI.
+	envEvalsToken = "LATERE_EVALS_TOKEN"
 )
