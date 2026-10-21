@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.33.0 - 2026-10-21
+
 ### Changed
 
 - **The default models are Claude 5.5.** `latere agents run` calls
