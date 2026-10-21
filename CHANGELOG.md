@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.32.0 - 2026-10-21
+
 ### Added
 
 - **`latere environments port-forward <name|id> <local>:<port>`** carries
