@@ -13,7 +13,7 @@ affects:
   - go.sum
 effort: medium
 created: 2026-06-28
-updated: 2026-07-07
+updated: 2026-10-21
 author: changkun
 dispatched_task_id: null
 ---
@@ -215,3 +215,15 @@ it), the same override pattern `latere lux` uses via `LUX_API_URL`.
 - Moving the proposer to topos (see topos's "Why critic-only").
 - Auto-detecting the session home on non-macOS paths; the Claude session home
   is `~/.claude`.
+
+## Outcome
+
+Implemented. 2026-10-21: the Lux routing detail above records the design as
+built. `latere.ai/x/pkg/luxsdk` was removed in pkg v0.104.0; its successor
+is `latere.ai/x/sdk-go/llm`. The review is `latere agents review` since
+spec 011, it runs on agon (`latere.ai/x/agon`) rather than
+`latere.ai/x/topos/adversarial`, and its critics call the Latere API's
+models through `latere.ai/x/sdk-go/llm` with the model key, at
+`https://api.latere.ai/v1/models` (spec 007). `--lux-url`, `--token` and
+`LUX_API_URL` are gone with the hosted Lux plane. The critic model defaults
+to `anthropic/claude-sonnet-5`.

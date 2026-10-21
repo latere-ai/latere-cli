@@ -51,15 +51,16 @@ the command group of the retired Eval service.
 
 ## Current state
 
-- **`latere eval` reaches nothing.** `internal/commands/eval.go` talks
-  to `https://eval.latere.ai` (`EVAL_API_URL`, `--api-url`) with the
+- **`latere eval` reached nothing.** Until 2026-10-21 (Outcome), when it
+  was removed, `internal/commands/eval.go` talked to the retired host
+  `eval.latere.ai` (`EVAL_API_URL`, `--api-url`) with the
   bearer in `EVAL_ADMIN_TOKEN` or `--token`, a token for the `eval`
   audience held by a platform administrator, not the login. Its three
   commands, `apply`, `suites` and `cells`, call
   `/api/v1/suites/apply`, `/api/v1/suites` and `/api/v1/cells`. The
   Eval service, its host and its database were removed on 2026-10-17
   (`latere-ai/specs` `decisions/2026-10-17-evals-on-examen.md`), so
-  every `latere eval` command now fails to connect.
+  every `latere eval` command failed to connect.
 - **Its tests.** Seven unit test files
   (`internal/commands/eval_test.go`, `eval_apply_response_test.go`,
   `eval_manifest_documents_test.go`, `eval_manifest_limit_test.go`,
@@ -79,21 +80,24 @@ the command group of the retired Eval service.
   `LATERE_APPS_TOKEN` from the environment (the names are constants in
   `internal/commands/capability_env.go`), and builds its issuer from the
   base URL, `AUTH_URL` or `--auth-url`.
-- **No `examen` audience.** The latere-cli client lists
-  `cella, arca, origo, api.latere.ai, insula` as actor audiences
-  (`auth/deploy/base/clients.yaml`), and `.lateregate.yaml`'s identity
-  block lists `cella, drive.latere.ai, origo, api.latere.ai, insula`.
-  Platform spec 214 adds `examen` to the console's and this client's
-  actor audiences at auth.
+- **The `examen` audience.** The latere-cli client lists `cella, arca,
+  origo, api.latere.ai, insula, examen` as actor audiences
+  (`auth/deploy/base/clients.yaml`), as platform spec 214 asked, and
+  since 2026-10-21 `.lateregate.yaml`'s identity block lists `cella,
+  origo, api.latere.ai, insula, examen`; the retired `drive.latere.ai`
+  it listed is gone.
 - **Exit codes.** `HandleExitError` (`internal/commands/exit.go`) passes
   a remote command's code, returns 2 for a review with unresolved
-  attacks, and 1 for every other error.
+  attacks, the evals group's own code (Outcome), and 1 for every other
+  error.
 - **Retired words.** Spec 011's old words `cella`, `sandbox`, `topos`,
   `review` and `app`, and its old variables, were refused for one release
   and removed in v0.32.0, together with `retired.go`, which refused them;
-  each is now an unknown command or an unread variable.
-  `capability_scan_test.go` still fails on any shipped mention of an old
-  command or variable.
+  each is now an unknown command or an unread variable. `retired.go` is
+  back in the same release with `eval` alone, and the variables
+  `EVAL_API_URL` and `EVAL_ADMIN_TOKEN` refused when set without their
+  replacements (Outcome). `capability_scan_test.go` still fails on any
+  shipped mention of an old command or variable.
 - **What Examen defines for the new commands.** Examen's specs 003,
   005 and 013 define what the commands below call and nothing on this
   side exists yet: `POST /experiments/{id}/imports` with `executor:

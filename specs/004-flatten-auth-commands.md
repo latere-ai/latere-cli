@@ -9,7 +9,7 @@ affects:
   - README.md
 effort: small
 created: 2026-07-12
-updated: 2026-07-12
+updated: 2026-10-21
 implemented: 2026-07-12
 author: changkun
 dispatched_task_id: null
@@ -144,7 +144,9 @@ deprecation notice (scripts' stderr stays clean).
 **Follow-ups.** Landscape classes 2-5 (the credential smoke script, the
 Cella remediation string, the product frontends, and the surrounding docs)
 land per-surface after a release ships, per the Landscape Impact section.
-`003-drive-subcommand.md` is now unblocked.
+`003-drive-subcommand.md` is now unblocked. (2026-10-21: that spec is
+`.archive/003-drive-subcommand.md`; `latere drive` was removed on
+2026-10-02 with Drive's retirement.)
 
 ## Non-goals
 

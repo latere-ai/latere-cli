@@ -144,4 +144,5 @@ Implemented as designed, with these additions:
   old word is now an unknown command and an old variable is not read.
   Only the tests name them: the scan's pattern in
   `capability_scan_test.go`, and the command-tree test, which checks that
-  no old word is a command.
+  no old word is a command. `retired.go` returns in the same release with one word,
+  `eval`, and its two variables, which spec 015 retired.
