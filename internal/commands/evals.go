@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"iter"
 	"maps"
 	"math"
 	"net"
@@ -25,6 +26,7 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
+	"latere.ai/x/sdk-go/evals"
 	"latere.ai/x/sdk-go/latere"
 
 	"github.com/latere-ai/latere-cli/internal/api"
@@ -32,19 +34,15 @@ import (
 
 // The evals commands reach Evals, the platform's capability for experiments
 // on agents and on programs built on models, which the Examen core serves
-// under the platform origin's /v1/evals (spec 015). They send through the
-// Latere Go SDK's request core, Config.Do and Config.Stream, which carries
-// the token, the retries and the API's errors; the SDK has no evals package
-// yet, so the fields the commands read are declared here, as Examen's
-// OpenAPI document names them.
+// under the platform origin (spec 015), through the Latere Go SDK's evals
+// package, which carries the routes, the token, the retries and the API's
+// errors. The address a person gives includes the path the origin serves
+// Evals under, evals.BasePath, and the commands cut it off to name the
+// origin.
 
 // defaultEvalsURL is the Evals API at the platform origin, its base path
 // included.
-const defaultEvalsURL = "https://api.latere.ai" + evalsBasePath
-
-// evalsBasePath is the path the origin serves the Evals API under, which
-// the API's base URL ends in.
-const evalsBasePath = "/v1/evals"
+const defaultEvalsURL = latere.DefaultBaseURL + evals.BasePath
 
 // evalsAudience is the aud claim of the bearer every evals command
 // presents: the Examen core's own audience, which auth mints actor tokens
@@ -60,7 +58,7 @@ const evalsURLUsage = "Evals API base URL, including its /v1/evals path (default
 const evalsTimeout = 30 * time.Second
 
 // evalsPage is the page size a list asks for: the API's largest.
-const evalsPage = 200
+const evalsPage = evals.MaxLimit
 
 // evalsStreamFloor is how long a run of the progress stream's own
 // reconnects must last, when it read no frame, for the watch to connect
@@ -149,11 +147,11 @@ same answer, and 3 when no answer came and running it again may succeed.`,
 
 // ---- the client ----
 
-// evalsClient is one command's connection to the Evals API: the SDK
-// configuration it sends with, the address as the command was given it,
-// which messages name, and the console's origin, which links name.
+// evalsClient is one command's connection to the Evals API: the SDK's
+// client, the address as the command was given it, which messages name,
+// and the console's origin, which links name.
 type evalsClient struct {
-	cfg     *latere.Config
+	ev      *evals.Client
 	base    string
 	console string
 }
@@ -169,9 +167,9 @@ func newEvalsClient(flagURL, authURL string) (*evalsClient, error) {
 		return nil, &evalsExitError{code: evalsExitRefused, err: err}
 	}
 	base := strings.TrimRight(cmp.Or(flagURL, env, defaultEvalsURL), "/")
-	origin, ok := strings.CutSuffix(base, evalsBasePath)
+	origin, ok := strings.CutSuffix(base, evals.BasePath)
 	if !ok {
-		return nil, &evalsExitError{code: evalsExitRefused, err: fmt.Errorf("%s is not an Evals API base URL: it ends in %s, as %s does", base, evalsBasePath, defaultEvalsURL)}
+		return nil, &evalsExitError{code: evalsExitRefused, err: fmt.Errorf("%s is not an Evals API base URL: it ends in %s, as %s does", base, evals.BasePath, defaultEvalsURL)}
 	}
 	token, err := capabilityEnv(envEvalsToken)
 	if err != nil {
@@ -184,45 +182,54 @@ func newEvalsClient(flagURL, authURL string) (*evalsClient, error) {
 	if err != nil {
 		return nil, &evalsExitError{code: evalsExitRefused, err: err}
 	}
-	return &evalsClient{cfg: cfg, base: base, console: resolvePlatformURL("")}, nil
+	return &evalsClient{ev: evals.New(cfg), base: base, console: resolvePlatformURL("")}, nil
 }
 
-// get reads one object at path, below the base path, as the API's bytes.
-func (c *evalsClient) get(ctx context.Context, path string) (json.RawMessage, error) {
-	var raw json.RawMessage
-	if err := c.cfg.Do(ctx, &latere.Request{Method: http.MethodGet, Path: evalsBasePath + path}, &raw); err != nil {
-		return nil, c.refused(err)
-	}
-	return raw, nil
-}
+// raw is a model of the Evals API that keeps the JSON it was answered with,
+// which --json prints.
+type raw interface{ RawJSON() json.RawMessage }
 
-// list reads the list at path with query: its first page, or with all
-// every page. more reports a page the read left unread.
-func (c *evalsClient) list(ctx context.Context, path string, query url.Values, all bool) (items []json.RawMessage, more bool, err error) {
-	fetch := func(ctx context.Context, cursor string) (*latere.Page[json.RawMessage], error) {
-		q := url.Values{}
-		maps.Copy(q, query)
-		q.Set("limit", strconv.Itoa(evalsPage))
-		if cursor != "" {
-			q.Set("cursor", cursor)
-		}
-		var page latere.Page[json.RawMessage]
-		if err := c.cfg.Do(ctx, &latere.Request{Method: http.MethodGet, Path: evalsBasePath + path, Query: q}, &page); err != nil {
-			return nil, err
-		}
-		if !all && page.NextCursor != "" {
-			more, page.NextCursor = true, ""
-		}
-		return &page, nil
-	}
-	items = []json.RawMessage{}
-	for item, err := range latere.Items(ctx, fetch) {
+// pages reads a list one page at a time from cursor "": its first page, or
+// with all every page. more reports a page the read left unread.
+func pages[T raw](ctx context.Context, c *evalsClient, all bool, page func(ctx context.Context, cursor string) (*latere.Page[T], error)) (items []T, more bool, err error) {
+	items = []T{}
+	cursor := ""
+	for {
+		p, err := page(ctx, cursor)
 		if err != nil {
 			return nil, false, c.refused(err)
 		}
+		items = append(items, p.Items...)
+		switch {
+		case p.NextCursor == "":
+			return items, false, nil
+		case !all:
+			return items, true, nil
+		}
+		cursor = p.NextCursor
+	}
+}
+
+// every reads every item of a list, as one of the SDK's iterators yields
+// them.
+func every[T any](c *evalsClient, seq iter.Seq2[T, error]) ([]T, error) {
+	items := []T{}
+	for item, err := range seq {
+		if err != nil {
+			return nil, c.refused(err)
+		}
 		items = append(items, item)
 	}
-	return items, more, nil
+	return items, nil
+}
+
+// raws are the items' JSON as the API answered them.
+func raws[T raw](items []T) []json.RawMessage {
+	out := make([]json.RawMessage, len(items))
+	for i, item := range items {
+		out[i] = item.RawJSON()
+	}
+	return out
 }
 
 // refused is what a command says of a call that failed, with its exit
@@ -312,86 +319,171 @@ func (c *evalsClient) experimentLink(id string) string {
 
 // ---- the definitions ----
 
-// evalsVersion is one version of a definition as the API answers it: its
-// record, and beside it the kind's own fields, of which the lists read the
-// few their key columns show.
-type evalsVersion struct {
-	ID        string    `json:"id"`
-	Owner     string    `json:"owner"`
-	Name      string    `json:"name"`
-	Digest    string    `json:"digest"`
-	Current   bool      `json:"current"`
-	CreatedAt time.Time `json:"created_at"`
-
-	// A metric's type and level, a grader's kind and level, and a
-	// candidate's kind.
-	Type  string `json:"type"`
-	Kind  string `json:"kind"`
-	Level string `json:"level"`
-	// A suite's tasks and primary metric, and a task's checks.
-	Tasks         []string `json:"tasks"`
-	PrimaryMetric string   `json:"primary_metric"`
-	Checks        []string `json:"checks"`
-	// What a candidate runs, by its kind.
-	Topos *struct {
-		Agent string `json:"agent"`
-		Model string `json:"model"`
-	} `json:"topos"`
-	Program *struct {
-		Image string `json:"image"`
-	} `json:"program"`
-	External *struct {
-		Harness string `json:"harness"`
-		Version string `json:"version"`
-	} `json:"external"`
-}
-
 // evalsRecordFields are the members of a version's answer that are its
 // record rather than its kind's fields.
 var evalsRecordFields = []string{"id", "owner", "name", "digest", "current", "created_at"}
 
-// evalsKind is a kind of definition the API keeps in versions, and how its
-// list shows it.
+// evalsRow is one version of a definition as a list shows it: its record,
+// its kind's key columns, and the API's answer, which --json prints.
+type evalsRow struct {
+	evals.Version
+	key string
+	raw json.RawMessage
+}
+
+// RawJSON is the version as the API answered it.
+func (r evalsRow) RawJSON() json.RawMessage { return r.raw }
+
+// evalsKind is a kind of definition the API keeps in versions, how its
+// list shows it, and the SDK's calls that read it.
 type evalsKind struct {
 	// path is the API's collection and the command's word, such as suites.
 	path string
 	// one names a single object in help and messages.
 	one string
-	// column and key are the list's key column: its header, and its value
-	// for one version.
+	// column is the header of the list's key columns, which evalsRow.key
+	// fills.
 	column string
-	key    func(v evalsVersion) string
+	// list reads a page of the current version of each name, and versions
+	// a page of every version of one name, each from cursor; get reads the
+	// version a ref names, as the API answered it.
+	list     func(ctx context.Context, ev *evals.Client, cursor string) (*latere.Page[evalsRow], error)
+	versions func(ctx context.Context, ev *evals.Client, name, cursor string) (*latere.Page[evalsRow], error)
+	get      func(ctx context.Context, ev *evals.Client, ref string) (json.RawMessage, error)
+}
+
+// evalsRows is a page of definitions as rows, row giving each one's record
+// and key columns.
+func evalsRows[P raw](page *latere.Page[P], err error, row func(P) (evals.Version, string)) (*latere.Page[evalsRow], error) {
+	if err != nil {
+		return nil, err
+	}
+	out := &latere.Page[evalsRow]{Items: make([]evalsRow, len(page.Items)), NextCursor: page.NextCursor}
+	for i, item := range page.Items {
+		v, key := row(item)
+		out.Items[i] = evalsRow{Version: v, key: key, raw: item.RawJSON()}
+	}
+	return out, nil
+}
+
+// rawOf is a definition as the API answered it.
+func rawOf[P raw](v P, err error) (json.RawMessage, error) {
+	if err != nil {
+		return nil, err
+	}
+	return v.RawJSON(), nil
+}
+
+// The key columns of each kind of definition.
+func metricRow(m *evals.Metric) (evals.Version, string) {
+	return m.Version, dash(string(m.Type)) + "\t" + dash(string(m.Level))
+}
+
+func graderRow(g *evals.Grader) (evals.Version, string) {
+	return g.Version, dash(string(g.Kind)) + "\t" + dash(string(g.Level))
+}
+
+func taskRow(t *evals.Task) (evals.Version, string) {
+	return t.Version, strconv.Itoa(len(t.Checks))
+}
+
+func suiteRow(s *evals.Suite) (evals.Version, string) {
+	return s.Version, strconv.Itoa(len(s.Tasks)) + "\t" + dash(shortRef(s.PrimaryMetric))
+}
+
+func candidateRow(c *evals.Candidate) (evals.Version, string) {
+	return c.Version, dash(string(c.Kind)) + "\t" + dash(candidateRuns(c))
+}
+
+// listParams is the page a list of definitions asks for.
+func listParams(cursor string) *evals.ListVersionsParams {
+	return &evals.ListVersionsParams{Limit: evalsPage, Cursor: cursor}
 }
 
 // evalsKinds are the definitions, in the order an experiment is built from
 // them.
 var evalsKinds = []evalsKind{
-	{path: "metrics", one: "metric", column: "TYPE\tLEVEL", key: func(v evalsVersion) string {
-		return dash(v.Type) + "\t" + dash(v.Level)
-	}},
-	{path: "graders", one: "grader", column: "KIND\tLEVEL", key: func(v evalsVersion) string {
-		return dash(v.Kind) + "\t" + dash(v.Level)
-	}},
-	{path: "tasks", one: "task", column: "CHECKS", key: func(v evalsVersion) string {
-		return strconv.Itoa(len(v.Checks))
-	}},
-	{path: "suites", one: "suite", column: "TASKS\tPRIMARY METRIC", key: func(v evalsVersion) string {
-		return strconv.Itoa(len(v.Tasks)) + "\t" + dash(shortRef(v.PrimaryMetric))
-	}},
-	{path: "candidates", one: "candidate", column: "KIND\tRUNS", key: func(v evalsVersion) string {
-		return dash(v.Kind) + "\t" + dash(candidateRuns(v))
-	}},
+	{
+		path: "metrics", one: "metric", column: "TYPE\tLEVEL",
+		list: func(ctx context.Context, ev *evals.Client, cursor string) (*latere.Page[evalsRow], error) {
+			p, err := ev.ListMetricsPage(ctx, &evals.ListMetricsParams{Limit: evalsPage, Cursor: cursor})
+			return evalsRows(p, err, metricRow)
+		},
+		versions: func(ctx context.Context, ev *evals.Client, name, cursor string) (*latere.Page[evalsRow], error) {
+			p, err := ev.ListMetricVersionsPage(ctx, name, listParams(cursor))
+			return evalsRows(p, err, metricRow)
+		},
+		get: func(ctx context.Context, ev *evals.Client, ref string) (json.RawMessage, error) {
+			return rawOf(ev.GetMetric(ctx, ref))
+		},
+	},
+	{
+		path: "graders", one: "grader", column: "KIND\tLEVEL",
+		list: func(ctx context.Context, ev *evals.Client, cursor string) (*latere.Page[evalsRow], error) {
+			p, err := ev.ListGradersPage(ctx, &evals.ListGradersParams{Limit: evalsPage, Cursor: cursor})
+			return evalsRows(p, err, graderRow)
+		},
+		versions: func(ctx context.Context, ev *evals.Client, name, cursor string) (*latere.Page[evalsRow], error) {
+			p, err := ev.ListGraderVersionsPage(ctx, name, listParams(cursor))
+			return evalsRows(p, err, graderRow)
+		},
+		get: func(ctx context.Context, ev *evals.Client, ref string) (json.RawMessage, error) {
+			return rawOf(ev.GetGrader(ctx, ref))
+		},
+	},
+	{
+		path: "tasks", one: "task", column: "CHECKS",
+		list: func(ctx context.Context, ev *evals.Client, cursor string) (*latere.Page[evalsRow], error) {
+			p, err := ev.ListTasksPage(ctx, &evals.ListTasksParams{Limit: evalsPage, Cursor: cursor})
+			return evalsRows(p, err, taskRow)
+		},
+		versions: func(ctx context.Context, ev *evals.Client, name, cursor string) (*latere.Page[evalsRow], error) {
+			p, err := ev.ListTaskVersionsPage(ctx, name, listParams(cursor))
+			return evalsRows(p, err, taskRow)
+		},
+		get: func(ctx context.Context, ev *evals.Client, ref string) (json.RawMessage, error) {
+			return rawOf(ev.GetTask(ctx, ref))
+		},
+	},
+	{
+		path: "suites", one: "suite", column: "TASKS\tPRIMARY METRIC",
+		list: func(ctx context.Context, ev *evals.Client, cursor string) (*latere.Page[evalsRow], error) {
+			p, err := ev.ListSuitesPage(ctx, &evals.ListSuitesParams{Limit: evalsPage, Cursor: cursor})
+			return evalsRows(p, err, suiteRow)
+		},
+		versions: func(ctx context.Context, ev *evals.Client, name, cursor string) (*latere.Page[evalsRow], error) {
+			p, err := ev.ListSuiteVersionsPage(ctx, name, listParams(cursor))
+			return evalsRows(p, err, suiteRow)
+		},
+		get: func(ctx context.Context, ev *evals.Client, ref string) (json.RawMessage, error) {
+			return rawOf(ev.GetSuite(ctx, ref))
+		},
+	},
+	{
+		path: "candidates", one: "candidate", column: "KIND\tRUNS",
+		list: func(ctx context.Context, ev *evals.Client, cursor string) (*latere.Page[evalsRow], error) {
+			p, err := ev.ListCandidatesPage(ctx, &evals.ListCandidatesParams{Limit: evalsPage, Cursor: cursor})
+			return evalsRows(p, err, candidateRow)
+		},
+		versions: func(ctx context.Context, ev *evals.Client, name, cursor string) (*latere.Page[evalsRow], error) {
+			p, err := ev.ListCandidateVersionsPage(ctx, name, listParams(cursor))
+			return evalsRows(p, err, candidateRow)
+		},
+		get: func(ctx context.Context, ev *evals.Client, ref string) (json.RawMessage, error) {
+			return rawOf(ev.GetCandidate(ctx, ref))
+		},
+	},
 }
 
 // candidateRuns is what a candidate runs, as its kind declares it.
-func candidateRuns(v evalsVersion) string {
+func candidateRuns(c *evals.Candidate) string {
 	switch {
-	case v.Topos != nil:
-		return strings.TrimSpace(shortRef(v.Topos.Agent) + " " + v.Topos.Model)
-	case v.Program != nil:
-		return v.Program.Image
-	case v.External != nil:
-		return strings.TrimSpace(v.External.Harness + " " + v.External.Version)
+	case c.Agent != nil:
+		return strings.TrimSpace(shortRef(c.Agent.AgentVersion) + " " + c.Agent.Model)
+	case c.Program != nil:
+		return c.Program.Image
+	case c.External != nil:
+		return strings.TrimSpace(c.External.Harness + " " + c.External.Version)
 	}
 	return ""
 }
@@ -427,18 +519,16 @@ as name@digest, the reference that names exactly that version.`,
 			if err != nil {
 				return err
 			}
-			items, more, err := c.list(cmd.Context(), "/"+kind.path, nil, all)
+			rows, more, err := pages(cmd.Context(), c, all, func(ctx context.Context, cursor string) (*latere.Page[evalsRow], error) {
+				return kind.list(ctx, c.ev, cursor)
+			})
 			if err != nil {
 				return err
 			}
 			if jsonF {
-				return printJSON(cmd.OutOrStdout(), items)
+				return printJSON(cmd.OutOrStdout(), raws(rows))
 			}
-			versions, err := decodeAll[evalsVersion](items)
-			if err != nil {
-				return c.refused(err)
-			}
-			printVersions(cmd.OutOrStdout(), kind, versions, quiet)
+			printVersions(cmd.OutOrStdout(), kind, rows, quiet)
 			if more {
 				fprintln(cmd.ErrOrStderr(), "More on the next page; --all reads every page.")
 			}
@@ -451,7 +541,7 @@ as name@digest, the reference that names exactly that version.`,
 	return cmd
 }
 
-func printVersions(out io.Writer, kind evalsKind, versions []evalsVersion, quiet bool) {
+func printVersions(out io.Writer, kind evalsKind, versions []evalsRow, quiet bool) {
 	if quiet {
 		for _, v := range versions {
 			fprintln(out, stripANSI(v.Name+"@"+v.Digest))
@@ -465,7 +555,7 @@ func printVersions(out io.Writer, kind evalsKind, versions []evalsVersion, quiet
 	w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
 	fprintf(w, "NAME\tDIGEST\t%s\tUPDATED\n", kind.column)
 	for _, v := range versions {
-		fprintf(w, "%s\t%s\t%s\t%s\n", stripANSI(v.Name), shortDigest(v.Digest), stripANSI(kind.key(v)), humanAge(v.CreatedAt))
+		fprintf(w, "%s\t%s\t%s\t%s\n", stripANSI(v.Name), shortDigest(v.Digest), stripANSI(v.key), humanAge(v.CreatedAt))
 	}
 	if err := w.Flush(); err != nil {
 		fprintln(out, err)
@@ -494,23 +584,21 @@ current one marked. --json prints the API's answer.`,
 			out := cmd.OutOrStdout()
 			if versionsF {
 				name, _, _ := strings.Cut(args[0], "@")
-				items, _, err := c.list(cmd.Context(), "/"+kind.path+"/"+url.PathEscape(name)+"/versions", nil, true)
+				rows, _, err := pages(cmd.Context(), c, true, func(ctx context.Context, cursor string) (*latere.Page[evalsRow], error) {
+					return kind.versions(ctx, c.ev, name, cursor)
+				})
 				if err != nil {
 					return err
 				}
 				if jsonF {
-					return printJSON(out, items)
+					return printJSON(out, raws(rows))
 				}
-				versions, err := decodeAll[evalsVersion](items)
-				if err != nil {
-					return c.refused(err)
-				}
-				printVersionHistory(out, versions)
+				printVersionHistory(out, rows)
 				return nil
 			}
-			raw, err := c.get(cmd.Context(), "/"+kind.path+"/"+url.PathEscape(args[0]))
+			raw, err := kind.get(cmd.Context(), c.ev, args[0])
 			if err != nil {
-				return err
+				return c.refused(err)
 			}
 			if jsonF {
 				return printJSON(out, raw)
@@ -526,7 +614,7 @@ current one marked. --json prints the API's answer.`,
 // printVersion prints a version's record as fields, then the kind's own
 // fields as YAML, the form a definition is written in.
 func printVersion(out io.Writer, raw json.RawMessage) error {
-	var v evalsVersion
+	var v evals.Version
 	if err := json.Unmarshal(raw, &v); err != nil {
 		return &evalsExitError{code: evalsExitNoAnswer, err: fmt.Errorf("read the Evals API's answer: %w", err)}
 	}
@@ -564,7 +652,7 @@ func printVersion(out io.Writer, raw json.RawMessage) error {
 	return nil
 }
 
-func printVersionHistory(out io.Writer, versions []evalsVersion) {
+func printVersionHistory(out io.Writer, versions []evalsRow) {
 	if len(versions) == 0 {
 		fprintln(out, "No versions.")
 		return
@@ -585,84 +673,14 @@ func printVersionHistory(out io.Writer, versions []evalsVersion) {
 
 // ---- experiments ----
 
-// evalsExperiment is an experiment as the API answers it, the fields the
-// commands print.
-type evalsExperiment struct {
-	ID          string   `json:"id"`
-	Owner       string   `json:"owner"`
-	Suite       string   `json:"suite"`
-	Candidates  []string `json:"candidates"`
-	Trials      int      `json:"trials"`
-	Parallelism int      `json:"parallelism"`
-	Mode        string   `json:"mode"`
-	State       string   `json:"state"`
-	CreatedBy   string   `json:"created_by"`
-	Reference   struct {
-		Baseline  string `json:"baseline"`
-		Candidate string `json:"candidate"`
-	} `json:"reference"`
-	Budget struct {
-		Name              string `json:"name"`
-		CapUSDMicro       *int64 `json:"cap_usd_micro"`
-		SpentUSDMicro     *int64 `json:"spent_usd_micro"`
-		RemainingUSDMicro *int64 `json:"remaining_usd_micro"`
-		Currency          string `json:"currency"`
-	} `json:"budget"`
-	Progress  evalsProgress     `json:"progress"`
-	Metadata  map[string]string `json:"metadata"`
-	CreatedAt time.Time         `json:"created_at"`
-	UpdatedAt time.Time         `json:"updated_at"`
-}
-
-// evalsProgress counts an experiment's cells and trials by state, and its
-// finished trials by outcome.
-type evalsProgress struct {
-	Cells    map[string]int `json:"cells"`
-	Trials   map[string]int `json:"trials"`
-	Outcomes map[string]int `json:"outcomes"`
-}
-
-// evalsCell is a cell of an experiment: one task of one candidate.
-type evalsCell struct {
-	ID           string `json:"id"`
-	Task         string `json:"task"`
-	Candidate    string `json:"candidate"`
-	State        string `json:"state"`
-	ParkedReason string `json:"parked_reason"`
-}
-
-// evalsComparison is a comparison of an experiment, the fields that say
-// what it compares and whether its figures are final.
-type evalsComparison struct {
-	ID                 string   `json:"id"`
-	Candidate          string   `json:"candidate"`
-	Baseline           string   `json:"baseline"`
-	ReferenceCandidate string   `json:"reference_candidate"`
-	Task               string   `json:"task"`
-	ReferenceTask      string   `json:"reference_task"`
-	Automatic          bool     `json:"automatic"`
-	State              string   `json:"state"`
-	Final              bool     `json:"final"`
-	Variable           []string `json:"variable"`
-	Confounds          []string `json:"confounds"`
-}
-
 // evalsRetryableStates are the states a parked cell waits in for a retry,
 // the ones the API's cell retry resumes. A canceled cell is parked too,
 // but its experiment was canceled, so it is not listed one by one.
-var evalsRetryableStates = []string{"blocked", "over_budget"}
+var evalsRetryableStates = []evals.CellState{evals.CellBlocked, evals.CellOverBudget}
 
 // evalsParkedStates are the states of a cell that will not finish on its
 // own: the retryable ones and canceled.
-var evalsParkedStates = append(slices.Clone(evalsRetryableStates), "canceled")
-
-// The states of an experiment the progress stream ends in, and the state
-// of a finished trial.
-const (
-	experimentComplete = "complete"
-	experimentCanceled = "canceled"
-	trialDone          = "done"
-)
+var evalsParkedStates = append(slices.Clone(evalsRetryableStates), evals.CellCanceled)
 
 func newEvalsExperimentsCmd(apiURL, authURL *string) *cobra.Command {
 	cmd := &cobra.Command{
@@ -704,23 +722,18 @@ prints the experiments as the API answers them, and -q their ids alone.`,
 			if err != nil {
 				return err
 			}
-			query := url.Values{}
-			for k, v := range map[string]string{"suite": suite, "state": state, "mode": mode} {
-				if v != "" {
-					query.Set(k, v)
-				}
-			}
-			items, more, err := c.list(cmd.Context(), "/experiments", query, all)
+			experiments, more, err := pages(cmd.Context(), c, all, func(ctx context.Context, cursor string) (*latere.Page[*evals.Experiment], error) {
+				return c.ev.ListExperimentsPage(ctx, &evals.ListExperimentsParams{
+					Suite: suite, State: evals.ExperimentState(state), Mode: evals.Mode(mode),
+					Limit: evalsPage, Cursor: cursor,
+				})
+			})
 			if err != nil {
 				return err
 			}
 			out := cmd.OutOrStdout()
 			if jsonF {
-				return printJSON(out, items)
-			}
-			experiments, err := decodeAll[evalsExperiment](items)
-			if err != nil {
-				return c.refused(err)
+				return printJSON(out, raws(experiments))
 			}
 			printExperiments(out, experiments, quiet)
 			if more {
@@ -738,7 +751,7 @@ prints the experiments as the API answers them, and -q their ids alone.`,
 	return cmd
 }
 
-func printExperiments(out io.Writer, experiments []evalsExperiment, quiet bool) {
+func printExperiments(out io.Writer, experiments []*evals.Experiment, quiet bool) {
 	if quiet {
 		for _, e := range experiments {
 			fprintln(out, stripANSI(e.ID))
@@ -753,7 +766,7 @@ func printExperiments(out io.Writer, experiments []evalsExperiment, quiet bool) 
 	fprintln(w, "ID\tSUITE\tCANDIDATES\tSTATE\tMODE\tTRIALS\tSTARTED")
 	for _, e := range experiments {
 		fprintf(w, "%s\t%s\t%d\t%s\t%s\t%s\t%s\n", stripANSI(e.ID), stripANSI(shortRef(e.Suite)), len(e.Candidates),
-			stripANSI(e.State), stripANSI(e.Mode), trialsDone(e.Progress), humanAge(e.CreatedAt))
+			stripANSI(string(e.State)), stripANSI(string(e.Mode)), trialsDone(e.Progress), humanAge(e.CreatedAt))
 	}
 	if err := w.Flush(); err != nil {
 		fprintln(out, err)
@@ -762,7 +775,7 @@ func printExperiments(out io.Writer, experiments []evalsExperiment, quiet bool) 
 
 // trialsDone is "<done>/<all>" of an experiment's trials, or "-" when its
 // progress counts none.
-func trialsDone(p evalsProgress) string {
+func trialsDone(p evals.Progress) string {
 	total := 0
 	for _, n := range p.Trials {
 		total += n
@@ -770,7 +783,7 @@ func trialsDone(p evalsProgress) string {
 	if total == 0 {
 		return "-"
 	}
-	return fmt.Sprintf("%d/%d", p.Trials[trialDone], total)
+	return fmt.Sprintf("%d/%d", p.Trials[evals.TrialDone], total)
 }
 
 func newEvalsExperimentsShowCmd(apiURL, authURL *string) *cobra.Command {
@@ -797,30 +810,21 @@ the command prints, shows each comparison's figures.
 			if err != nil {
 				return err
 			}
-			id := args[0]
-			raw, err := c.get(cmd.Context(), "/experiments/"+url.PathEscape(id))
+			e, err := c.ev.GetExperiment(cmd.Context(), args[0])
 			if err != nil {
-				return err
+				return c.refused(err)
 			}
 			out := cmd.OutOrStdout()
 			if jsonF {
-				return printJSON(out, raw)
-			}
-			var e evalsExperiment
-			if err := json.Unmarshal(raw, &e); err != nil {
-				return c.refused(err)
+				return printJSON(out, e.RawJSON())
 			}
 			parked, err := c.parkedCells(cmd.Context(), e)
 			if err != nil {
 				return err
 			}
-			items, _, err := c.list(cmd.Context(), "/experiments/"+url.PathEscape(e.ID)+"/comparisons", nil, true)
+			comparisons, err := every(c, c.ev.ListExperimentComparisons(cmd.Context(), e.ID, &evals.ListExperimentComparisonsParams{Limit: evalsPage}))
 			if err != nil {
 				return err
-			}
-			comparisons, err := decodeAll[evalsComparison](items)
-			if err != nil {
-				return c.refused(err)
 			}
 			names, err := c.names(cmd.Context(), e, parked)
 			if err != nil {
@@ -836,19 +840,15 @@ the command prints, shows each comparison's figures.
 
 // parkedCells reads the cells of e that wait for a retry, the states its
 // progress counts any in alone.
-func (c *evalsClient) parkedCells(ctx context.Context, e evalsExperiment) ([]evalsCell, error) {
-	var cells []evalsCell
+func (c *evalsClient) parkedCells(ctx context.Context, e *evals.Experiment) ([]*evals.Cell, error) {
+	var cells []*evals.Cell
 	for _, state := range evalsRetryableStates {
 		if e.Progress.Cells[state] == 0 {
 			continue
 		}
-		items, _, err := c.list(ctx, "/experiments/"+url.PathEscape(e.ID)+"/cells", url.Values{"state": {state}}, true)
+		some, err := every(c, c.ev.ListCells(ctx, e.ID, &evals.ListCellsParams{State: state, Limit: evalsPage}))
 		if err != nil {
 			return nil, err
-		}
-		some, err := decodeAll[evalsCell](items)
-		if err != nil {
-			return nil, c.refused(err)
 		}
 		cells = append(cells, some...)
 	}
@@ -859,33 +859,60 @@ func (c *evalsClient) parkedCells(ctx context.Context, e evalsExperiment) ([]eva
 // alone, its suite, its candidates and the tasks of its parked cells, and
 // answers each digest's name@digest. A definition the caller may not read,
 // such as another owner's suite, reads as missing and keeps its digest.
-func (c *evalsClient) names(ctx context.Context, e evalsExperiment, parked []evalsCell) (map[string]string, error) {
+func (c *evalsClient) names(ctx context.Context, e *evals.Experiment, parked []*evals.Cell) (map[string]string, error) {
 	names := map[string]string{}
-	add := func(kind, ref string) error {
+	// name reads the name of the version of a kind of definition a
+	// digest names.
+	type name func(ctx context.Context, digest string) (string, error)
+	suite := func(ctx context.Context, digest string) (string, error) {
+		v, err := c.ev.GetSuite(ctx, digest)
+		if err != nil {
+			return "", err
+		}
+		return v.Name, nil
+	}
+	candidate := func(ctx context.Context, digest string) (string, error) {
+		v, err := c.ev.GetCandidate(ctx, digest)
+		if err != nil {
+			return "", err
+		}
+		return v.Name, nil
+	}
+	task := func(ctx context.Context, digest string) (string, error) {
+		v, err := c.ev.GetTask(ctx, digest)
+		if err != nil {
+			return "", err
+		}
+		return v.Name, nil
+	}
+	add := func(read name, ref string) error {
 		if _, done := names[ref]; done || !strings.HasPrefix(ref, "sha256:") {
 			return nil
 		}
-		var v evalsVersion
-		err := c.cfg.Do(ctx, &latere.Request{Method: http.MethodGet, Path: evalsBasePath + "/" + kind + "/" + url.PathEscape(ref)}, &v)
+		n, err := read(ctx, ref)
 		switch {
 		case errors.Is(err, latere.ErrNotFound):
 			names[ref] = ref
 		case err != nil:
 			return c.refused(err)
 		default:
-			names[ref] = v.Name + "@" + ref
+			names[ref] = n + "@" + ref
 		}
 		return nil
 	}
-	refs := [][2]string{{"suites", e.Suite}}
+	type lookup struct {
+		read name
+		ref  string
+	}
+	refs := []lookup{{suite, e.Suite}}
 	for _, cand := range append(slices.Clone(e.Candidates), e.Reference.Candidate) {
-		refs = append(refs, [2]string{"candidates", cand})
+		refs = append(refs, lookup{candidate, cand})
 	}
 	for _, cell := range parked {
-		refs = append(refs, [2]string{"tasks", cell.Task}, [2]string{"candidates", cell.Candidate})
+		refs = append(refs, lookup{task, cell.Task}, lookup{candidate, cell.Candidate})
 	}
 	for _, r := range refs {
-		if err := add(r[0], r[1]); err != nil {
+		if err := add(r.read, r.ref); err != nil {
 			return nil, err
 		}
 	}
@@ -894,7 +921,7 @@ func (c *evalsClient) names(ctx context.Context, e evalsExperiment, parked []eva
 
 // formatExperiment is the record `experiments show` prints. names maps a
 // digest to the name@digest it is printed as.
-func formatExperiment(e evalsExperiment, parked []evalsCell, comparisons []evalsComparison, names map[string]string, link string) string {
+func formatExperiment(e *evals.Experiment, parked []*evals.Cell, comparisons []*evals.Comparison, names map[string]string, link string) string {
 	named := func(ref string) string { return cmp.Or(names[ref], ref) }
 	var b strings.Builder
 	reference := ""
@@ -917,8 +944,8 @@ func formatExperiment(e evalsExperiment, parked []evalsCell, comparisons []evals
 		{"suite", named(e.Suite)},
 		{"candidates", strings.Join(candidates, ", ")},
 		{"reference", reference},
-		{"state", e.State},
-		{"mode", e.Mode},
+		{"state", string(e.State)},
+		{"mode", string(e.Mode)},
 		{"trials", fmt.Sprintf("%d per cell", e.Trials)},
 		{"parallel", fmt.Sprintf("%d trials at once", e.Parallelism)},
 		{"budget", formatBudget(e)},
@@ -946,7 +973,7 @@ func formatExperiment(e evalsExperiment, parked []evalsCell, comparisons []evals
 		w := tabwriter.NewWriter(&t, 0, 4, 2, ' ', 0)
 		fprintln(w, "  CELL\tTASK\tCANDIDATE\tSTATE\tREASON")
 		for _, cell := range parked {
-			fprintf(w, "  %s\t%s\t%s\t%s\t%s\n", cell.ID, shortRef(named(cell.Task)), shortRef(named(cell.Candidate)), cell.State, dash(cell.ParkedReason))
+			fprintf(w, "  %s\t%s\t%s\t%s\t%s\n", cell.ID, shortRef(named(cell.Task)), shortRef(named(cell.Candidate)), string(cell.State), dash(cell.ParkedReason))
 		}
 		if err := w.Flush(); err != nil {
 			fprintln(&t, err)
@@ -967,7 +994,7 @@ func formatExperiment(e evalsExperiment, parked []evalsCell, comparisons []evals
 				figures = "final"
 			}
 			fprintf(w, "  %s\t%s\t%s\t%s\t%s\t%s\n", c.ID, comparisonSides(c, named), dash(strings.Join(c.Variable, ", ")),
-				dash(strings.Join(c.Confounds, ", ")), c.State, figures)
+				dash(strings.Join(c.Confounds, ", ")), string(c.State), figures)
 		}
 		if err := w.Flush(); err != nil {
 			fprintln(&t, err)
@@ -981,7 +1008,7 @@ func formatExperiment(e evalsExperiment, parked []evalsCell, comparisons []evals
 // comparisonSides says what a comparison compares: a candidate against the
 // reference candidate or a baseline, or one candidate's task against
 // another of its tasks. named gives a digest its name@digest.
-func comparisonSides(c evalsComparison, named func(string) string) string {
+func comparisonSides(c *evals.Comparison, named func(string) string) string {
 	short := func(ref string) string { return shortRef(named(ref)) }
 	switch {
 	case c.Task != "" && c.ReferenceTask != "":
@@ -997,17 +1024,17 @@ func comparisonSides(c evalsComparison, named func(string) string) string {
 // formatBudget is an experiment's spending cap, what it spent and what is
 // left, as the answer carries them: the figures are absent when no key
 // source answered them, and a Budget in another currency names it instead.
-func formatBudget(e evalsExperiment) string {
+func formatBudget(e *evals.Experiment) string {
 	b := e.Budget
 	var parts []string
-	if b.CapUSDMicro != nil {
-		parts = append(parts, formatUSD(*b.CapUSDMicro)+" cap")
+	if b.CapMicroUSD != nil {
+		parts = append(parts, formatUSD(*b.CapMicroUSD)+" cap")
 	}
-	if b.SpentUSDMicro != nil {
-		parts = append(parts, formatUSD(*b.SpentUSDMicro)+" spent")
+	if b.SpentMicroUSD != nil {
+		parts = append(parts, formatUSD(*b.SpentMicroUSD)+" spent")
 	}
-	if b.RemainingUSDMicro != nil {
-		parts = append(parts, formatUSD(*b.RemainingUSDMicro)+" left")
+	if b.RemainingMicroUSD != nil {
+		parts = append(parts, formatUSD(*b.RemainingMicroUSD)+" left")
 	}
 	if len(parts) == 0 && b.Currency != "" {
 		parts = append(parts, "figures in "+b.Currency)
@@ -1038,11 +1065,11 @@ func formatUSD(micro int64) string {
 
 // formatCounts is counts by name, "complete 8, running 2", in name order;
 // a zero count is left out.
-func formatCounts(counts map[string]int) string {
+func formatCounts[K ~string](counts map[K]int) string {
 	var parts []string
 	for _, k := range slices.Sorted(maps.Keys(counts)) {
 		if counts[k] != 0 {
-			parts = append(parts, fmt.Sprintf("%s %d", k, counts[k]))
+			parts = append(parts, fmt.Sprintf("%s %d", string(k), counts[k]))
 		}
 	}
 	return strings.Join(parts, ", ")
@@ -1106,50 +1133,41 @@ type evalsWatch struct {
 	jsonOut bool
 	now     func() time.Time
 
-	// lastID is the id of the last frame read, which a connection resumes
-	// after; snapshot reports the snapshot was printed.
-	lastID   string
+	// lastSeq is the place of the last event read, which a connection
+	// resumes after; snapshot reports the snapshot was printed.
+	lastSeq  int64
 	snapshot bool
 	// cells holds each cell's last printed state, so a repeat of a state
 	// is not printed again; last is the line printed last.
-	cells map[string]string
+	cells map[string]evals.CellState
 	last  string
 }
 
-// follow reads the stream until its end frame, connecting again when it
-// closes. The SDK's stream connects again after a drop by itself, but
-// gives up after a few connections that read no frame, which a quiet
-// experiment's stream does at each token expiry; so a run of those that
-// lasted is followed by another, resuming after the last frame read.
+// follow reads the stream until its end event, connecting again when it
+// closes. The SDK's stream connects again after a drop by itself, for as
+// long as the API sends anything on it, but gives up after a few
+// connections that send nothing at all; so a run of those that lasted is
+// followed by another, resuming after the last event read.
 func (w *evalsWatch) follow(ctx context.Context) error {
-	w.cells = map[string]string{}
+	w.cells = map[string]evals.CellState{}
 	for {
 		started, read := w.now(), 0
-		req := &latere.Request{Method: http.MethodGet, Path: evalsBasePath + "/experiments/" + url.PathEscape(w.id) + "/stream"}
-		if w.lastID != "" {
-			req.Header = http.Header{"Last-Event-ID": {w.lastID}}
-		}
-		var end *latere.Frame
 		var streamErr error
-		for frame, err := range w.c.cfg.Stream(ctx, req, isStreamEnd) {
+		for ev, err := range w.c.ev.StreamEvents(ctx, w.id, &evals.StreamEventsParams{AfterSeq: w.lastSeq}) {
 			if err != nil {
 				streamErr = err
 				break
 			}
 			read++
-			if frame.ID != "" {
-				w.lastID = frame.ID
+			if ev.Seq > 0 {
+				w.lastSeq = ev.Seq
 			}
-			if isStreamEnd(frame) {
-				end = &frame
-				break
+			if ev.Type == evals.EventEnd {
+				return w.finish(ctx, ev)
 			}
-			if err := w.print(frame); err != nil {
+			if err := w.print(ev); err != nil {
 				return err
 			}
-		}
-		if end != nil {
-			return w.finish(ctx, *end)
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -1157,31 +1175,54 @@ func (w *evalsWatch) follow(ctx context.Context) error {
 		if streamErr == nil {
 			return &evalsExitError{code: evalsExitNoAnswer, err: fmt.Errorf("the progress stream of %s ended without its end frame", w.id)}
 		}
+		if e, ok := errors.AsType[*evals.StreamError](streamErr); ok {
+			return w.refused(e)
+		}
 		dropped := errors.Is(streamErr, io.ErrUnexpectedEOF) && (read > 0 || w.now().Sub(started) >= evalsStreamFloor)
-		if !dropped {
-			if errors.Is(streamErr, io.ErrUnexpectedEOF) {
-				return &evalsExitError{code: evalsExitNoAnswer, err: fmt.Errorf("the progress stream of %s could not be kept open: %w", w.id, streamErr)}
-			}
-			return w.c.refused(streamErr)
+		if dropped {
+			continue
+		}
+		if errors.Is(streamErr, io.ErrUnexpectedEOF) {
+			return &evalsExitError{code: evalsExitNoAnswer, err: fmt.Errorf("the progress stream of %s could not be kept open: %w", w.id, streamErr)}
+		}
+		if err := w.c.refused(streamErr); errors.As(err, new(*evalsExitError)) {
+			return err
+		}
+		// An event the stream could not read, such as one whose data is
+		// not JSON, may read when the stream is opened again.
+		return &evalsExitError{code: evalsExitNoAnswer, err: fmt.Errorf("read the progress stream of %s: %w", w.id, streamErr)}
+	}
+}
+
+// refused is the error event an open stream ends with: the API's refusal,
+// exit code 3 when it says the same stream may succeed later and 2
+// otherwise. With --json it is printed first, as the API sent it.
+func (w *evalsWatch) refused(e *evals.StreamError) error {
+	if w.jsonOut {
+		data, err := json.Marshal(map[string]any{"error": map[string]any{"code": e.Code, "message": e.Message, "details": e.Details}})
+		if err != nil {
+			return fmt.Errorf("render the error frame: %w", err)
+		}
+		if err := w.printFrame(&evals.StreamEvent{Type: "error", Data: data}); err != nil {
+			return err
 		}
 	}
-}
-
-// isStreamEnd reports the frames after which the server closes the stream:
-// end, once the experiment is finished, and error.
-func isStreamEnd(f latere.Frame) bool {
-	return f.Event == "end" || f.Event == "error"
-}
-
-// print prints one frame: as it was sent with --json, else one line for
-// the changes worth a line.
-func (w *evalsWatch) print(f latere.Frame) error {
-	if w.jsonOut {
-		return w.printFrame(f)
+	code := evalsExitRefused
+	if e.Retryable() {
+		code = evalsExitNoAnswer
 	}
-	line, err := w.line(f)
+	return &evalsExitError{code: code, err: evalsRefusal(0, e.Code, e.Message, e.Details)}
+}
+
+// print prints one event: as it was sent with --json, else one line for
+// the changes worth a line.
+func (w *evalsWatch) print(ev *evals.StreamEvent) error {
+	if w.jsonOut {
+		return w.printFrame(ev)
+	}
+	line, err := w.line(ev)
 	if err != nil {
-		return &evalsExitError{code: evalsExitNoAnswer, err: fmt.Errorf("read the %s event of %s: %w", f.Event, w.id, err)}
+		return &evalsExitError{code: evalsExitNoAnswer, err: fmt.Errorf("read the %s event of %s: %w", ev.Type, w.id, err)}
 	}
 	w.printLine(line)
 	return nil
@@ -1197,48 +1238,49 @@ func (w *evalsWatch) printLine(line string) {
 	fprintf(w.out, "%s  %s\n", w.now().Format(time.TimeOnly), stripANSI(line))
 }
 
-// printFrame writes f as one JSON line: its id, event and data.
-func (w *evalsWatch) printFrame(f latere.Frame) error {
-	data := json.RawMessage(f.Data)
-	if !json.Valid(data) {
-		data = nil
+// printFrame writes an event as one JSON line: its id, which is its place
+// in the experiment's log, its event and its data, as the stream sent them.
+func (w *evalsWatch) printFrame(ev *evals.StreamEvent) error {
+	id := ""
+	if ev.Seq > 0 {
+		id = strconv.FormatInt(ev.Seq, 10)
 	}
 	b, err := json.Marshal(struct {
 		ID    string          `json:"id,omitempty"`
 		Event string          `json:"event"`
 		Data  json.RawMessage `json:"data,omitempty"`
-	}{f.ID, f.Event, data})
+	}{id, string(ev.Type), ev.Data})
 	if err != nil {
-		return fmt.Errorf("render the %s frame: %w", f.Event, err)
+		return fmt.Errorf("render the %s frame: %w", ev.Type, err)
 	}
 	fprintln(w.out, string(b))
 	return nil
 }
 
-// line is the line a frame prints, or "" for one that prints none: a
+// line is the line an event prints, or "" for one that prints none: a
 // trial, a grading, a provisional comparison, and the events that repeat
 // an experiment's or a cell's change.
-func (w *evalsWatch) line(f latere.Frame) (string, error) {
-	switch f.Event {
-	case "snapshot":
+func (w *evalsWatch) line(ev *evals.StreamEvent) (string, error) {
+	switch ev.Type {
+	case evals.EventSnapshot:
 		if w.snapshot {
 			return "", nil
 		}
 		w.snapshot = true
-		var e evalsExperiment
-		if err := json.Unmarshal(f.Data, &e); err != nil {
+		var e evals.Experiment
+		if err := ev.Decode(&e); err != nil {
 			return "", err
 		}
 		return experimentLine(e.ID, e.State, e.Progress), nil
-	case "experiment":
-		var e evalsExperiment
-		if err := json.Unmarshal(f.Data, &e); err != nil {
+	case evals.EventExperiment:
+		var e evals.ExperimentChange
+		if err := ev.Decode(&e); err != nil {
 			return "", err
 		}
 		return experimentLine(cmp.Or(e.ID, w.id), e.State, e.Progress), nil
-	case "cell":
-		var cell evalsCell
-		if err := json.Unmarshal(f.Data, &cell); err != nil {
+	case evals.EventCell:
+		var cell evals.CellChange
+		if err := ev.Decode(&cell); err != nil {
 			return "", err
 		}
 		if w.cells[cell.ID] == cell.State {
@@ -1250,23 +1292,25 @@ func (w *evalsWatch) line(f latere.Frame) (string, error) {
 			line += " (" + cell.ParkedReason + ")"
 		}
 		return line, nil
-	case "comparison":
-		var c evalsComparison
-		if err := json.Unmarshal(f.Data, &c); err != nil {
+	case evals.EventComparison:
+		// Read as a whole comparison, so a comparison across tasks names
+		// its tasks.
+		var c evals.Comparison
+		if err := ev.Decode(&c); err != nil {
 			return "", err
 		}
 		if !c.Final {
 			return "", nil
 		}
-		return fmt.Sprintf("comparison %s final: %s", c.ID, comparisonSides(c, func(ref string) string { return ref })), nil
+		return fmt.Sprintf("comparison %s final: %s", c.ID, comparisonSides(&c, func(ref string) string { return ref })), nil
 	case "bar.passed", "bar.failed":
-		return f.Event + " " + oneLine(string(f.Data)), nil
+		return string(ev.Type) + " " + oneLine(string(ev.Data)), nil
 	}
 	return "", nil
 }
 
 // experimentLine is an experiment's state and its progress on one line.
-func experimentLine(id, state string, p evalsProgress) string {
+func experimentLine(id string, state evals.ExperimentState, p evals.Progress) string {
 	line := fmt.Sprintf("experiment %s %s", id, state)
 	if cells := formatCounts(p.Cells); cells != "" {
 		line += " · cells " + cells
@@ -1277,45 +1321,20 @@ func experimentLine(id, state string, p evalsProgress) string {
 	return line
 }
 
-// finish handles the frame that ended the stream: an error frame is the
-// API's refusal; an end frame is the experiment's last state, which reads
+// finish handles the end event: the experiment's last state, which reads
 // as success only when every cell completed.
-func (w *evalsWatch) finish(ctx context.Context, f latere.Frame) error {
+func (w *evalsWatch) finish(ctx context.Context, ev *evals.StreamEvent) error {
 	if w.jsonOut {
-		if err := w.printFrame(f); err != nil {
+		if err := w.printFrame(ev); err != nil {
 			return err
 		}
 	}
-	if f.Event == "error" {
-		var envelope struct {
-			Error struct {
-				Code    string         `json:"code"`
-				Message string         `json:"message"`
-				Details map[string]any `json:"details"`
-			} `json:"error"`
-		}
-		if err := json.Unmarshal(f.Data, &envelope); err != nil {
-			return &evalsExitError{code: evalsExitNoAnswer, err: fmt.Errorf("the progress stream of %s ended with an error that could not be read: %w", w.id, err)}
-		}
-		code := evalsExitRefused
-		if again, _ := envelope.Error.Details["retryable"].(bool); again {
-			code = evalsExitNoAnswer
-		}
-		e := envelope.Error
-		return &evalsExitError{code: code, err: evalsRefusal(0, e.Code, e.Message, e.Details)}
-	}
-	var end struct {
-		State string `json:"state"`
-	}
-	if err := json.Unmarshal(f.Data, &end); err != nil {
+	var end evals.StreamEnd
+	if err := ev.Decode(&end); err != nil {
 		return &evalsExitError{code: evalsExitNoAnswer, err: fmt.Errorf("read the end of %s's progress stream: %w", w.id, err)}
 	}
-	raw, err := w.c.get(ctx, "/experiments/"+url.PathEscape(w.id))
+	e, err := w.c.ev.GetExperiment(ctx, w.id)
 	if err != nil {
-		return err
-	}
-	var e evalsExperiment
-	if err := json.Unmarshal(raw, &e); err != nil {
 		return w.c.refused(err)
 	}
 	parked := 0
@@ -1327,9 +1346,9 @@ func (w *evalsWatch) finish(ctx context.Context, f latere.Frame) error {
 		fprint(w.out, formatWrappedField("console", w.c.experimentLink(w.id)))
 	}
 	switch {
-	case end.State == experimentCanceled:
+	case end.State == evals.ExperimentCanceled:
 		return evalsFailed("%s was canceled; every trial it finished is kept", w.id)
-	case end.State != experimentComplete:
+	case end.State != evals.ExperimentComplete:
 		return evalsFailed("%s ended %s", w.id, end.State)
 	case parked > 0:
 		return evalsFailed("%s completed with %d parked cells: %s", w.id, parked, formatCounts(e.Progress.Cells))
@@ -1338,19 +1357,6 @@ func (w *evalsWatch) finish(ctx context.Context, f latere.Frame) error {
 }
 
 // ---- small helpers ----
-
-// decodeAll decodes each item of a list into T.
-func decodeAll[T any](items []json.RawMessage) ([]T, error) {
-	out := make([]T, 0, len(items))
-	for _, item := range items {
-		var v T
-		if err := json.Unmarshal(item, &v); err != nil {
-			return nil, err
-		}
-		out = append(out, v)
-	}
-	return out, nil
-}
 
 // shortRef is a reference as a list shows it: a name@digest by its name, a
 // bare digest by its first twelve hexadecimal digits, anything else as it

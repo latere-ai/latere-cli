@@ -19,6 +19,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"latere.ai/x/sdk-go/evals"
 )
 
 // evalsDigest is a digest of 64 hexadecimal digits, each the digit d.
@@ -42,7 +44,7 @@ func newEvalsStub(t *testing.T) *evalsStub {
 	t.Helper()
 	s := &evalsStub{t: t, routes: map[string]http.HandlerFunc{}}
 	s.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path, ok := strings.CutPrefix(r.URL.Path, evalsBasePath)
+		path, ok := strings.CutPrefix(r.URL.Path, evals.BasePath)
 		s.mu.Lock()
 		s.requests = append(s.requests, r.Clone(r.Context()))
 		s.bearers = append(s.bearers, r.Header.Get("Authorization"))
@@ -57,7 +59,7 @@ func newEvalsStub(t *testing.T) *evalsStub {
 		h(w, r)
 	}))
 	t.Cleanup(s.srv.Close)
-	t.Setenv(envEvalsURL, s.srv.URL+evalsBasePath)
+	t.Setenv(envEvalsURL, s.srv.URL+evals.BasePath)
 	t.Setenv(envEvalsToken, "evals-token")
 	t.Setenv("LATERE_PLATFORM_URL", "https://console.example")
 	t.Setenv("LATERE_NO_UPDATE_CHECK", "1")
@@ -463,8 +465,8 @@ func TestEvalsRefusalExitCodes(t *testing.T) {
 		t.Errorf("wrong base = %d %q", code, errOut)
 	}
 	s.srv.Close()
-	t.Setenv(envEvalsURL, s.srv.URL+evalsBasePath)
-	if _, errOut, code := runEvals(t, "suites", "list"); code != 3 || !strings.Contains(errOut, "reach the Evals API at "+s.srv.URL+evalsBasePath) {
+	t.Setenv(envEvalsURL, s.srv.URL+evals.BasePath)
+	if _, errOut, code := runEvals(t, "suites", "list"); code != 3 || !strings.Contains(errOut, "reach the Evals API at "+s.srv.URL+evals.BasePath) {
 		t.Errorf("unreachable = %d %q", code, errOut)
 	}
 }
@@ -572,7 +574,7 @@ func TestEvalsRoutesAreExamens(t *testing.T) {
 		t.Fatalf("only %d requests reached the stub", len(seen))
 	}
 	for _, r := range seen {
-		path, ok := strings.CutPrefix(r.URL.Path, evalsBasePath)
+		path, ok := strings.CutPrefix(r.URL.Path, evals.BasePath)
 		if !ok || !served(r.Method, path) {
 			t.Errorf("%s %s is not a route of the Evals API", r.Method, r.URL.Path)
 		}
