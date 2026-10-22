@@ -392,3 +392,60 @@ func TestStartedLine(t *testing.T) {
 		}
 	}
 }
+
+// A refused host is one line naming the session, the host and the port,
+// with the two commands that allow it; the activity line of the same
+// refusal is not printed beside it, and an allowance's line is.
+func TestTerminalShowsRefusedHosts(t *testing.T) {
+	e := newFakeEngine(device.Status{State: device.StateOnline})
+	out, _ := terminalOn(t, e, false)
+	now := time.Now()
+	refused := device.NetworkRefusal{Time: now, Session: "ses_r", Agent: "agt_1", Sandbox: "sbx_r", Host: "api.example.com", Port: 443}
+	for _, ev := range []device.Event{
+		{Kind: device.EventActivity, Activity: &device.Entry{Time: now, Type: device.TypeNetworkRefused, Session: "ses_r", Host: "api.example.com", Port: 443}},
+		{Kind: device.EventNetworkRefused, Refusal: &refused},
+		{Kind: device.EventActivity, Activity: &device.Entry{Time: now, Type: device.TypeHostAllowed, Session: "ses_r", Host: "api.example.com", Port: 443}},
+		{Kind: device.EventNotice, Notice: "done"},
+	} {
+		e.events <- ev
+	}
+	waitFor(t, "the notice", func() bool { return strings.Contains(out.String(), "Note: done") })
+	got := out.String()
+	for _, want := range []string{
+		"Session ses_r (agent agt_1) was refused a connection to api.example.com:443.\n" +
+			"  To allow it for this session:  latere devices allow api.example.com:443 --session ses_r\n" +
+			"  To allow it for every session: latere devices allow api.example.com:443 --save\n",
+		"ses_r  host_allowed  api.example.com:443",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the terminal lacks %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "network_refused") {
+		t.Errorf("the terminal printed the refusal's activity line beside it:\n%s", got)
+	}
+}
+
+func TestRefusedLines(t *testing.T) {
+	for _, tc := range []struct {
+		r    device.NetworkRefusal
+		want string
+	}{
+		{device.NetworkRefusal{Session: "ses_1", Sandbox: "sbx_1", Host: "db.example.com", Port: 5432},
+			"Session ses_1 was refused a connection to db.example.com:5432.\n" +
+				"  To allow it for this session:  latere devices allow db.example.com:5432 --session ses_1\n" +
+				"  To allow it for every session: latere devices allow db.example.com:5432 --save"},
+		// A sandbox its plane names no session on is allowed by its own id.
+		{device.NetworkRefusal{Sandbox: "sbx_2", Host: "2001:db8::1", Port: 8443},
+			"Sandbox sbx_2 was refused a connection to [2001:db8::1]:8443.\n" +
+				"  To allow it for this session:  latere devices allow [2001:db8::1]:8443 --session sbx_2\n" +
+				"  To allow it for every session: latere devices allow [2001:db8::1]:8443 --save"},
+		// What is not a host is shown quoted, with nothing to copy and run.
+		{device.NetworkRefusal{Session: "ses_3", Host: "a b;rm -rf ~", Port: 80},
+			`Session ses_3 was refused a connection to "a b;rm -rf ~:80".`},
+	} {
+		if got := RefusedLines(tc.r); got != tc.want {
+			t.Errorf("RefusedLines(%+v) =\n%s\nwant\n%s", tc.r, got, tc.want)
+		}
+	}
+}

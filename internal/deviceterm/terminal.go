@@ -5,8 +5,8 @@
 
 // Package deviceterm is the terminal client of the device engine that
 // `latere devices connect` and `serve` run: the status line, a line per
-// operation and notice, and the person's answer to each session typed in
-// the terminal.
+// operation, notice and refused host, and the person's answer to each
+// session typed in the terminal.
 package deviceterm
 
 import (
@@ -14,10 +14,13 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"slices"
+	"strconv"
 	"strings"
 
 	"latere.ai/x/cella/device"
+	"latere.ai/x/cella/runtime/local"
 )
 
 // terminalClient is how an answer typed in the terminal names its client.
@@ -103,9 +106,13 @@ func (t Terminal) Run(ctx context.Context) {
 					t.print(line)
 				}
 			case device.EventActivity:
-				if !slices.Contains(quietTypes, ev.Activity.Type) {
+				// A refused host is printed from its own event, which also
+				// says how to allow it.
+				if !slices.Contains(quietTypes, ev.Activity.Type) && ev.Activity.Type != device.TypeNetworkRefused {
 					t.print(ev.Activity.Line(t.Home))
 				}
+			case device.EventNetworkRefused:
+				t.print(RefusedLines(*ev.Refusal))
 			case device.EventNotice:
 				t.print("Note: " + ev.Notice)
 			case device.EventStarted:
@@ -174,6 +181,29 @@ func StartedLine(a device.Approval, home string) string {
 		folder = device.Shorten(home, a.Folder) + " (read-only)"
 	}
 	return fmt.Sprintf("%s (%s, %s) is using %s.", agent, session, a.StartedWords(), folder)
+}
+
+// RefusedLines tell the person a session's command was refused a host: the
+// session, or the sandbox where the plane names none, the host and the
+// port, and the two commands that allow it, for that session alone and for
+// every session. A host that cannot be allowed, which the engine never
+// reports, is shown quoted with no command to copy.
+func RefusedLines(r device.NetworkRefusal) string {
+	who, subject := r.Session, "Session "+r.Session
+	if r.Session == "" {
+		who, subject = r.Sandbox, "Sandbox "+r.Sandbox
+	}
+	if r.Agent != "" {
+		subject += " (agent " + r.Agent + ")"
+	}
+	target := net.JoinHostPort(r.Host, strconv.Itoa(r.Port))
+	if _, err := local.HostEntry(r.Host, r.Port); err != nil {
+		return fmt.Sprintf("%s was refused a connection to %q.", subject, target)
+	}
+	return fmt.Sprintf("%s was refused a connection to %s.\n"+
+		"  To allow it for this session:  latere devices allow %s --session %s\n"+
+		"  To allow it for every session: latere devices allow %s --save",
+		subject, target, target, who, target)
 }
 
 // Prompt is the question a create puts to the person.
