@@ -56,13 +56,15 @@ func readDeviceToken(token string) (device.TokenClaims, error) {
 // not know: a build that cannot verify its own upgrades; a sign-out on a
 // connected computer that was cancelled or could not remove it; a host
 // policy file naming a field this version does not know, which a newer
-// latere or Latere Studio wrote; and the network any not confirmed.
+// latere or Latere Studio wrote; the network any not confirmed; and a host
+// allowed for a session no sandbox of which runs on this computer.
 const (
 	codeUnverifiedBuild     = "device_unverified_build"
 	codeLogoutCancelled     = "device_logout_cancelled"
 	codeLogoutBlocked       = "device_logout_blocked"
 	codePolicyNewer         = "device_policy_newer"
 	codeNetworkNotConfirmed = "device_network_not_confirmed"
+	codeNoSession           = "device_no_session"
 )
 
 // cliRefusals are the sentences and next steps of the codes above.
@@ -86,6 +88,10 @@ var cliRefusals = map[string]struct{ message, hint string }{
 	codeNetworkNotConfirmed: {
 		"The network was not changed.",
 		"Run the command again and type yes, or add --yes.",
+	},
+	codeNoSession: {
+		"No sandbox of this session runs on this computer, so nothing was allowed.",
+		"Name the session a refused line names while it runs, or save the host for every session with --save.",
 	},
 }
 

@@ -210,6 +210,50 @@ func TestDevicesSessionCommandsRunUnderSeatbeltEndToEnd(t *testing.T) {
 		t.Errorf("a connection around the proxy answered %+v, want it refused by the sandbox", r)
 	}
 
+	// The refused host reaches the terminal serving the computer as one
+	// line naming the session, the host and the port, with the two
+	// commands that allow it.
+	waitForText(t, &stderr, "Session ses_seatbelt (agent agt_e2e) was refused a connection to denied.invalid:80.", exited)
+	waitForText(t, &stderr, "latere devices allow denied.invalid:80 --session ses_seatbelt", exited)
+	waitForText(t, &stderr, "latere devices allow denied.invalid:80 --save", exited)
+	latere := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command(latereBinary(t), args...)
+		cmd.Env = env
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("latere %v: %v\n%s", args, err, out)
+		}
+		return string(out)
+	}
+	before, err := os.ReadFile(filepath.Join(config, "latere", "device.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Allowed for the session, its next command reaches the host, which
+	// the proxy now admits and cannot resolve, and the file is unchanged.
+	latere("devices", "allow", "denied.invalid:80", "--session", "ses_seatbelt")
+	if r := run("/usr/bin/curl -q -sS --max-time 20 -o /dev/null -w '%{http_code}' http://denied.invalid/"); r.Stdout != "502" {
+		t.Errorf("a host allowed for the session answered %+v, want the proxy's 502 after admitting it", r)
+	}
+	if after, err := os.ReadFile(filepath.Join(config, "latere", "device.yaml")); err != nil || string(after) != string(before) {
+		t.Errorf("allowing a host for one session changed the host policy file: %v\n%s", err, after)
+	}
+	// Saved, it joins the allowlist in the file, and every session's next
+	// command reaches it without a restart.
+	latere("devices", "allow", "saved.invalid", "--save")
+	if r := run("/usr/bin/curl -q -sS --max-time 20 -o /dev/null -w '%{http_code}' http://saved.invalid/"); r.Stdout != "502" {
+		t.Errorf("a saved host answered %+v, want the proxy's 502 after admitting it", r)
+	}
+	if after, err := os.ReadFile(filepath.Join(config, "latere", "device.yaml")); err != nil || !strings.Contains(string(after), "hosts: [allowed.invalid, saved.invalid]") {
+		t.Errorf("the host policy file after the save reads %v\n%s", err, after)
+	}
+	activity := latere("devices", "activity")
+	for _, want := range []string{"ses_seatbelt  network_refused  denied.invalid:80", "ses_seatbelt  host_allowed  denied.invalid:80", "host_saved  saved.invalid:443"} {
+		if !strings.Contains(activity, want) {
+			t.Errorf("the activity lacks %q:\n%s", want, activity)
+		}
+	}
 }
 
 // TestDevicesNetworkAnyUnderSeatbeltEndToEnd is the network any as the

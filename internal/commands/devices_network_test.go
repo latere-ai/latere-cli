@@ -245,7 +245,7 @@ func TestDevicesNewerPolicyFileSaysUpgrade(t *testing.T) {
 	if err = os.WriteFile(paths.PolicyFile(), []byte(newer), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, args := range [][]string{{"devices", "policy"}, {"devices", "activity"}, {"devices", "connect"}} {
+	for _, args := range [][]string{{"devices", "policy"}, {"devices", "activity"}, {"devices", "connect"}, {"devices", "allow", "example.com", "--save"}} {
 		_, _, err := runDevices(t, "", args...)
 		if device.CodeOf(err) != codePolicyNewer || !strings.Contains(err.Error(), "Upgrade with `latere upgrade`") || !strings.Contains(err.Error(), "proxy") {
 			t.Errorf("%v over a newer file returned %v", args, err)
