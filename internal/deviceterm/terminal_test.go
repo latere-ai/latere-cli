@@ -262,6 +262,21 @@ func (fakeAccount) MintKey(context.Context, string, time.Duration) (device.Key, 
 func (fakeAccount) RevokeKey(context.Context, string, string) error { return nil }
 func (fakeAccount) Exists(context.Context, string) (bool, error)    { return true, nil }
 
+// attachedEngine is Cella's engine, telling the test once the terminal has
+// attached: the terminal subscribes first, so from then on it hears every
+// create.
+type attachedEngine struct {
+	*device.Engine
+	once     sync.Once
+	attached chan struct{}
+}
+
+func (a *attachedEngine) Attach() func() {
+	detach := a.Engine.Attach()
+	a.once.Do(func() { close(a.attached) })
+	return detach
+}
+
 // TestTerminalAnswersTheEngine is the terminal over Cella's engine itself: a
 // create on a connected computer is asked at the terminal, and the answer
 // typed there is the engine's verdict.
@@ -276,8 +291,18 @@ func TestTerminalAnswersTheEngine(t *testing.T) {
 		t.Fatal(err)
 	}
 	labels := device.SessionLabels{Session: "example.com/session", Agent: "example.com/agent", AgentName: "example.com/agent-name"}
-	e := device.New(device.Config{Paths: paths, Keys: device.OpenKeys(paths.KeyFile()), Account: fakeAccount{}, Labels: labels})
+	e := &attachedEngine{
+		Engine:   device.New(device.Config{Paths: paths, Keys: device.OpenKeys(paths.KeyFile()), Account: fakeAccount{}, Labels: labels}),
+		attached: make(chan struct{}),
+	}
 	out, typed := terminalOn(t, e, true)
+	// A create before the terminal attached would find no one to ask, and
+	// be refused before any prompt.
+	select {
+	case <-e.attached:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the terminal never attached")
+	}
 	create := func(session string) worker.Create {
 		return worker.Create{
 			Labels: map[string]string{labels.Session: session, labels.Agent: "agt_1"},
