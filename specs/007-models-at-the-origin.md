@@ -156,3 +156,14 @@ default through the origin is `anthropic/claude-sonnet-5.5`, and with
 knows the Claude 5.5 models and routes an `anthropic/` model to the
 Anthropic door; v0.32.0 shipped `anthropic/claude-sonnet-5` and
 `claude-opus-5`.
+
+**2026-10-22: the CLI's own model calls go through the Go SDK.** `models
+list` and `models invoke` call the core's Lux door through sdk-go's `llm`
+package (`ListModels`, `Generate`) with the model key, rather than the
+OpenAI door; `models env` still points a stock SDK at the OpenAI and
+Anthropic doors. `models list --json` keeps its shape; `models invoke
+--json` prints the Latere dialect's answer. The models URL ends in
+`/v1/models`, which `review` already required, and the base path comes
+from `llm.BasePath`. The tests above that name the OpenAI door now stub the
+Lux door; `TestModelsInvokeCallsTheOpenAIDoor` is
+`TestModelsInvokeCallsTheModel`.

@@ -164,3 +164,7 @@ The maintainer confirmed decision D1 and the storage choice on 2026-09-24:
 a key of 90 days renewed within 7 days of its end, kept in the system
 keychain with the 0600 file where no keychain exists.
 
+**2026-10-22: the key calls go through the Go SDK.** The key is created and
+revoked at auth's `/me/keys` with sdk-go's `signin.CreateKey` and
+`signin.RevokeKey`, from `internal/modelkey`; `internal/api/keys.go` is
+gone, and `ModelGrant` and its test live in `internal/modelkey`.

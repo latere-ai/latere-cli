@@ -966,3 +966,13 @@ served), `taxonomies` and `baselines` (served), `experiments run`,
 request (served), `trials` (served), `harness lease`, `--renew`, `submit`
 and `import` (served), `reports`, `publish`, `share`, `submissions`,
 `bars` and `exports` (not served at v0.6.4).
+
+**2026-10-22: on sdk-go's `evals` package.** The commands read through
+sdk-go v0.8.0's `evals` package: the definitions' list, versions and get
+calls, the experiments' list and get, their cells and comparisons, and
+`StreamEvents`, which `watch` follows and resumes by the last event's
+place. The fields the commands had declared in `internal/commands/evals.go`
+are the SDK's models now, `--json` prints each model's `RawJSON`, and the
+base path comes from `evals.BasePath`. An error event the stream ends with
+reaches `watch` as `evals.StreamError`; `watch --json` prints it as the
+frame the API sent.
