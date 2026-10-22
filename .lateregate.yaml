@@ -55,3 +55,8 @@ identity:
       reason: >-
         the manifest's apiVersion cella.latere.ai, which the `latere environments` help prints, shares its word with the audience cella, and the rule matches the word in every string literal, so each file with that help text reads as a second minter; the audience is presented from internal/commands/cella.go alone. The waiver also pauses the rule for origo and api.latere.ai until it ends; api.latere.ai is also the host of the Environments and models URLs, so every literal naming those URLs reads as a mint of it, while the audience is the SDK's latere.DefaultAudience, which no literal here names
       until: 2026-12-01
+
+platform_via_sdk:
+  enabled: true
+  allow:
+    /v1/environments: the Environments capability's Go client is Cella's open-core client, latere.ai/x/cella/client, which the CLI and the device engine share
