@@ -1,10 +1,15 @@
 // SPDX-FileCopyrightText: 2026 Latere AI
 // SPDX-License-Identifier: MIT
 
+// Package api holds what the CLI's commands share to reach Latere through
+// the Latere Go SDK: the saved login and its refresh, the actor tokens
+// minted from it for one product, the SDK's configuration of the issuer
+// and of a product, and the HTTP client both send with.
 package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -61,6 +66,19 @@ func Issuer(authBase, clientID string) *signin.Config {
 		Scopes:     strings.Fields(LoginScopes),
 		HTTPClient: HTTPClient(),
 	}
+}
+
+// PreserveMethodOnRedirect is an http.Client.CheckRedirect callback that
+// retains the default ten-request limit and rejects redirects that change
+// the HTTP method, which could make a write appear successful after a GET.
+func PreserveMethodOnRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	if previous := via[len(via)-1].Method; req.Method != previous {
+		return fmt.Errorf("redirect changed request method from %s to %s", previous, req.Method)
+	}
+	return nil
 }
 
 // Product is how a product command reaches one capability of the API

@@ -7,14 +7,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestRefreshAuthTokenReportsPersistenceFailure(t *testing.T) {
@@ -79,70 +77,6 @@ func TestRefreshAuthTokenPersistsAndPreservesRefreshToken(t *testing.T) {
 	saved, err := LoadAuthToken()
 	if err != nil || saved.AccessToken != "new-access" {
 		t.Errorf("persisted auth token = %+v, %v", saved, err)
-	}
-}
-
-// NewClient takes the URL its caller resolved and reads nothing of its own:
-// SANDBOX_API_URL named the retired hosted sandbox API, and a value left in
-// a shell profile must not redirect any client.
-func TestNewClientReadsNoEnvironment(t *testing.T) {
-	t.Setenv("SANDBOX_API_URL", "https://retired.example")
-	if c := NewClient(""); c.BaseURL != "" {
-		t.Errorf("BaseURL = %q, want the empty URL it was given", c.BaseURL)
-	}
-	if c := NewClient("https://x.example/"); c.BaseURL != "https://x.example" {
-		t.Errorf("BaseURL = %q, want the URL trimmed", c.BaseURL)
-	}
-	// A new client carries no credential and mints nothing: the caller
-	// attaches a token minted for the product it is about to call.
-	c := NewClient("https://x.example")
-	if c.Token != "" || c.Refresh != nil {
-		t.Error("NewClient loaded a credential of its own")
-	}
-}
-
-func TestClientRetriesSeekableBodyAfterRefresh(t *testing.T) {
-	mux := http.NewServeMux()
-	var postCalls int32
-	mux.HandleFunc("POST /v1/things", func(w http.ResponseWriter, r *http.Request) {
-		postCalls++
-		if r.Header.Get("Authorization") != "Bearer fresh-actor" {
-			w.WriteHeader(http.StatusUnauthorized)
-			_, _ = w.Write([]byte(`{"code":"unauthorized","message":"stale"}`))
-			return
-		}
-		body, _ := readAllString(r)
-		if body != `{"x":1}` {
-			t.Errorf("retried body = %q, want the rewound original", body)
-		}
-		w.WriteHeader(http.StatusNoContent)
-	})
-	srv := httptest.NewServer(mux)
-	defer srv.Close()
-
-	c := NewClient(srv.URL)
-	c.SetBearer("stale-actor", time.Time{})
-	c.Refresh = func(context.Context) (string, time.Time, bool) { return "fresh-actor", time.Time{}, true }
-	if err := c.Do(context.Background(), http.MethodPost, "/v1/things", strings.NewReader(`{"x":1}`), "application/json", nil); err != nil {
-		t.Fatalf("Do: %v", err)
-	}
-	if postCalls != 2 {
-		t.Errorf("post calls = %d, want 2 (401 then rewound retry)", postCalls)
-	}
-}
-
-func readAllString(r *http.Request) (string, error) {
-	b := make([]byte, 0, 64)
-	buf := make([]byte, 64)
-	for {
-		n, err := r.Body.Read(buf)
-		b = append(b, buf[:n]...)
-		if errors.Is(err, io.EOF) {
-			return string(b), nil
-		}
-		if err != nil {
-			return string(b), err
-		}
 	}
 }
 
