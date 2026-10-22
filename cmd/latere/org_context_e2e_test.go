@@ -61,6 +61,9 @@ func TestOrgSwitchUpdatesTheSavedLoginE2E(t *testing.T) {
 			newAuth := "e30." + base64.RawURLEncoding.EncodeToString(claims) + ".test-signature"
 			var refreshes atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if serveDiscovery(w, r) {
+					return
+				}
 				w.Header().Set("Content-Type", "application/json")
 				switch r.URL.Path {
 				case "/token":

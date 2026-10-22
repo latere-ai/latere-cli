@@ -30,6 +30,9 @@ func TestLoginRetainsOAuthClientAcrossSessionE2E(t *testing.T) {
 			authPath := filepath.Join(root, "auth-token.json")
 			var mints, refreshes, revocations atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if serveDiscovery(w, r) {
+					return
+				}
 				w.Header().Set("Content-Type", "application/json")
 				if r.URL.Path == "/device/code" || r.URL.Path == "/token" || r.URL.Path == "/revoke" {
 					if err := r.ParseForm(); err != nil {

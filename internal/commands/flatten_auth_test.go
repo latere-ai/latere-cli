@@ -137,6 +137,9 @@ func TestOrgSwitch(t *testing.T) {
 
 			var gotOrg *string
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if serveDiscovery(w, r) {
+					return
+				}
 				w.Header().Set("Content-Type", "application/json")
 				if r.URL.Path != "/token" {
 					http.NotFound(w, r)

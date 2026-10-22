@@ -49,6 +49,9 @@ func TestCommandsPreserveHTTPErrorStatusE2E(t *testing.T) {
 			}
 			var calls atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if serveDiscovery(w, r) {
+					return
+				}
 				calls.Add(1)
 				if r.URL.Path != path || r.Method != method {
 					t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)

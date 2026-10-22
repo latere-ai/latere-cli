@@ -420,12 +420,15 @@ func TestGitCredentialSetupRemove(t *testing.T) {
 
 // fakeSandboxAPI serves the /v1/sandboxes probe saveAndVerify uses to
 // confirm a pasted token.
-// fakeIssuer stands in for auth when a login is verified: /tokeninfo
+// fakeIssuer stands in for auth when a login is verified: /userinfo
 // accepts or refuses the pasted token.
 func fakeIssuer(t *testing.T, acceptToken bool) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/me" {
+		if serveDiscovery(w, r) {
+			return
+		}
+		if r.URL.Path != "/userinfo" {
 			http.NotFound(w, r)
 			return
 		}

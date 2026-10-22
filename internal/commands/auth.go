@@ -5,11 +5,9 @@ package commands
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
@@ -17,13 +15,12 @@ import (
 	"strings"
 	"time"
 
-	"latere.ai/x/pkg/otel"
-
 	"github.com/spf13/cobra"
 	"golang.org/x/oauth2"
 	"latere.ai/x/pkg/authkit/cli"
 	"latere.ai/x/pkg/authkit/jwt"
 	"latere.ai/x/pkg/authkit/oidc"
+	"latere.ai/x/sdk-go/signin"
 
 	"github.com/latere-ai/latere-cli/internal/api"
 )
@@ -148,8 +145,12 @@ func showOrgContext(cmd *cobra.Command) error {
 	return nil
 }
 
+// issuerTimeout bounds one call to the issuer: a refresh that switches the
+// context, the check of a pasted login, or a sign-out's revocation.
+const issuerTimeout = 15 * time.Second
+
 // switchOrgContext re-scopes the saved token to orgID (empty = personal)
-// using the refresh-token grant with `org_id=<uuid>`.
+// with the refresh that switches the login's organization.
 func switchOrgContext(cmd *cobra.Command, authURL, clientID, orgID string) error {
 	tok, err := api.LoadAuthToken()
 	if err != nil {
@@ -172,56 +173,16 @@ func switchOrgContext(cmd *cobra.Command, authURL, clientID, orgID string) error
 	}
 	cid := api.AuthClientID(clientID)
 
-	form := url.Values{
-		"grant_type":    {"refresh_token"},
-		"refresh_token": {tok.RefreshToken},
-		"client_id":     {cid},
-		"org_id":        {orgID},
-	}
-	req, err := http.NewRequestWithContext(cmd.Context(),
-		http.MethodPost,
-		authBase+"/token",
-		strings.NewReader(form.Encode()),
-	)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Accept", "application/json")
-
-	httpc := &http.Client{Timeout: 15 * time.Second, Transport: otel.Transport(nil), CheckRedirect: api.PreserveMethodOnRedirect}
-	resp, err := httpc.Do(req)
+	ctx, cancel := context.WithTimeout(cmd.Context(), issuerTimeout)
+	defer cancel()
+	got, err := api.Issuer(authBase, cid).SwitchOrganization(ctx, tok.RefreshToken, orgID)
 	if err != nil {
 		return fmt.Errorf("token endpoint: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
-	body, readErr := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("token endpoint: %s: %s", resp.Status, strings.TrimSpace(string(body)))
-	}
-	if readErr != nil {
-		return fmt.Errorf("read token response: %w", readErr)
-	}
-	var got struct {
-		AccessToken  string `json:"access_token"`
-		RefreshToken string `json:"refresh_token"`
-		ExpiresIn    int    `json:"expires_in"`
-	}
-	if err := json.Unmarshal(body, &got); err != nil {
-		return fmt.Errorf("decode token: %w", err)
-	}
-	if got.AccessToken == "" {
-		return errors.New("token endpoint returned no access_token")
-	}
-
-	// Match OAuth refresh handling: an absent or zero lifetime means the
-	// expiry is unknown, rather than that the new token expired immediately.
-	var expiry time.Time
-	if got.ExpiresIn != 0 {
-		expiry = time.Now().Add(time.Duration(got.ExpiresIn) * time.Second).UTC()
-	}
-	if got.RefreshToken == "" {
-		got.RefreshToken = tok.RefreshToken
+	// A zero expiry is one the issuer did not say, not one that lapsed.
+	expiry := got.Expiry
+	if !expiry.IsZero() {
+		expiry = expiry.UTC()
 	}
 	if err := api.SaveAuthToken(api.Token{
 		AccessToken:  got.AccessToken,
@@ -410,16 +371,13 @@ func loginWithPastedToken(ctx context.Context, authURL, token string) error {
 
 // verifyAtIssuer confirms a pasted token at the issuer before it is
 // stored. The login token is addressed to auth, so auth is who can say
-// whether it is a login at all: its own /api/me answers a live login and
+// whether it is a login at all: its userinfo answers a live login and
 // refuses anything else. Storing an unverified string would fail later at
 // every product with an error naming the wrong service.
 func verifyAtIssuer(ctx context.Context, authBase, token string) error {
-	c := api.NewClient(authBase)
-	c.SetBearer(token, time.Time{})
-	verifyCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	verifyCtx, cancel := context.WithTimeout(ctx, issuerTimeout)
 	defer cancel()
-	var ignored any
-	if err := c.GetJSON(verifyCtx, "/api/me", &ignored); err != nil {
+	if _, err := api.Issuer(authBase, "").UserInfo(verifyCtx, token); err != nil {
 		return fmt.Errorf("token rejected by auth: %w", err)
 	}
 	return nil
@@ -758,40 +716,21 @@ func forgetModelKeys(ctx context.Context, authURL string, errw io.Writer) {
 	}
 }
 
-// revokeAuthRefreshToken best-effort revokes the saved refresh token via
-// RFC 7009 (POST {auth}/revoke, public client) so the login cannot mint
-// further access tokens after sign-out.
+// revokeAuthRefreshToken best-effort revokes the saved refresh token at
+// the issuer (RFC 7009) so the login cannot mint further access tokens
+// after sign-out.
 func revokeAuthRefreshToken(ctx context.Context, authURL string, errw io.Writer) {
 	tok, err := api.LoadAuthToken()
 	if err != nil || tok.RefreshToken == "" {
 		return
 	}
-	authBase := api.ResolveAuthURL("", authURL)
-	cid := api.AuthClientID(tok.ClientID)
-	form := url.Values{
-		"token":           {tok.RefreshToken},
-		"token_type_hint": {"refresh_token"},
-		"client_id":       {cid},
-	}
-	rctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	rctx, cancel := context.WithTimeout(ctx, issuerTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(rctx, http.MethodPost, authBase+"/revoke", strings.NewReader(form.Encode()))
-	if err != nil {
-		fprintf(errw, "  warning: could not revoke the refresh token (%v)\n", err)
-		return
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	resp, err := (&http.Client{Timeout: 10 * time.Second, Transport: otel.Transport(nil), CheckRedirect: api.PreserveMethodOnRedirect}).Do(req)
-	if err != nil {
+	err = api.Issuer(api.ResolveAuthURL("", authURL), tok.ClientID).Revoke(rctx, tok.RefreshToken)
+	if refused, ok := errors.AsType[*signin.Error](err); ok {
+		fprintf(errw, "  warning: refresh-token revocation returned %d; it may remain valid until expiry\n", refused.StatusCode)
+	} else if err != nil {
 		fprintf(errw, "  warning: could not revoke the refresh token (%v); it remains valid until expiry\n", err)
-		return
-	}
-	defer func() { _ = resp.Body.Close() }()
-	_, readErr := io.Copy(io.Discard, resp.Body)
-	if resp.StatusCode/100 != 2 {
-		fprintf(errw, "  warning: refresh-token revocation returned %d; it may remain valid until expiry\n", resp.StatusCode)
-	} else if readErr != nil {
-		fprintf(errw, "  warning: could not confirm refresh-token revocation (%v); it may remain valid until expiry\n", readErr)
 	}
 }
 

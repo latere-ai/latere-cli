@@ -38,9 +38,12 @@ func TestLoginWithClosedStdinE2E(t *testing.T) {
 			}
 			var requests atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if serveDiscovery(w, r) {
+					return
+				}
 				requests.Add(1)
 				w.Header().Set("Content-Type", "application/json")
-				if !explicit || r.URL.Path != "/api/me" || r.Header.Get("Authorization") != "Bearer candidate" {
+				if !explicit || r.URL.Path != "/userinfo" || r.Header.Get("Authorization") != "Bearer candidate" {
 					t.Error("unexpected login request")
 				}
 				_, _ = w.Write([]byte(`{"sub":"u-1"}`))

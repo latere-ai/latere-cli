@@ -13,6 +13,7 @@ import (
 
 	"latere.ai/x/pkg/otel"
 	"latere.ai/x/sdk-go/latere"
+	"latere.ai/x/sdk-go/signin"
 )
 
 // userAgent is the product the CLI names itself as, before the SDK's own
@@ -46,6 +47,20 @@ func actorTokens(authURL, audience string) latere.TokenSource {
 // calls with latere.WithTimeout.
 func HTTPClient() *http.Client {
 	return &http.Client{Transport: otel.Transport(nil), CheckRedirect: PreserveMethodOnRedirect}
+}
+
+// Issuer is the SDK's configuration for the issuer at authBase, the
+// identity service the saved login belongs to, as the client clientID that
+// issued the login (AuthClientID resolves an empty one): the CLI's traced
+// HTTP client, which refuses a redirect that changes the method. The calls
+// made with it are bounded by their context.
+func Issuer(authBase, clientID string) *signin.Config {
+	return &signin.Config{
+		ClientID:   AuthClientID(clientID),
+		Issuer:     authBase,
+		Scopes:     strings.Fields(LoginScopes),
+		HTTPClient: HTTPClient(),
+	}
 }
 
 // Product is how a product command reaches one capability of the API

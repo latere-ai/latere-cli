@@ -65,6 +65,9 @@ func TestAuthFormsRequireCompleteRequestsAndResponsesE2E(t *testing.T) {
 				}
 				var initial, redirected atomic.Int32
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if serveDiscovery(w, r) {
+						return
+					}
 					switch r.URL.Path {
 					case "/token", "/revoke":
 						initial.Add(1)

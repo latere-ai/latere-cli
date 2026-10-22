@@ -113,7 +113,10 @@ func TestAuthLoginTokenReplacesThePreviousLogin(t *testing.T) {
 	}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/me" {
+		if serveDiscovery(w, r) {
+			return
+		}
+		if r.URL.Path != "/userinfo" {
 			http.NotFound(w, r)
 			return
 		}

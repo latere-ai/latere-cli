@@ -53,6 +53,9 @@ func TestLogoutAttemptsBothLocalCredentialsE2E(t *testing.T) {
 				}
 			}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if serveDiscovery(w, r) {
+					return
+				}
 				if r.Method != http.MethodPost || r.URL.Path != "/revoke" {
 					t.Errorf("unexpected request: %s %s; logout speaks to the issuer alone", r.Method, r.URL.Path)
 				} else if err := r.ParseForm(); err != nil || r.PostForm.Get("token") != "test-refresh" {

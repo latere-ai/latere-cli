@@ -54,6 +54,7 @@ func TestLogoutRevokesAtTheIssuerAndClearsTheLogin(t *testing.T) {
 	var revokes atomic.Int32
 	var gotForm atomic.Value
 	mux := http.NewServeMux()
+	handleDiscovery(mux)
 	mux.HandleFunc("POST /revoke", func(w http.ResponseWriter, r *http.Request) {
 		revokes.Add(1)
 		_ = r.ParseForm()
@@ -132,6 +133,7 @@ func TestLoginAndRefreshShareOneScopeSet(t *testing.T) {
 
 func TestLogoutRevocationDegrades(t *testing.T) {
 	mux := http.NewServeMux()
+	handleDiscovery(mux)
 	mux.HandleFunc("POST /revoke", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	})

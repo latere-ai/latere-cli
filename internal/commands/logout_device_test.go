@@ -36,6 +36,7 @@ func connectedForLogout(t *testing.T, deleteStatus int) (paths device.Paths, aut
 		mu.Unlock()
 	}
 	mux := http.NewServeMux()
+	handleDiscovery(mux)
 	mux.HandleFunc("POST /revoke", func(w http.ResponseWriter, r *http.Request) {
 		record("revoke")
 		w.WriteHeader(http.StatusOK)

@@ -26,7 +26,10 @@ func TestPastedLoginVerifiesAtTheIssuer(t *testing.T) {
 	}
 	var probes atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/me" {
+		if serveDiscovery(w, r) {
+			return
+		}
+		if r.URL.Path != "/userinfo" {
 			t.Errorf("login called %s; it speaks to the issuer alone", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
 			return
@@ -65,6 +68,9 @@ func TestPastedLoginWritesOneCredential(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("LATERE_AUTH_TOKEN_FILE", filepath.Join(root, "auth-token.json"))
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveDiscovery(w, r) {
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"sub":"u-1"}`))
 	}))
