@@ -132,7 +132,8 @@ The file is the computer's say: the platform never writes it, and the
 command reads it at each start. A change takes effect at the next
 `connect`. The folder rules are Cella's local driver's (no `/`, no home
 directory itself, no system directory). The network is `allowlist` or
-`none`: the local driver offers no open network.
+`none`: the local driver offers no open network. (Amended 2026-10-22: or
+`any`, below.)
 
 The command passes the driver more denied paths of its own, in `Deny`:
 
@@ -567,3 +568,52 @@ ends.
 Cella v0.18.0 also writes the environment's status at registration and
 words a missing path "not found: <path>", which is how the activity log now
 reads one, in place of "environment not found" in the live check above.
+
+### Amended, 2026-10-22: the network any, refused hosts, `latere devices allow`
+
+On Cella v0.21.0 a device's network can be `any`: any public host but
+those `network.blocked` names, never this computer, its networks, or an
+address that is not public. With it, everything readable in a granted
+folder can be sent to any public host, so it is never a default and
+never proposed at a connect.
+
+- **`latere devices policy --network allowlist | none | any`**, with
+  `--host` and `--block`, each naming its whole list. The result is
+  checked as the engine checks a policy before anything is written. A
+  switch of mode starts each list from what the new mode reads of the
+  old: an allowlist from the default hosts, `any` from the entries naming
+  a port beyond 443 and 80. Choosing `any` shows the network facts of the
+  connect screen, the sentence among them, and takes the same typed yes,
+  or `--yes`; a refusal is `device_network_not_confirmed`. Where the
+  driver cannot enforce `any` (srt, and a binary whose main does not run
+  hostsandbox's launcher) it is `device_network_unenforceable`, before
+  anything is asked. The policy's output shows the network facts.
+  `connect --network any` is refused with the command that sets it.
+- **Refused hosts.** The terminal client prints each `network_refused`
+  event as one line, the session (or the sandbox where the plane names
+  none), the host and the port, with the two commands that allow it, and
+  does not print the refusal's activity line beside it.
+- **`latere devices allow HOST[:PORT] (--session ID | --save)`** rather
+  than flags on `policy`: the two answer the same refusal and differ in how
+  long the answer lasts, and `--session` changes no file. `--session` is
+  `POST /v1/sessions/{session}/hosts`; `--save` is `POST /v1/policy/hosts`,
+  or, with nothing serving, `Engine.SaveHost` on an engine that does not
+  run, so the file is changed and checked exactly as the serving engine
+  would. A host alone is port 443.
+- **Older and newer binaries.** A latere before this release refuses a
+  file whose network is `any` (`blocked` is an unknown field to it), so
+  every write that leaves `any` says to upgrade. A file naming a field this
+  version does not know is `device_policy_newer`, whose step is `latere
+  upgrade`.
+
+| Item | Test | Where |
+|---|---|---|
+| The flags, each list on a switch, refusals before any write, unenforceable `any` | `TestDevicesPolicyNetworkFlags` | `internal/commands/devices_network_test.go` |
+| The typed yes and `--yes`, the policy's network output, the upgrade note | `TestDevicesPolicyNetworkAnyAsksForYes` | `internal/commands/devices_network_test.go` |
+| `connect --network any` refused | `TestConnectRefusesNetworkAny` | `internal/commands/devices_network_test.go` |
+| A newer file says upgrade | `TestDevicesNewerPolicyFileSaysUpgrade` | `internal/commands/devices_network_test.go` |
+| `allow` through the socket: routes, bodies, refusals | `TestDevicesAllowThroughTheEngine` | `internal/commands/devices_allow_test.go` |
+| `allow` with nothing serving: allowlist, a block lifted, a wildcard kept | `TestDevicesAllowWithNothingServing` | `internal/commands/devices_allow_test.go` |
+| The activity lines | `TestDevicesActivityShowsRefusedHosts` | `internal/commands/devices_allow_test.go` |
+| The refused line and its commands | `TestTerminalShowsRefusedHosts`, `TestRefusedLines` | `internal/deviceterm/terminal_test.go` |
+| End to end on macOS: a refusal printed, allowed for the session, saved, logged; `any` taken by the built binary | `TestDevicesSessionCommandsRunUnderSeatbeltEndToEnd`, `TestDevicesNetworkAnyUnderSeatbeltEndToEnd` | `cmd/latere/devices_seatbelt_e2e_test.go` |

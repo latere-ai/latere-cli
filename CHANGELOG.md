@@ -10,6 +10,63 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Added
+
+- **A computer's network can be `any`: any public host but the ones you
+  block.** `latere devices policy --network any`, with `--block HOST`
+  repeated for each host to refuse, lets sessions' commands reach any
+  public host over HTTPS and HTTP, but never this computer, its Wi-Fi and
+  Ethernet networks, an address that is not public, or a host you block.
+  Everything readable in a granted folder can be sent to any public host.
+  The command shows that sentence and what `any` allows, and asks you to
+  type yes, as the connect screen does; `--yes` answers for you, and
+  `connect` says it again at every start. The default stays the allowlist
+  of git and package hosts, or none: `connect` never offers `any`, and
+  `connect --network any` is refused with the command that sets it once
+  connected. `any` is enforced by macOS's own sandbox alone; on Linux it
+  is refused with `device_network_unenforceable`. `latere devices policy`
+  also takes `--network allowlist` or `none` and `--host`, checks the
+  result before it writes, and prints the network, the hosts it reaches or
+  blocks, and what it lets out.
+- **A refused host is printed, with the commands that allow it.** While
+  `latere devices connect` serves, each host a session's command is
+  refused is one line naming the session, the host and the port, followed
+  by two commands. `latere devices allow HOST:PORT --session ID` lets that
+  session's next command reach the host, until its sandbox stops, without
+  changing the host policy file. `latere devices allow HOST:PORT --save`
+  writes it into the file, so every session's next command reaches it,
+  with no restart; with nothing serving, from the next `connect`. A
+  command already running keeps the network it started with. `latere
+  devices activity` shows `network_refused`, `host_allowed` and
+  `host_saved` lines.
+- **A host policy file written by a newer `latere` or Latere Studio is
+  refused with `device_policy_newer`**, whose next step is `latere
+  upgrade`. A `latere` released before the network `any` cannot read a
+  file whose network is `any` or that has a `blocked` list, and stops
+  with `device_policy_invalid`: upgrade it the same way. `latere devices
+  policy` and `latere devices allow` remind you whenever they leave `any`
+  in the file.
+
+### Changed
+
+- **A session's sandbox started again gets the computer's network as it is
+  then**, through `latere.ai/x/cella` v0.21.0: after you narrow the
+  network and connect again, a sandbox that was created under the wider
+  one gets the narrower one.
+- **On macOS, a session cannot create a file or folder whose name ends in
+  `.git`, outside git's refs and logs**, through `latere.ai/x/pkg`
+  v0.109.0. So a bare repository inside a folder you shared cannot be
+  removed, renamed or swapped while a session runs, and one you later push
+  to keeps its own config and hooks. A branch or tag whose name ends in
+  `.git` still works.
+
+### Fixed
+
+- **On macOS, a session's command holds no file or connection of `latere
+  devices` but its own input and output.** Before, a descriptor held open
+  without close-on-exec passed to the command, where a socket stayed
+  connected whatever the sandbox allowed.
+
 ## v0.33.1 - 2026-10-21
 
 ### Fixed
