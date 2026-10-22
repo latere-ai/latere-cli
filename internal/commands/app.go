@@ -30,12 +30,13 @@ import (
 
 // The app commands reach the Apps API under the platform origin through the
 // SDK's apps package, which writes the API's paths under the origin's
-// /v1/apps. The base URL a person gives includes that path, as the API's
-// address at the origin, and the commands cut it off to name the origin.
+// apps.BasePath. The base URL a person gives includes that path, as the
+// API's address at the origin, and the commands cut it off to name the
+// origin.
 
 // defaultAppURL is the Apps API at the platform origin, its base path
 // included.
-const defaultAppURL = "https://api.latere.ai/v1/apps"
+const defaultAppURL = latere.DefaultBaseURL + apps.BasePath
 
 // appAudience is the aud claim of the bearer every app command presents: the
 // Apps API's own audience, which auth mints actor tokens for on the
@@ -150,10 +151,6 @@ LATERE_PLATFORM_TOKEN presents that bearer as given.`,
 
 // ---- the wire ----
 
-// appBasePath is the path the origin serves the Apps API under, which the
-// API's base URL ends in.
-const appBasePath = "/v1/apps"
-
 // appError is a refusal of the Apps API: the code to branch on, the fixed
 // sentence for a person, and the details, which carry the hint and what the
 // code names. A command that knows a code better says so in explained,
@@ -239,9 +236,9 @@ func newAppClient(flagURL, authURL string) (*appClient, error) {
 		u = defaultAppURL
 	}
 	base := strings.TrimRight(u, "/")
-	origin, ok := strings.CutSuffix(base, appBasePath)
+	origin, ok := strings.CutSuffix(base, apps.BasePath)
 	if !ok {
-		return nil, fmt.Errorf("%s is not an Apps API base URL: it ends in %s, as %s does", base, appBasePath, defaultAppURL)
+		return nil, fmt.Errorf("%s is not an Apps API base URL: it ends in %s, as %s does", base, apps.BasePath, defaultAppURL)
 	}
 	cfg, err := api.Product{
 		BaseURL: origin, AuthURL: authURL, Audience: appAudience,
