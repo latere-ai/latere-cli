@@ -7,12 +7,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"os"
 	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"latere.ai/x/sdk-go/latere"
 
 	"github.com/latere-ai/latere-cli/internal/api"
 	"github.com/latere-ai/latere-cli/internal/modelkey"
@@ -86,21 +87,21 @@ func modelKeyProvenance(res modelkey.Result, store string) string {
 // for up to retryWindow; an older key's 401 means it was revoked or lost, so
 // it is replaced once and the new key gets the same retry.
 func callWithModelKey(ctx context.Context, keys *modelkey.Keys, l modelkey.Login, res modelkey.Result,
-	call func(bearer string) ([]byte, error)) ([]byte, error) {
+	call func(bearer string) error) error {
 	replaced := false
 	for {
-		raw, err := callWhileFresh(ctx, keys, res, call)
-		var ae *api.APIError
-		if err == nil || !errors.As(err, &ae) || ae.Status != http.StatusUnauthorized || res.FromEnv || replaced {
-			if err != nil && res.Record.Status == "pending_approval" && errors.As(err, &ae) && ae.Status == http.StatusUnauthorized {
-				return nil, errors.New("the model key waits for an org admin's approval; ask one to approve it in the console")
+		err := callWhileFresh(ctx, keys, res, call)
+		refused := errors.Is(err, latere.ErrUnauthorized)
+		if !refused || res.FromEnv || replaced {
+			if refused && res.Record.Status == "pending_approval" {
+				return errors.New("the model key waits for an org admin's approval; ask one to approve it in the console")
 			}
-			return raw, err
+			return err
 		}
 		fmt.Fprintf(os.Stderr, "note: the model key %s was refused; replacing it\n", res.Record.Prefix)
 		next, rerr := keys.Replace(ctx, l, res.Record)
 		if rerr != nil {
-			return nil, rerr
+			return rerr
 		}
 		res, replaced = next, true
 	}
@@ -108,20 +109,18 @@ func callWithModelKey(ctx context.Context, keys *modelkey.Keys, l modelkey.Login
 
 // callWhileFresh makes the call, and retries its 401 while the key is young
 // enough that the core may not know it yet.
-func callWhileFresh(ctx context.Context, keys *modelkey.Keys, res modelkey.Result, call func(bearer string) ([]byte, error)) ([]byte, error) {
+func callWhileFresh(ctx context.Context, keys *modelkey.Keys, res modelkey.Result, call func(bearer string) error) error {
 	deadline := time.Now().Add(retryWindow)
 	wait := retryFirstWait
 	for {
-		raw, err := call(res.Record.Value)
-		var ae *api.APIError
+		err := call(res.Record.Value)
 		fresh := res.Created || keys.Fresh(res.Record)
-		if err == nil || !errors.As(err, &ae) || ae.Status != http.StatusUnauthorized ||
-			!fresh || time.Now().Add(wait).After(deadline) {
-			return raw, err
+		if !errors.Is(err, latere.ErrUnauthorized) || !fresh || time.Now().Add(wait).After(deadline) {
+			return err
 		}
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return ctx.Err()
 		case <-time.After(wait):
 		}
 		wait *= 2

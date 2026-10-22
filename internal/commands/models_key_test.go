@@ -24,7 +24,7 @@ import (
 
 // The model key (specs/006-model-key.md) and the model commands over it
 // (specs/007-models-at-the-origin.md), against a stub that is both auth's
-// /me/keys and the Lux core's OpenAI door at /v1/models/openai.
+// /me/keys and the Lux core's doors under /v1/models.
 
 // stubModels is the model list the stub core answers.
 var stubModels = []string{"anthropic/claude-sonnet-4.6", "openai/gpt-4.1-mini"}
@@ -101,7 +101,7 @@ func newKeyWorld(t *testing.T, orgID string) *keyWorld {
 				"anthropic": w.modelsURL() + "/anthropic", "openai": w.modelsURL() + "/openai", "lux": w.modelsURL() + "/lux",
 			}})
 		case strings.HasPrefix(r.URL.Path, "/v1/models/openai/v1/"), strings.HasPrefix(r.URL.Path, "/v1/models/anthropic/v1/"),
-			r.URL.Path == "/v1/models/lux/v1/generate":
+			strings.HasPrefix(r.URL.Path, "/v1/models/lux/v1/"):
 			w.serveCore(t, rw, r)
 		default:
 			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
@@ -131,8 +131,8 @@ func newKeyWorld(t *testing.T, orgID string) *keyWorld {
 // serveCore is the stub core's OpenAI door: the model list, and Chat
 // Completions answered whole or as an event stream; its Anthropic door: the
 // model list with its figures, and Messages as an event stream; and its Lux
-// door's generate, answered whole. The Anthropic door takes the key as
-// x-api-key, the others as the bearer.
+// door: the model list, and generate, answered whole. The Anthropic door
+// takes the key as x-api-key, the others as the bearer.
 func (w *keyWorld) serveCore(t *testing.T, rw http.ResponseWriter, r *http.Request) {
 	n := w.calls.Add(1)
 	bearer := cmp.Or(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "), r.Header.Get("x-api-key"))
@@ -154,7 +154,7 @@ func (w *keyWorld) serveCore(t *testing.T, rw http.ResponseWriter, r *http.Reque
 		return
 	}
 	switch {
-	case r.Method == http.MethodGet && r.URL.Path == "/v1/models/openai/v1/models":
+	case r.Method == http.MethodGet && (r.URL.Path == "/v1/models/openai/v1/models" || r.URL.Path == "/v1/models/lux/v1/models"):
 		var data []string
 		for _, m := range stubModels {
 			data = append(data, fmt.Sprintf(`{"id":%q,"object":"model","created":0,"owned_by":"lux"}`, m))
@@ -186,7 +186,13 @@ func (w *keyWorld) serveCore(t *testing.T, rw http.ResponseWriter, r *http.Reque
 			_, _ = io.WriteString(rw, "event: "+ev[0]+"\ndata: "+ev[1]+"\n\n")
 		}
 	case r.Method == http.MethodPost && r.URL.Path == "/v1/models/lux/v1/generate":
-		_, _ = io.WriteString(rw, `{"id":"g1","model":"`+body.Model+`","blocks":[{"type":"text","text":"no findings"}],"stop_reason":"end_turn","usage":{"input_tokens":9,"output_tokens":3}}`)
+		// The critic model's reply is a review's; any other model is a
+		// check that it answers.
+		reply := "hi"
+		if body.Model == defaultCatalogModel {
+			reply = "no findings"
+		}
+		_, _ = io.WriteString(rw, `{"id":"g1","model":"`+body.Model+`","blocks":[{"type":"text","text":"`+reply+`"}],"stop_reason":"end_turn","usage":{"input_tokens":9,"output_tokens":3}}`)
 	default:
 		t.Errorf("unexpected core %s %s", r.Method, r.URL.Path)
 		http.NotFound(rw, r)

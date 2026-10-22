@@ -4,38 +4,38 @@
 package commands
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"strings"
 	"time"
 
-	"latere.ai/x/pkg/otel"
-
 	"github.com/spf13/cobra"
+
+	"latere.ai/x/sdk-go/latere"
+	"latere.ai/x/sdk-go/llm"
 
 	"github.com/latere-ai/latere-cli/internal/api"
 )
 
-// The model commands reach the Lux core behind the platform origin, at
-// https://api.latere.ai/v1/models. The core serves one door per wire
-// dialect under that base. The OpenAI and Anthropic doors reach every
+// The model commands reach the Lux core behind the platform origin, under
+// llm.BasePath. The core serves one door per wire dialect under that base.
+// The CLI's own calls, the model list and a model call, go through the
+// SDK's llm package, which speaks the Latere dialect. The OpenAI and
+// Anthropic doors, which `models env` points a stock SDK at, reach every
 // Model in the catalog, translated where its provider speaks the other
 // dialect; the Gemini door is never translated, and the catalog serves no
 // Model in that dialect, so it reaches none. The credential of every call
 // is the model key (models_key.go).
 
-// modelsPath is where the origin serves the core, under which its doors
-// sit.
-const modelsPath = "/v1/models"
-
 // defaultModelsURL is the base of the core's doors at the origin.
-const defaultModelsURL = "https://api.latere.ai" + modelsPath
+const defaultModelsURL = latere.DefaultBaseURL + llm.BasePath
+
+// modelsTimeout bounds one model call, its retries included.
+const modelsTimeout = 120 * time.Second
 
 // defaultCatalogModel is the Model review's critics and the local Topos
 // agent call when none is named. Models are named as the catalog names
@@ -43,9 +43,8 @@ const defaultModelsURL = "https://api.latere.ai" + modelsPath
 // requests take: an anthropic model goes to the Anthropic door.
 const defaultCatalogModel = "anthropic/claude-sonnet-5.5"
 
-// openAIDoor is the core's OpenAI door under the base. The CLI's own model
-// calls go through it: it serves the model list and Chat Completions, and a
-// Model of any provider is translated behind it.
+// openAIDoor is the core's OpenAI door under the base, which a stock
+// OpenAI SDK calls a Model of any provider through.
 const openAIDoor = "/openai"
 
 // resolveModelsURL returns the base of the core's doors: the flag, then
@@ -133,9 +132,38 @@ or --models-url overrides it.`,
 	return cmd
 }
 
+// modelsOrigin is the origin the models URL is served under, which the
+// SDK's llm package builds its paths on: the URL without its llm.BasePath.
+func modelsOrigin(modelsURL string) (string, bool) {
+	return strings.CutSuffix(resolveModelsURL(modelsURL), llm.BasePath)
+}
+
+// modelsClient is the SDK's models client at origin, presenting key, a
+// model key, unchanged, as the models capability takes it. A zero timeout
+// keeps the SDK's default.
+func modelsClient(origin, key string, timeout time.Duration) (*llm.Client, error) {
+	cfg, err := api.Product{BaseURL: origin, Token: key, Timeout: timeout}.Config()
+	if err != nil {
+		return nil, err
+	}
+	return llm.New(cfg), nil
+}
+
+// commandModelsOrigin is the origin the model commands' calls go to, or the
+// error that says the models URL names none.
+func commandModelsOrigin(modelsURL string) (string, error) {
+	origin, ok := modelsOrigin(modelsURL)
+	if !ok {
+		return "", fmt.Errorf("the models URL %s does not end in %s, the path the models are served under, as %s does", resolveModelsURL(modelsURL), llm.BasePath, defaultModelsURL)
+	}
+	return origin, nil
+}
+
 // ---- list ----
 
-// modelEntry is one row of the OpenAI door's model list.
+// modelEntry is one model of the list as --json prints it: the shape of a
+// model list's entry, its id, the object it is, when it was added and who
+// offers it.
 type modelEntry struct {
 	ID      string `json:"id"`
 	Object  string `json:"object,omitempty"`
@@ -149,7 +177,7 @@ func newModelsListCmd(modelsURL, authURL *string) *cobra.Command {
 		Use:   "list",
 		Short: "List the models your key reaches.",
 		Long: `List the models your model key reaches, by the names a model call
-takes. The list is the OpenAI door's, GET /v1/models/openai/v1/models.
+takes.
 
 The list carries names only. Prices per million tokens are in the
 console's Models section.`,
@@ -194,32 +222,41 @@ func runModelsList(cmd *cobra.Command, modelsURL, authURL string, jsonF bool) er
 // listModels answers the models the key reaches, and the key the core
 // accepted for the list.
 func listModels(ctx context.Context, modelsURL, authURL string) ([]modelEntry, string, error) {
+	origin, err := commandModelsOrigin(modelsURL)
+	if err != nil {
+		return nil, "", err
+	}
 	keys, l, res, err := modelKey(ctx, modelsURL, authURL)
 	if err != nil {
 		return nil, "", err
 	}
-	listURL := resolveModelsURL(modelsURL) + openAIDoor + "/v1/models"
-	var accepted string
-	raw, err := callWithModelKey(ctx, keys, l, res, func(bearer string) ([]byte, error) {
-		body, err := modelsRequest(ctx, http.MethodGet, listURL, bearer, nil)
+	var (
+		models   []llm.Model
+		accepted string
+	)
+	err = callWithModelKey(ctx, keys, l, res, func(bearer string) error {
+		c, err := modelsClient(origin, bearer, modelsTimeout)
+		if err != nil {
+			return err
+		}
+		models, err = c.ListModels(ctx)
 		if err == nil {
 			accepted = bearer
 		}
-		return body, err
+		return err
 	})
 	if err != nil {
 		return nil, "", wrapModelsErr(err)
 	}
-	var list struct {
-		Data []modelEntry `json:"data"`
+	entries := make([]modelEntry, 0, len(models))
+	for _, m := range models {
+		e := modelEntry{ID: m.ID, Object: "model", OwnedBy: m.OwnedBy}
+		if !m.Created.IsZero() {
+			e.Created = m.Created.Unix()
+		}
+		entries = append(entries, e)
 	}
-	if err := json.Unmarshal(raw, &list); err != nil {
-		return nil, "", fmt.Errorf("parse the model list: %w", err)
-	}
-	if list.Data == nil {
-		list.Data = []modelEntry{}
-	}
-	return list.Data, accepted, nil
+	return entries, accepted, nil
 }
 
 // ---- env ----
@@ -312,7 +349,7 @@ func newModelsInvokeCmd(modelsURL, authURL *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "invoke <prompt>",
 		Short: "One raw model call, to check that a model answers your key.",
-		Long: `Send one prompt to a model through the OpenAI door and print the reply.
+		Long: `Send one prompt to a model and print the reply.
 
 This is a check, not an assistant: no tools, no session, no workspace.
 Use it to see that a model answers your key. For assistant work, run
@@ -326,139 +363,71 @@ Name the model as 'latere models' lists it.`,
 			if model == "" {
 				return errors.New("--model is required")
 			}
+			origin, err := commandModelsOrigin(*modelsURL)
+			if err != nil {
+				return err
+			}
 			keys, l, res, err := modelKey(cmd.Context(), *modelsURL, *authURL)
 			if err != nil {
 				return err
 			}
-			chatURL := resolveModelsURL(*modelsURL) + openAIDoor + "/v1/chat/completions"
-			body := map[string]any{
-				"model":      model,
-				"max_tokens": maxTokens,
-				"messages":   []map[string]any{{"role": "user", "content": strings.Join(args, " ")}},
+			limit := int64(maxTokens)
+			req := &llm.Request{
+				Model:     model,
+				MaxTokens: &limit,
+				Messages:  []llm.Message{llm.UserText(strings.Join(args, " "))},
 			}
-			raw, err := callWithModelKey(cmd.Context(), keys, l, res, func(bearer string) ([]byte, error) {
-				return modelsRequest(cmd.Context(), http.MethodPost, chatURL, bearer, body)
+			var answer *llm.Result
+			err = callWithModelKey(cmd.Context(), keys, l, res, func(bearer string) error {
+				c, err := modelsClient(origin, bearer, modelsTimeout)
+				if err != nil {
+					return err
+				}
+				answer, err = c.Generate(cmd.Context(), req)
+				return err
 			})
 			if err != nil {
 				return wrapModelsErr(err)
 			}
 			if jsonF {
-				_, err := fmt.Fprintln(cmd.OutOrStdout(), strings.TrimSpace(string(raw)))
+				raw, err := json.Marshal(answer.Response)
+				if err != nil {
+					return fmt.Errorf("render the response: %w", err)
+				}
+				_, err = fmt.Fprintln(cmd.OutOrStdout(), string(raw))
 				return err
 			}
-			text, err := extractChatText(raw)
-			if err != nil {
-				return err
-			}
-			_, err = fmt.Fprintln(cmd.OutOrStdout(), text)
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), strings.TrimSpace(answer.Text()))
 			return err
 		},
 	}
 	cmd.Flags().StringVar(&model, "model", "", "model name, as 'latere models' lists it (required)")
 	cmd.Flags().IntVar(&maxTokens, "max-tokens", 1024, "max output tokens")
-	cmd.Flags().BoolVar(&jsonF, "json", false, "print the raw Chat Completions response")
+	cmd.Flags().BoolVar(&jsonF, "json", false, "print the raw response")
 	return cmd
 }
 
-// extractChatText pulls the assistant text out of a Chat Completions
-// response.
-func extractChatText(raw []byte) (string, error) {
-	var resp struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
+// modelsRefusal is the core's refusal of a model call, worded as its code
+// and sentence, or its status and text for an answer without a code.
+type modelsRefusal struct{ err *latere.Error }
+
+func (r *modelsRefusal) Error() string {
+	if r.err.Code != "" {
+		return r.err.Code + ": " + api.RefusalText(r.err)
 	}
-	if err := json.Unmarshal(raw, &resp); err != nil {
-		return "", fmt.Errorf("parse response: %w", err)
-	}
-	if len(resp.Choices) == 0 {
-		return "", errors.New("model returned no choices")
-	}
-	return strings.TrimSpace(resp.Choices[0].Message.Content), nil
+	return fmt.Sprintf("status %d: %s", r.err.StatusCode, api.RefusalText(r.err))
 }
 
-// ---- transport ----
-
-// maxModelsResponse bounds a model response the CLI reads whole.
-const maxModelsResponse = 8 << 20
-
-// modelsRequest sends one request to a door with the bearer, a JSON body
-// when body is non-nil, and returns the whole response body. A non-2xx
-// answer becomes an *api.APIError carrying the door's code and message, so
-// callWithModelKey can see a 401 and wrapModelsErr can explain a refusal.
-func modelsRequest(ctx context.Context, method, url, bearer string, body any) ([]byte, error) {
-	var reader io.Reader
-	if body != nil {
-		b, err := json.Marshal(body)
-		if err != nil {
-			return nil, err
-		}
-		reader = bytes.NewReader(b)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, url, reader)
-	if err != nil {
-		return nil, err
-	}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	req.Header.Set("Authorization", "Bearer "+bearer)
-	req.Header.Set("User-Agent", "latere-cli")
-	resp, err := (&http.Client{Timeout: 120 * time.Second, Transport: otel.Transport(nil), CheckRedirect: api.PreserveMethodOnRedirect}).Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, maxModelsResponse+1))
-	if resp.StatusCode/100 != 2 {
-		// Keep HTTP failures structured, with bounded diagnostic text.
-		if len(respBody) > maxModelsResponse {
-			respBody = respBody[:maxModelsResponse]
-		}
-		e := &api.APIError{Status: resp.StatusCode, Message: strings.TrimSpace(string(respBody))}
-		_ = json.Unmarshal(respBody, e)
-		if e.Code == "" {
-			// The doors answer in their dialect's envelope,
-			// {"error":{"type","code","message"}}; without this the caller
-			// sees the raw JSON instead of the code and the sentence.
-			var nested struct {
-				Error struct {
-					Code    string `json:"code"`
-					Type    string `json:"type"`
-					Message string `json:"message"`
-				} `json:"error"`
-			}
-			if json.Unmarshal(respBody, &nested) == nil {
-				if nested.Error.Code != "" {
-					e.Code = nested.Error.Code
-				} else if nested.Error.Type != "" {
-					e.Code = nested.Error.Type
-				}
-				if nested.Error.Message != "" {
-					e.Message = nested.Error.Message
-				}
-			}
-		}
-		return nil, e
-	}
-	if readErr != nil {
-		return nil, fmt.Errorf("read model response: %w", readErr)
-	}
-	if len(respBody) > maxModelsResponse {
-		return nil, errors.New("model response exceeds 8 MiB limit")
-	}
-	return respBody, nil
-}
+func (r *modelsRefusal) Unwrap() error { return r.err }
 
 // wrapModelsErr adds what to do next to the core's refusals a person acts
 // on, leaving other errors untouched.
 func wrapModelsErr(err error) error {
-	var apiErr *api.APIError
-	if !errors.As(err, &apiErr) {
+	apiErr, ok := errors.AsType[*latere.Error](err)
+	if !ok {
 		return err
 	}
+	err = &modelsRefusal{err: apiErr}
 	switch apiErr.Code {
 	case "model_not_found", "model_not_allowed":
 		return fmt.Errorf("%w\nRun `latere models` to see the models your key reaches", err)

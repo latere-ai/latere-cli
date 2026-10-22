@@ -104,8 +104,8 @@ func TestReviewCriticNeedsTheModelsPath(t *testing.T) {
 	if _, err := reviewCriticModel("https://models.example/other", "pat_k1.value"); err == nil || !strings.Contains(err.Error(), "/v1/models") {
 		t.Fatalf("reviewCriticModel = %v, want a refusal naming /v1/models", err)
 	}
-	if origin, err := modelsOrigin("https://api.example/v1/models/"); err != nil || origin != "https://api.example" {
-		t.Fatalf("modelsOrigin = %q, %v", origin, err)
+	if origin, ok := modelsOrigin("https://api.example/v1/models/"); !ok || origin != "https://api.example" {
+		t.Fatalf("modelsOrigin = %q, %v", origin, ok)
 	}
 }
 

@@ -27,7 +27,7 @@ func TestSharedJSONConfiguredOutput(t *testing.T) {
 		requests               int32
 	}{
 		{"environments", []string{"environments", "list", "--json"}, "/v1/environments", "/v1/environments/sandboxes", `{"items":[{"kind":"Sandbox","metadata":{"name":"dev"},"status":{"id":"sbx-1"}}],"next":""}`, "kind", "Sandbox", 1},
-		{"models", []string{"models", "list", "--json"}, "", "/openai/v1/models", `{"object":"list","data":[{"id":"model-1","object":"model"}]}`, "id", "model-1", 1},
+		{"models", []string{"models", "list", "--json"}, "/v1/models", "/v1/models/lux/v1/models", `{"object":"list","data":[{"id":"model-1","object":"model"}]}`, "id", "model-1", 1},
 	} {
 		for _, failAfter := range []int{-1, 0, 3} {
 			t.Run(fmt.Sprintf("%s/failAfter=%d", tc.name, failAfter), func(t *testing.T) {
@@ -56,7 +56,7 @@ func TestSharedJSONConfiguredOutput(t *testing.T) {
 				root.SetErr(io.Discard)
 				args := append([]string(nil), tc.args...)
 				if tc.name == "models" {
-					args = append(args, "--models-url", server.URL)
+					args = append(args, "--models-url", server.URL+tc.base)
 				} else {
 					args = append(args, "--api-url", server.URL+tc.base)
 				}

@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -29,7 +30,7 @@ func TestCommandsPreserveHTTPErrorStatusE2E(t *testing.T) {
 		status, bodyStatus int
 		want               string
 	}{
-		{"list", 503, 200, "status 503: try later"},
+		{"list", 403, 200, "status 403: try later"},
 		{"invoke", 503, 200, "status 503: try later"},
 		{"logout unavailable", 503, 404, "warning: refresh-token revocation returned 503"},
 	} {
@@ -40,9 +41,9 @@ func TestCommandsPreserveHTTPErrorStatusE2E(t *testing.T) {
 				t.Fatal(err)
 			}
 			logout := strings.HasPrefix(tc.name, "logout")
-			path, method := "/openai/v1/models", http.MethodGet
+			path, method := "/v1/models/lux/v1/models", http.MethodGet
 			if tc.name == "invoke" {
-				path, method = "/openai/v1/chat/completions", http.MethodPost
+				path, method = "/v1/models/lux/v1/generate", http.MethodPost
 			} else if logout {
 				path, method = "/revoke", http.MethodPost
 			}
@@ -54,12 +55,18 @@ func TestCommandsPreserveHTTPErrorStatusE2E(t *testing.T) {
 				}
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(tc.status)
-				_, _ = fmt.Fprintf(w, `{"status":%d,"message":"try later"}`, tc.bodyStatus)
+				if logout {
+					_, _ = fmt.Fprintf(w, `{"status":%d,"message":"try later"}`, tc.bodyStatus)
+					return
+				}
+				// An answer without the API's envelope, such as a proxy's,
+				// is named by its status and its text.
+				_, _ = io.WriteString(w, "try later")
 			}))
 			defer server.Close()
-			args := []string{"models", "list", "--json", "--models-url", server.URL}
+			args := []string{"models", "list", "--json", "--models-url", server.URL + modelsBase}
 			if tc.name == "invoke" {
-				args = []string{"models", "invoke", "--models-url", server.URL, "--model", "test-model", "Hello"}
+				args = []string{"models", "invoke", "--models-url", server.URL + modelsBase, "--model", "test-model", "Hello"}
 			} else if logout {
 				args = []string{"logout", "--auth-url", server.URL}
 			}

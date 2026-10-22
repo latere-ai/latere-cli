@@ -20,8 +20,19 @@ import (
 	"time"
 )
 
-// chatPath is the OpenAI door's Chat Completions path under a models base.
-const chatPath = "/openai/v1/chat/completions"
+// modelsBase is the path the models are served under, which a models URL
+// ends in, and generatePath the Latere dialect's model call under it, which
+// `models invoke` sends through the SDK.
+const (
+	modelsBase   = "/v1/models"
+	generatePath = "/v1/models/lux/v1/generate"
+)
+
+// luxAnswer is an answer of the Latere dialect with text, as the models
+// capability sends it and as --json prints it.
+func luxAnswer(text string) string {
+	return `{"id":"g1","model":"test-model","blocks":[{"type":"text","text":` + strconv.Quote(text) + `}],"stop_reason":"end_turn","usage":{"input_tokens":3,"output_tokens":2}}`
+}
 
 func TestModelsInvokeConfiguredOutputE2E(t *testing.T) {
 	if testing.Short() {
@@ -31,7 +42,7 @@ func TestModelsInvokeConfiguredOutputE2E(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const body = `{"choices":[{"message":{"content":"first\nsecond"}}]}`
+	body := luxAnswer("first\nsecond")
 	for _, format := range []string{"text", "json"} {
 		for _, writable := range []string{"1", "0"} {
 			t.Run(format+"/writable="+writable, func(t *testing.T) {
@@ -39,7 +50,7 @@ func TestModelsInvokeConfiguredOutputE2E(t *testing.T) {
 				var requests atomic.Int32
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					requests.Add(1)
-					if r.Method != http.MethodPost || r.URL.Path != chatPath || r.Header.Get("Authorization") != "Bearer synthetic-key" {
+					if r.Method != http.MethodPost || r.URL.Path != generatePath || r.Header.Get("Authorization") != "Bearer synthetic-key" {
 						t.Errorf("request=%s %s", r.Method, r.URL)
 					}
 					_, _ = io.WriteString(w, " \n"+body+"\n ")
@@ -50,7 +61,7 @@ func TestModelsInvokeConfiguredOutputE2E(t *testing.T) {
 					t.Fatal(err)
 				}
 				// Reuse the helper that installs an inherited writer on the full command tree.
-				args := []string{"-test.run=^TestConfiguredOutputHelperProcess$", "--", "models", "invoke", "test", "--model", "test-model", "--models-url", server.URL}
+				args := []string{"-test.run=^TestConfiguredOutputHelperProcess$", "--", "models", "invoke", "test", "--model", "test-model", "--models-url", server.URL + modelsBase}
 				if format == "json" {
 					args = append(args, "--json")
 				}
@@ -92,7 +103,7 @@ func TestModelsInvokeReportsOutputFailuresE2E(t *testing.T) {
 		t.Skip("binary e2e skipped with -short")
 	}
 	binary := latereBinary(t)
-	const response = `{"choices":[{"message":{"content":"test answer"}}]}`
+	response := luxAnswer("test answer")
 	for _, format := range []string{"text", "json"} {
 		for _, mode := range []string{"writable", "read only"} {
 			t.Run(format+"/"+mode, func(t *testing.T) {
@@ -115,13 +126,13 @@ func TestModelsInvokeReportsOutputFailuresE2E(t *testing.T) {
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					calls.Add(1)
 					body, err := io.ReadAll(r.Body)
-					if err != nil || r.URL.Path != chatPath || r.Method != http.MethodPost || r.Header.Get("Authorization") != "Bearer test-key" || !bytes.Contains(body, []byte("test prompt")) {
+					if err != nil || r.URL.Path != generatePath || r.Method != http.MethodPost || r.Header.Get("Authorization") != "Bearer test-key" || !bytes.Contains(body, []byte("test prompt")) {
 						t.Errorf("unexpected inference request: %s %s (%v)", r.Method, r.URL.Path, err)
 					}
 					_, _ = w.Write([]byte(response))
 				}))
 				defer server.Close()
-				args := []string{"models", "invoke", "--models-url", server.URL, "--model", "test-model", "test prompt"}
+				args := []string{"models", "invoke", "--models-url", server.URL + modelsBase, "--model", "test-model", "test prompt"}
 				if format == "json" {
 					args = append(args, "--json")
 				}
@@ -164,7 +175,7 @@ func TestModelsInvokeRedirectsPreservePromptE2E(t *testing.T) {
 	}
 	binary := latereBinary(t)
 	const prompt = "Keep this prompt intact"
-	const reply = `{"choices":[{"message":{"content":"complete answer"}}]}`
+	reply := luxAnswer("complete answer")
 	for _, raw := range []bool{false, true} {
 		for _, status := range []int{301, 302, 303, 307, 308} {
 			mode := "text"
@@ -191,7 +202,7 @@ func TestModelsInvokeRedirectsPreservePromptE2E(t *testing.T) {
 						return
 					}
 					initial.Add(1)
-					if r.URL.Path != chatPath || r.Method != http.MethodPost || !bytes.Contains(body, []byte(prompt)) {
+					if r.URL.Path != generatePath || r.Method != http.MethodPost || !bytes.Contains(body, []byte(prompt)) {
 						t.Errorf("unexpected inference request: %s %s %q", r.Method, r.URL.Path, body)
 					}
 					original.Store(string(body))
@@ -199,7 +210,7 @@ func TestModelsInvokeRedirectsPreservePromptE2E(t *testing.T) {
 					w.WriteHeader(status)
 				}))
 				defer server.Close()
-				args := []string{"models", "invoke", "--models-url", server.URL, "--model", "test-model", prompt}
+				args := []string{"models", "invoke", "--models-url", server.URL + modelsBase, "--model", "test-model", prompt}
 				if raw {
 					args = append(args, "--json")
 				}
@@ -241,7 +252,7 @@ func TestModelsInvokeRejectsIncompleteResponsesE2E(t *testing.T) {
 		t.Skip("binary e2e skipped with -short")
 	}
 	binary := latereBinary(t)
-	const reply = `{"choices":[{"message":{"content":"complete answer"}}]}`
+	reply := luxAnswer("complete answer")
 	for _, raw := range []bool{false, true} {
 		mode := "text"
 		if raw {
@@ -254,10 +265,8 @@ func TestModelsInvokeRejectsIncompleteResponsesE2E(t *testing.T) {
 			{name: "complete"},
 			{name: "short content length", wantError: "unexpected EOF"},
 			{name: "interrupted chunks", wantError: "unexpected EOF"},
-			{name: "at limit", size: 8 << 20},
-			{name: "over limit", size: (8 << 20) + 1, wantError: "exceeds 8 MiB"},
+			{name: "padded", size: 1 << 20},
 			{name: "provider error", wantError: "provider_unavailable"},
-			{name: "provider error over limit", size: (8 << 20) + 1, wantError: "provider_unavailable"},
 		} {
 			t.Run(mode+"/"+tc.name, func(t *testing.T) {
 				root := t.TempDir()
@@ -272,7 +281,7 @@ func TestModelsInvokeRejectsIncompleteResponsesE2E(t *testing.T) {
 				}
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					w.Header().Set("Content-Type", "application/json")
-					if r.Method != http.MethodPost || r.URL.Path != chatPath || r.Header.Get("Authorization") != "Bearer test-key" {
+					if r.Method != http.MethodPost || r.URL.Path != generatePath || r.Header.Get("Authorization") != "Bearer test-key" {
 						t.Errorf("unexpected inference request: %s %s", r.Method, r.URL.Path)
 						w.WriteHeader(http.StatusBadRequest)
 						return
@@ -282,8 +291,14 @@ func TestModelsInvokeRejectsIncompleteResponsesE2E(t *testing.T) {
 						_, _ = w.Write([]byte(payload))
 						return
 					}
+					// An interrupted answer ends inside its value: the
+					// promised length is never sent, or the stream is cut.
 					if tc.name == "short content length" {
-						w.Header().Set("Content-Length", strconv.Itoa(len(payload)+10))
+						w.Header().Set("Content-Length", strconv.Itoa(len(payload)))
+						payload = payload[:len(payload)/2]
+					}
+					if tc.name == "interrupted chunks" {
+						payload = payload[:len(payload)/2]
 					}
 					_, _ = w.Write([]byte(payload))
 					if tc.name == "interrupted chunks" {
@@ -294,7 +309,7 @@ func TestModelsInvokeRejectsIncompleteResponsesE2E(t *testing.T) {
 				defer server.Close()
 				ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 				defer cancel()
-				args := []string{"models", "invoke", "--models-url", server.URL, "--model", "test-model", "Say hello"}
+				args := []string{"models", "invoke", "--models-url", server.URL + modelsBase, "--model", "test-model", "Say hello"}
 				if raw {
 					args = append(args, "--json")
 				}

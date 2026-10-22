@@ -20,7 +20,6 @@ import (
 	"latere.ai/x/agon/input"
 	"latere.ai/x/sdk-go/llm"
 
-	"github.com/latere-ai/latere-cli/internal/api"
 	"github.com/latere-ai/latere-cli/internal/reviews"
 )
 
@@ -97,26 +96,11 @@ repo. Old sessions are pruned automatically; --state-dir overrides.`,
 // origin the models URL is served under, presenting key, a model key the
 // core already accepted.
 func reviewCriticModel(modelsURL, key string) (*llm.Client, error) {
-	origin, err := modelsOrigin(modelsURL)
-	if err != nil {
-		return nil, err
-	}
-	cfg, err := api.Product{BaseURL: origin, Token: key}.Config()
-	if err != nil {
-		return nil, err
-	}
-	return llm.New(cfg), nil
-}
-
-// modelsOrigin is the origin the models URL is served under, which the
-// Latere models client builds its paths on: the URL without its /v1/models.
-func modelsOrigin(modelsURL string) (string, error) {
-	base := resolveModelsURL(modelsURL)
-	origin, ok := strings.CutSuffix(base, modelsPath)
+	origin, ok := modelsOrigin(modelsURL)
 	if !ok {
-		return "", fmt.Errorf("the models URL %s does not end in %s, so the critics cannot reach the models from it", base, modelsPath)
+		return nil, fmt.Errorf("the models URL %s does not end in %s, so the critics cannot reach the models from it", resolveModelsURL(modelsURL), llm.BasePath)
 	}
-	return origin, nil
+	return modelsClient(origin, key, 0)
 }
 
 func runReview(ctx context.Context, cmd *cobra.Command, o *reviewOpts) error {

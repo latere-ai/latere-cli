@@ -277,7 +277,7 @@ func TestLocalModelCallsTheDoor(t *testing.T) {
 			t.Errorf("messages call = %+v, want a stream of %s", c, defaultCatalogModel)
 		}
 	}
-	want := "/v1/models/openai/v1/models,/v1/models/anthropic/v1/models,/v1/models/anthropic/v1/messages"
+	want := "/v1/models/lux/v1/models,/v1/models/anthropic/v1/models,/v1/models/anthropic/v1/messages"
 	if got := strings.Join(paths, ","); got != want {
 		t.Fatalf("core calls = %s, want the key's list, the door's figures, then the request", got)
 	}

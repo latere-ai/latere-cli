@@ -10,6 +10,16 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Changed
+
+- **`latere models invoke --json` prints the answer in the Latere
+  dialect,** its `blocks`, `stop_reason` and `usage`, where it printed a
+  Chat Completions response: `models invoke` and `models list` now call
+  the models through the Latere Go SDK, as `latere review` does. The model
+  list's `--json` is unchanged. `--models-url` and `LATERE_MODELS_URL`
+  end in `/v1/models`, as the default does and as `latere review` already
+  required; a URL that does not is refused before any call.
+
 ## v0.34.0 - 2026-10-22
 
 ### Added

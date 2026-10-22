@@ -36,7 +36,7 @@ func TestSharedJSONConfiguredOutputE2E(t *testing.T) {
 		requests               int32
 	}{
 		{"environments", []string{"environments", "list", "--json"}, "/v1/environments", "/v1/environments/sandboxes", `{"items":[{"kind":"Sandbox","metadata":{"name":"dev"}}]}`, "kind", "Sandbox", 1},
-		{"models", []string{"models", "list", "--json"}, "", "/openai/v1/models", `{"object":"list","data":[{"id":"model-1","object":"model"}]}`, "id", "model-1", 1},
+		{"models", []string{"models", "list", "--json"}, "/v1/models", "/v1/models/lux/v1/models", `{"object":"list","data":[{"id":"model-1","object":"model"}]}`, "id", "model-1", 1},
 	} {
 		for _, writable := range []string{"1", "0"} {
 			t.Run(tc.name+"/writable="+writable, func(t *testing.T) {
@@ -62,7 +62,7 @@ func TestSharedJSONConfiguredOutputE2E(t *testing.T) {
 				// Reuse the helper that installs an inherited writer on the full command tree.
 				args := append([]string{"-test.run=^TestConfiguredOutputHelperProcess$", "--"}, tc.args...)
 				if tc.name == "models" {
-					args = append(args, "--models-url", server.URL)
+					args = append(args, "--models-url", server.URL+tc.base)
 				} else {
 					args = append(args, "--api-url", server.URL+tc.base)
 				}

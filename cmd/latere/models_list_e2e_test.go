@@ -33,7 +33,7 @@ func TestModelsListOutputE2E(t *testing.T) {
 				var requests atomic.Int32
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					requests.Add(1)
-					if r.Method != http.MethodGet || r.URL.Path != "/v1/models/openai/v1/models" || r.Header.Get("Authorization") != "Bearer synthetic-key" {
+					if r.Method != http.MethodGet || r.URL.Path != "/v1/models/lux/v1/models" || r.Header.Get("Authorization") != "Bearer synthetic-key" {
 						t.Errorf("request=%s %s", r.Method, r.URL)
 					}
 					if empty {

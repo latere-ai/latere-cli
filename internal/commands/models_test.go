@@ -18,7 +18,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/latere-ai/latere-cli/internal/api"
+	"latere.ai/x/sdk-go/latere"
+	"latere.ai/x/sdk-go/llm"
+
 	"github.com/latere-ai/latere-cli/internal/modelkey"
 )
 
@@ -207,8 +209,9 @@ func TestModelsURLReachesTheCommands(t *testing.T) {
 }
 
 // TestModelsListPrintsNames is criterion 1 for `models` and `models list`:
-// the key reaches the OpenAI door's model list, and the names print one per
-// line, with where the prices are on stderr.
+// the key reaches the model list, and the names print one per line, with
+// where the prices are on stderr; --json prints each as a model list's
+// entry.
 func TestModelsListPrintsNames(t *testing.T) {
 	w := newKeyWorld(t, "")
 	for _, args := range [][]string{{"models"}, {"models", "list"}} {
@@ -224,7 +227,7 @@ func TestModelsListPrintsNames(t *testing.T) {
 		}
 	}
 	for _, c := range w.coreCalls() {
-		if c.path != "/v1/models/openai/v1/models" || c.bearer != "pat_k1.value" {
+		if c.path != "/v1/models/lux/v1/models" || c.bearer != "pat_k1.value" {
 			t.Fatalf("core call = %+v, want the list with the key", c)
 		}
 	}
@@ -232,6 +235,14 @@ func TestModelsListPrintsNames(t *testing.T) {
 	var got []modelEntry
 	if err != nil || json.Unmarshal([]byte(out), &got) != nil || len(got) != 2 || got[0].ID != stubModels[0] {
 		t.Fatalf("--json = %q %v", out, err)
+	}
+	if want := `[
+  {
+    "id": "anthropic/claude-sonnet-4.6",
+    "object": "model",
+    "owned_by": "lux"
+  },`; !strings.HasPrefix(out, want) {
+		t.Errorf("--json = %q, want it to start %q", out, want)
 	}
 }
 
@@ -247,7 +258,7 @@ func TestModelsListEmpty(t *testing.T) {
 		var out bytes.Buffer
 		root.SetOut(&out)
 		root.SetErr(io.Discard)
-		args := []string{"models", "--models-url", srv.URL}
+		args := []string{"models", "--models-url", srv.URL + llm.BasePath}
 		want := "No models.\n"
 		if tc.json {
 			args, want = append(args, "--json"), "[]\n"
@@ -317,16 +328,16 @@ func TestModelsEnvSaysWhyThereIsNoGeminiDoor(t *testing.T) {
 	}
 }
 
-// TestModelsInvokeCallsTheOpenAIDoor is criterion 1 for `models invoke`: one
-// Chat Completions call with the key and the model as named.
-func TestModelsInvokeCallsTheOpenAIDoor(t *testing.T) {
+// TestModelsInvokeCallsTheModel is criterion 1 for `models invoke`: one
+// model call with the key and the model as named.
+func TestModelsInvokeCallsTheModel(t *testing.T) {
 	w := newKeyWorld(t, "")
 	out, errOut, err := w.run(t, "models", "invoke", "--model", "anthropic/claude-haiku-4.5", "Say", "hi")
 	if err != nil || out != "hi\n" {
 		t.Fatalf("invoke = %q %v %s", out, err, errOut)
 	}
 	calls := w.coreCalls()
-	if len(calls) != 1 || calls[0].path != "/v1/models/openai/v1/chat/completions" ||
+	if len(calls) != 1 || calls[0].path != "/v1/models/lux/v1/generate" ||
 		calls[0].bearer != "pat_k1.value" || calls[0].model != "anthropic/claude-haiku-4.5" {
 		t.Fatalf("core calls = %+v", calls)
 	}
@@ -355,10 +366,10 @@ func TestModelsErrorsSayWhatToDo(t *testing.T) {
 		root := NewRoot("test")
 		root.SetOut(io.Discard)
 		root.SetErr(io.Discard)
-		root.SetArgs([]string{"models", "invoke", "--model", "m", "--models-url", srv.URL, "hi"})
+		root.SetArgs([]string{"models", "invoke", "--model", "m", "--models-url", srv.URL + llm.BasePath, "hi"})
 		_, err := captureStdout(root.Execute)
 		srv.Close()
-		var apiErr *api.APIError
+		var apiErr *latere.Error
 		if err == nil || !strings.Contains(err.Error(), tc.want) || !errors.As(err, &apiErr) || apiErr.Code != tc.code {
 			t.Errorf("%s: err = %v, want %q", tc.code, err, tc.want)
 		}

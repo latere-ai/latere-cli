@@ -13,6 +13,8 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"latere.ai/x/sdk-go/llm"
+
 	"github.com/latere-ai/latere-cli/internal/modelkey"
 )
 
@@ -21,14 +23,14 @@ import (
 func TestModelsInvokeConfiguredOutput(t *testing.T) {
 	t.Setenv("LATERE_NO_UPDATE_CHECK", "1")
 	t.Setenv(modelkey.EnvKey, "synthetic-key")
-	const body = `{"choices":[{"message":{"content":"first\nsecond"}}]}`
+	const body = `{"id":"g1","model":"test-model","blocks":[{"type":"text","text":"first\nsecond"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":2}}`
 	for _, jsonF := range []bool{false, true} {
 		for _, failAfter := range []int{-1, 0, 3} {
 			t.Run(fmt.Sprintf("json=%t/failAfter=%d", jsonF, failAfter), func(t *testing.T) {
 				var requests atomic.Int32
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					requests.Add(1)
-					if r.Method != http.MethodPost || r.URL.Path != "/openai/v1/chat/completions" || r.Header.Get("Authorization") != "Bearer synthetic-key" {
+					if r.Method != http.MethodPost || r.URL.Path != "/v1/models/lux/v1/generate" || r.Header.Get("Authorization") != "Bearer synthetic-key" {
 						t.Errorf("request=%s %s", r.Method, r.URL)
 					}
 					_, _ = io.WriteString(w, " \n"+body+"\n ")
@@ -42,7 +44,7 @@ func TestModelsInvokeConfiguredOutput(t *testing.T) {
 				root := NewRoot("test")
 				root.SetOut(out)
 				root.SetErr(io.Discard)
-				args := []string{"models", "invoke", "test", "--model", "test-model", "--models-url", server.URL}
+				args := []string{"models", "invoke", "test", "--model", "test-model", "--models-url", server.URL + llm.BasePath}
 				if jsonF {
 					args = append(args, "--json")
 				}
@@ -80,7 +82,7 @@ func TestModelsListConfiguredOutput(t *testing.T) {
 	t.Setenv("LATERE_NO_UPDATE_CHECK", "1")
 	t.Setenv(modelkey.EnvKey, "synthetic-key")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/openai/v1/models" || r.Header.Get("Authorization") != "Bearer synthetic-key" {
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/models/lux/v1/models" || r.Header.Get("Authorization") != "Bearer synthetic-key" {
 			t.Errorf("request=%s %s", r.Method, r.URL)
 		}
 		_, _ = io.WriteString(w, `{"object":"list","data":[{"id":"a/one"},{"id":"b/two"}]}`)
@@ -95,7 +97,7 @@ func TestModelsListConfiguredOutput(t *testing.T) {
 		root := NewRoot("test")
 		root.SetOut(out)
 		root.SetErr(io.Discard)
-		root.SetArgs([]string{"models", "list", "--models-url", server.URL})
+		root.SetArgs([]string{"models", "list", "--models-url", server.URL + llm.BasePath})
 		leaked, err := captureStdout(root.Execute)
 		want := "a/one\nb/two\n"
 		if failAfter >= 0 {

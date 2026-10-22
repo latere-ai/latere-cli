@@ -46,14 +46,14 @@ curl https://api.latere.ai/v1/models/openai/v1/chat/completions \
 
 ## Check a model with one call
 
-`invoke` sends one prompt through the OpenAI door and prints the reply: no tools, no session. Use it to check that a model answers your key; for assistant work, run an agent instead: `latere agents run -p "<prompt>"` on this machine.
+`invoke` sends one prompt to a model and prints the reply: no tools, no session. Use it to check that a model answers your key; for assistant work, run an agent instead: `latere agents run -p "<prompt>"` on this machine.
 
 ```sh
 latere models invoke --model anthropic/claude-sonnet-5.5 "Say hi"
-latere models invoke --model openai/gpt-4.1-mini --json "Say hi"   # the whole response
+latere models invoke --model openai/gpt-4.1-mini --json "Say hi"   # the whole response, in the Latere dialect
 ```
 
-An interrupted response, or one larger than 8 MiB, is an error, and nothing is printed. A model your key cannot call says to run `latere models`; a context with nothing left to spend points at the console's Billing section.
+An interrupted response is an error, and nothing is printed. A model your key cannot call says to run `latere models`; a context with nothing left to spend points at the console's Billing section.
 
 ## Your model key
 
@@ -76,7 +76,7 @@ A CI job can hand the CLI a key with `LATERE_MODEL_KEY`; the CLI then presents t
 
 | Setting | Purpose |
 |---------|---------|
-| `--models-url` / `LATERE_MODELS_URL` | Override the base URL, `https://api.latere.ai/v1/models`. |
+| `--models-url` / `LATERE_MODELS_URL` | Override the base URL, `https://api.latere.ai/v1/models`. It ends in `/v1/models`, as the default does. |
 | `--auth-url` / `AUTH_URL` | Override the auth service the key is created and revoked at. |
 | `LATERE_MODEL_KEY` | Present this key instead of the one the CLI keeps. |
 | `LATERE_MODEL_KEYS_FILE` | Where the model key is kept on a machine with no keychain. |
