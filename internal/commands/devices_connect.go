@@ -103,15 +103,21 @@ Ctrl-C stops every command a session started on this computer, and
 A folder is shared read-write unless it ends in :ro. With no --folder,
 the current directory is shared. The network is an allowlist of git and
 package hosts unless --host names the hosts, or --network none allows
-none. To change any of it later, edit the host policy file and connect
-again; 'latere devices policy --session-start' changes how sessions start
-at once.`,
+none. The network any, any public host but those you block, is never
+proposed here: once connected, choose it with 'latere devices policy
+--network any'. To change any of it later, edit the host policy file or
+run 'latere devices policy', and connect again; 'latere devices policy
+--session-start' changes how sessions start at once.`,
 		Example: `  latere devices connect
   latere devices connect --folder ~/code/site --folder ~/notes:ro
   latere devices connect --network none
   latere devices connect --session-start ask
   latere devices connect --name "Work laptop" --host github.com --host proxy.golang.org`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if cmd.Flags().Changed("network") && network == device.NetworkAny {
+				return device.Fail(device.CodePolicyInvalid,
+					"connect never sets the network any: connect with allowlist or none, then run `latere devices policy --network any`", nil)
+			}
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 			paths, lock, err := deviceStart()
@@ -119,9 +125,9 @@ at once.`,
 				return err
 			}
 			defer func() { _ = lock.Release() }()
-			policy, ok, err := device.LoadPolicy(paths.PolicyFile())
+			policy, ok, err := loadPolicy(paths.PolicyFile())
 			if err != nil {
-				return device.Fail(device.CodePolicyInvalid, "", err)
+				return err
 			}
 			flagged := cmd.Flags().Changed("name") || cmd.Flags().Changed("folder") ||
 				cmd.Flags().Changed("network") || cmd.Flags().Changed("host") || cmd.Flags().Changed("session-start")
@@ -144,7 +150,7 @@ at once.`,
 	f := cmd.Flags()
 	f.StringVar(&name, "name", "", "the name this computer has among your devices (default: the computer's own name)")
 	f.StringArrayVar(&folders, "folder", nil, "a folder sessions may use, PATH or PATH:ro (repeatable; default: the current directory)")
-	f.StringVar(&network, "network", device.NetworkAllowlist, "what sessions may reach: allowlist or none")
+	f.StringVar(&network, "network", device.NetworkAllowlist, "what sessions may reach: allowlist or none (choose any once connected, with latere devices policy --network any)")
 	f.StringArrayVar(&hosts, "host", nil, "a host on the allowlist (repeatable; default: git and package hosts)")
 	f.StringVar(&sessionStart, "session-start", device.SessionStartAllow, "whether your own sessions and scheduled triggers start without asking here: allow or ask")
 	f.StringVar(&apiURL, "api-url", "", cellaURLUsage)
@@ -405,6 +411,9 @@ func serveDevice(ctx context.Context, cmd *cobra.Command, paths device.Paths, au
 	<-printed
 	if err := <-controlled; err != nil && runErr == nil {
 		runErr = device.Fail(device.CodeControlUnavailable, "", err)
+	}
+	if device.CodeOf(runErr) == device.CodePolicyInvalid && newerPolicy(runErr) {
+		runErr = newerRefusal(runErr)
 	}
 	if runErr == nil {
 		fprintln(cmd.ErrOrStderr(), "Stopped serving this computer; every command a session started here was stopped.")

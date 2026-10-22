@@ -12,7 +12,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	goruntime "runtime"
 	"strings"
 	"syscall"
 	"text/tabwriter"
@@ -82,9 +81,9 @@ func thisDevice() (device.Paths, device.Policy, error) {
 	if err != nil {
 		return device.Paths{}, device.Policy{}, device.Fail(device.CodeServeFailed, "resolve the configuration directory", err)
 	}
-	policy, _, err := device.LoadPolicy(paths.PolicyFile())
+	policy, _, err := loadPolicy(paths.PolicyFile())
 	if err != nil {
-		return paths, device.Policy{}, device.Fail(device.CodePolicyInvalid, "", err)
+		return paths, device.Policy{}, err
 	}
 	return paths, policy, nil
 }
@@ -273,11 +272,13 @@ func newDevicesPolicyCmd() *cobra.Command {
 	var (
 		forget       []string
 		sessionStart string
+		network      networkFlags
+		yes          bool
 	)
 	cmd := &cobra.Command{
 		Use:   "policy",
 		Args:  cobra.NoArgs,
-		Short: "Print the host policy file, check it, set how sessions start, and forget remembered triggers.",
+		Short: "Print the host policy file, check it, and change how sessions start, the network and remembered triggers.",
 		Long: `Print the path and the content of the host policy file,
 ~/.config/latere/device.yaml, and check it: the folders and read paths
 against the rules of the sandbox, the network, and each remembered
@@ -290,11 +291,26 @@ ask. Either applies to the next session, even while this computer is
 serving. Each command that changes something is still approved in the
 chat, unless you approved a matching one before.
 
+--network sets what commands may reach: allowlist, the hosts --host names
+(by default the git and package hosts); none, no host; or any, any public
+host but this computer, the networks it is on, and the hosts --block
+names. With any, everything readable in a granted folder can be sent to
+any public host, so it shows what any allows and asks you to type yes, as
+connect does; --yes answers for you. Any is enforced by macOS's own
+sandbox alone, and refused elsewhere. Under any, --host names a host on a
+port beyond 443 and 80 as HOST:PORT. A --block entry is a host, an address
+or *.example.com for the names below example.com, alone or as HOST:PORT.
+--host and --block each name the whole list. The network changes at the
+next 'latere devices connect'; 'latere devices allow' reaches a running
+session at once.
+
 A remembered trigger runs on this computer with no one asked, until its
 agent changes or its date passes. --forget TRIGGER removes one, and the
 trigger asks again at its next run, even while this computer is serving.`,
 		Example: `  latere devices policy
   latere devices policy --session-start ask
+  latere devices policy --network any --block internal.example.com --block "*.example.com"
+  latere devices policy --network allowlist --host github.com --host proxy.golang.org
   latere devices policy --forget trg_01jaq7v3k9m2wxyz`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			paths, err := device.DefaultPaths()
@@ -302,23 +318,31 @@ trigger asks again at its next run, even while this computer is serving.`,
 				return device.Fail(device.CodeServeFailed, "resolve the configuration directory", err)
 			}
 			path := paths.PolicyFile()
-			policy, ok, err := device.LoadPolicy(path)
+			policy, ok, err := loadPolicy(path)
 			if err != nil {
-				return device.Fail(device.CodePolicyInvalid, "", err)
+				return err
 			}
 			if !ok {
 				return device.Fail(device.CodeNotConnected, "there is no host policy file at "+path, nil)
 			}
-			out := cmd.OutOrStdout()
-			if cmd.Flags().Changed("session-start") {
-				if sessionStart != device.SessionStartAllow && sessionStart != device.SessionStartAsk {
-					return device.Fail(device.CodePolicyInvalid, fmt.Sprintf("--session-start is %q; it is allow or ask", sessionStart), nil)
+			out, errOut := cmd.OutOrStdout(), cmd.ErrOrStderr()
+			flags := cmd.Flags()
+			if flags.Changed("session-start") && sessionStart != device.SessionStartAllow && sessionStart != device.SessionStartAsk {
+				return device.Fail(device.CodePolicyInvalid, fmt.Sprintf("--session-start is %q; it is allow or ask", sessionStart), nil)
+			}
+			network.modeSet, network.hostsSet, network.blockedSet = flags.Changed("network"), flags.Changed("host"), flags.Changed("block")
+			network.hosts, network.blocked = nonEmpty(network.hosts), nonEmpty(network.blocked)
+			if network.changed() {
+				if err = changeNetwork(cmd, paths, &policy, network, yes); err != nil {
+					return err
 				}
+			}
+			if flags.Changed("session-start") {
 				policy.SessionStart = sessionStart
 				if err = device.SavePolicy(path, policy); err != nil {
 					return device.Fail(device.CodePolicyInvalid, "write the host policy file", err)
 				}
-				fprintf(cmd.ErrOrStderr(), "session_start is %s from the next session on.\n", sessionStart)
+				fprintf(errOut, "session_start is %s from the next session on.\n", sessionStart)
 			}
 			if len(forget) > 0 {
 				for _, trigger := range forget {
@@ -329,19 +353,14 @@ trigger asks again at its next run, even while this computer is serving.`,
 				if err = device.SavePolicy(path, policy); err != nil {
 					return device.Fail(device.CodePolicyInvalid, "write the host policy file", err)
 				}
-				fprintf(cmd.ErrOrStderr(), "Forgot %s; it asks again at its next run.\n", strings.Join(forget, ", "))
+				fprintf(errOut, "Forgot %s; it asks again at its next run.\n", strings.Join(forget, ", "))
 			}
 			raw, err := os.ReadFile(path)
 			if err != nil {
 				return device.Fail(device.CodePolicyInvalid, "", err)
 			}
-			fprintf(out, "%s\n\n%s\n\n%s\n", path, strings.TrimRight(string(raw), "\n"), device.SessionStartNotice(policy))
-			problems := policy.Problems(paths.Home)
-			if len(problems) == 0 {
-				if err := device.CheckDriver(policy, paths, goruntime.GOOS, sessionDriver); err != nil {
-					problems = append(problems, err.Error())
-				}
-			}
+			fprintf(out, "%s\n\n%s\n\n%s\n\n%s", path, strings.TrimRight(string(raw), "\n"), device.SessionStartNotice(policy), networkScreen(policy))
+			refusal := policyRefusal(policy, paths, path+": ")
 			now := time.Now()
 			if len(policy.RememberedTriggers) > 0 {
 				fprintln(out, "\nRemembered triggers, each running here with no one asked until its agent changes or its date passes:")
@@ -353,15 +372,20 @@ trigger asks again at its next run, even while this computer is serving.`,
 					fprintf(out, "  %s  agent version %s  %s\n", r.Trigger, r.AgentVersion, state)
 				}
 			}
-			if len(problems) > 0 {
-				return device.Fail(device.CodePolicyInvalid, path+": "+strings.Join(problems, "; "), nil)
+			if refusal != nil {
+				return refusal
 			}
 			fprintln(out, "\nThe host policy file is valid.")
 			return nil
 		},
 	}
-	cmd.Flags().StringArrayVar(&forget, "forget", nil, "forget a remembered trigger by its id (repeatable)")
-	cmd.Flags().StringVar(&sessionStart, "session-start", "", "whether your own sessions and scheduled triggers start without asking here: allow or ask")
+	f := cmd.Flags()
+	f.StringArrayVar(&forget, "forget", nil, "forget a remembered trigger by its id (repeatable)")
+	f.StringVar(&sessionStart, "session-start", "", "whether your own sessions and scheduled triggers start without asking here: allow or ask")
+	f.StringVar(&network.mode, "network", "", "what commands may reach: allowlist, none, or any public host but those --block names")
+	f.StringArrayVar(&network.hosts, "host", nil, "a host on the allowlist, or under any a HOST:PORT on a port beyond 443 and 80 (repeatable; names the whole list)")
+	f.StringArrayVar(&network.blocked, "block", nil, "a host the network any refuses: a host, an address or *.example.com, alone or as HOST:PORT (repeatable; names the whole list)")
+	f.BoolVar(&yes, "yes", false, "set the network any without asking to type yes")
 	return cmd
 }
 

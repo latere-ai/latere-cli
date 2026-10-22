@@ -209,4 +209,60 @@ func TestDevicesSessionCommandsRunUnderSeatbeltEndToEnd(t *testing.T) {
 	if r := run("/usr/bin/curl -q -sS --max-time 10 --noproxy '*' -o /dev/null http://1.1.1.1/"); r.ExitCode == 0 {
 		t.Errorf("a connection around the proxy answered %+v, want it refused by the sandbox", r)
 	}
+
+}
+
+// TestDevicesNetworkAnyUnderSeatbeltEndToEnd is the network any as the
+// built binary checks it on macOS: its main runs hostsandbox's launcher, so
+// macOS's own sandbox enforces any and the host policy takes it, after the
+// sentence that says what it lets out, where a binary without the launcher
+// refuses it as unenforceable.
+func TestDevicesNetworkAnyUnderSeatbeltEndToEnd(t *testing.T) {
+	if testing.Short() {
+		t.Skip("binary e2e skipped with -short")
+	}
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := os.MkdirTemp("/tmp", "le")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(state) })
+	if err = os.MkdirAll(filepath.Join(home, "project"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	config := filepath.Join(home, ".config")
+	policy := filepath.Join(config, "latere", "device.yaml")
+	if err = os.MkdirAll(filepath.Dir(policy), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(policy, []byte("device: dev-abcdefghijklmnop\nname: Seatbelt computer\nsession_start: allow\n"+
+		"folders:\n  - path: ~/project\n    write: true\nnetwork:\n  mode: allowlist\n  hosts: [github.com]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env := []string{
+		"HOME=" + home, "XDG_CONFIG_HOME=" + config, "XDG_STATE_HOME=" + state, "XDG_CACHE_HOME=" + filepath.Join(home, ".cache"),
+		"LATERE_AUTH_TOKEN_FILE=" + filepath.Join(config, "latere", "auth-token.json"), "LATERE_NO_UPDATE_CHECK=1",
+		"OTEL_SDK_DISABLED=true", "PATH=/bin:/usr/bin", "TMPDIR=" + os.TempDir(),
+	}
+	latere := func(args ...string) (string, error) {
+		cmd := exec.Command(latereBinary(t), args...)
+		cmd.Env = env
+		out, err := cmd.CombinedOutput()
+		return string(out), err
+	}
+	out, err := latere("devices", "policy", "--network", "any", "--block", "blocked.invalid", "--yes")
+	if err != nil || !strings.Contains(out, "Everything readable in a granted folder can be sent to any public host.") ||
+		!strings.Contains(out, "Saved the network any") || !strings.Contains(out, "The host policy file is valid.") {
+		t.Fatalf("policy --network any --yes: %v\n%s", err, out)
+	}
+	raw, err := os.ReadFile(policy)
+	if err != nil || !strings.Contains(string(raw), "mode: any") || !strings.Contains(string(raw), "blocked: [blocked.invalid]") {
+		t.Errorf("the host policy file reads %v\n%s", err, raw)
+	}
+	if out, err = latere("devices", "policy"); err != nil || !strings.Contains(out, "Network: any.") || !strings.Contains(out, "blocked.invalid") {
+		t.Errorf("policy over any: %v\n%s", err, out)
+	}
 }

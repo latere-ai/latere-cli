@@ -53,12 +53,16 @@ func readDeviceToken(token string) (device.TokenClaims, error) {
 }
 
 // The refusals of `latere devices` and `latere logout` that the engine does
-// not know: a build that cannot verify its own upgrades, and a sign-out on a
-// connected computer that was cancelled or could not remove it.
+// not know: a build that cannot verify its own upgrades; a sign-out on a
+// connected computer that was cancelled or could not remove it; a host
+// policy file naming a field this version does not know, which a newer
+// latere or Latere Studio wrote; and the network any not confirmed.
 const (
-	codeUnverifiedBuild = "device_unverified_build"
-	codeLogoutCancelled = "device_logout_cancelled"
-	codeLogoutBlocked   = "device_logout_blocked"
+	codeUnverifiedBuild     = "device_unverified_build"
+	codeLogoutCancelled     = "device_logout_cancelled"
+	codeLogoutBlocked       = "device_logout_blocked"
+	codePolicyNewer         = "device_policy_newer"
+	codeNetworkNotConfirmed = "device_network_not_confirmed"
 )
 
 // cliRefusals are the sentences and next steps of the codes above.
@@ -74,6 +78,14 @@ var cliRefusals = map[string]struct{ message, hint string }{
 	codeLogoutBlocked: {
 		"This computer could not be removed from your devices, so you are still signed in.",
 		"Try again, or remove it with `latere devices remove` and then sign out.",
+	},
+	codePolicyNewer: {
+		"The host policy file names a setting this version of latere does not know, so it cannot be used.",
+		"A newer latere or Latere Studio wrote it. Upgrade with `latere upgrade`, then run the command again.",
+	},
+	codeNetworkNotConfirmed: {
+		"The network was not changed.",
+		"Run the command again and type yes, or add --yes.",
 	},
 }
 
