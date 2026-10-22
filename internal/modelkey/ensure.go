@@ -5,11 +5,14 @@ package modelkey
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"strings"
 	"time"
+
+	"latere.ai/x/sdk-go/signin"
 
 	"github.com/latere-ai/latere-cli/internal/api"
 )
@@ -25,7 +28,29 @@ const (
 	// EnvKey is the environment variable that hands the CLI a key, and
 	// wins over every store.
 	EnvKey = "LATERE_MODEL_KEY"
+	// keyTimeout bounds one key call to auth.
+	keyTimeout = 30 * time.Second
 )
+
+// A key is created and revoked at auth's /me/keys (auth specs/084): a
+// personal key in the personal context, a member key in an organization's.
+// The CLI creates one for the model endpoints on first use
+// (specs/006-model-key.md) and presents it as the bearer of every model
+// call; auth announces it to platformd, which registers it at the Lux core.
+
+// ModelGrant is the one grant a CLI model key carries: model.use on every
+// Model. Which Models it reaches is the context's model list, and what it
+// may spend is the context's wallet.
+const ModelGrant = `[{"type":"latere-authz","actions":["lux:model.use"],"datatypes":["Model"],"locations":["https://api.latere.ai"]}]`
+
+// KeyRequest is the key the CLI asks auth for.
+type KeyRequest struct {
+	Name string
+	// OrgID is the organization the key acts in, "" for the personal
+	// context.
+	OrgID     string
+	ExpiresAt time.Time
+}
 
 // Login is the signed-in person the key is for.
 type Login struct {
@@ -48,15 +73,33 @@ func (l Login) Context() string {
 // Slot is where the login's key for its context is kept.
 func (l Login) Slot() string { return Slot(l.AuthBase, l.Sub, l.Context()) }
 
-// Auth is what the keys are created and revoked with: api.CreateModelKey
-// and api.RevokeKey, replaced in tests.
+// Auth is what the keys are created and revoked with, at auth with the
+// login's access token; tests replace it.
 type Auth struct {
-	Create func(ctx context.Context, authBase, access string, r api.KeyRequest) (api.CreatedKey, error)
+	Create func(ctx context.Context, authBase, access string, r KeyRequest) (*signin.Key, error)
 	Revoke func(ctx context.Context, authBase, access, id string) error
 }
 
-// DefaultAuth calls auth.
-var DefaultAuth = Auth{Create: api.CreateModelKey, Revoke: api.RevokeKey}
+// DefaultAuth calls auth through the SDK: a key with ModelGrant, and a
+// revocation that counts a key auth no longer knows as revoked already.
+var DefaultAuth = Auth{
+	Create: func(ctx context.Context, authBase, access string, r KeyRequest) (*signin.Key, error) {
+		ctx, cancel := context.WithTimeout(ctx, keyTimeout)
+		defer cancel()
+		return api.Issuer(authBase, "").CreateKey(ctx, access, &signin.CreateKeyParams{
+			Name: r.Name, Grants: json.RawMessage(ModelGrant), OrgID: r.OrgID, ExpiresAt: r.ExpiresAt,
+		})
+	},
+	Revoke: func(ctx context.Context, authBase, access, id string) error {
+		ctx, cancel := context.WithTimeout(ctx, keyTimeout)
+		defer cancel()
+		err := api.Issuer(authBase, "").RevokeKey(ctx, access, id)
+		if errors.Is(err, signin.ErrNoKey) {
+			return nil
+		}
+		return err
+	},
+}
 
 // Keys answers the key for a login, creating it on first use.
 type Keys struct {
@@ -141,7 +184,7 @@ func (k *Keys) Replace(ctx context.Context, l Login, old Record) (Result, error)
 
 func (k *Keys) create(ctx context.Context, l Login) (Result, error) {
 	now := k.Now().UTC()
-	created, err := k.Auth.Create(ctx, l.AuthBase, l.Access, api.KeyRequest{
+	created, err := k.Auth.Create(ctx, l.AuthBase, l.Access, KeyRequest{
 		Name:      "latere-cli on " + k.Host,
 		OrgID:     l.OrgID,
 		ExpiresAt: now.Add(Lifetime),
@@ -150,11 +193,11 @@ func (k *Keys) create(ctx context.Context, l Login) (Result, error) {
 		return Result{}, explain(err)
 	}
 	r := Record{
-		ID: created.ID, Prefix: created.Prefix, Value: created.Key,
+		ID: created.ID, Prefix: created.Prefix, Value: created.Value,
 		AuthBase: l.AuthBase, Sub: l.Sub, Context: l.Context(),
-		Status: created.Status, CreatedAt: now, ExpiresAt: now.Add(Lifetime),
+		Status: string(created.Status), CreatedAt: now, ExpiresAt: now.Add(Lifetime),
 	}
-	if created.ExpiresAt != nil {
+	if !created.ExpiresAt.IsZero() {
 		r.ExpiresAt = created.ExpiresAt.UTC()
 	}
 	if err := k.Store.Put(l.Slot(), r); err != nil {
@@ -217,8 +260,8 @@ func (k *Keys) ForgetAll(ctx context.Context, authBase, sub, access string) []er
 
 // explain turns auth's refusals into the sentence the person acts on.
 func explain(err error) error {
-	var ke *api.KeyError
-	if !errors.As(err, &ke) {
+	ke, ok := errors.AsType[*signin.Error](err)
+	if !ok {
 		return fmt.Errorf("create a model key: %w", err)
 	}
 	switch ke.Code {

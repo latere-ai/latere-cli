@@ -13,13 +13,12 @@ import (
 	"time"
 
 	"github.com/zalando/go-keyring"
-
-	"github.com/latere-ai/latere-cli/internal/api"
+	"latere.ai/x/sdk-go/signin"
 )
 
 // fakeAuth records the key requests and revocations the CLI makes.
 type fakeAuth struct {
-	created  []api.KeyRequest
+	created  []KeyRequest
 	revoked  []string
 	status   string
 	createEr error
@@ -28,9 +27,9 @@ type fakeAuth struct {
 
 func (f *fakeAuth) auth() Auth {
 	return Auth{
-		Create: func(_ context.Context, authBase, access string, r api.KeyRequest) (api.CreatedKey, error) {
+		Create: func(_ context.Context, authBase, access string, r KeyRequest) (*signin.Key, error) {
 			if f.createEr != nil {
-				return api.CreatedKey{}, f.createEr
+				return nil, f.createEr
 			}
 			f.created = append(f.created, r)
 			f.n++
@@ -39,7 +38,7 @@ func (f *fakeAuth) auth() Auth {
 				status = "active"
 			}
 			id := "key-" + string(rune('0'+f.n))
-			return api.CreatedKey{ID: id, Prefix: "pat_" + id, Key: "pat_" + id + ".secret", Status: status}, nil
+			return &signin.Key{ID: id, Prefix: "pat_" + id, Value: "pat_" + id + ".secret", Status: signin.KeyStatus(status)}, nil
 		},
 		Revoke: func(_ context.Context, authBase, access, id string) error {
 			f.revoked = append(f.revoked, id)
@@ -118,7 +117,7 @@ func TestEnsureExplainsRefusals(t *testing.T) {
 		"not_a_member":    "no longer a member",
 		"key_limit":       "maximum number of keys",
 	} {
-		fa := &fakeAuth{createEr: &api.KeyError{Status: 403, Code: code}}
+		fa := &fakeAuth{createEr: &signin.Error{StatusCode: 403, Code: code}}
 		k := testKeys(t, fileStore(t), fa, time.Now())
 		_, err := k.Ensure(context.Background(), login)
 		if err == nil || !strings.Contains(err.Error(), want) {
