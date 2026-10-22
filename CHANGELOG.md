@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.35.0 - 2026-10-22
+
 ### Changed
 
 - **`latere models invoke --json` prints the answer in the Latere
