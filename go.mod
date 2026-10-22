@@ -21,7 +21,7 @@ require (
 	latere.ai/x/agon v0.3.0
 	latere.ai/x/cella v0.21.0
 	latere.ai/x/pkg v0.109.0
-	latere.ai/x/sdk-go v0.3.0
+	latere.ai/x/sdk-go v0.7.0
 	latere.ai/x/topos v0.51.0
 )
 

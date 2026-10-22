@@ -136,9 +136,12 @@ func TestAppLogsFollowOfACanceledBuild(t *testing.T) {
 	}
 }
 
+// A stream that closes before the build ends, and then sends nothing on
+// the connections that resume it, is reported once the SDK's retries are
+// spent. One that keeps sending, a keepalive included, is followed on.
 func TestAppLogsFollowOfAStreamThatClosesEarly(t *testing.T) {
 	s := newStubApps(t)
-	s.frames = []string{sseLine(1, "npm run build"), ": heartbeat\n\n"}
+	s.frames = []string{sseLine(1, "npm run build")}
 	if _, _, err := runApp(t, s, "logs", "hello", "-f"); err == nil || !strings.Contains(err.Error(), "closed before the build ended") {
 		t.Errorf("logs -f = %v", err)
 	}
