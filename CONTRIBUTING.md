@@ -71,8 +71,10 @@ device tests and the end-to-end run against a real `cellad` with the real
 
 Every call to the platform goes through the Latere Go SDK,
 `latere.ai/x/sdk-go`, and `go tool lateregate` fails on a platform route
-written here instead. The one exception is the Environments capability,
-which Cella's own open-core client reaches.
+written here instead. Two calls do not: the Environments capability, which
+Cella's own open-core client reaches, and the repository commands, whose
+routes platformd serves on the platform's host rather than at the API
+origin, with no published document for an SDK call to follow yet.
 
 A product command never presents the login token. It asks auth for a token
 addressed to that one product, through one function in `internal/api`, so a
