@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.34.0 - 2026-10-22
+
 ### Added
 
 - **A computer's network can be `any`: any public host but the ones you
