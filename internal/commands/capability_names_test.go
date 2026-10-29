@@ -17,7 +17,7 @@ import (
 func TestCapabilityCommandTree(t *testing.T) {
 	root := NewRoot("test")
 	for path, want := range map[string][]string{
-		"environments": {"apply", "cat", "delete", "exec", "export", "get", "import", "list", "logs", "ls", "mkdir", "mv", "port-forward", "rm", "run", "shell", "start", "stop", "upload", "write"},
+		"environments": {"apply", "cat", "delete", "exec", "export", "get", "import", "list", "logs", "ls", "mkdir", "mv", "port-forward", "rm", "run", "secrets", "shell", "start", "stop", "upload", "write"},
 		"agents":       {"provider", "review", "run"},
 		"evals":        {"candidates", "experiments", "graders", "metrics", "suites", "tasks"},
 	} {

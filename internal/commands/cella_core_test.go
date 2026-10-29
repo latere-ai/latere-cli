@@ -104,6 +104,12 @@ type fakeCore struct {
 	// labelReads is the bearer of each labels read, kept apart from the
 	// core's requests.
 	labelReads []string
+	// secrets are the stored Secrets by name, as a read answers them:
+	// without a value. A write's value is in its recorded request alone.
+	secrets map[string]map[string]any
+	// secretRefusal, when set, refuses every Secret write with its status,
+	// code and message.
+	secretRefusal *refusal
 
 	mu       sync.Mutex
 	requests []coreRequest
@@ -113,7 +119,7 @@ func newFakeCore(t *testing.T) *fakeCore {
 	t.Helper()
 	t.Setenv("LATERE_ENVIRONMENTS_TOKEN", coreToken)
 	t.Setenv("LATERE_ENVIRONMENTS_URL", "")
-	f := &fakeCore{t: t, heldPhase: cellaRunning, pageSize: 200, labels: fakeLabels}
+	f := &fakeCore{t: t, heldPhase: cellaRunning, pageSize: 200, labels: fakeLabels, secrets: map[string]map[string]any{}}
 	f.srv = httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.srv.Close)
 	t.Setenv("LATERE_PLATFORM_URL", f.srv.URL)
@@ -243,6 +249,10 @@ func (f *fakeCore) serve(w http.ResponseWriter, r *http.Request) {
 	f.record(req)
 	if req.Auth != "Bearer "+coreToken {
 		f.refuse(w, http.StatusUnauthorized, "unauthenticated", "Sign in and send a valid token.")
+		return
+	}
+	if parts[0] == "secrets" {
+		f.serveSecrets(w, r, parts[1:], body)
 		return
 	}
 	if parts[0] != "sandboxes" {

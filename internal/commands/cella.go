@@ -88,7 +88,7 @@ const (
 func newEnvironmentsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "environments",
-		Short: "Manage workloads: create, list, run commands in, and move files in or out.",
+		Short: "Manage workloads and their secrets: create, list, run commands in, and move files in or out.",
 		Long: `Manage the workloads of Latere Environments.
 
 A workload is an isolated Linux machine with a persistent workspace at
@@ -99,13 +99,17 @@ catalog:
 ` + catalogImageList + `
 
 A create answers as soon as the workload is recorded, usually Pending.
-'latere environments apply --wait' holds the answer until it runs or fails.`,
+'latere environments apply --wait' holds the answer until it runs or fails.
+
+'latere environments secrets' manages the credentials a workload uses
+without holding them, sent only to the hosts each one names.`,
 		Example: `  latere environments apply -f workload.yaml --wait
   latere environments list
   latere environments exec dev -- uname -a
   latere environments shell dev
   latere environments run --ephemeral --rm -- python -c 'print(1)'
-  latere environments export dev src -o workspace.tar`,
+  latere environments export dev src -o workspace.tar
+  printf %s "$GITHUB_TOKEN" | latere environments secrets create github-token --host api.github.com`,
 		// The group runs only for a word that names none of its commands,
 		// to say why a command of the retired API is gone. Its flags are
 		// not the group's to refuse first.
@@ -142,6 +146,7 @@ A create answers as soon as the workload is recorded, usually Pending.
 		newCeMkdirCmd(),
 		newCeRmCmd(),
 		newCeMvCmd(),
+		newCeSecretsCmd(),
 	)
 	return cmd
 }
@@ -301,6 +306,11 @@ Field reference: https://platform.latere.ai/docs/environments/manifest`,
 			body, err := readManifestBody(file, cmd.InOrStdin())
 			if err != nil {
 				return err
+			}
+			// The workload route refuses a Secret by its kind alone, which
+			// does not say where a Secret goes.
+			if manifestKind(body) == v1.KindSecret {
+				return errors.New("this manifest is a Secret: apply it with 'latere environments secrets apply -f'")
 			}
 			c, err := cellaClient(apiURL)
 			if err != nil {

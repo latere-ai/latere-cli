@@ -38,6 +38,8 @@ type e2eCore struct {
 	// created is the body of each create, which carries the account's
 	// labels the platform answered.
 	created [][]byte
+	// secretWrites is the body of each write of a Secret.
+	secretWrites [][]byte
 }
 
 // e2eLabels is what the platform's labels read answers the binary.
@@ -54,6 +56,10 @@ func newE2ECore(t *testing.T) *e2eCore {
 			}
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = io.WriteString(w, e2eLabels)
+			return
+		}
+		if rest, ok := strings.CutPrefix(r.URL.Path, "/v1/environments/secrets"); ok && r.Header.Get("Authorization") == "Bearer e2e-token" {
+			c.serveSecret(t, w, r, rest)
 			return
 		}
 		rest, ok := strings.CutPrefix(r.URL.Path, "/v1/environments/sandboxes")
@@ -126,6 +132,49 @@ func newE2ECore(t *testing.T) *e2eCore {
 	}))
 	t.Cleanup(c.srv.Close)
 	return c
+}
+
+// serveSecret is the core's Secret routes for one secret, github-token,
+// which one workload attaches. No answer carries a value.
+func (c *e2eCore) serveSecret(t *testing.T, w http.ResponseWriter, r *http.Request, rest string) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		t.Errorf("read %s %s: %v", r.Method, r.URL.Path, err)
+		return
+	}
+	c.mu.Lock()
+	c.seen = append(c.seen, r.Method+" secrets"+rest)
+	if len(body) > 0 {
+		c.secretWrites = append(c.secretWrites, body)
+	}
+	c.mu.Unlock()
+	secret := func(version int) map[string]any {
+		return map[string]any{
+			"apiVersion": "cella.latere.ai/v1beta1", "kind": "Secret",
+			"metadata": map[string]any{"name": "github-token", "labels": map[string]any{
+				"platform.latere.ai/tenant": "p-0123456789abcdef0123456789abcdef", "platform.latere.ai/principal": "p1"}},
+			"spec": map[string]any{"kind": "static", "scope": map[string]any{"hosts": []any{"api.github.com"}, "ports": []any{443}},
+				"inject": map[string]any{"header": "Authorization", "scheme": "bearer"}},
+			"status": map[string]any{"id": "sec_1", "version": version, "mountedBy": 1},
+		}
+	}
+	answer := func(status int, v any) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(v)
+	}
+	switch {
+	case rest == "" && r.Method == http.MethodPost:
+		answer(http.StatusCreated, secret(1))
+	case rest == "" && r.Method == http.MethodGet:
+		answer(http.StatusOK, map[string]any{"items": []any{secret(1)}})
+	case rest == "/github-token" && r.Method == http.MethodPut:
+		answer(http.StatusOK, secret(2))
+	case rest == "/github-token":
+		answer(http.StatusOK, secret(1))
+	default:
+		w.WriteHeader(http.StatusNotFound)
+	}
 }
 
 func (c *e2eCore) requests() []string {
@@ -219,6 +268,70 @@ func (c *e2eCore) hasLabels(t *testing.T) {
 	for _, body := range c.created {
 		if !strings.Contains(string(body), "platform.latere.ai/tenant") || !strings.Contains(string(body), "p-0123456789abcdef0123456789abcdef") || !strings.Contains(string(body), "platform.latere.ai/principal") {
 			t.Errorf("create body %q carries no account labels", body)
+		}
+	}
+}
+
+// The built binary creates a secret from flags with its value piped in,
+// lists it, rotates it and deletes it. Each write carries the account's
+// labels and the value, and no output carries the value.
+func TestEnvironmentsSecretsOnTheCoreE2E(t *testing.T) {
+	if testing.Short() {
+		t.Skip("binary e2e skipped with -short")
+	}
+	c := newE2ECore(t)
+	const value, rotated = "ghp_e2eFirstSECRET", "ghp_e2eSecondSECRET"
+	var outputs []string
+	out, errOut, code := c.run(t, value+"\n", "environments", "secrets", "create", "github-token", "--host", "api.github.com")
+	if code != 0 || !strings.Contains(out, "sec_1") {
+		t.Fatalf("create = %d %q %q", code, out, errOut)
+	}
+	outputs = append(outputs, out, errOut)
+	out, errOut, code = c.run(t, "", "environments", "secrets", "list")
+	if code != 0 || !strings.Contains(out, "as a bearer token in the Authorization header") || !strings.Contains(out, "to 1 workload") {
+		t.Fatalf("list = %d %q %q", code, out, errOut)
+	}
+	outputs = append(outputs, out, errOut)
+	out, errOut, code = c.run(t, rotated, "environments", "secrets", "rotate", "github-token")
+	if code != 0 || !strings.Contains(out, "version:    2") || !strings.Contains(errOut, "rotated github-token") {
+		t.Fatalf("rotate = %d %q %q", code, out, errOut)
+	}
+	outputs = append(outputs, out, errOut)
+	out, errOut, code = c.run(t, "", "environments", "secrets", "delete", "github-token")
+	if code != 0 || !strings.Contains(errOut, "deleted secret github-token") || !strings.Contains(errOut, "1 workload attached it") {
+		t.Fatalf("delete = %d %q %q", code, out, errOut)
+	}
+	outputs = append(outputs, out, errOut)
+	want := []string{"POST secrets", "GET secrets", "GET secrets/github-token", "PUT secrets/github-token", "DELETE secrets/github-token"}
+	if got := c.requests(); !slices.Equal(got, want) {
+		t.Errorf("requests = %v, want %v", got, want)
+	}
+	c.mu.Lock()
+	writes := append([][]byte(nil), c.secretWrites...)
+	c.mu.Unlock()
+	if len(writes) != 2 {
+		t.Fatalf("secret writes = %d, want the create and the rotation", len(writes))
+	}
+	for i, v := range []string{value, rotated} {
+		var w struct {
+			Metadata struct {
+				Labels map[string]string `json:"labels"`
+			} `json:"metadata"`
+			Spec struct {
+				Value string `json:"value"`
+			} `json:"spec"`
+			Status any `json:"status"`
+		}
+		if err := json.Unmarshal(writes[i], &w); err != nil {
+			t.Fatalf("write %d: %v", i, err)
+		}
+		if w.Spec.Value != v || w.Metadata.Labels["platform.latere.ai/tenant"] != "p-0123456789abcdef0123456789abcdef" || w.Status != nil {
+			t.Errorf("write %d = %s, want the value with the account's labels and no status", i, writes[i])
+		}
+	}
+	for _, text := range outputs {
+		if strings.Contains(text, value) || strings.Contains(text, rotated) {
+			t.Errorf("a value is in the output:\n%s", text)
 		}
 	}
 }
