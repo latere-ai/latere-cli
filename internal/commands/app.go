@@ -102,7 +102,9 @@ in the gallery at latere.site. You ask for that from the app's Share in the
 chat, and it is reviewed first.
 
 An app's slug is its address, https://<slug>.latere.site, and 'latere apps
-rename <new-slug>' changes it. The old address stops working at once.
+rename <new-slug>' changes it. The old address stops working at once. Its
+name is the words people read for it, and 'latere apps name <name>' changes
+that alone, keeping the address.
 
 A command that takes [slug] reads it from the git remote latere of the
 repository you run it in when you leave it out.
@@ -121,6 +123,7 @@ LATERE_PLATFORM_TOKEN presents that bearer as given.`,
   latere apps share ada@example.com
   latere apps access
   latere apps rename hello-world
+  latere apps name "Hello world"
   latere apps list
   latere apps show
   latere apps deploys --json
@@ -137,6 +140,7 @@ LATERE_PLATFORM_TOKEN presents that bearer as given.`,
 		newAppListCmd(&apiURL, &authURL),
 		newAppShowCmd(&apiURL, &authURL),
 		newAppRenameCmd(&apiURL, &authURL),
+		newAppNameCmd(&apiURL, &authURL),
 		newAppVisibilityCmd(&apiURL, &authURL),
 		newAppAccessCmd(&apiURL, &authURL),
 		newAppShareCmd(&apiURL, &authURL),

@@ -22,7 +22,10 @@ import (
 // create` added when it still names this app.
 
 func newAppRenameCmd(apiURL, authURL *string) *cobra.Command {
-	var jsonF bool
+	var (
+		jsonF bool
+		name  string
+	)
 	cmd := &cobra.Command{
 		Use:   "rename <new-slug> [slug]",
 		Short: "Change an app's address.",
@@ -49,12 +52,23 @@ keeps, and the name of another repository of the app's owner are refused.
 Renaming takes the app's owner, or an owner or admin of the organization that
 owns it. Without [slug], the slug is read from the git remote latere. --json
 prints the app as the API answers it, and what became of the remote is said
-on standard error.`,
+on standard error.
+
+The name people read for the app is apart from its address: 'latere apps
+name <name>' changes it and keeps the address.`,
 		Example: `  latere apps rename hello-world
   latere apps rename hello-world hello
   latere apps rename hello-world hello --json`,
-		Args: cobra.RangeArgs(1, 2),
+		Args: func(cmd *cobra.Command, args []string) error {
+			if cmd.Flags().Changed("name") {
+				return nil
+			}
+			return cobra.RangeArgs(1, 2)(cmd, args)
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if cmd.Flags().Changed("name") {
+				return renameByName(name, args)
+			}
 			to := args[0]
 			if rule := brokenSlugRule(to); rule != "" {
 				return fmt.Errorf("%q cannot be an app's slug: %s; nothing was sent", to, invalidSlugReasons[rule])
@@ -142,7 +156,22 @@ on standard error.`,
 		},
 	}
 	cmd.Flags().BoolVar(&jsonF, "json", false, "print the app as JSON")
+	// --name is what a person reaches for to change the name people read,
+	// which other clients call Rename. It is no flag of a change of address,
+	// so it is hidden and answers with the command that changes the name.
+	cmd.Flags().StringVar(&name, "name", "", "the name people read for the app; changed by `latere apps name`")
+	cmd.Flags().Lookup("name").Hidden = true
 	return cmd
+}
+
+// renameByName refuses a rename given --name and names the command that
+// changes the name, with the app's slug when the arguments gave one.
+func renameByName(name string, args []string) error {
+	suggest := fmt.Sprintf("latere apps name %q", strings.TrimSpace(name))
+	if len(args) > 0 {
+		suggest += " " + args[len(args)-1]
+	}
+	return fmt.Errorf("`latere apps rename` changes an app's address, and nothing was sent. To change the name people read for the app and keep its address, run:\n  %s", suggest)
 }
 
 // explainRenameRefusal puts what each refusal of a rename names into its
