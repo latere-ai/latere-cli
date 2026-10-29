@@ -10,6 +10,29 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Added
+
+- **`latere memory` shows and changes what Latere remembers about you and
+  your projects,** the same memories Latere Chat's Settings shows. `list`
+  prints yours by group, Preferences, Profile, Topics, Areas and People,
+  with where each came from, then the projects that have memory;
+  `--project` takes a project's name or id. `show` prints one with its
+  detail, `add` saves what you type in the group you name, `edit` changes
+  its text, name, group or detail, and `mv` moves it between you and a
+  project. `rm` deletes one for good and `forget` deletes everything, each
+  after you confirm. `restore` lists what conversations forgot in the last
+  30 days and brings one back. `export` saves every memory as one zip of
+  Markdown files, readable only by you, and `import` saves another
+  assistant's answer, a memory per line, from a file or standard input;
+  `import --prompt` prints what to ask it. `settings` shows Remember new
+  things, Include sensitive topics and any setting the platform adds, and
+  `settings remember=off` turns one off; turning sensitive topics off
+  deletes the memories marked sensitive, after you confirm.
+- **`latere apps name <name> [slug]` changes the name people read for an
+  app and keeps its address,** where `latere apps rename` changes the
+  address alone. `latere apps rename --name` changes nothing and prints
+  the `latere apps name` line that does.
+
 ## v0.36.0 - 2026-10-29
 
 ### Added
