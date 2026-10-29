@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.36.0 - 2026-10-29
+
 ### Added
 
 - **`latere environments secrets` creates, rotates, lists and deletes the
