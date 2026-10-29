@@ -177,7 +177,7 @@ git clone https://code.latere.ai/<owner>/<repo>.git
 
 | Command | What it does | Guide |
 |---------|--------------|-------|
-| `latere environments` | Workloads in Latere Environments: create one from a manifest, run commands, open a shell, read logs, and move files in and out. | [docs/environments.md](docs/environments.md) |
+| `latere environments` | Workloads in Latere Environments: create one from a manifest, run commands, open a shell, read logs, move files in and out, and manage the secrets a workload uses without holding them. | [docs/environments.md](docs/environments.md) |
 | `latere apps` | Apps on the platform: create one and add its git remote, decide who can open it, give it a password and invite people by email, change its address, list your apps, show one, list its deploys, follow a build to its outcome, and delete one. A new app is private, and a `git push` deploys. | [docs/apps.md](docs/apps.md) |
 | `latere repos` | Git repositories on Latere Code: create one under your handle or your organization, list your context's repositories and the ones shared with you, and look one up by name. | [docs/repos.md](docs/repos.md) |
 | `latere models` | Call language models through the Latere API with a model key the CLI creates and keeps: list the models your key reaches, point a stock SDK at the API, and check a model with one call. | [docs/models.md](docs/models.md) |

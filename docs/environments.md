@@ -108,6 +108,116 @@ spec:
 A disposable workload from `run --ephemeral` sets no boundary and takes the
 platform's default for your account.
 
+## Secrets
+
+A secret is a credential a workload uses without holding it. The workload
+reads a placeholder from an environment variable, and the egress gateway
+puts the value in the placeholder's place on requests to the secret's hosts
+and ports, and nowhere else. No command prints a value, and the API never
+returns one after it is saved.
+
+Create one from flags. The value is never a flag or an argument, which a
+shell history would keep: it is read from standard input, or typed at a
+prompt without being shown when standard input is a terminal.
+
+```sh
+printf %s "$GITHUB_TOKEN" | latere environments secrets create github-token --host api.github.com
+latere environments secrets create github-token --host api.github.com   # asks for the token
+```
+
+Standard input is read whole, with one trailing line ending removed, so
+`echo` and `printf %s` give the same value.
+
+`--type` names how the service takes the credential, in the five ways the
+console's **Add a secret** offers:
+
+| `--type` | The workload sends | Also takes |
+|---|---|---|
+| `bearer` (default) | `Authorization: Bearer $VARIABLE` | |
+| `header` | The variable in the header you name, such as `X-Api-Key` | `--header` |
+| `basic` | `Authorization: Basic $VARIABLE` | `--username`; the password is the value |
+| `query` | The variable in the query parameter you name, such as `?key=$VARIABLE` | `--query` |
+| `oauth` | `Authorization: Bearer $VARIABLE`; the gateway requests the access token at `--token-url` | `--client-id`, with the client secret as the value; `--token-scope` and `--token-audience` if the endpoint needs them |
+
+`--host` names a host the value may be sent to, such as `api.github.com` or
+`*.example.com`; repeat it or separate hosts with commas. There is no
+setting that sends a secret to every host. `--port` names the ports on
+those hosts, 443 unless given. `--body` also puts the value in JSON, form
+and text request bodies; leave it off unless the service reads the
+credential from the body.
+
+```sh
+latere environments secrets create search --type header --header X-Api-Key --host api.example.com
+latere environments secrets create registry --type basic --username ci --host registry.example.com
+latere environments secrets create billing --type oauth --client-id app-1 \
+  --token-url https://auth.example.com/oauth/token --host api.example.com
+```
+
+`create` adds [your account's labels](#your-accounts-labels), as `apply`
+does, and refuses a name already in use. In an organization, a secret
+belongs to the organization: its owners and admins can attach it to their
+workloads, and no one, you included, can read its value. `create` says so
+when it makes one.
+
+A workload attaches a secret in its manifest, under the environment
+variable it reads the placeholder from. The variable is chosen there, not
+when the secret is made:
+
+```yaml
+spec:
+  secrets:
+    - {name: github-token, env: GITHUB_TOKEN}
+```
+
+A secret sent in a header other than `Authorization`, or in a query
+parameter, also sets `<env>_HEADER` or `<env>_QUERY` to where the
+placeholder belongs.
+
+```sh
+latere environments secrets list                  # each without its value; --json for the API's objects
+latere environments secrets get <name|id>         # the object, as JSON
+latere environments secrets rotate <name|id>      # replace the value
+latere environments secrets delete <name|id>
+```
+
+`rotate` replaces the value, read as `create` reads one, and keeps the
+secret's hosts, ports and the way it is sent. Every workload that attaches
+it uses the new value on its next request, without restarting. A `basic`
+secret takes `--username` again, and an `oauth` one `--client-id`, because
+the stored value is the pair and neither half can be read back.
+
+`delete` says how many workloads still attached the secret. Each keeps its
+variable, but the gateway no longer replaces the placeholder, so their
+requests go out without the credential.
+
+To keep secrets in files, write a manifest of `kind: Secret` and apply it:
+
+```yaml
+apiVersion: cella.latere.ai/v1beta1
+kind: Secret
+metadata:
+  name: github-token
+spec:
+  scope:
+    hosts: [api.github.com]
+    ports: [443]                  # Optional; 443 when omitted.
+  inject:
+    header: Authorization         # Or query: <parameter>, never both.
+    scheme: bearer                # bearer, basic or raw.
+  value: <the credential>         # Required to create; never returned.
+```
+
+```sh
+latere environments secrets apply -f secret.yaml
+```
+
+`apply` adds your account's labels, creates the secret or updates the one
+the manifest names, and replaces its hosts, ports and the way it is sent
+with the manifest's. An update without `value` keeps the stored one, so
+once `create` has made a secret, its file can leave the credential out. The
+[console's description of secrets](https://platform.latere.ai/docs/environments/console#secrets)
+shows how each way a secret is sent maps onto `inject`, `oauth` and `kind`.
+
 ## Lifecycle
 
 ```sh
@@ -287,8 +397,8 @@ hosted sandbox service. Each one exits 1 and says why:
 | `run <name> -- CMD`, `run --follow`, `run --detach`, `run status`, `run logs`, `run cancel`, `wait` | `exec` runs a command in an existing workload and waits for it. |
 
 `--credential`, `--idempotency-key` and `shell --session` are gone as
-well: a manifest mounts secrets through `spec.secrets`, and an apply by
-name is already idempotent. `logs` now reads the workload's main process,
+well: a manifest mounts secrets through `spec.secrets` (see
+[Secrets](#secrets)), and an apply by name is already idempotent. `logs` now reads the workload's main process,
 not a background command.
 
 ## Settings

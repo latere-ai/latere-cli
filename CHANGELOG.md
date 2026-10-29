@@ -10,6 +10,20 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Added
+
+- **`latere environments secrets` creates, rotates, lists and deletes the
+  credentials a workload uses without holding them,** where a secret had
+  to be created through the API by hand. `create <name> --host HOST`
+  makes one from flags, with `--type` for the five ways the console's Add
+  a secret offers: `bearer`, `header`, `basic`, `query` and `oauth`. The
+  value is read from standard input, or typed at a prompt without being
+  shown, and no command prints it. `rotate` replaces a value and keeps the
+  rest, and `apply -f` creates or updates a secret from a `kind: Secret`
+  manifest. `create` and `apply` add your account's labels, as `latere
+  environments apply` does for a workload. `latere environments apply`
+  given a Secret manifest now names the command that applies it.
+
 ## v0.35.0 - 2026-10-22
 
 ### Changed

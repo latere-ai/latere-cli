@@ -26,6 +26,7 @@ specs/
   016-devices-command.md             (complete: latere devices connects this computer as an environment the person's sessions work on; their own sessions start there unasked)
   017-signed-upgrades.md             (complete: releases sign their checksums; upgrade and auto-upgrade verify the signature, and an SSH signature beside it for the installer)
   018-a-desktop-client-of-the-device-engine.md (complete: serve connects, takes a client's tokens, changes the policy and removes the device through its socket; Latere Studio's folders denied, and logout keeps a device another process serves)
+  019-environments-secrets.md        (implemented: latere environments secrets creates, rotates, applies, lists and deletes the credentials a workload uses without holding them)
 ```
 
 ## Status
@@ -133,6 +134,13 @@ Where each spec stands:
   Studio's data and cache to every session on macOS, and `logout` keeps a
   device another process serves. Drafted on 2026-10-19 for Latere Studio's
   This Mac; F and G built on 2026-10-21, not released.
+- `019-environments-secrets.md`: `latere environments secrets` manages the
+  core's Secret kind. `create` makes one from flags in the five ways the
+  console offers, with the value read from standard input or typed at a
+  prompt and never printed; `rotate` sends the secret back as read with a
+  new value; `apply -f` sends a manifest with the account's labels added;
+  `list`, `get` and `delete` read and remove them. Built on 2026-10-29, not
+  released.
 
 One surface shipped without a dedicated design record: the token-lifecycle
 work, which [docs/login-and-tokens.md](../docs/login-and-tokens.md) documents.
