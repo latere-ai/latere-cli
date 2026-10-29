@@ -27,6 +27,8 @@ specs/
   017-signed-upgrades.md             (complete: releases sign their checksums; upgrade and auto-upgrade verify the signature, and an SSH signature beside it for the installer)
   018-a-desktop-client-of-the-device-engine.md (complete: serve connects, takes a client's tokens, changes the policy and removes the device through its socket; Latere Studio's folders denied, and logout keeps a device another process serves)
   019-environments-secrets.md        (implemented: latere environments secrets creates, rotates, applies, lists and deletes the credentials a workload uses without holding them)
+  020-memory-command.md              (implemented: latere memory lists, shows, adds, changes, moves, deletes, restores, exports and imports what Latere remembers, and turns its settings on or off)
+  021-app-name.md                    (implemented: latere apps name changes the name people read for an app and keeps its address)
 ```
 
 ## Status
@@ -141,6 +143,16 @@ Where each spec stands:
   new value; `apply -f` sends a manifest with the account's labels added;
   `list`, `get` and `delete` read and remove them. Built on 2026-10-29, not
   released.
+- `020-memory-command.md`: `latere memory` manages what Latere remembers
+  through the platform's memory routes and sdk-go's `memory` package:
+  `list` by group, `show`, `add`, `edit`, `mv` between You and a project,
+  `rm` one, `forget` everything, `restore` what a conversation forgot,
+  `export` the zip, `import` another assistant's answer, and `settings`,
+  which reads the switches the platform sends rather than a fixed list.
+  Built on 2026-10-29 on sdk-go's main, not released.
+- `021-app-name.md`: `latere apps name <name> [slug]` changes the name
+  people read for an app and keeps its address; `rename --name` names that
+  command. Built on 2026-10-29, not released.
 
 One surface shipped without a dedicated design record: the token-lifecycle
 work, which [docs/login-and-tokens.md](../docs/login-and-tokens.md) documents.
