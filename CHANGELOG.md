@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.37.0 - 2026-10-30
+
 ### Added
 
 - **`latere memory` shows and changes what Latere remembers about you and
