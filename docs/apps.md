@@ -330,6 +330,32 @@ Deploy 02c415ed released v1.0.0 from preview cbc11a51 without a build; its build
 Color codes in the log are printed as they are on a terminal and removed when
 the output goes to a file or a pipe.
 
+## Change an app's name
+
+```sh
+latere apps name "Tide tables"                          # the app of this repository
+latere apps name "Latere design boards" latere-clients  # the app latere-clients, from anywhere
+latere apps name "Tide tables" --json                   # the app as JSON
+```
+
+An app's name is the words people read for it in the console, in Latere
+Chat and in the projects that hold it. `latere apps create [name]` sets it,
+and `latere apps name` changes it later. The app keeps its slug, its
+address and its push URL:
+
+```text
+app:        latere-clients
+name:       Latere design boards
+address:    https://latere-clients.latere.site
+
+The app's address and push URL stay as they were.
+```
+
+A name may not be blank. Changing it takes the app's owner, or an owner or
+admin of the organization that owns it. `latere apps rename` changes the
+address instead; given `--name`, it changes nothing and prints the
+`latere apps name` line that does.
+
 ## Change an app's address
 
 ```sh
