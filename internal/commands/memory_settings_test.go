@@ -119,7 +119,7 @@ func TestMemorySettingsAskBeforeDeletingSensitiveMemories(t *testing.T) {
 // The switches a change can set are the client's *bool members by their
 // JSON names, so a member an SDK adds is a switch the command changes.
 func TestTheSwitchesAreTheClientsMembers(t *testing.T) {
-	if got := slices.Sorted(maps.Keys(settableSwitches())); !slices.Equal(got, []string{"remember", "sensitive"}) {
+	if got := slices.Sorted(maps.Keys(settableSwitches())); !slices.Equal(got, []string{"chats", "remember", "sensitive"}) {
 		t.Errorf("the SDK's switches = %v", got)
 	}
 	type params struct {
