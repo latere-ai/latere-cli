@@ -27,18 +27,12 @@ import (
 // person reads are the console's, so every surface names a tidy, a change
 // and their states the same way.
 
-// tidySourcePrefix starts the source of a memory a tidy wrote, followed
-// by the tidy's id. The platform writes it; the SDK names no constant.
-const tidySourcePrefix = "dream:"
-
 // tidyOf is the id of the tidy a memory's source names, "" for a source
-// that names none.
+// that names none. The SDK reads the id, which holds only letters, digits,
+// "_" and "-", so it prints as it is.
 func tidyOf(source string) string {
-	id, ok := strings.CutPrefix(source, tidySourcePrefix)
-	if !ok {
-		return ""
-	}
-	return clean(id, false)
+	id, _ := memory.TidyRunOf(source)
+	return id
 }
 
 // tidyMinute is how the time a tidy ran is shown, and tidyDay the day

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"latere.ai/x/sdk-go/memory"
 )
 
 // The ids of the tidies the stubs answer.
@@ -463,7 +465,7 @@ func TestMemorySourceOfATidy(t *testing.T) {
 		t.Fatal(err)
 	}
 	contains(t, out, "tidy "+tidyWaiting)
-	if strings.Contains(out, "dream:") {
+	if strings.Contains(out, memory.SourceTidyPrefix) {
 		t.Errorf("the list shows the source as sent:\n%s", out)
 	}
 	s.answer("GET /v1/account/memory/you/mia", http.StatusOK, strings.Replace(memoryOf("you", "", "mia", "person"), `"source":"you"`, `"source":"dream:`+tidyWaiting+`"`, 1))
@@ -474,5 +476,11 @@ func TestMemorySourceOfATidy(t *testing.T) {
 	contains(t, out, "from:       Tidy memory, in the tidy "+tidyWaiting+"\n")
 	if tidyOf("ses_01JA3BQ7Z4M8N2P5R6S7T8V9WX") != "" || memorySource("ses_x") != "the conversation ses_x" {
 		t.Error("a conversation's source reads as a tidy's")
+	}
+	// A source with the prefix and no id a run could have names no tidy.
+	for _, source := range []string{"dream:", "dream:a b", "dream:../runs", "dream:\x1b[2J"} {
+		if tidyOf(source) != "" || sourceCell(source) == "tidy " {
+			t.Errorf("%q reads as a tidy's source", source)
+		}
 	}
 }
