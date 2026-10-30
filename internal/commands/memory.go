@@ -97,7 +97,10 @@ for you or for one of your projects:
   a project   only that project's conversations read it
 
 The groups are Preferences, Profile, Topics, Areas and People. Each memory
-says where it came from: a conversation, something you added, or an import.
+says where it came from: a conversation, something you added, an import, or
+Tidy memory, which goes through your memory each night, combines memories
+that say the same thing, settles ones that contradict each other, and
+forgets ones that only recorded a finished task.
 
   latere memory list                       what Latere remembers about you
   latere memory add "Keep lists short."    remember something now
@@ -108,6 +111,7 @@ says where it came from: a conversation, something you added, or an import.
   latere memory export                     every memory as one zip file
   latere memory import answer.txt          what another assistant remembers
   latere memory settings                   Remember new things and the rest
+  latere memory tidies                     what Tidy memory changed each night
 
 Memory is kept for your personal account; in an organization's context the
 commands are refused, and 'latere org --personal' switches back.
@@ -140,6 +144,7 @@ address, and LATERE_PLATFORM_TOKEN presents a bearer as given.`,
 		newMemoryExportCmd(&platformURL, &authURL),
 		newMemoryImportCmd(&platformURL, &authURL),
 		newMemorySettingsCmd(&platformURL, &authURL),
+		newMemoryTidiesCmd(&platformURL, &authURL),
 	)
 	return cmd
 }
@@ -178,13 +183,17 @@ func (c *memoryClient) refused(err error, about memoryTarget) error {
 }
 
 // memoryTarget is what a refusal is about: the memory's id, "" for none,
-// and its scope.
+// and its scope, or a tidy and the memories a decision on it named.
 type memoryTarget struct {
 	id      string
 	project *memoryProject
 	// restore says the call restored a forgotten memory, whose not-found
 	// means nothing forgotten has the id.
 	restore bool
+	// tidy is the id of the tidy the call read or decided, and changes the
+	// memories a decision named, none for every one.
+	tidy    string
+	changes []string
 }
 
 // explainMemoryRefusal puts what a refusal of a memory call names into its
@@ -213,7 +222,33 @@ func explainMemoryRefusal(err error, about memoryTarget) error {
 	case "memory_personal_only":
 		e.Message += " `latere org --personal` switches to your personal account."
 	}
+	explainTidyRefusal(e, about)
 	return e
+}
+
+// explainTidyRefusal puts the tidy a refusal of a call on one names into
+// its sentence, in the words a person reads for it, with what to run next.
+func explainTidyRefusal(e *platformError, about memoryTarget) {
+	tidy := clean(about.tidy, false)
+	if tidy == "" {
+		return
+	}
+	switch e.Code {
+	case "run_not_found":
+		e.Message = fmt.Sprintf("You have no tidy %s. `latere memory tidies` lists your tidies.", tidy)
+	case "run_running":
+		e.Message = fmt.Sprintf("Tidy memory is still going through this memory, so what it changes cannot be decided yet. `latere memory tidies show %s` shows it when it is done.", tidy)
+	case "run_not_waiting":
+		what := "Nothing of the tidy " + tidy
+		if len(about.changes) > 0 {
+			what = "None of the changes you named"
+		}
+		e.Message = fmt.Sprintf("%s waits for you any more, so nothing was decided. `latere memory tidies show %s` shows where each change stands.", what, tidy)
+	case "run_change_unknown":
+		e.Message = fmt.Sprintf("The tidy %s did not change every memory you named. `latere memory tidies show %s` lists the memories it changed.", tidy, tidy)
+	case "run_busy":
+		e.Message = fmt.Sprintf("Another apply, decline or undo of the tidy %s is being saved. Run the command again in a moment.", tidy)
+	}
 }
 
 // ---- projects ----
@@ -353,13 +388,18 @@ func memorySource(source string) string {
 		return "you"
 	case memory.SourceImport:
 		return "an import"
-	default:
-		return "the conversation " + clean(source, false)
 	}
+	if tidy := tidyOf(source); tidy != "" {
+		return "Tidy memory, in the tidy " + tidy
+	}
+	return "the conversation " + clean(source, false)
 }
 
 // sourceCell is where a memory came from, as a table shows it.
 func sourceCell(source string) string {
+	if tidy := tidyOf(source); tidy != "" {
+		return "tidy " + tidy
+	}
 	return defaultStr(clean(source, false), "-")
 }
 
@@ -566,7 +606,8 @@ func newMemoryListCmd(platformURL, authURL *string) *cobra.Command {
 		Short: "List what Latere remembers about you, or about a project.",
 		Long: `List what Latere remembers about you, by group, in one table: each memory's
 id, its text, when it was last saved and where it came from (you, an import,
-or the id of the conversation that saved it). A memory's text is cut to fit
+the id of the conversation that saved it, or tidy and the id of the tidy
+that wrote it). A memory's text is cut to fit
 the table; 'latere memory show <id>' prints it whole.
 
 After your own memories come the projects that have memory, one line each.
