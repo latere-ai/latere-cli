@@ -5,7 +5,8 @@ projects. Latere keeps in mind what it learns in your conversations: how you
 like to be answered, who you are, the topics and areas of your life you keep
 coming back to, and the people you mention. Each memory is one line, in a
 group, and says where it came from. The same memories are in Latere Chat's
-Settings, and a change made here is there at once.
+Settings, and a change made here is there at once. Each night Tidy memory
+goes through them, and `latere memory tidies` shows what it changed.
 
 Run `latere login` first (see the [main README](../README.md#sign-in)).
 Memory is kept for your personal account: in an organization's context the
@@ -48,7 +49,8 @@ latere memory list --json                    # the platform's answer
 
 `list` prints one table, by group, with each memory's id, its text, when it
 was last saved and where it came from: `you` for what you added, `import`
-for an import, or the id of the conversation that saved it.
+for an import, the id of the conversation that saved it, or `tidy` and the
+tidy's id for what [Tidy memory](#tidy-memory) wrote.
 
 ```text
 GROUP        ID           MEMORY                         UPDATED  FROM
@@ -143,22 +145,97 @@ bounded number of lines; the command says when the text had more, so you
 import the rest in a second run. Nothing is sent to a model, so an import
 costs nothing.
 
+## Tidy memory
+
+Each night Tidy memory goes through what Latere remembers about you, and
+each project with something new. It combines memories that say the same
+thing, settles ones that contradict each other, and forgets ones that only
+recorded a finished task. A night with nothing new starts nothing. Each
+night's work on your memory, or on one project's, is one tidy, and you can
+see every change it made and undo it.
+
+```sh
+latere memory tidies                                  # your tidies, the newest first
+latere memory tidies --project "Tide tables"          # one project's
+latere memory tidies show ses_01JBWAIT0000000000000000AA          # what one changed
+latere memory tidies undo ses_01JBWAIT0000000000000000AA mia      # take back one change
+latere memory tidies undo ses_01JBWAIT0000000000000000AA          # take back all of it; asks first
+latere memory tidies apply ses_01JBWAIT0000000000000000AA         # apply what waits for you
+latere memory tidies decline ses_01JBWAIT0000000000000000AA mia   # decline one change that waits
+```
+
+`tidies` lists each tidy with its id, whose memory it went through, when
+it ran in your computer's time, where it stands and what it changed:
+
+```text
+ID                              IN           TIDIED            STATE          CHANGED
+ses_01JBWAIT0000000000000000AA  You          2026-10-30 03:03  Waits for you  2 changes wait for you
+ses_01JBTIDE0000000000000000BB  Tide tables  2026-10-29 03:04  Applied        1 added, 2 updated, 1 removed
+ses_01JBNONE0000000000000000CC  You          2026-10-28 03:01  Applied        Nothing needed changing
+```
+
+| State | What it means |
+|---|---|
+| Tidying | the tidy is still going; what it changes shows when it is done |
+| Waits for you | every change waits for you to apply or decline it |
+| Applied | every change was applied, or nothing needed changing |
+| Partly applied | some changes were applied and others wait, were declined or were undone |
+| Declined | nothing was applied: each change was declined, or left as it was because you changed the memory since |
+| Undone | everything the tidy applied was undone |
+
+`show` prints each memory the tidy added, updated or removed, where the
+change stands, and the memory before and after: a line marked `-` was
+there only before, and one marked `+` only after.
+
+```text
+Updated mia: Waits for you
+You wrote this memory, so this change waits for your OK.
+    Name: Mia
+  - Memory: Mia is your sister.
+  + Memory: Mia is your sister. She lives in Lisbon.
+    Group: People
+  - From: you
+  + From: Tidy memory, in the tidy ses_01JBWAIT0000000000000000AA
+```
+
+`apply`, `decline` and `undo` take the tidy's id, then the memories to
+decide by their ids as `show` prints them; without any, they decide every
+change they can. Undoing more than one change asks first unless `--yes`
+is given. Each says what it did and lists every change as it stands now.
+
+Undo takes back what a tidy applied: a memory it added is removed, one it
+updated gets its text back, and one it removed is restored. A declined
+change cannot be applied later. A memory you changed after the tidy read
+it is left as it is, whichever you choose, and the command says so.
+
+What happens to what Tidy memory changes is the setting `review`:
+
+| `review` | What happens |
+|---|---|
+| `apply` | Apply, and show me what changed. The default. Changes apply at once, `tidies` lists them, and you can undo them. |
+| `ask` | Ask me first. Changes wait until you apply or decline them. Left waiting, they lapse and nothing changes. |
+
+A change to a memory you wrote waits for your OK either way.
+
 ## Settings
 
 ```sh
-latere memory settings                       # every setting and whether it is on
+latere memory settings                       # every setting and its state
 latere memory settings remember=off
+latere memory settings chats=off review=ask
 latere memory settings sensitive=off --yes
 ```
 
 | Setting | What it does |
 |---|---|
 | `remember` | Remember new things: conversations save new memories. Off, they still use what is remembered and save nothing new. On by default. |
+| `chats` | Search past chats: conversations search and read your past conversations when you mention one or an answer depends on something you said before. In a project, only that project's conversations. Off, they read none of them. On by default. |
 | `sensitive` | Include sensitive topics: memories about health conditions, religious beliefs, political opinions, sexual orientation, racial or ethnic origin, and union membership are kept. Off by default. Turning it off deletes every memory marked sensitive, for good, after you confirm. |
+| `review` | When Tidy memory changes something: `apply`, the default, or `ask`. See [Tidy memory](#tidy-memory). |
 
-`settings` lists every setting the platform has, including ones added
-after your version of `latere`; one it cannot change yet is marked, and
-`latere upgrade` installs the release that can.
+`settings` lists every on or off setting the platform has, including ones
+added after your version of `latere`; one it cannot change yet is marked,
+and `latere upgrade` installs the release that can.
 
 ## When a command is refused
 
@@ -173,7 +250,18 @@ A refusal prints the platform's code and its sentence and exits 1:
 | `invalid_field` | a field breaks its rule, such as a text of more than one line or a group that is none of the five |
 | `memory_personal_only` | your current context is an organization's; `latere org --personal` switches back |
 | `memory_unavailable`, `storage_unavailable` | memory cannot be reached here, or just now; run the command again in a moment |
+| `run_not_found` | you have no tidy with that id; `latere memory tidies` lists them |
+| `run_running` | the tidy is still going, so what it changes cannot be decided yet |
+| `run_not_waiting` | nothing you named waits for you any more, so nothing was decided; `latere memory tidies show <id>` shows where each change stands |
+| `run_change_unknown` | the tidy did not change a memory you named |
+| `run_busy` | another apply, decline or undo of the tidy is being saved; run the command again in a moment |
+| `runs_unavailable` | Tidy memory is not kept here |
 | `unauthorized` | the token was refused; run `latere login` again |
+
+An apply or a decline is sent once. When its answer fails for a reason
+other than a refusal, the decision may have been saved all the same: the
+command says so, and `latere memory tidies show <id>` shows where each
+change stands.
 
 ## Where the commands go
 

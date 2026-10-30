@@ -10,6 +10,22 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Added
+
+- **`latere memory tidies` shows what Tidy memory changed in your memory
+  each night, and takes it back.** `tidies` lists each night's tidy of
+  your memory and of each project, with when it ran, where it stands and
+  what it changed, "1 added, 2 updated, 1 removed". `show` prints each
+  memory a tidy added, updated or removed, before and after, and why a
+  change waits for you. `undo` takes back what a tidy applied, one memory
+  or all of it, and `apply` and `decline` decide what waits for you. A
+  memory a tidy wrote names the tidy where `list` and `show` say where it
+  came from.
+- **`latere memory settings` shows and changes Search past chats and when
+  Tidy memory asks first.** `chats=off` stops conversations from reading
+  your past conversations, and `review=ask` holds what Tidy memory changes
+  until you apply or decline it.
+
 ## v0.37.0 - 2026-10-30
 
 ### Added
