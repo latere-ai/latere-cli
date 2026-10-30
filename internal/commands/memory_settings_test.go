@@ -116,23 +116,93 @@ func TestMemorySettingsAskBeforeDeletingSensitiveMemories(t *testing.T) {
 	}
 }
 
-// The switches a change can set are the client's *bool members by their
-// JSON names, so a member an SDK adds is a switch the command changes.
+// The settings a change can set are the client's *bool members and its
+// members of a string kind by their JSON names, so a member an SDK adds is
+// a setting the command changes.
 func TestTheSwitchesAreTheClientsMembers(t *testing.T) {
-	if got := slices.Sorted(maps.Keys(settableSwitches())); !slices.Equal(got, []string{"chats", "remember", "sensitive"}) {
-		t.Errorf("the SDK's switches = %v", got)
+	if got := slices.Sorted(maps.Keys(settableSwitches())); !slices.Equal(got, []string{"chats", "remember", "review", "sensitive"}) {
+		t.Errorf("the SDK's settings = %v", got)
 	}
+	type mode string
 	type params struct {
 		Remember    *bool   `json:"remember,omitempty"`
 		SearchChats *bool   `json:"search_chats,omitempty"`
 		Note        *string `json:"note,omitempty"`
+		Mode        mode    `json:"mode,omitempty"`
 		Skipped     *bool   `json:"-"`
 		Untagged    *bool
 		hidden      *bool
 	}
 	_ = params{}.hidden
 	got := switchFields(reflect.TypeFor[params]())
-	if want := map[string]int{"remember": 0, "search_chats": 1}; !maps.Equal(got, want) {
+	want := map[string]settingField{"remember": {index: 0}, "search_chats": {index: 1}, "mode": {index: 3, word: true}}
+	if !maps.Equal(got, want) {
 		t.Errorf("switchFields = %v, want %v", got, want)
+	}
+}
+
+// Search past chats is a switch, and Tidy memory's review mode a setting
+// that takes a word: both are shown with what they mean, and a change
+// sends the word or the switch as given.
+func TestMemorySettingsChatsAndReview(t *testing.T) {
+	s := newStubMemory(t)
+	s.setList(strings.Replace(memoryList, `"settings":{"remember":true,"sensitive":false}`,
+		`"settings":{"remember":true,"chats":true,"sensitive":false,"review":"apply"}`, 1))
+	out, _, err := runMemory(t, s, "", "settings")
+	if err != nil {
+		t.Fatal(err)
+	}
+	contains(t, out, "chats      on     Search past chats\n",
+		"review     apply  When Tidy memory changes something: apply, and show me what changed\n")
+	if strings.Contains(out, "cannot change") {
+		t.Errorf("a setting this version changes is marked as one it cannot:\n%s", out)
+	}
+
+	s.answer("PATCH /v1/account/memory/settings", http.StatusOK, `{"remember":true,"chats":false,"sensitive":false,"review":"ask","deleted_sensitive":0}`)
+	out, _, err = runMemory(t, s, "", "settings", "chats=off", "Review=ASK")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body := s.body("PATCH /v1/account/memory/settings"); len(body) != 2 || body["chats"] != false || body["review"] != "ask" {
+		t.Errorf("settings body = %v", body)
+	}
+	contains(t, out, "chats      off", "review     ask    When Tidy memory changes something: ask me first")
+
+	for args, want := range map[string]string{
+		"review=never": `review takes apply or ask, not "never"; nothing was changed`,
+		"review=":      `review takes apply or ask, not ""; nothing was changed`,
+		"chats=ask":    `"ask" is neither on nor off; nothing was changed`,
+	} {
+		before := len(s.requests())
+		_, _, err := runMemory(t, s, "", "settings", args)
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("settings %s = %v, want %q", args, err, want)
+		}
+		if got := s.requests()[before:]; slices.ContainsFunc(got, func(r string) bool { return strings.HasPrefix(r, "PATCH") }) {
+			t.Errorf("settings %s sent the change: %v", args, got)
+		}
+	}
+}
+
+// A setting that takes a word the CLI has no list of words for takes any
+// word but none, and a word setting the platform adds that neither the CLI
+// nor the SDK names is no setting the command shows.
+func TestMemorySettingWords(t *testing.T) {
+	if got, err := parseSettingWord("tone", " Brief "); err != nil || got != "brief" {
+		t.Errorf("parseSettingWord(tone, brief) = %q, %v", got, err)
+	}
+	if _, err := parseSettingWord("tone", " "); err == nil || !strings.Contains(err.Error(), "tone takes a word, and none was given") {
+		t.Errorf("parseSettingWord(tone, empty) = %v", err)
+	}
+	got, err := readSwitches([]byte(`{"review":"ask","tone":"brief","remember":false}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []memorySwitch{{name: "review", value: "ask", word: true}, {name: "remember", value: "off"}}
+	if !slices.Equal(got, want) {
+		t.Errorf("readSwitches = %v, want %v", got, want)
+	}
+	if l := (memorySwitch{name: "review", value: "later", word: true}).label(); l != "When Tidy memory changes something" {
+		t.Errorf("the label of a word the CLI does not know = %q", l)
 	}
 }
