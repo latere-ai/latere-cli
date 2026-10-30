@@ -1,6 +1,6 @@
 ---
 title: "`latere memory tidies`: see what Tidy memory changed each night, undo it, apply or decline what waits, and choose its review mode and Search past chats"
-status: in-progress
+status: implemented
 depends_on:
   - specs/020-memory-command.md
   - "CROSS-REPO: latere-ai/specs infrastructure/memory.md, section 15: dreaming, the CLI's commands in its surfaces table, and its Outcome as Tidy memory"
@@ -144,3 +144,9 @@ knows is not one of the mode's (`apply`, `ask`) before anything is sent.
 | 7 | A memory a tidy wrote names the tidy as its source | `TestMemorySourceOfATidy` |
 | 8 | The built binary lists, shows and decides a tidy against a stub of the routes with auth's mint | `cmd/latere.TestMemoryTidiesE2E` |
 
+## Outcome
+
+Built as designed on 2026-10-30, on sdk-go v0.16.0, against the routes as
+platform v0.178.0 serves them. Checked against stubs of the routes, in
+the package's tests and with the built binary; not yet against a live
+tidy, which needs a night with something new on a throwaway account.
