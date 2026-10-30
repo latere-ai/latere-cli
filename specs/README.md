@@ -29,6 +29,7 @@ specs/
   019-environments-secrets.md        (implemented: latere environments secrets creates, rotates, applies, lists and deletes the credentials a workload uses without holding them)
   020-memory-command.md              (implemented: latere memory lists, shows, adds, changes, moves, deletes, restores, exports and imports what Latere remembers, and turns its settings on or off)
   021-app-name.md                    (implemented: latere apps name changes the name people read for an app and keeps its address)
+  022-memory-tidies.md               (in-progress: latere memory tidies lists what Tidy memory changed each night, shows it as a diff, undoes it, and applies or declines what waits)
 ```
 
 ## Status
@@ -153,6 +154,11 @@ Where each spec stands:
 - `021-app-name.md`: `latere apps name <name> [slug]` changes the name
   people read for an app and keeps its address; `rename --name` names that
   command. Built on 2026-10-29, not released.
+- `022-memory-tidies.md`: `latere memory tidies` lists the nightly tidies
+  of Tidy memory, `show` prints what one changed as a diff of each memory,
+  and `apply`, `decline` and `undo` decide its changes, one memory or all;
+  `latere memory settings` gains `chats` and `review`. Designed on
+  2026-10-30.
 
 One surface shipped without a dedicated design record: the token-lifecycle
 work, which [docs/login-and-tokens.md](../docs/login-and-tokens.md) documents.
