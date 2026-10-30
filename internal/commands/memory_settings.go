@@ -345,8 +345,9 @@ name=off, and review=apply or review=ask:
               decline them. A change to a memory you wrote waits for your
               OK either way.
 
-The list shows every setting the platform has, including ones added after
-this version of latere, which says when it cannot change one yet. Turning
+The list shows every on or off setting the platform has, including ones
+added after this version of latere, which says when it cannot change one
+yet. Turning
 Include sensitive topics off asks first unless --yes is given, and says how
 many memories it deleted. --json prints the settings as the platform
 answers them.`,
