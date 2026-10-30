@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.38.0 - 2026-10-30
+
 ### Added
 
 - **`latere memory tidies` shows what Tidy memory changed in your memory
