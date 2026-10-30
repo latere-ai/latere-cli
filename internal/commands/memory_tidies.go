@@ -34,8 +34,8 @@ const tidySourcePrefix = "dream:"
 // tidyOf is the id of the tidy a memory's source names, "" for a source
 // that names none.
 func tidyOf(source string) string {
-	id, _ := strings.CutPrefix(source, tidySourcePrefix)
-	if id == source {
+	id, ok := strings.CutPrefix(source, tidySourcePrefix)
+	if !ok {
 		return ""
 	}
 	return clean(id, false)
@@ -608,12 +608,7 @@ func newMemoryTidyDecisionCmd(platformURL, authURL *string, d tidyDecision) *cob
 				return err
 			}
 			if d == decideUndo && !yes {
-				from, _ := d.decides()
-				n := len(named)
-				if n == 0 {
-					n = countChanges(before, from)
-				}
-				if n > 1 {
+				if n := undoable(before, named); n > 1 {
 					errOut := cmd.ErrOrStderr()
 					fprintf(errOut, undoQuestion, n, clean(id, false))
 					line, err := readLine(cmd.InOrStdin())
@@ -701,6 +696,18 @@ the platform's answer.`
 	}
 	cmd.Flags().BoolVar(&jsonF, "json", false, "print the platform's answer as JSON")
 	return cmd
+}
+
+// undoable is how many changes an undo of the memories named, every one
+// when none is, takes back: those applied.
+func undoable(r *memory.Run, named []string) int {
+	n := 0
+	for _, c := range r.Changes {
+		if c.State == memory.ChangeApplied && (len(named) == 0 || slices.Contains(named, c.ID)) {
+			n++
+		}
+	}
+	return n
 }
 
 // knownChanges refuses, before anything is sent, a memory the tidy did not

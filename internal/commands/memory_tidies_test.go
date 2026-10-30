@@ -383,6 +383,11 @@ func TestMemoryTidiesUndoAsksFirst(t *testing.T) {
 	if _, errOut, err := runMemory(t, s, "", "tidies", "undo", tidyWaiting, "mia"); err != nil || errOut != "" {
 		t.Errorf("an undo of one change = %v, asked %q", err, errOut)
 	}
+	// Two memories named, one of them not applied, is one change to undo.
+	s.answer("GET /v1/account/runs/"+tidyWaiting, http.StatusOK, waitingTidy(t, "partly_applied", "applied", "declined"))
+	if _, errOut, err := runMemory(t, s, "", "tidies", "undo", tidyWaiting, "lisbon", "mia"); err != nil || errOut != "" {
+		t.Errorf("an undo that takes back one change = %v, asked %q", err, errOut)
+	}
 }
 
 func TestMemoryTidiesRefusals(t *testing.T) {
