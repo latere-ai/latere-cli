@@ -1,6 +1,6 @@
 ---
 title: "`latere agents run`: a message typed while the agent works waits for its next step, shows where it was read, can be sent now or taken back"
-status: in-progress
+status: implemented
 depends_on:
   - specs/011-capability-commands.md
   - "CROSS-REPO: topos specs/098-messages-sent-while-a-turn-runs.md, shipped in topos v0.62.0: messages.read, user.withdraw, send_now, the send_now stop"
@@ -84,8 +84,16 @@ a turn runs.
 | 1 | A message sent while a command runs is read at the next step of the same turn, led by the while-working line, and shown where it was read | `TestLocalMessageWhileACommandRunsIsReadAtTheNextStep` |
 | 2 | Send now moves a running command to the background and the same turn reads the message | `TestLocalSendNowMovesACommand` |
 | 3 | Send now cuts a call that cannot move after the grace; `turn` returns no error and follows the next turn, which reads the message led by the sent-now line | `TestLocalSendNowCutIsNotAnError` |
-| 4 | A stop by send_now is no error; any other stop but `end_turn` and `completed` is | `TestStopErrorOfASendNowStop` |
+| 4 | A stop by send_now is no error, also when `runner.Drive` returns it because the message was taken back during the grace; any other stop but `end_turn` and `completed` is | `TestStopErrorOfASendNowStop`, `TestLocalSendNowWithdrawnInTheGraceIsNotAnError` |
 | 5 | A message appended after a turn's last status is driven by the drive that saw it | `TestLocalDriveReadsAMessageAsATurnEnds` |
-| 6 | A waiting message is withdrawn and never read; a read one, one that started its turn and one already withdrawn are refused | `TestLocalWithdraw` |
-| 7 | The TUI sends while it works, shows a waiting message above the prompt and moves it into the transcript when read, sends now on Ctrl+J and Alt+Enter, takes waiting messages back on Up, and keeps a read one with its note | `TestLocalTUIMessagesWhileItWorks`, `TestLocalTUIUpTakesBackWaitingMessages`, `TestLocalTUISendNowKeys` |
+| 6 | A waiting message is withdrawn and never read; a read one, one that started its turn, one already withdrawn and another person's are refused | `TestLocalWithdraw`, `TestWithdrawableRefusesAnotherSender` |
+| 7 | The TUI sends while it works, shows a waiting message above the prompt and moves it into the transcript when read, sends now on Ctrl+J and Alt+Enter, takes waiting messages back on Up, and keeps a read one with its note | `TestLocalTUIMessagesWhileItWorks`, `TestLocalTUIUpTakesBackWaitingMessages`, `TestLocalTUISendNowKeysOnAnIdleAgent`, `TestLocalTUIAMessageThatStartsTheNextTurn` |
 | 8 | End to end in the TUI over the scripted model: a message typed while a command runs waits, then shows where it was read | `TestLocalTUIMessageWhileACommandRunsEndToEnd` |
+
+## Outcome
+
+Built as designed. `runner.Drive` already runs the turn after a send_now
+cut, so it returns that stop only when the message was taken back during
+the grace; `stopError` covers that case and the unit table. A send, a
+withdrawal and a drive whose store fails or conflicts are covered by
+`TestLocalAgentStoreFailures` and `TestLocalTUIStoreFailures`.
