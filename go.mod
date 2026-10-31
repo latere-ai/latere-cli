@@ -19,10 +19,10 @@ require (
 	golang.org/x/term v0.46.0
 	gopkg.in/yaml.v3 v3.0.1
 	latere.ai/x/agon v0.3.0
-	latere.ai/x/cella v0.21.0
-	latere.ai/x/pkg v0.109.0
-	latere.ai/x/sdk-go v0.17.0
-	latere.ai/x/topos v0.51.0
+	latere.ai/x/cella v0.22.5
+	latere.ai/x/pkg v0.110.2
+	latere.ai/x/sdk-go v0.19.0
+	latere.ai/x/topos v0.62.0
 )
 
 require (
@@ -51,6 +51,7 @@ require (
 	github.com/gorilla/css v1.0.1 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
+	github.com/kr/text v0.2.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.3.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-localereader v0.0.1 // indirect

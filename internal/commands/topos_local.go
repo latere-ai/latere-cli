@@ -318,13 +318,13 @@ func (a *localAgent) record(e session.Event) {
 	switch e.Type {
 	case session.TypeAgentToolUse:
 		var u session.AgentToolUse
-		if e.Decode(&u) != nil || e.Thread != "" {
+		if e.Decode(&u) != nil || e.Subagent != "" {
 			return
 		}
 		a.emit(localEvent{kind: localToolUse, name: u.Name, input: u.Input})
 	case session.TypeToolResult:
 		var r session.ToolResult
-		if e.Decode(&r) != nil || e.Thread != "" {
+		if e.Decode(&r) != nil || e.Subagent != "" {
 			return
 		}
 		var text []string
@@ -353,7 +353,7 @@ func (a *localAgent) record(e session.Event) {
 type localObserver struct{ emit func(localEvent) }
 
 func (o localObserver) OnDelta(d harness.Delta) {
-	if d.Thread == "" && d.Event.Type == ir.EventTextDelta && d.Event.Delta != "" {
+	if d.Subagent == "" && d.Event.Type == ir.EventTextDelta && d.Event.Delta != "" {
 		o.emit(localEvent{kind: localText, text: d.Event.Delta})
 	}
 }
