@@ -89,6 +89,7 @@ a turn runs.
 | 6 | A waiting message is withdrawn and never read; a read one, one that started its turn, one already withdrawn and another person's are refused | `TestLocalWithdraw`, `TestWithdrawableRefusesAnotherSender` |
 | 7 | The TUI sends while it works, shows a waiting message above the prompt and moves it into the transcript when read, sends now on Ctrl+J and Alt+Enter, takes waiting messages back on Up, and keeps a read one with its note | `TestLocalTUIMessagesWhileItWorks`, `TestLocalTUIUpTakesBackWaitingMessages`, `TestLocalTUISendNowKeysOnAnIdleAgent`, `TestLocalTUIAMessageThatStartsTheNextTurn` |
 | 8 | End to end in the TUI over the scripted model: a message typed while a command runs waits, then shows where it was read | `TestLocalTUIMessageWhileACommandRunsEndToEnd` |
+| 9 | A read message, and the calls and results before it, show before the answer of the request that read it, however late the log's watch delivers | `TestLocalAMessageShowsBeforeTheAnswerThatReadIt` |
 
 ## Outcome
 
@@ -97,3 +98,8 @@ cut, so it returns that stop only when the message was taken back during
 the grace; `stopError` covers that case and the unit table. A send, a
 withdrawal and a drive whose store fails or conflicts are covered by
 `TestLocalAgentStoreFailures` and `TestLocalTUIStoreFailures`.
+
+Not in the design: the log's watch runs on its own goroutine and the
+streamed text on the harness's, so a read message could show after the
+answer that read it. Each step's first streamed delta now tells the
+terminal what the log holds first, and `record` tells an event once.
