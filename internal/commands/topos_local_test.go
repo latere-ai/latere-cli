@@ -178,8 +178,10 @@ func stateOf(evs []session.Event, id string) session.MessageState {
 	return ""
 }
 
-// gate is a file a scripted command waits for in the working directory.
-const gateCommand = "for i in $(seq 1 600); do [ -f gate ] && break; sleep 0.05; done; echo gate-opened"
+// gateCommand waits up to 30 seconds for a file named gate in the working
+// directory. It runs nothing but the shell and sleep, which the gate's
+// stripped PATH (/bin alone) still holds.
+const gateCommand = "i=0; while [ ! -f gate ] && [ $i -lt 600 ]; do sleep 0.05; i=$((i+1)); done; echo gate-opened"
 
 // openGate lets the command gateCommand runs in agent's directory end.
 func openGate(t *testing.T, agent *localAgent) {
