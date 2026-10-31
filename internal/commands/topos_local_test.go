@@ -637,6 +637,97 @@ func TestLocalTurnReportsAStoppedTurn(t *testing.T) {
 	}
 }
 
+// flakyStore fails what the test sets it to: conflicts conflicting appends
+// before the next one goes through, broken refuses every append, and
+// blind refuses every watch.
+type flakyStore struct {
+	session.Store
+	mu        sync.Mutex
+	conflicts int
+	broken    bool
+	blind     bool
+}
+
+func (s *flakyStore) set(f func(*flakyStore)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f(s)
+}
+
+func (s *flakyStore) Append(ctx context.Context, id string, after uint64, evs []session.Event) (uint64, error) {
+	s.mu.Lock()
+	broken, conflict := s.broken, s.conflicts > 0
+	if conflict {
+		s.conflicts--
+	}
+	s.mu.Unlock()
+	switch {
+	case broken:
+		return 0, errors.New("the store is down")
+	case conflict:
+		return 0, session.ErrSequenceConflict
+	}
+	return s.Store.Append(ctx, id, after, evs)
+}
+
+func (s *flakyStore) Watch(ctx context.Context, id string, from uint64) (<-chan session.Event, error) {
+	s.mu.Lock()
+	blind := s.blind
+	s.mu.Unlock()
+	if blind {
+		return nil, errors.New("the store cannot be watched")
+	}
+	return s.Store.Watch(ctx, id, from)
+}
+
+// TestLocalAgentStoreFailures: a send tries again after the runner
+// appended first, and gives up after localAppendTries; a store that fails
+// fails the send, and a drive that cannot follow the log ends and lets the
+// next message start one.
+func TestLocalAgentStoreFailures(t *testing.T) {
+	store := &flakyStore{Store: session.NewMemoryStore()}
+	agent := startAgent(t, store, scriptedModel(t, "steps: []\n"), func(localEvent) {})
+
+	store.set(func(s *flakyStore) { s.conflicts = localAppendTries - 1 })
+	if _, start, err := agent.send(t.Context(), "after a conflict", false); err != nil || !start {
+		t.Fatalf("send after conflicts = (%v, %v), want it appended", start, err)
+	}
+	agent.driving = false
+	store.set(func(s *flakyStore) { s.conflicts = localAppendTries })
+	if _, _, err := agent.send(t.Context(), "never", false); !errors.Is(err, session.ErrSequenceConflict) {
+		t.Fatalf("send through conflicts only = %v, want the conflict", err)
+	}
+	store.set(func(s *flakyStore) { s.conflicts, s.broken = 0, true })
+	if err := agent.turn(t.Context(), "down"); err == nil || agent.driving {
+		t.Fatalf("turn on a broken store = %v, driving %v; want the store's error", err, agent.driving)
+	}
+	store.set(func(s *flakyStore) { s.broken, s.blind = false, true })
+	if err := agent.turn(t.Context(), "blind"); err == nil {
+		t.Fatal("a drive that could not follow the log reported success")
+	}
+	agent.sendMu.Lock()
+	driving := agent.driving
+	agent.sendMu.Unlock()
+	if driving {
+		t.Fatal("a drive that failed left the agent driving, so no message would start the next")
+	}
+}
+
+// An event the terminal cannot read is skipped, not shown half-read.
+func TestLocalRecordSkipsAnEventItCannotRead(t *testing.T) {
+	rec := &recorder{}
+	agent := &localAgent{emit: rec.emit}
+	for _, typ := range []session.Type{session.TypeAgentToolUse, session.TypeToolResult, session.TypeUserMessage, session.TypeModelRequest} {
+		agent.record(session.Event{Type: typ, Seq: agent.seen + 1, Payload: json.RawMessage(`{`)})
+	}
+	if got := rec.all(); len(got) != 0 {
+		t.Fatalf("the agent told %+v of events it could not read", got)
+	}
+	if agent.seen != 4 {
+		t.Errorf("seen = %d, want every event counted", agent.seen)
+	}
+}
+
 // TestLocalSystemPromptNamesNoTool keeps tool names out of the system
 // prompt: each tool's description already says what it does, and a name in
 // prose becomes a dangling reference the moment the tool set changes.

@@ -409,6 +409,23 @@ func TestLocalTUIUpTakesBackWaitingMessages(t *testing.T) {
 	}
 }
 
+// A send or a take-back the store refuses says so, and loses nothing the
+// prompt or the waiting messages held.
+func TestLocalTUIStoreFailures(t *testing.T) {
+	m := newTestTUI(t)
+	working(t, m)
+	typeLine(m, "kept", tea.KeyMsg{Type: tea.KeyEnter})
+	m.agent.store = &flakyStore{Store: m.agent.store, broken: true}
+	typeLine(m, "lost", tea.KeyMsg{Type: tea.KeyEnter})
+	if len(m.waiting) != 1 || !strings.Contains(m.rawText(), "error: the store is down") {
+		t.Fatalf("waiting %+v, transcript %q; want the refusal said", m.waiting, m.rawText())
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	if len(m.waiting) != 1 || m.input.Value() != "" || strings.Count(m.rawText(), "error: the store is down") != 2 {
+		t.Fatalf("waiting %+v, prompt %q, transcript %q; want the message kept and the refusal said", m.waiting, m.input.Value(), m.rawText())
+	}
+}
+
 // pump hands the messages the program would get to m until done holds.
 func pump(t *testing.T, m *localTUI, msgs <-chan tea.Msg, done func() bool) {
 	t.Helper()
