@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -47,10 +48,18 @@ const collapseThreshold = 6
 type localEventMsg struct{ ev localEvent }
 
 // localTurnDoneMsg reports a completed (or failed) turn and how long it took
-// (for the "✻ …for Ns" footer).
+// (for the "✻ …for Ns" footer). gen is the drive that ran it.
 type localTurnDoneMsg struct {
 	err     error
 	elapsed time.Duration
+	gen     int
+}
+
+// waitingMessage is a message sent while the agent works that it has not
+// read yet; now is set on one sent to be read now.
+type waitingMessage struct {
+	id, text string
+	now      bool
 }
 
 type blockKind int
@@ -69,6 +78,7 @@ const (
 type block struct {
 	kind      blockKind
 	text      string // raw content (Markdown for assistant)
+	note      string // a dim line under a user message (blkUser)
 	name      string // tool name (blkTool)
 	args      string // tool arg summary (blkTool)
 	isErr     bool   // error result (blkResult) or error notice
@@ -79,8 +89,10 @@ type block struct {
 }
 
 type localTUI struct {
-	ctx     context.Context
-	prog    *tea.Program // set right after NewProgram; used by the Observer
+	ctx context.Context
+	// post hands a message to the program, set right after NewProgram;
+	// nil drops it.
+	post    func(tea.Msg)
 	version string
 	cwd     string
 
@@ -104,6 +116,15 @@ type localTUI struct {
 	ready     bool // a WindowSizeMsg has sized the layout
 	width     int
 	height    int
+
+	// waiting are the messages sent while the agent works that it has not
+	// read yet, in the order sent, shown above the prompt; shown holds the
+	// ids of the messages the transcript shows.
+	waiting []waitingMessage
+	shown   map[string]bool
+	// gen numbers the drives, so the end of one that a later drive took
+	// over from leaves the later one running.
+	gen int
 }
 
 // newLocalTUI starts the local agent in dir on brain, its events sent to the
@@ -116,12 +137,8 @@ func newLocalTUI(ctx context.Context, version, dir string, brain localModel) (*l
 	sp := spinner.New()
 	// A rotating arc — distinct from other assistants' star/braille spinners.
 	sp.Spinner = spinner.Spinner{Frames: []string{"◜", "◠", "◝", "◞", "◡", "◟"}, FPS: time.Second / 8}
-	m := &localTUI{ctx: ctx, version: version, input: in, spin: sp}
-	agent, err := newLocalAgent(ctx, dir, brain, func(e localEvent) {
-		if m.prog != nil {
-			m.prog.Send(localEventMsg{ev: e})
-		}
-	})
+	m := &localTUI{ctx: ctx, version: version, input: in, spin: sp, shown: map[string]bool{}}
+	agent, err := newLocalAgent(ctx, dir, brain, func(e localEvent) { m.send(localEventMsg{ev: e}) })
 	if err != nil {
 		return nil, err
 	}
@@ -130,6 +147,13 @@ func newLocalTUI(ctx context.Context, version, dir string, brain localModel) (*l
 }
 
 func (m *localTUI) Init() tea.Cmd { return textinput.Blink }
+
+// send hands msg to the program, from any goroutine.
+func (m *localTUI) send(msg tea.Msg) {
+	if m.post != nil {
+		m.post(msg)
+	}
+}
 
 func (m *localTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -143,6 +167,15 @@ func (m *localTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.appendEvent(msg.ev)
 		return m, nil
 	case localTurnDoneMsg:
+		if msg.gen != m.gen {
+			// A later drive took over from this one, and its end reports
+			// the turns it runs.
+			if msg.err != nil {
+				m.appendNotice(styleErr.Render("error: "+msg.err.Error()), true)
+				m.refresh()
+			}
+			return m, nil
+		}
 		m.running = false
 		m.closeStreaming()
 		if msg.err != nil {
@@ -181,15 +214,22 @@ func (m *localTUI) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.refresh()
 		return m, nil
-	case tea.KeyPgUp, tea.KeyPgDown, tea.KeyUp, tea.KeyDown:
+	case tea.KeyUp:
+		// ↑ on an empty prompt takes back what the agent has not read yet,
+		// as in Claude Code; otherwise it scrolls.
+		if m.input.Value() == "" && len(m.waiting) > 0 {
+			m.takeBack()
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.vp, cmd = m.vp.Update(msg)
+		return m, cmd
+	case tea.KeyPgUp, tea.KeyPgDown, tea.KeyDown:
 		// Scroll the transcript (the input is single-line, so ↑/↓ are free).
 		var cmd tea.Cmd
 		m.vp, cmd = m.vp.Update(msg)
 		return m, cmd
-	case tea.KeyEnter:
-		if m.running {
-			return m, nil
-		}
+	case tea.KeyEnter, tea.KeyCtrlJ:
 		line := strings.TrimSpace(m.input.Value())
 		if line == "" {
 			return m, nil
@@ -198,29 +238,95 @@ func (m *localTUI) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if strings.HasPrefix(line, "/") {
 			return m.onSlash(line)
 		}
-		return m.startTurn(line)
+		// Ctrl+J is a line feed, which a terminal sends apart from Enter's
+		// carriage return; Alt+Enter arrives as Enter with Alt where the
+		// terminal sends Option or Alt as Esc.
+		return m.submit(line, msg.Type == tea.KeyCtrlJ || msg.Alt)
 	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	return m, cmd
 }
 
-// startTurn echoes the prompt and runs the turn asynchronously; the Observer
-// streams events back while it runs.
-func (m *localTUI) startTurn(prompt string) (tea.Model, tea.Cmd) {
-	m.appendUser(prompt)
+// submit sends line to the agent. An idle agent starts a turn on it; one
+// that works reads it after its current step, or stops the step to read it
+// when now is set, and until then it waits above the prompt.
+func (m *localTUI) submit(line string, now bool) (tea.Model, tea.Cmd) {
+	id, start, err := m.agent.send(m.ctx, line, now)
+	if err != nil {
+		m.appendNotice(styleErr.Render("error: "+err.Error()), true)
+		m.refresh()
+		return m, nil
+	}
+	if !start {
+		m.waiting = append(m.waiting, waitingMessage{id: id, text: line, now: now})
+		m.layout()
+		return m, nil
+	}
+	return m.startTurn(id, line)
+}
+
+// startTurn echoes the prompt the message id carries and drives the turn
+// asynchronously; the Observer streams events back while it runs.
+func (m *localTUI) startTurn(id, prompt string) (tea.Model, tea.Cmd) {
+	m.appendUser(prompt, "")
+	m.shown[id] = true
+	ticking := m.running
 	m.running = true
 	m.turnStart = time.Now()
 	m.turnVerb = workVerbs[m.turnCount%len(workVerbs)]
 	m.turnTip = workTips[m.turnCount%len(workTips)]
 	m.turnCount++
+	m.gen++
+	gen := m.gen
 	m.refresh()
 	go func() {
 		start := time.Now()
-		err := m.agent.turn(m.ctx, prompt)
-		m.prog.Send(localTurnDoneMsg{err: err, elapsed: time.Since(start)})
+		err := m.agent.drive(m.ctx)
+		m.send(localTurnDoneMsg{err: err, elapsed: time.Since(start), gen: gen})
 	}()
+	if ticking {
+		return m, nil
+	}
 	return m, m.spin.Tick
+}
+
+// takeBack withdraws the waiting messages into the prompt to be edited. A
+// message the agent read first stays, and shows where it was read.
+func (m *localTUI) takeBack() {
+	var back []string
+	var keep []waitingMessage
+	for _, w := range m.waiting {
+		err := m.agent.withdraw(m.ctx, w.id)
+		switch {
+		case err == nil:
+			back = append(back, w.text)
+		case errors.Is(err, errAlreadyRead), errors.Is(err, errNotWaiting):
+			// Read, or sent as a turn ended and so the next turn's prompt.
+			keep = append(keep, w)
+		default:
+			keep = append(keep, w)
+			m.appendNotice(styleErr.Render("error: "+err.Error()), true)
+		}
+	}
+	switch kept := len(keep); {
+	case kept == 1:
+		m.appendNotice(styleDim.Render("had already read this, so it stays"), false)
+	case kept > 1:
+		m.appendNotice(styleDim.Render("had already read these, so they stay"), false)
+	}
+	m.waiting = keep
+	m.input.SetValue(strings.Join(back, " "))
+	m.input.CursorEnd()
+	m.layout()
+}
+
+// dropWaiting removes the message id from the waiting ones, and reports
+// whether it was one.
+func (m *localTUI) dropWaiting(id string) bool {
+	n := len(m.waiting)
+	m.waiting = slices.DeleteFunc(m.waiting, func(w waitingMessage) bool { return w.id == id })
+	return len(m.waiting) != n
 }
 
 func (m *localTUI) onSlash(line string) (tea.Model, tea.Cmd) {
@@ -280,6 +386,22 @@ func (m *localTUI) appendEvent(e localEvent) {
 		m.blocks = append(m.blocks, block{kind: blkResult, text: e.text, isErr: e.isErr, collapsed: !m.expand})
 	case localUsage:
 		m.inTok, m.outTok = e.in, e.out
+	case localPrompt, localRead:
+		// A message the agent read while it worked shows where it read it;
+		// one sent as a turn ended starts the next turn.
+		if m.shown[e.id] {
+			return
+		}
+		m.shown[e.id] = true
+		note := ""
+		if e.cut {
+			note = "stopped what it was doing to read this"
+		}
+		m.appendUser(e.text, note)
+		if m.dropWaiting(e.id) {
+			m.layout()
+			return
+		}
 	default:
 		return
 	}
@@ -302,9 +424,9 @@ func (m *localTUI) closeStreaming() {
 	}
 }
 
-func (m *localTUI) appendUser(text string) {
+func (m *localTUI) appendUser(text, note string) {
 	m.closeStreaming()
-	m.blocks = append(m.blocks, block{kind: blkUser, text: text})
+	m.blocks = append(m.blocks, block{kind: blkUser, text: text, note: note})
 }
 
 func (m *localTUI) appendNotice(styled string, isErr bool) {
@@ -363,6 +485,9 @@ func (m *localTUI) renderBlock(i int) string {
 	switch b.kind {
 	case blkUser:
 		s = styleUserMsg.Width(m.innerWidth()).Render("❯ " + b.text)
+		if b.note != "" {
+			s += "\n" + styleDim.Render("  "+b.note)
+		}
 	case blkAssistant:
 		s = styleAsstDot.Render("⏺") + " " + m.markdown(b.text)
 	case blkTool:
@@ -464,9 +589,14 @@ func (m *localTUI) refresh() {
 // width-dependent Markdown renderer.
 func (m *localTUI) layout() {
 	// The banner now scrolls inside the viewport, so only the input box (rounded
-	// border: 3 rows) and the status line (1 row) are fixed chrome.
+	// border: 3 rows), the status line (1 row) and the waiting messages are
+	// fixed chrome.
 	const inputH, statusH = 3, 1
-	vpH := max(m.height-inputH-statusH, 3)
+	waitH := 0
+	if w := m.waitingView(); w != "" {
+		waitH = lipgloss.Height(w)
+	}
+	vpH := max(m.height-inputH-statusH-waitH, 3)
 	if !m.ready {
 		m.vp = viewport.New(m.width, vpH)
 		m.ready = true
@@ -509,7 +639,38 @@ func (m *localTUI) View() string {
 	}
 	inputBox := styleInputBorder.Width(m.width - 2).Render(m.input.View())
 	// No fixed header: the banner lives at the top of the scrolling transcript.
-	return lipgloss.JoinVertical(lipgloss.Left, m.vp.View(), inputBox, m.statusView())
+	parts := []string{m.vp.View()}
+	if w := m.waitingView(); w != "" {
+		parts = append(parts, w)
+	}
+	parts = append(parts, inputBox, m.statusView())
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+}
+
+// waitingView shows the messages the agent has not read yet, below the
+// conversation and above the prompt, and when it reads them; "" when none
+// waits.
+func (m *localTUI) waitingView() string {
+	if len(m.waiting) == 0 {
+		return ""
+	}
+	lines := make([]string, 0, len(m.waiting)+1)
+	now := false
+	for _, w := range m.waiting {
+		lines = append(lines, "❯ "+truncLine(w.text, max(m.width-leftGutter-rightGutter-4, 1)))
+		now = now || w.now
+	}
+	hint := "reads this after its current step"
+	switch {
+	case now && len(m.waiting) > 1:
+		hint = "stopping its current step to read these"
+	case now:
+		hint = "stopping its current step to read this"
+	case len(m.waiting) > 1:
+		hint = "reads these after its current step"
+	}
+	lines = append(lines, "  "+hint+" · ↑ to edit")
+	return indentLines(styleDim.Render(strings.Join(lines, "\n")), leftGutter)
 }
 
 // bannerView is the wordmark shown once at the top of the transcript (it scrolls
@@ -532,6 +693,9 @@ func (m *localTUI) statusView() string {
 		left = m.spin.View() + " " + left
 	}
 	right := "↑↓ scroll · Ctrl+O expand · /model · Ctrl+D quit"
+	if m.running {
+		right = "Ctrl+J send now · ↑↓ scroll · Ctrl+O expand · Ctrl+D quit"
+	}
 	gap := max(m.width-leftGutter-lipgloss.Width(left)-lipgloss.Width(right), 1)
 	return strings.Repeat(" ", leftGutter) + styleDim.Render(left) + strings.Repeat(" ", gap) + styleDim.Render(right)
 }
@@ -555,6 +719,9 @@ Commands:
   /model [name]   switch model (name switches directly; none lists the models your key reaches)
   /help           show this help
   /quit, /exit    leave (or Ctrl+D)
+While it works: Enter sends a message it reads after its current step ·
+Ctrl+J (or Alt+Enter) sends one it stops its step to read · ↑ on an empty
+prompt takes back what it has not read.
 Ctrl+O expands/folds tool output · ↑↓ or PgUp/PgDn scroll.`)
 }
 
@@ -568,6 +735,7 @@ var (
 		"Tip: /model switches models mid-session.",
 		"Tip: ↑/↓ or PgUp/PgDn scroll the transcript.",
 		"Tip: run with -p \"…\" for a one-shot, scriptable answer.",
+		"Tip: type while it works; Ctrl+J has it read your message now.",
 	}
 )
 
@@ -584,7 +752,7 @@ func runLocalTUI(ctx context.Context, version, dir string, brain localModel) (er
 	// No mouse capture: it would disable the terminal's native text selection.
 	// Scrolling is via the keyboard (↑/↓, PgUp/PgDn).
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithContext(ctx))
-	m.prog = p
+	m.post = p.Send
 	_, err = p.Run()
 	return err
 }
