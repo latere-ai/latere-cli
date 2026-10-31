@@ -238,6 +238,66 @@ func TestLocalMessageWhileACommandRunsIsReadAtTheNextStep(t *testing.T) {
 	}
 }
 
+// slowWatchStore delivers what a watch of the log sees late, as a busy
+// goroutine would.
+type slowWatchStore struct{ session.Store }
+
+func (s slowWatchStore) Watch(ctx context.Context, id string, from uint64) (<-chan session.Event, error) {
+	in, err := s.Store.Watch(ctx, id, from)
+	if err != nil {
+		return nil, err
+	}
+	out := make(chan session.Event)
+	go func() {
+		defer close(out)
+		for e := range in {
+			select {
+			case <-time.After(50 * time.Millisecond):
+			case <-ctx.Done():
+				return
+			}
+			select {
+			case out <- e:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return out, nil
+}
+
+// TestLocalAMessageShowsBeforeTheAnswerThatReadIt: however late the watch
+// of the log delivers, the terminal is told a message the step's request
+// read before the answer that request streams.
+func TestLocalAMessageShowsBeforeTheAnswerThatReadIt(t *testing.T) {
+	rec := &recorder{}
+	agent := startAgent(t, slowWatchStore{session.NewMemoryStore()}, scriptedModel(t, `steps:
+  - tool_calls:
+      - name: bash
+        input: {command: "`+gateCommand+`"}
+  - text: "Using port 9000."
+`), rec.emit)
+	done := turnAsync(t, agent, "start the server")
+	rec.waitFor(t, func(e localEvent) bool { return e.kind == localToolUse })
+	if _, _, err := agent.send(t.Context(), "use port 9000", false); err != nil {
+		t.Fatal(err)
+	}
+	openGate(t, agent)
+	if err := waitTurn(t, done); err != nil {
+		t.Fatalf("turn: %v", err)
+	}
+	var order []localEventKind
+	for _, e := range rec.all() {
+		switch e.kind {
+		case localToolUse, localToolResult, localRead, localText:
+			order = append(order, e.kind)
+		}
+	}
+	if want := []localEventKind{localToolUse, localToolResult, localRead, localText}; !slices.Equal(order, want) {
+		t.Fatalf("the terminal was told %v, want %v", order, want)
+	}
+}
+
 // TestLocalSendNowMovesACommand sends a message to be read now while a
 // command runs: the host moves the command to the background, the call
 // returns within the grace, and the next request of the same turn reads

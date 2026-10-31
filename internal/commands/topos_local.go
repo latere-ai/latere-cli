@@ -160,10 +160,12 @@ type localAgent struct {
 	sendMu  sync.Mutex
 	driving bool
 
-	// log is the session's log as record has told it, through seen. Only
-	// the drive that runs touches them, and drives never overlap.
-	log  []session.Event
-	seen uint64
+	// log is the session's log as record has told it, through seen. recMu
+	// orders record between the drive's watch of the log and the catch-up
+	// a step's first streamed delta makes.
+	recMu sync.Mutex
+	log   []session.Event
+	seen  uint64
 }
 
 // newLocalAgent starts a session in dir on model, telling emit what each
@@ -268,7 +270,7 @@ func (a *localAgent) config(ctx context.Context, _ session.Session) (harness.Con
 		Policy:       harness.Policy{Mode: harness.ModeConfirm, AlwaysAllow: a.tools.Names()},
 		Instructions: localSystemPrompt,
 		Prompt:       prompts.HarnessOptions{Host: true},
-		Observer:     localObserver{emit: a.emit},
+		Observer:     &localObserver{emit: a.emit, catchUp: a.catchUp},
 		Checkpoint: func(context.Context, int, string) (*session.CheckpointRef, error) {
 			return nil, nil
 		},
@@ -423,7 +425,10 @@ func (a *localAgent) more(ctx context.Context) (bool, error) {
 func (a *localAgent) driveOnce(ctx context.Context) (harness.Outcome, error) {
 	watching, stop := context.WithCancel(ctx)
 	defer stop()
-	watch, err := a.store.Watch(watching, a.id, a.seen+1)
+	a.recMu.Lock()
+	from := a.seen + 1
+	a.recMu.Unlock()
+	watch, err := a.store.Watch(watching, a.id, from)
 	if err != nil {
 		return harness.Outcome{}, err
 	}
@@ -436,14 +441,27 @@ func (a *localAgent) driveOnce(ctx context.Context) (harness.Outcome, error) {
 	out, derr := a.runner.Drive(ctx, a.id)
 	stop()
 	wg.Wait()
-	rest, err := a.store.Events(context.WithoutCancel(ctx), a.id, a.seen+1, 0)
-	if err != nil {
+	if err := a.catchUp(context.WithoutCancel(ctx)); err != nil {
 		return out, errors.Join(derr, err)
 	}
-	for _, e := range rest {
-		a.record(e)
-	}
 	return out, derr
+}
+
+// catchUp tells emit every event the log holds that it has not told yet.
+// A step's first streamed delta calls it, so a message the step's request
+// read, and the calls and results before it, show before the answer that
+// streams, which the watch alone, on its own goroutine, does not order.
+func (a *localAgent) catchUp(ctx context.Context) error {
+	a.recMu.Lock()
+	defer a.recMu.Unlock()
+	evs, err := a.store.Events(ctx, a.id, a.seen+1, 0)
+	if err != nil {
+		return err
+	}
+	for _, e := range evs {
+		a.recordLocked(e)
+	}
+	return nil
 }
 
 // stopError is what a turn's stop says to the person: nothing for a turn
@@ -483,8 +501,19 @@ func textOf(content []lux.Block) string {
 // record tells emit what one event of the log shows the person: a call of
 // the session's own thread, its result, a request's tokens, a person's
 // message that starts a turn, and each waiting message a messages.read
-// names, where it names it. Events reach it in sequence order.
+// names, where it names it. Events reach it in sequence order, and one it
+// told already is told once.
 func (a *localAgent) record(e session.Event) {
+	a.recMu.Lock()
+	defer a.recMu.Unlock()
+	a.recordLocked(e)
+}
+
+// recordLocked is record under recMu.
+func (a *localAgent) recordLocked(e session.Event) {
+	if e.Seq <= a.seen {
+		return
+	}
 	a.log = append(a.log, e)
 	a.seen = e.Seq
 	switch e.Type {
@@ -531,16 +560,35 @@ func (a *localAgent) record(e session.Event) {
 }
 
 // localObserver tells emit the text of the session's own thread as the
-// model streams it.
-type localObserver struct{ emit func(localEvent) }
+// model streams it, after catchUp told what the log holds before the
+// step's request, at each step's first delta.
+type localObserver struct {
+	emit    func(localEvent)
+	catchUp func(context.Context) error
 
-func (o localObserver) OnDelta(d harness.Delta) {
-	if d.Subagent == "" && d.Event.Type == ir.EventTextDelta && d.Event.Delta != "" {
+	mu         sync.Mutex
+	turn, step int
+}
+
+func (o *localObserver) OnDelta(d harness.Delta) {
+	if d.Subagent != "" {
+		return
+	}
+	o.mu.Lock()
+	first := d.Turn != o.turn || d.Step != o.step
+	o.turn, o.step = d.Turn, d.Step
+	o.mu.Unlock()
+	if first {
+		if err := o.catchUp(context.Background()); err != nil {
+			slog.Warn("the local agent could not read the log before a step's answer", "error", err)
+		}
+	}
+	if d.Event.Type == ir.EventTextDelta && d.Event.Delta != "" {
 		o.emit(localEvent{kind: localText, text: d.Event.Delta})
 	}
 }
 
-func (localObserver) OnReset(string, int, int) {}
+func (*localObserver) OnReset(string, int, int) {}
 
 // localEventKind is what one localEvent is.
 type localEventKind int
