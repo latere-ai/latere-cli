@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.39.0 - 2026-10-31
+
 ### Added
 
 - **`latere agents run` takes a message while the agent works.** Press
