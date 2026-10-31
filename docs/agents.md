@@ -32,6 +32,22 @@ Inside the interactive session, `/model <name>` switches the model,
 `/model` alone lists the models your model key reaches, `/help` lists the
 commands, and `/quit` leaves.
 
+### Typing while the agent works
+
+You don't have to wait for the agent to finish before you say more. While
+it works:
+
+| Key | What happens |
+|---|---|
+| Enter | Sends your message. It shows above the prompt until the agent reads it after its current step, then appears in the conversation where the agent read it. |
+| Ctrl+J | Sends your message and has the agent stop its current step to read it. A running command moves to the background and keeps running; anything else still running after a second is stopped. The agent then reads your message. Alt+Enter does the same where your terminal sends Option or Alt as Esc. |
+| Up, with an empty prompt | Takes back the messages the agent hasn't read yet and puts them in the prompt to edit. A message it already read stays in the conversation. |
+
+Ctrl+J stops the agent's step because you asked it to, so it isn't
+reported as an error. With nothing running, Ctrl+J sends as Enter does.
+Most terminals send the same key for Shift+Enter or Ctrl+Enter as for
+Enter, so neither one sends now.
+
 ### Choosing the model
 
 `latere agents run` uses the first of these that is available:

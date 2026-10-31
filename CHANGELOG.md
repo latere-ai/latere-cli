@@ -10,6 +10,15 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Added
+
+- **`latere agents run` takes a message while the agent works.** Press
+  Enter and the message waits above the prompt until the agent reads it
+  after its current step, then shows in the conversation where it was read.
+  Ctrl+J has the agent stop its step to read the message now: a running
+  command moves to the background and keeps running. Up on an empty prompt
+  takes back what the agent hasn't read yet, so you can edit it.
+
 ## v0.38.0 - 2026-10-30
 
 ### Added
