@@ -30,6 +30,7 @@ specs/
   020-memory-command.md              (implemented: latere memory lists, shows, adds, changes, moves, deletes, restores, exports and imports what Latere remembers, and turns its settings on or off)
   021-app-name.md                    (implemented: latere apps name changes the name people read for an app and keeps its address)
   022-memory-tidies.md               (implemented: latere memory tidies lists what Tidy memory changed each night, shows it as a diff, undoes it, and applies or declines what waits)
+  023-messages-while-the-agent-works.md (in-progress: latere agents run takes a message typed while the agent works, reads it at its next step, sends it now with Ctrl+J, and takes it back with Up)
 ```
 
 ## Status
@@ -159,6 +160,10 @@ Where each spec stands:
   and `apply`, `decline` and `undo` decide its changes, one memory or all;
   `latere memory settings` gains `chats` and `review`. Built on
   2026-10-30, not released.
+- `023-messages-while-the-agent-works.md`: `latere agents run` sends a
+  message typed while the agent works, shows it above the prompt until the
+  agent reads it at its next step, sends it now with Ctrl+J, and takes it
+  back with Up, after topos spec 098. Built on 2026-10-31, not released.
 
 One surface shipped without a dedicated design record: the token-lifecycle
 work, which [docs/login-and-tokens.md](../docs/login-and-tokens.md) documents.
