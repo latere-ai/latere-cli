@@ -16,6 +16,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -152,11 +153,27 @@ type localAgent struct {
 	model localModel
 	// in and out are the tokens the session's requests read and wrote.
 	in, out int64
+
+	// sendMu orders a message's append against a drive's last look for
+	// input, so a message sent as a drive ends is either seen by that
+	// drive or starts the next one; driving is set while a drive runs.
+	sendMu  sync.Mutex
+	driving bool
+
+	// log is the session's log as record has told it, through seen. Only
+	// the drive that runs touches them, and drives never overlap.
+	log  []session.Event
+	seen uint64
 }
 
 // newLocalAgent starts a session in dir on model, telling emit what each
 // turn does.
 func newLocalAgent(ctx context.Context, dir string, model localModel, emit func(localEvent)) (*localAgent, error) {
+	return newLocalAgentOn(ctx, session.NewMemoryStore(), dir, model, emit)
+}
+
+// newLocalAgentOn is newLocalAgent with the session kept in store.
+func newLocalAgentOn(ctx context.Context, store session.Store, dir string, model localModel, emit func(localEvent)) (*localAgent, error) {
 	workdir, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, err
@@ -165,7 +182,7 @@ func newLocalAgent(ctx context.Context, dir string, model localModel, emit func(
 	if err != nil {
 		return nil, err
 	}
-	a := &localAgent{store: session.NewMemoryStore(), workdir: workdir, dataDir: dataDir, emit: emit, model: model}
+	a := &localAgent{store: store, workdir: workdir, dataDir: dataDir, emit: emit, model: model}
 	if err = a.start(ctx); err != nil {
 		return nil, errors.Join(err, a.close(context.WithoutCancel(ctx)))
 	}
@@ -258,85 +275,250 @@ func (a *localAgent) config(ctx context.Context, _ session.Session) (harness.Con
 	}, nil
 }
 
-// turn sends prompt and runs the turn it starts to its end, telling emit
-// each call, its result and the tokens used as the log records them.
+// turn sends prompt and runs the turn it starts to its end, and each turn
+// after it that reads a message sent meanwhile, telling emit each call,
+// its result and the tokens used as the log records them. A prompt sent
+// while another drive runs is that drive's to read.
 func (a *localAgent) turn(ctx context.Context, prompt string) error {
-	start, err := a.store.Get(ctx, a.id)
-	if err != nil {
+	_, start, err := a.send(ctx, prompt, false)
+	if err != nil || !start {
 		return err
 	}
+	return a.drive(ctx)
+}
+
+// send appends a person's message to the session and returns its event
+// id. While a drive runs the message waits, and the drive's turn reads it
+// at its next step, or stops its step to read it when now is set (topos
+// spec 098). Otherwise start is set: the caller drives the turn the
+// message starts.
+func (a *localAgent) send(ctx context.Context, text string, now bool) (id string, start bool, err error) {
+	a.sendMu.Lock()
+	defer a.sendMu.Unlock()
 	msg, err := session.NewEvent(session.TypeUserMessage, session.UserMessage{
-		Sender: a.person, Content: []lux.Block{{Type: ir.BlockText, Text: prompt}},
+		Sender: a.person, Content: []lux.Block{{Type: ir.BlockText, Text: text}}, SendNow: now && a.driving,
 	}, time.Now())
 	if err != nil {
-		return err
+		return "", false, err
 	}
-	evs := []session.Event{msg}
-	session.Stamp(a.id, start.LastSeq, evs)
-	if _, err = a.store.Append(ctx, a.id, start.LastSeq, evs); err != nil {
-		return err
+	if err := a.appendChecked(ctx, msg, nil); err != nil {
+		return "", false, err
 	}
-	watching, stop := context.WithCancel(ctx)
-	defer stop()
-	watch, err := a.store.Watch(watching, a.id, start.LastSeq+1)
+	start = !a.driving
+	a.driving = true
+	return msg.ID, start, nil
+}
+
+// Why a withdrawal is refused: the agent read the message first, or the
+// message is not one a withdrawal takes back.
+var (
+	errAlreadyRead = errors.New("the agent already read the message")
+	errNotWaiting  = errors.New("the message is not waiting")
+)
+
+// withdraw takes back a waiting message the person sent, before a request
+// reads it (topos spec 098). The check runs on the log the withdrawal is
+// appended after, as the server's send route runs it, so a withdrawal and
+// the harness's messages.read of the same message never both stand.
+func (a *localAgent) withdraw(ctx context.Context, id string) error {
+	e, err := session.NewEvent(session.TypeUserWithdraw, session.UserWithdraw{Sender: a.person, EventID: id}, time.Now())
 	if err != nil {
 		return err
 	}
-	var (
-		wg   sync.WaitGroup
-		last uint64
-	)
+	return a.appendChecked(ctx, e, func(evs []session.Event) error {
+		return withdrawable(evs, id, a.person.Subject)
+	})
+}
+
+// withdrawable refuses a withdrawal of anything but a waiting message
+// subject sent that no request read and nobody withdrew.
+func withdrawable(evs []session.Event, id, subject string) error {
+	for _, w := range session.WaitingMessages(evs) {
+		if w.Event.ID != id {
+			continue
+		}
+		switch {
+		case w.Message.Sender.Subject != subject:
+			return fmt.Errorf("%w: %s was sent by %s", errNotWaiting, id, w.Message.Sender.Subject)
+		case w.State == session.MessageRead:
+			return errAlreadyRead
+		case w.State == session.MessageWithdrawn:
+			return fmt.Errorf("%w: %s was taken back already", errNotWaiting, id)
+		}
+		return nil
+	}
+	return fmt.Errorf("%w: %s was sent while the agent was idle, or is no message of this session", errNotWaiting, id)
+}
+
+// localAppendTries bounds how often an append is tried again after the
+// runner appended first.
+const localAppendTries = 8
+
+// appendChecked appends e after the log's last event when check, if any,
+// passes on the log through that event, and reads and checks again when
+// the runner appended first.
+func (a *localAgent) appendChecked(ctx context.Context, e session.Event, check func([]session.Event) error) error {
+	var err error
+	for range localAppendTries {
+		var evs []session.Event
+		if evs, err = a.store.Events(ctx, a.id, 1, 0); err != nil {
+			return err
+		}
+		if check != nil {
+			if err := check(evs); err != nil {
+				return err
+			}
+		}
+		var last uint64
+		if n := len(evs); n > 0 {
+			last = evs[n-1].Seq
+		}
+		batch := []session.Event{e}
+		session.Stamp(a.id, last, batch)
+		if _, err = a.store.Append(ctx, a.id, last, batch); !errors.Is(err, session.ErrSequenceConflict) {
+			return err
+		}
+	}
+	return err
+}
+
+// drive runs the session's turns until it is idle with nothing for a turn
+// to read. runner.Drive runs the next turn itself for a message a turn
+// left unread; a message appended after a turn's last status, which
+// Drive returned without seeing, is driven here.
+func (a *localAgent) drive(ctx context.Context) error {
+	var stops error
+	for {
+		out, err := a.driveOnce(ctx)
+		if err != nil {
+			a.sendMu.Lock()
+			a.driving = false
+			a.sendMu.Unlock()
+			return errors.Join(stops, err)
+		}
+		stops = errors.Join(stops, stopError(out))
+		more, err := a.more(ctx)
+		if err != nil || !more {
+			return errors.Join(stops, err)
+		}
+	}
+}
+
+// more reports input for another drive to read, and ends the drive when
+// there is none. It holds sendMu, so a message sent meanwhile is either
+// seen here or starts a drive of its own.
+func (a *localAgent) more(ctx context.Context) (bool, error) {
+	a.sendMu.Lock()
+	defer a.sendMu.Unlock()
+	evs, err := a.store.Events(ctx, a.id, 1, 0)
+	if err == nil && session.HasPendingInput(evs) {
+		return true, nil
+	}
+	a.driving = false
+	return false, err
+}
+
+// driveOnce runs runner.Drive once, telling emit each event the log
+// records meanwhile, and the rest before it returns.
+func (a *localAgent) driveOnce(ctx context.Context) (harness.Outcome, error) {
+	watching, stop := context.WithCancel(ctx)
+	defer stop()
+	watch, err := a.store.Watch(watching, a.id, a.seen+1)
+	if err != nil {
+		return harness.Outcome{}, err
+	}
+	var wg sync.WaitGroup
 	wg.Go(func() {
 		for e := range watch {
-			last = e.Seq
 			a.record(e)
 		}
 	})
 	out, derr := a.runner.Drive(ctx, a.id)
 	stop()
 	wg.Wait()
-	rest, err := a.store.Events(context.WithoutCancel(ctx), a.id, max(last, start.LastSeq)+1, 0)
+	rest, err := a.store.Events(context.WithoutCancel(ctx), a.id, a.seen+1, 0)
 	if err != nil {
-		return errors.Join(derr, err)
+		return out, errors.Join(derr, err)
 	}
 	for _, e := range rest {
 		a.record(e)
 	}
-	if derr != nil {
-		return derr
-	}
-	switch out.StopReason {
-	case session.StopEndTurn, session.StopCompleted:
+	return out, derr
+}
+
+// stopError is what a turn's stop says to the person: nothing for a turn
+// that ended, nor for one a message sent to be read now stopped, which is
+// the person's own choice (topos spec 098); any other stop is an error.
+func stopError(out harness.Outcome) error {
+	switch {
+	case out.StopReason == session.StopEndTurn, out.StopReason == session.StopCompleted:
+		return nil
+	case out.StopReason == session.StopInterrupted && out.Detail == session.DetailSendNow:
 		return nil
 	}
 	return fmt.Errorf("the turn stopped: %s %s", out.StopReason, out.Detail)
 }
 
+// decoded decodes e's payload into v, and logs a payload that does not
+// decode, which the terminal then does not show.
+func decoded(e session.Event, v any) bool {
+	if err := e.Decode(v); err != nil {
+		slog.Warn("the local agent skipped an event it could not read", "type", e.Type, "seq", e.Seq, "error", err)
+		return false
+	}
+	return true
+}
+
+// textOf joins the text blocks of content.
+func textOf(content []lux.Block) string {
+	var text []string
+	for _, b := range content {
+		if b.Type == ir.BlockText {
+			text = append(text, b.Text)
+		}
+	}
+	return strings.Join(text, "\n")
+}
+
 // record tells emit what one event of the log shows the person: a call of
-// the session's own thread, its result, and a request's tokens.
+// the session's own thread, its result, a request's tokens, a person's
+// message that starts a turn, and each waiting message a messages.read
+// names, where it names it. Events reach it in sequence order.
 func (a *localAgent) record(e session.Event) {
+	a.log = append(a.log, e)
+	a.seen = e.Seq
 	switch e.Type {
 	case session.TypeAgentToolUse:
 		var u session.AgentToolUse
-		if e.Decode(&u) != nil || e.Subagent != "" {
+		if e.Subagent != "" || !decoded(e, &u) {
 			return
 		}
 		a.emit(localEvent{kind: localToolUse, name: u.Name, input: u.Input})
 	case session.TypeToolResult:
 		var r session.ToolResult
-		if e.Decode(&r) != nil || e.Subagent != "" {
+		if e.Subagent != "" || !decoded(e, &r) {
 			return
 		}
-		var text []string
-		for _, b := range r.Content {
-			if b.Type == ir.BlockText {
-				text = append(text, b.Text)
+		a.emit(localEvent{kind: localToolResult, text: textOf(r.Content), isErr: r.IsError})
+	case session.TypeUserMessage:
+		var m session.UserMessage
+		if e.Subagent != "" || !decoded(e, &m) || m.Sender.Kind != session.SenderPerson {
+			return
+		}
+		// A message sent while a turn ran is shown where a messages.read
+		// names it; any other starts a turn.
+		if !slices.ContainsFunc(session.WaitingMessages(a.log), func(w session.Waiting) bool { return w.Event.ID == e.ID }) {
+			a.emit(localEvent{kind: localPrompt, id: e.ID, text: textOf(m.Content)})
+		}
+	case session.TypeMessagesRead:
+		for _, w := range session.WaitingMessages(a.log) {
+			if w.State == session.MessageRead && w.ReadAt == e.Seq {
+				a.emit(localEvent{kind: localRead, id: w.Event.ID, text: textOf(w.Message.Content), cut: w.CutForIt})
 			}
 		}
-		a.emit(localEvent{kind: localToolResult, text: strings.Join(text, "\n"), isErr: r.IsError})
 	case session.TypeModelRequest:
 		var mr session.ModelRequest
-		if e.Decode(&mr) != nil || mr.Usage == nil {
+		if !decoded(e, &mr) || mr.Usage == nil {
 			return
 		}
 		a.mu.Lock()
@@ -368,18 +550,25 @@ const (
 	localToolUse
 	localToolResult
 	localUsage
+	localPrompt
+	localRead
 )
 
 // localEvent is one thing the terminal shows of a turn: text as the model
-// streams it, a tool call with its input, a call's result, or the tokens the
-// session used so far. The line REPL and the full-screen TUI read the same
-// events.
+// streams it, a tool call with its input, a call's result, the tokens the
+// session used so far, a person's message that starts a turn, or a message
+// sent while a turn ran, where the agent read it. The line REPL and the
+// full-screen TUI read the same events.
 type localEvent struct {
-	kind    localEventKind
-	text    string
-	name    string
-	input   json.RawMessage
-	isErr   bool
+	kind  localEventKind
+	text  string
+	name  string
+	input json.RawMessage
+	isErr bool
+	// id is the event id of a localPrompt's or a localRead's message, and
+	// cut is set on a localRead whose message stopped its turn to be read.
+	id      string
+	cut     bool
 	in, out int64
 }
 
