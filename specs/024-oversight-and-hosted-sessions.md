@@ -1,10 +1,10 @@
 ---
-title: "`latere oversight` and `latere agents sessions`: a person, and their coding agent, inspect what Limen recorded and learned about them, and how each call of a hosted session was decided"
+title: "`latere oversight` and `latere agents sessions`: a person, and their coding agent, inspect what Limen recorded and learned about them, and how each tool call of a hosted session was decided"
 status: implemented
 depends_on:
   - specs/011-capability-commands.md
   - specs/015-evals-commands.md
-  - "CROSS-REPO: limen specs/009-explanations.md and its /v1/oversight route (v0.2.0); sdk-go oversight.ListCases, GetReliability, agents.Session.Policy and agents.ToolConfirmation (main after v0.23.0)"
+  - "CROSS-REPO: Limen's oversight API at /v1/oversight; sdk-go oversight.ListCases, GetReliability, agents.Session.Policy and agents.ToolConfirmation (main after v0.23.0)"
 affects:
   - go.mod (sdk-go main after v0.23.0, to be v0.24.0)
   - internal/commands/oversight.go, internal/commands/oversight_test.go
@@ -29,11 +29,11 @@ with the login they already have.
 
 | Fact | Where |
 |---|---|
-| Limen serves cases, explanations, what it learned, reliability, profiles, answers and forget to a person's own token at `https://api.latere.ai/v1/oversight`, audience `api.latere.ai` | limen `server/server.go`, `routes`; deployment `LIMEN_OIDC_AUDIENCE=limen,api.latere.ai` |
-| Limen's owner policy lets a caller act on the cases, reports and profiles whose subject is its own rendered subject, `<issuer>\|<sub>` | limen `server/auth.go`, `OwnerPolicy` |
-| Topos keys a hosted session's records in Limen by the person who started it, in every context, so the console reads them with the person's subject as the organization | platform `frontend/src/console/oversight/api.ts` |
-| A recorded `agent.tool_use` carries its verdict, mode, risk, review probability, attended, Limen's suggestion, and the layer and rule that decided it; Topos does not record the suggestion's ask kind | topos `session/event.go`, `AgentToolUse`, `Suggestion` |
-| The agents API lists a person's sessions newest first, each with its approval policy, at `https://api.latere.ai/v1/agents`, audience `api.latere.ai` | topos `internal/server/sessions.go`, `listSessions`; deployment `TOPOS_OIDC_AUDIENCE=topos,api.latere.ai` |
+| Limen serves cases, explanations, what it learned, reliability, profiles, answers and forget to a person's own token at `https://api.latere.ai/v1/oversight`, audience `api.latere.ai` | the oversight API; sdk-go `oversight` |
+| Limen's owner policy lets a caller act on the cases, reports and profiles whose subject is its own rendered subject, `<issuer>\|<sub>` | the oversight API; sdk-go `oversight.Subject` |
+| Topos keys a hosted session's records in Limen by the person who started it, in every context, so the console reads them with the person's subject as the organization | topos `internal/decisions/decisions.go`, `Decider.key` |
+| A recorded `agent.tool_use` carries its verdict, mode, risk, review probability, attended, Limen's suggestion, and the layer and rule that decided it; Topos up to v0.67.0 does not record the suggestion's ask kind, and Topos main after v0.67.0 does | topos `session/event.go`, `AgentToolUse`, `Suggestion` |
+| The agents API lists a person's sessions newest first, each with its approval policy, at `https://api.latere.ai/v1/agents`, audience `api.latere.ai` | topos `internal/server/sessions.go`, `listSessions` |
 
 ## Design
 
@@ -83,8 +83,9 @@ refused, 3 no answer. The type and wording moved to `apierror.go`.
 - **No join with Limen in `agents session`.** A per-call or per-page join
   would cost a request per call, or every case of the person; the footer
   names the oversight commands instead.
-- **No ask kind in the SDK's suggestion.** Topos does not record it, and
-  the SDK holds its models to the agents API's document.
+- **No ask kind in the SDK's suggestion.** Topos up to v0.67.0 does not
+  record it, and the SDK holds its models to the agents API's document, so
+  the command reads it from the event when the event carries it.
 
 ## Not in this spec
 
@@ -109,3 +110,9 @@ Built. Production returned the person's cases, what Limen learned, their
 hosted sessions and one session's calls with a locally built binary and
 the existing login. The release waits for sdk-go v0.24.0, which go.mod
 then names in place of the pseudo-version.
+
+Later, `docs/oversight.md` and the help say what Limen decides in
+`learned` mode and define a step as one tool call, which the
+`agents session` help and `docs/agents.md` use for the oversight
+commands. They say that a session from before the platform recorded the
+ask kind shows none.
