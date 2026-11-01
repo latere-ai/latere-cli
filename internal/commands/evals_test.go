@@ -489,9 +489,9 @@ func TestEvalsTokenFromTheEnvironment(t *testing.T) {
 // Every exit code of the group reaches the process unchanged, its message
 // printed.
 func TestHandleExitErrorKeepsTheEvalsCode(t *testing.T) {
-	for _, code := range []int{evalsExitFailure, evalsExitRefused, evalsExitNoAnswer} {
+	for _, code := range []int{exitFailure, exitRefused, exitNoAnswer} {
 		var buf bytes.Buffer
-		err := fmt.Errorf("evals: %w", &evalsExitError{code: code, err: errors.New("why")})
+		err := fmt.Errorf("evals: %w", &exitError{code: code, err: errors.New("why")})
 		if got := HandleExitError(&buf, err); got != code || buf.String() != "evals: why\n" {
 			t.Errorf("code %d = %d %q", code, got, buf.String())
 		}

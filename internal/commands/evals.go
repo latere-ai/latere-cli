@@ -14,8 +14,6 @@ import (
 	"iter"
 	"maps"
 	"math"
-	"net"
-	"net/http"
 	"net/url"
 	"os"
 	"slices"
@@ -69,34 +67,9 @@ const evalsPage = evals.MaxLimit
 // to serve. A variable so a test's stub can close at once.
 var evalsStreamFloor = 10 * time.Second
 
-// The exit codes of the evals commands (spec 015, after Examen spec 009's
-// release check): 0 is done, and a failed command says which of these it
-// is, so a CI job can tell a failed result from a refusal from an outage.
-const (
-	// evalsExitFailure is a result that is a failure, such as a watched
-	// experiment that was canceled.
-	evalsExitFailure = 1
-	// evalsExitRefused is a refusal because of the request: the same
-	// command gets the same answer.
-	evalsExitRefused = 2
-	// evalsExitNoAnswer is no answer yet: the service did not answer or
-	// was busy, or a wait ran out. The same command may succeed later.
-	evalsExitNoAnswer = 3
-)
-
-// evalsExitError is an evals command's error with the exit code
-// HandleExitError gives the process.
-type evalsExitError struct {
-	code int
-	err  error
-}
-
-func (e *evalsExitError) Error() string { return e.err.Error() }
-func (e *evalsExitError) Unwrap() error { return e.err }
-
 // evalsFailed is a result that is a failure, for exit code 1.
 func evalsFailed(format string, a ...any) error {
-	return &evalsExitError{code: evalsExitFailure, err: fmt.Errorf(format, a...)}
+	return &exitError{code: exitFailure, err: fmt.Errorf(format, a...)}
 }
 
 func newEvalsCmd() *cobra.Command {
@@ -166,14 +139,14 @@ func newEvalsClient(flagURL, authURL string) (*evalsClient, error) {
 	base := strings.TrimRight(cmp.Or(flagURL, os.Getenv(envEvalsURL), defaultEvalsURL), "/")
 	origin, ok := strings.CutSuffix(base, evals.BasePath)
 	if !ok {
-		return nil, &evalsExitError{code: evalsExitRefused, err: fmt.Errorf("%s is not an Evals API base URL: it ends in %s, as %s does", base, evals.BasePath, defaultEvalsURL)}
+		return nil, &exitError{code: exitRefused, err: fmt.Errorf("%s is not an Evals API base URL: it ends in %s, as %s does", base, evals.BasePath, defaultEvalsURL)}
 	}
 	cfg, err := api.Product{
 		BaseURL: origin, AuthURL: authURL, Audience: evalsAudience,
 		Token: strings.TrimSpace(os.Getenv(envEvalsToken)), Timeout: evalsTimeout,
 	}.Config()
 	if err != nil {
-		return nil, &evalsExitError{code: evalsExitRefused, err: err}
+		return nil, &exitError{code: exitRefused, err: err}
 	}
 	return &evalsClient{ev: evals.New(cfg), base: base, console: resolvePlatformURL("")}, nil
 }
@@ -226,83 +199,9 @@ func raws[T raw](items []T) []json.RawMessage {
 }
 
 // refused is what a command says of a call that failed, with its exit
-// code: the API's refusal in its code, sentence and the details a person
-// can act on; a bearer that could not be had; an API that could not be
-// reached; an answer that could not be read.
+// code, as apiRefused words it for Evals.
 func (c *evalsClient) refused(err error) error {
-	if e, ok := errors.AsType[*latere.TokenError](err); ok {
-		code := evalsExitRefused
-		if retryable(e.Err) {
-			code = evalsExitNoAnswer
-		}
-		return &evalsExitError{code: code, err: fmt.Errorf("cannot authenticate to Evals: %w", e.Err)}
-	}
-	if e, ok := errors.AsType[*latere.Error](err); ok {
-		code := evalsExitRefused
-		if retryableStatus(e.StatusCode) {
-			code = evalsExitNoAnswer
-		}
-		return &evalsExitError{code: code, err: evalsRefusal(e.StatusCode, e.Code, api.RefusalText(e), e.Details)}
-	}
-	if errors.Is(err, context.DeadlineExceeded) || retryable(err) {
-		return &evalsExitError{code: evalsExitNoAnswer, err: fmt.Errorf("reach the Evals API at %s: %w", c.base, err)}
-	}
-	if e := jsonError(err); e != nil {
-		return &evalsExitError{code: evalsExitNoAnswer, err: fmt.Errorf("read the Evals API's answer: %w", e)}
-	}
-	return err
-}
-
-// retryableStatus reports whether an answer with status may change when the
-// same request is sent again: a timeout, a rate limit or a server error.
-func retryableStatus(status int) bool {
-	return status == http.StatusRequestTimeout || status == http.StatusTooManyRequests || status >= 500
-}
-
-// retryable reports whether err is a failure the same request may not meet
-// again: a network failure, or an answer retryableStatus names.
-func retryable(err error) bool {
-	if e, ok := errors.AsType[*latere.Error](err); ok {
-		return retryableStatus(e.StatusCode)
-	}
-	if _, ok := errors.AsType[net.Error](err); ok {
-		return true
-	}
-	_, ok := errors.AsType[*url.Error](err)
-	return ok
-}
-
-// evalsRefusal is the sentence of a refusal: "<code>: <message>", then the
-// members of details a person can act on, one per line, and for a 401 the
-// command that signs in again.
-func evalsRefusal(status int, code, message string, details map[string]any) error {
-	var b strings.Builder
-	switch {
-	case code != "" && message != "":
-		b.WriteString(code + ": " + message)
-	case code != "":
-		b.WriteString(code)
-	case message != "":
-		b.WriteString(message)
-	case status != 0:
-		fmt.Fprintf(&b, "the Evals API answered HTTP %d", status)
-	default:
-		b.WriteString("the Evals API refused without saying why")
-	}
-	for _, key := range []string{"field", "reason", "constant", "figure"} {
-		switch v := details[key].(type) {
-		case string:
-			if v != "" {
-				fmt.Fprintf(&b, "\n%s: %s", key, v)
-			}
-		case float64:
-			fmt.Fprintf(&b, "\n%s: %s", key, strconv.FormatFloat(v, 'g', -1, 64))
-		}
-	}
-	if status == http.StatusUnauthorized {
-		b.WriteString("\nRun `latere login` and try again.")
-	}
-	return errors.New(stripANSI(b.String()))
+	return apiRefused("Evals", c.base, err)
 }
 
 // experimentLink is the console's page of an experiment.
@@ -609,11 +508,11 @@ current one marked. --json prints the API's answer.`,
 func printVersion(out io.Writer, raw json.RawMessage) error {
 	var v evals.Version
 	if err := json.Unmarshal(raw, &v); err != nil {
-		return &evalsExitError{code: evalsExitNoAnswer, err: fmt.Errorf("read the Evals API's answer: %w", err)}
+		return &exitError{code: exitNoAnswer, err: fmt.Errorf("read the Evals API's answer: %w", err)}
 	}
 	var fields map[string]any
 	if err := json.Unmarshal(raw, &fields); err != nil {
-		return &evalsExitError{code: evalsExitNoAnswer, err: fmt.Errorf("read the Evals API's answer: %w", err)}
+		return &exitError{code: exitNoAnswer, err: fmt.Errorf("read the Evals API's answer: %w", err)}
 	}
 	for _, k := range evalsRecordFields {
 		delete(fields, k)
@@ -1108,7 +1007,7 @@ event and its data as the API sent them.`,
 			w := &evalsWatch{c: c, id: args[0], out: cmd.OutOrStdout(), jsonOut: jsonF, now: time.Now}
 			err = w.follow(ctx)
 			if errors.Is(err, context.DeadlineExceeded) && ctx.Err() != nil && cmd.Context().Err() == nil {
-				return &evalsExitError{code: evalsExitNoAnswer, err: fmt.Errorf("%s did not end within %s", args[0], timeout)}
+				return &exitError{code: exitNoAnswer, err: fmt.Errorf("%s did not end within %s", args[0], timeout)}
 			}
 			return err
 		},
@@ -1166,7 +1065,7 @@ func (w *evalsWatch) follow(ctx context.Context) error {
 			return ctx.Err()
 		}
 		if streamErr == nil {
-			return &evalsExitError{code: evalsExitNoAnswer, err: fmt.Errorf("the progress stream of %s ended without its end frame", w.id)}
+			return &exitError{code: exitNoAnswer, err: fmt.Errorf("the progress stream of %s ended without its end frame", w.id)}
 		}
 		if e, ok := errors.AsType[*evals.StreamError](streamErr); ok {
 			return w.refused(e)
@@ -1176,14 +1075,14 @@ func (w *evalsWatch) follow(ctx context.Context) error {
 			continue
 		}
 		if errors.Is(streamErr, io.ErrUnexpectedEOF) {
-			return &evalsExitError{code: evalsExitNoAnswer, err: fmt.Errorf("the progress stream of %s could not be kept open: %w", w.id, streamErr)}
+			return &exitError{code: exitNoAnswer, err: fmt.Errorf("the progress stream of %s could not be kept open: %w", w.id, streamErr)}
 		}
-		if err := w.c.refused(streamErr); errors.As(err, new(*evalsExitError)) {
+		if err := w.c.refused(streamErr); errors.As(err, new(*exitError)) {
 			return err
 		}
 		// An event the stream could not read, such as one whose data is
 		// not JSON, may read when the stream is opened again.
-		return &evalsExitError{code: evalsExitNoAnswer, err: fmt.Errorf("read the progress stream of %s: %w", w.id, streamErr)}
+		return &exitError{code: exitNoAnswer, err: fmt.Errorf("read the progress stream of %s: %w", w.id, streamErr)}
 	}
 }
 
@@ -1200,11 +1099,11 @@ func (w *evalsWatch) refused(e *evals.StreamError) error {
 			return err
 		}
 	}
-	code := evalsExitRefused
+	code := exitRefused
 	if e.Retryable() {
-		code = evalsExitNoAnswer
+		code = exitNoAnswer
 	}
-	return &evalsExitError{code: code, err: evalsRefusal(0, e.Code, e.Message, e.Details)}
+	return &exitError{code: code, err: apiRefusal("Evals", 0, e.Code, e.Message, e.Details)}
 }
 
 // print prints one event: as it was sent with --json, else one line for
@@ -1215,7 +1114,7 @@ func (w *evalsWatch) print(ev *evals.StreamEvent) error {
 	}
 	line, err := w.line(ev)
 	if err != nil {
-		return &evalsExitError{code: evalsExitNoAnswer, err: fmt.Errorf("read the %s event of %s: %w", ev.Type, w.id, err)}
+		return &exitError{code: exitNoAnswer, err: fmt.Errorf("read the %s event of %s: %w", ev.Type, w.id, err)}
 	}
 	w.printLine(line)
 	return nil
@@ -1324,7 +1223,7 @@ func (w *evalsWatch) finish(ctx context.Context, ev *evals.StreamEvent) error {
 	}
 	var end evals.StreamEnd
 	if err := ev.Decode(&end); err != nil {
-		return &evalsExitError{code: evalsExitNoAnswer, err: fmt.Errorf("read the end of %s's progress stream: %w", w.id, err)}
+		return &exitError{code: exitNoAnswer, err: fmt.Errorf("read the end of %s's progress stream: %w", w.id, err)}
 	}
 	e, err := w.c.ev.GetExperiment(ctx, w.id)
 	if err != nil {
