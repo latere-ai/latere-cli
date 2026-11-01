@@ -12,8 +12,8 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // handleLocalCommand runs a slash command typed at the `latere agents run`
@@ -51,11 +51,11 @@ func switchLocalModel(ctx context.Context, name string, agent *localAgent) {
 	if target == "" {
 		list, err := fetchKeyModels(ctx)
 		if err != nil {
-			fmt.Println(styleDim.Render("could not list your models (" + err.Error() + "); use /model <name>"))
+			fmt.Println(paint(styleDim, "could not list your models ("+err.Error()+"); use /model <name>"))
 			return
 		}
 		if len(list) == 0 {
-			fmt.Println(styleDim.Render("your key reaches no models; use /model <name>"))
+			fmt.Println(paint(styleDim, "your key reaches no models; use /model <name>"))
 			return
 		}
 		chosen, perr := runModelPicker(ctx, list, agent.modelName())
@@ -66,7 +66,7 @@ func switchLocalModel(ctx context.Context, name string, agent *localAgent) {
 	}
 	b, err := buildLocalModel(ctx, target)
 	if err != nil {
-		fmt.Println(styleErr.Render("switch failed: " + err.Error()))
+		fmt.Println(paint(styleErr, "switch failed: "+err.Error()))
 		return
 	}
 	agent.setModel(b)
@@ -110,7 +110,7 @@ func newModelPicker(list []string, current string) modelPicker {
 func (m modelPicker) Init() tea.Cmd { return nil }
 
 func (m modelPicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	key, ok := msg.(tea.KeyMsg)
+	key, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return m, nil
 	}
@@ -132,7 +132,7 @@ func (m modelPicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m modelPicker) View() string {
+func (m modelPicker) View() tea.View {
 	var b strings.Builder
 	b.WriteString(lipgloss.NewStyle().Bold(true).Render("Select a model") + "\n\n")
 	for i, name := range m.models {
@@ -150,7 +150,7 @@ func (m modelPicker) View() string {
 		b.WriteString(cursor + label + "\n")
 	}
 	b.WriteString("\n" + styleDim.Render("[↑↓] move   [enter] select   [q] cancel") + "\n")
-	return b.String()
+	return tea.NewView(b.String())
 }
 
 // runModelPicker shows the picker and returns the chosen model id, or "" if the

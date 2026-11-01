@@ -19,6 +19,9 @@ import (
 	"testing"
 	"time"
 
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/colorprofile"
+
 	"latere.ai/x/pkg/llmdialect/ir"
 	"latere.ai/x/pkg/llmdialect/lux"
 	"latere.ai/x/topos/harness"
@@ -679,6 +682,41 @@ func TestLocalLoopEndToEnd(t *testing.T) {
 	}
 	if usage.in != 30 || usage.out != 6 {
 		t.Errorf("usage = %d in, %d out; want the session's 30 and 6", usage.in, usage.out)
+	}
+}
+
+// The line REPL prints a turn as plain text where stdout is not a
+// terminal, as a pipe or a file receives it, and styled where it is one.
+func TestLocalRendererOutput(t *testing.T) {
+	saved := lipgloss.Writer.Profile
+	t.Cleanup(func() { lipgloss.Writer.Profile = saved })
+	turn := func() string {
+		t.Helper()
+		out, err := captureStdout(func() error {
+			r := &localRenderer{}
+			r.render(localEvent{kind: localText, text: "Hello"})
+			r.render(localEvent{kind: localText, text: " world"})
+			r.render(localEvent{kind: localToolUse, name: "bash", input: json.RawMessage(`{"command":"ls\tx"}`)})
+			r.render(localEvent{kind: localToolResult, text: "ok\nmore"})
+			r.render(localEvent{kind: localToolResult, text: "bad", isErr: true})
+			r.endTurn()
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	const want = "\n⏺ Hello world\n\n⏺ bash (ls    x)\n  ⎿ ok more\n  ⎿ bad\n"
+
+	lipgloss.Writer.Profile = colorprofile.NoTTY
+	if got := turn(); got != want {
+		t.Fatalf("piped output = %q, want %q", got, want)
+	}
+	lipgloss.Writer.Profile = colorprofile.ANSI256
+	got := turn()
+	if !strings.Contains(got, "\x1b[") || ansiRE.ReplaceAllString(got, "") != want {
+		t.Fatalf("terminal output = %q, want %q styled", got, want)
 	}
 }
 

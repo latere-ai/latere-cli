@@ -17,14 +17,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/glamour"
-	"github.com/charmbracelet/glamour/ansi"
-	"github.com/charmbracelet/glamour/styles"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/glamour/v2"
+	"charm.land/glamour/v2/ansi"
+	"charm.land/glamour/v2/styles"
+	"charm.land/lipgloss/v2"
 )
 
 // The full-screen TUI for `latere agents run`, in the spirit of Claude Code /
@@ -133,6 +133,7 @@ func newLocalTUI(ctx context.Context, version, dir string, brain localModel) (*l
 	in := textinput.New()
 	in.Placeholder = "Ask anything, or /help"
 	in.Prompt = "❯ "
+	in.SetStyles(promptInputStyles())
 	in.Focus()
 	sp := spinner.New()
 	// A rotating arc — distinct from other assistants' star/braille spinners.
@@ -161,7 +162,7 @@ func (m *localTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 		m.layout()
 		return m, nil
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return m.onKey(msg)
 	case localEventMsg:
 		m.appendEvent(msg.ev)
@@ -199,11 +200,17 @@ func (m *localTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m *localTUI) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.Type {
-	case tea.KeyCtrlC, tea.KeyCtrlD:
+func (m *localTUI) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	// Enter is matched on the key alone: where the terminal tells
+	// Shift+Enter and Ctrl+Enter apart from Enter, they send as Enter does,
+	// as they do where it cannot.
+	if msg.Code == tea.KeyEnter {
+		return m.onEnter(msg.Mod.Contains(tea.ModAlt))
+	}
+	switch msg.String() {
+	case "ctrl+c", "ctrl+d":
 		return m, tea.Quit
-	case tea.KeyCtrlO:
+	case "ctrl+o":
 		// Toggle tool-output folding for the whole transcript.
 		m.expand = !m.expand
 		for i := range m.blocks {
@@ -214,7 +221,7 @@ func (m *localTUI) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.refresh()
 		return m, nil
-	case tea.KeyUp:
+	case "up":
 		// ↑ on an empty prompt takes back what the agent has not read yet,
 		// as in Claude Code; otherwise it scrolls.
 		if m.input.Value() == "" && len(m.waiting) > 0 {
@@ -224,28 +231,35 @@ func (m *localTUI) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.vp, cmd = m.vp.Update(msg)
 		return m, cmd
-	case tea.KeyPgUp, tea.KeyPgDown, tea.KeyDown:
+	case "pgup", "pgdown", "down":
 		// Scroll the transcript (the input is single-line, so ↑/↓ are free).
 		var cmd tea.Cmd
 		m.vp, cmd = m.vp.Update(msg)
 		return m, cmd
-	case tea.KeyEnter, tea.KeyCtrlJ:
-		line := strings.TrimSpace(m.input.Value())
-		if line == "" {
-			return m, nil
-		}
-		m.input.Reset()
-		if strings.HasPrefix(line, "/") {
-			return m.onSlash(line)
-		}
+	case "ctrl+j":
 		// Ctrl+J is a line feed, which a terminal sends apart from Enter's
-		// carriage return; Alt+Enter arrives as Enter with Alt where the
-		// terminal sends Option or Alt as Esc.
-		return m.submit(line, msg.Type == tea.KeyCtrlJ || msg.Alt)
+		// carriage return.
+		return m.onEnter(true)
 	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	return m, cmd
+}
+
+// onEnter sends what the prompt holds, or runs it as a slash command; now
+// has the agent stop its current step to read it. Ctrl+J sends now, and so
+// does Alt+Enter, which arrives as Enter with Alt where the terminal sends
+// Option or Alt as Esc.
+func (m *localTUI) onEnter(now bool) (tea.Model, tea.Cmd) {
+	line := strings.TrimSpace(m.input.Value())
+	if line == "" {
+		return m, nil
+	}
+	m.input.Reset()
+	if strings.HasPrefix(line, "/") {
+		return m.onSlash(line)
+	}
+	return m.submit(line, now)
 }
 
 // submit sends line to the agent. An idle agent starts a turn on it; one
@@ -556,7 +570,7 @@ const (
 
 // innerWidth is the width transcript content wraps to, leaving left/right gutters.
 func (m *localTUI) innerWidth() int {
-	if w := m.vp.Width - leftGutter - rightGutter; w > 1 {
+	if w := m.vp.Width() - leftGutter - rightGutter; w > 1 {
 		return w
 	}
 	return 1
@@ -598,12 +612,13 @@ func (m *localTUI) layout() {
 	}
 	vpH := max(m.height-inputH-statusH-waitH, 3)
 	if !m.ready {
-		m.vp = viewport.New(m.width, vpH)
+		m.vp = viewport.New(viewport.WithWidth(m.width), viewport.WithHeight(vpH))
 		m.ready = true
 	} else {
-		m.vp.Width, m.vp.Height = m.width, vpH
+		m.vp.SetWidth(m.width)
+		m.vp.SetHeight(vpH)
 	}
-	m.input.Width = m.width - 6
+	m.input.SetWidth(m.width - 6)
 	m.setupGlamour(m.innerWidth() - 2)
 	m.refresh()
 }
@@ -633,11 +648,22 @@ func (m *localTUI) setupGlamour(w int) {
 	}
 }
 
-func (m *localTUI) View() string {
+// View is the whole screen, on the terminal's alternate screen so the
+// session leaves the scrollback as it found it.
+func (m *localTUI) View() tea.View {
+	v := tea.NewView(m.frame())
+	v.AltScreen = true
+	return v
+}
+
+// frame renders the screen: the transcript, the waiting messages, the
+// prompt and the status line.
+func (m *localTUI) frame() string {
 	if !m.ready {
 		return "Starting the Latere agent…"
 	}
-	inputBox := styleInputBorder.Width(m.width - 2).Render(m.input.View())
+	// The box's width includes its border.
+	inputBox := styleInputBorder.Width(m.width).Render(m.input.View())
 	// No fixed header: the banner lives at the top of the scrolling transcript.
 	parts := []string{m.vp.View()}
 	if w := m.waitingView(); w != "" {
@@ -750,11 +776,23 @@ func runLocalTUI(ctx context.Context, version, dir string, brain localModel) (er
 	}
 	defer func() { err = errors.Join(err, m.agent.close(context.WithoutCancel(ctx))) }()
 	// No mouse capture: it would disable the terminal's native text selection.
-	// Scrolling is via the keyboard (↑/↓, PgUp/PgDn).
-	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithContext(ctx))
+	// Scrolling is via the keyboard (↑/↓, PgUp/PgDn). View puts the session
+	// on the alternate screen.
+	p := tea.NewProgram(m, tea.WithContext(ctx))
 	m.post = p.Send
 	_, err = p.Run()
 	return err
+}
+
+// promptInputStyles style a text input as the terminal's own text: the
+// prompt and what is typed in its default color, the placeholder dim, and
+// the cursor a reversed cell, focused or not.
+func promptInputStyles() textinput.Styles {
+	s := textinput.DefaultDarkStyles()
+	s.Focused.Prompt = lipgloss.NewStyle()
+	s.Blurred = s.Focused
+	s.Cursor.Color = lipgloss.NoColor{}
+	return s
 }
 
 // Styles specific to the local TUI (block styles are shared from topos_local.go).

@@ -22,7 +22,7 @@ import (
 	"sync"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/latere-ai/latere-cli/internal/api"
 )
@@ -324,7 +324,7 @@ func TestProviderConfigMovesFromLegacyName(t *testing.T) {
 }
 
 func TestAuthPickerSelections(t *testing.T) {
-	enter := tea.KeyMsg{Type: tea.KeyEnter}
+	enter := tea.KeyPressMsg{Code: tea.KeyEnter}
 
 	// Cursor 0 = API key: Enter → entering; type, Enter → authAPIKey +
 	// value.
@@ -340,7 +340,7 @@ func TestAuthPickerSelections(t *testing.T) {
 	}
 	// Down to Ollama → authOllama.
 	m = newAuthModel()
-	m = m.updated(tea.KeyMsg{Type: tea.KeyDown}).updated(enter)
+	m = m.updated(tea.KeyPressMsg{Code: tea.KeyDown}).updated(enter)
 	if m.result.choice != authOllama {
 		t.Fatalf("second option = %v, want authOllama", m.result.choice)
 	}
@@ -351,8 +351,24 @@ func TestAuthPickerSelections(t *testing.T) {
 	}
 
 	// q cancels.
-	if got := newAuthModel().updated(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")}).result; got.choice != authCancel {
+	if got := newAuthModel().updated(tea.KeyPressMsg{Code: 'q', Text: "q"}).result; got.choice != authCancel {
 		t.Fatalf("q = %v, want authCancel", got.choice)
+	}
+}
+
+// The API key prompt shows its whole placeholder, and takes a key pasted
+// into the terminal.
+func TestAuthPickerAPIKeyPrompt(t *testing.T) {
+	m := newAuthModel().updated(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if got := ansiRE.ReplaceAllString(m.View().Content, ""); !strings.Contains(got, "API key: sk-ant-api03-...") {
+		t.Fatalf("the prompt shows\n%s\nwant the whole placeholder", got)
+	}
+	m = m.updated(tea.PasteMsg{Content: "sk-ant-api-pasted"}).updated(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.result.choice != authAPIKey || m.result.apiKey != "sk-ant-api-pasted" {
+		t.Fatalf("result = %+v, want the pasted key", m.result)
+	}
+	if got := newAuthModel().updated(tea.PasteMsg{Content: "j"}); got.cursor != 0 || got.entering {
+		t.Fatalf("a paste on the provider list moved it: cursor %d, entering %v", got.cursor, got.entering)
 	}
 }
 

@@ -12,9 +12,9 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // The auth picker shown by `latere agents run` when no model credential is
@@ -52,6 +52,7 @@ func newAuthModel() authModel {
 	in := textinput.New()
 	in.Placeholder = "sk-ant-api03-..."
 	in.Prompt = "API key: "
+	in.SetStyles(promptInputStyles())
 	return authModel{
 		options: []authOption{
 			{"Use an Anthropic API key", authAPIKey},
@@ -64,16 +65,22 @@ func newAuthModel() authModel {
 func (m authModel) Init() tea.Cmd { return nil }
 
 func (m authModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	key, ok := msg.(tea.KeyMsg)
+	if paste, ok := msg.(tea.PasteMsg); ok && m.entering {
+		// A key pasted into the terminal arrives in one message of its own.
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(paste)
+		return m, cmd
+	}
+	key, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return m, nil
 	}
 	if m.entering {
-		switch key.Type {
+		switch key.Code {
 		case tea.KeyEnter:
 			m.result = authResult{choice: authAPIKey, apiKey: strings.TrimSpace(m.input.Value())}
 			return m, tea.Quit
-		case tea.KeyEsc:
+		case tea.KeyEscape:
 			m.entering = false
 			return m, nil
 		}
@@ -113,13 +120,13 @@ var (
 	authDim   = lipgloss.NewStyle().Faint(true)
 )
 
-func (m authModel) View() string {
+func (m authModel) View() tea.View {
 	var b strings.Builder
 	b.WriteString(authTitle.Render("Latere agent") + "  " + authDim.Render("choose a model provider") + "\n\n")
 	if m.entering {
-		b.WriteString(m.input.View() + "\n\n")
+		b.WriteString(inputView(m.input) + "\n\n")
 		b.WriteString(authDim.Render("[enter] save   [esc] back") + "\n")
-		return b.String()
+		return tea.NewView(b.String())
 	}
 	for i, o := range m.options {
 		cursor := "  "
@@ -131,7 +138,18 @@ func (m authModel) View() string {
 		b.WriteString(cursor + label + "\n")
 	}
 	b.WriteString("\n" + authDim.Render("[↑↓] move   [enter] select   [q] cancel") + "\n")
-	return b.String()
+	return tea.NewView(b.String())
+}
+
+// inputView renders in. The text input shows only the first character of
+// its placeholder when it has no width, so an empty one is given the
+// placeholder's width; one with text keeps none, so a long key shows whole
+// rather than scrolling.
+func inputView(in textinput.Model) string {
+	if in.Value() == "" {
+		in.SetWidth(lipgloss.Width(in.Placeholder))
+	}
+	return in.View()
 }
 
 // runAuthPicker shows the provider picker and applies the choice: a stored

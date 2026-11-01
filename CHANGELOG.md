@@ -10,6 +10,13 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Changed
+
+- **`latere agents run` follows your terminal's colors more closely.**
+  With NO_COLOR set, bold, dim text and the prompt's cursor still show
+  while colors stay off, and formatted answers use only the colors your
+  terminal supports.
+
 ## v0.39.0 - 2026-10-31
 
 ### Added

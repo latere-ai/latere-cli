@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"latere.ai/x/topos/session"
 )
@@ -38,7 +38,7 @@ func TestLocalTUIFrameLayout(t *testing.T) {
 	m.Update(localEventMsg{ev: localEvent{kind: localToolUse, name: "bash", input: json.RawMessage(`{"command":"go build ./..."}`)}})
 	m.Update(localTurnDoneMsg{elapsed: 3 * time.Second})
 
-	frame := ansiRE.ReplaceAllString(m.View(), "")
+	frame := ansiRE.ReplaceAllString(m.View().Content, "")
 	for i, ln := range strings.Split(frame, "\n") {
 		if w := len([]rune(strings.TrimRight(ln, " "))); w > m.width {
 			t.Fatalf("line %d width %d exceeds terminal width %d: %q", i, w, m.width, ln)
@@ -49,6 +49,45 @@ func TestLocalTUIFrameLayout(t *testing.T) {
 	}
 	if !strings.Contains(frame, "bash") || !strings.Contains(frame, "3s") {
 		t.Fatalf("frame missing expected content (tool + timing):\n%s", frame)
+	}
+	// The prompt's box spans the terminal, its border included.
+	lines := strings.Split(frame, "\n")
+	if box := strings.TrimRight(lines[lineOf(lines, "╭")], " "); len([]rune(box)) != m.width {
+		t.Fatalf("the prompt's box is %d wide on a %d wide terminal: %q", len([]rune(box)), m.width, box)
+	}
+}
+
+// The session runs on the terminal's alternate screen from its first frame,
+// so it leaves the scrollback as it found it.
+func TestLocalTUIOnTheAltScreen(t *testing.T) {
+	m := newTestTUI(t)
+	if !m.View().AltScreen {
+		t.Fatal("the session's frame is not on the alternate screen")
+	}
+	m.ready = false
+	if v := m.View(); !v.AltScreen || v.Content != "Starting the Latere agent…" {
+		t.Fatalf("the frame before the terminal's size is known is %q, alternate screen %v", v.Content, v.AltScreen)
+	}
+}
+
+// Where the terminal tells Shift+Enter and Ctrl+Enter apart from Enter,
+// they send as Enter does; Alt+Enter alone sends to be read now.
+func TestLocalTUIModifiedEnterSends(t *testing.T) {
+	m := newTestTUI(t)
+	working(t, m)
+	typeLine(m, "shifted", tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModShift})
+	typeLine(m, "with ctrl", tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModCtrl})
+	if len(m.waiting) != 2 || m.waiting[0].now || m.waiting[1].now {
+		t.Fatalf("waiting = %+v, want both messages sent as Enter sends them", m.waiting)
+	}
+}
+
+// Text pasted into the terminal goes into the prompt.
+func TestLocalTUIPaste(t *testing.T) {
+	m := newTestTUI(t)
+	m.Update(tea.PasteMsg{Content: "pasted text"})
+	if got := m.input.Value(); got != "pasted text" {
+		t.Fatalf("the prompt holds %q, want the pasted text", got)
 	}
 }
 
@@ -93,8 +132,8 @@ func TestLocalTUISizingAndStreaming(t *testing.T) {
 	if !m.ready {
 		t.Fatal("WindowSizeMsg should mark the layout ready")
 	}
-	if m.vp.Height <= 0 || m.vp.Width != 100 {
-		t.Fatalf("viewport not sized: %dx%d", m.vp.Width, m.vp.Height)
+	if m.vp.Height() <= 0 || m.vp.Width() != 100 {
+		t.Fatalf("viewport not sized: %dx%d", m.vp.Width(), m.vp.Height())
 	}
 
 	// Assistant text streams into a single open assistant block.
@@ -178,7 +217,7 @@ func TestLocalTUIScrolls(t *testing.T) {
 		t.Fatal("new content should pin to the bottom")
 	}
 	// ↑ must scroll the transcript (routed to the viewport, not the input).
-	m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 	if m.vp.AtBottom() {
 		t.Fatal("↑ should scroll the transcript up, away from the bottom")
 	}
@@ -193,7 +232,7 @@ func TestLocalTUIResultFolding(t *testing.T) {
 		t.Fatalf("collapsed result = %q, want a '+N lines' summary", got)
 	}
 	// Ctrl+O expands: the full content is shown (more rows than the summary).
-	m.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
+	m.Update(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
 	expanded := m.renderBlock(len(m.blocks) - 1)
 	if strings.Count(expanded, "\n") < collapseThreshold {
 		t.Fatalf("expanded result should show all lines, got %q", expanded)
@@ -246,7 +285,7 @@ func TestLocalTUISlashCommands(t *testing.T) {
 }
 
 // typeLine types line into the prompt and presses key.
-func typeLine(m *localTUI, line string, key tea.KeyMsg) {
+func typeLine(m *localTUI, line string, key tea.KeyPressMsg) {
 	m.input.SetValue(line)
 	m.Update(key)
 }
@@ -295,7 +334,7 @@ func sentNow(t *testing.T, m *localTUI, id string) bool {
 
 // frameLines is m's frame without styles, line by line.
 func frameLines(m *localTUI) []string {
-	return strings.Split(ansiRE.ReplaceAllString(m.View(), ""), "\n")
+	return strings.Split(ansiRE.ReplaceAllString(m.View().Content, ""), "\n")
 }
 
 // lineOf is the index of the first line of lines that holds s, -1 for none.
@@ -310,7 +349,7 @@ func lineOf(lines []string, s string) int {
 func TestLocalTUIMessagesWhileItWorks(t *testing.T) {
 	m := newTestTUI(t)
 	working(t, m)
-	typeLine(m, "use port 9000", tea.KeyMsg{Type: tea.KeyEnter})
+	typeLine(m, "use port 9000", tea.KeyPressMsg{Code: tea.KeyEnter})
 	if len(m.waiting) != 1 || m.waiting[0].text != "use port 9000" || m.waiting[0].now {
 		t.Fatalf("waiting = %+v, want the message", m.waiting)
 	}
@@ -346,8 +385,8 @@ func TestLocalTUIMessagesWhileItWorks(t *testing.T) {
 		t.Error("the hint stayed after the agent read the message")
 	}
 
-	typeLine(m, "stop and read this", tea.KeyMsg{Type: tea.KeyCtrlJ})
-	typeLine(m, "and this", tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
+	typeLine(m, "stop and read this", tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl})
+	typeLine(m, "and this", tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt})
 	if len(m.waiting) != 2 || !m.waiting[0].now || !m.waiting[1].now {
 		t.Fatalf("waiting = %+v, want two messages sent to be read now", m.waiting)
 	}
@@ -372,20 +411,20 @@ func TestLocalTUIMessagesWhileItWorks(t *testing.T) {
 func TestLocalTUIUpTakesBackWaitingMessages(t *testing.T) {
 	m := newTestTUI(t)
 	working(t, m)
-	typeLine(m, "first", tea.KeyMsg{Type: tea.KeyEnter})
-	typeLine(m, "second", tea.KeyMsg{Type: tea.KeyEnter})
-	typeLine(m, "third", tea.KeyMsg{Type: tea.KeyEnter})
+	typeLine(m, "first", tea.KeyPressMsg{Code: tea.KeyEnter})
+	typeLine(m, "second", tea.KeyPressMsg{Code: tea.KeyEnter})
+	typeLine(m, "third", tea.KeyPressMsg{Code: tea.KeyEnter})
 	first, second, third := m.waiting[0].id, m.waiting[1].id, m.waiting[2].id
 	markRead(t, m, second)
 
 	m.input.SetValue("draft")
-	m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 	if len(m.waiting) != 3 || m.input.Value() != "draft" {
 		t.Fatalf("↑ with text in the prompt took back %+v, prompt %q", m.waiting, m.input.Value())
 	}
 
 	m.input.Reset()
-	m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 	if got := m.input.Value(); got != "first third" {
 		t.Fatalf("the prompt is %q, want the two messages the agent has not read", got)
 	}
@@ -400,10 +439,10 @@ func TestLocalTUIUpTakesBackWaitingMessages(t *testing.T) {
 		t.Fatalf("states: first %s, second %s, third %s", stateOf(evs, first), stateOf(evs, second), stateOf(evs, third))
 	}
 
-	typeLine(m, "fourth", tea.KeyMsg{Type: tea.KeyEnter})
+	typeLine(m, "fourth", tea.KeyPressMsg{Code: tea.KeyEnter})
 	markRead(t, m, m.waiting[1].id)
 	m.input.Reset()
-	m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 	if !strings.Contains(m.rawText(), "had already read these, so they stay") || m.input.Value() != "" {
 		t.Fatalf("transcript %q, prompt %q; want the note on both read messages and nothing back", m.rawText(), m.input.Value())
 	}
@@ -414,13 +453,13 @@ func TestLocalTUIUpTakesBackWaitingMessages(t *testing.T) {
 func TestLocalTUIStoreFailures(t *testing.T) {
 	m := newTestTUI(t)
 	working(t, m)
-	typeLine(m, "kept", tea.KeyMsg{Type: tea.KeyEnter})
+	typeLine(m, "kept", tea.KeyPressMsg{Code: tea.KeyEnter})
 	m.agent.store = &flakyStore{Store: m.agent.store, broken: true}
-	typeLine(m, "lost", tea.KeyMsg{Type: tea.KeyEnter})
+	typeLine(m, "lost", tea.KeyPressMsg{Code: tea.KeyEnter})
 	if len(m.waiting) != 1 || !strings.Contains(m.rawText(), "error: the store is down") {
 		t.Fatalf("waiting %+v, transcript %q; want the refusal said", m.waiting, m.rawText())
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 	if len(m.waiting) != 1 || m.input.Value() != "" || strings.Count(m.rawText(), "error: the store is down") != 2 {
 		t.Fatalf("waiting %+v, prompt %q, transcript %q; want the message kept and the refusal said", m.waiting, m.input.Value(), m.rawText())
 	}
@@ -452,7 +491,7 @@ func postTo(m *localTUI) <-chan tea.Msg {
 func TestLocalTUISendNowKeysOnAnIdleAgent(t *testing.T) {
 	m := newScriptedTUI(t, "steps:\n  - text: \"hi\"\n")
 	msgs := postTo(m)
-	typeLine(m, "hello", tea.KeyMsg{Type: tea.KeyCtrlJ})
+	typeLine(m, "hello", tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl})
 	if !m.running || len(m.waiting) != 0 {
 		t.Fatalf("Ctrl+J on an idle agent: running %v, waiting %+v; want a turn", m.running, m.waiting)
 	}
@@ -511,11 +550,11 @@ func TestLocalTUIMessageWhileACommandRunsEndToEnd(t *testing.T) {
     text: "Using port 9000."
 `)
 	msgs := postTo(m)
-	typeLine(m, "start the server", tea.KeyMsg{Type: tea.KeyEnter})
+	typeLine(m, "start the server", tea.KeyPressMsg{Code: tea.KeyEnter})
 	pump(t, m, msgs, func() bool {
 		return slices.ContainsFunc(m.blocks, func(b block) bool { return b.kind == blkTool })
 	})
-	typeLine(m, "use port 9000", tea.KeyMsg{Type: tea.KeyEnter})
+	typeLine(m, "use port 9000", tea.KeyPressMsg{Code: tea.KeyEnter})
 	if len(m.waiting) != 1 || lineOf(frameLines(m), "reads this after its current step") < 0 {
 		t.Fatalf("waiting = %+v, want the message above the prompt", m.waiting)
 	}

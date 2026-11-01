@@ -11,7 +11,7 @@ import (
 	"context"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 func TestModelPickerSelection(t *testing.T) {
@@ -24,8 +24,8 @@ func TestModelPickerSelection(t *testing.T) {
 	}
 
 	// Down then Enter selects the third model.
-	m2, _ := mp.Update(tea.KeyMsg{Type: tea.KeyDown})
-	m3, cmd := m2.(modelPicker).Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2, _ := mp.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	m3, cmd := m2.(modelPicker).Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if got := m3.(modelPicker).chosen; got != "claude-fable-5" {
 		t.Fatalf("chosen = %q, want claude-fable-5", got)
 	}
@@ -34,7 +34,7 @@ func TestModelPickerSelection(t *testing.T) {
 	}
 
 	// q cancels with no choice.
-	mc, _ := newModelPicker(list, "").Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	mc, _ := newModelPicker(list, "").Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
 	if mc.(modelPicker).chosen != "" {
 		t.Fatal("q should not choose a model")
 	}

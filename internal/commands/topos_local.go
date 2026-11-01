@@ -31,7 +31,7 @@ import (
 	"latere.ai/x/topos/runner"
 	"latere.ai/x/topos/session"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"golang.org/x/term"
 )
 
@@ -90,7 +90,7 @@ func runToposLocal(ctx context.Context, dir, modelName, oneShot, version string)
 	}
 	defer func() {
 		if cerr := agent.close(context.WithoutCancel(ctx)); cerr != nil {
-			fmt.Fprintln(os.Stderr, styleErr.Render("error: "+cerr.Error()))
+			fmt.Fprintln(os.Stderr, paint(styleErr, "error: "+cerr.Error()))
 		}
 	}()
 	turn := func(prompt string) error {
@@ -124,7 +124,7 @@ func runToposLocal(ctx context.Context, dir, modelName, oneShot, version string)
 			continue
 		}
 		if err := turn(line); err != nil {
-			fmt.Fprintln(os.Stderr, styleErr.Render("error: "+err.Error()))
+			fmt.Fprintln(os.Stderr, paint(styleErr, "error: "+err.Error()))
 		}
 	}
 }
@@ -631,6 +631,14 @@ var (
 	styleErr      = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
 )
 
+// paint renders s in style for the line REPL, which prints rather than
+// drawing through the full-screen program: the styles are cut down to what
+// stdout shows, and dropped where stdout is not a terminal, so piped and
+// one-shot output stays plain text. Errors on stderr follow stdout too.
+func paint(style lipgloss.Style, s string) string {
+	return lipgloss.Sprint(style.Render(s))
+}
+
 // localRenderer streams a run to the terminal as distinct blocks. It keeps the
 // small amount of state needed to know when an assistant text block is open, so
 // text, tool calls, and results are cleanly separated. The streamed text and
@@ -647,21 +655,21 @@ func (r *localRenderer) render(e localEvent) {
 	switch e.kind {
 	case localText:
 		if !r.inText {
-			fmt.Print("\n" + styleAsstDot.Render("⏺") + " ")
+			fmt.Print("\n" + paint(styleAsstDot, "⏺") + " ")
 			r.inText = true
 		}
 		fmt.Print(e.text)
 	case localToolUse:
 		r.closeText()
-		fmt.Printf("\n%s %s%s\n", styleToolDot.Render("⏺"),
-			styleToolName.Render(e.name), styleDim.Render(summarizeToolInput(e.input)))
+		fmt.Printf("\n%s %s%s\n", paint(styleToolDot, "⏺"),
+			paint(styleToolName, e.name), paint(styleDim, summarizeToolInput(e.input)))
 	case localToolResult:
 		line := truncLine(e.text, 120)
 		if e.isErr {
-			fmt.Printf("%s%s\n", styleDim.Render("  ⎿ "), styleErr.Render(line))
+			fmt.Printf("%s%s\n", paint(styleDim, "  ⎿ "), paint(styleErr, line))
 			return
 		}
-		fmt.Printf("%s%s\n", styleDim.Render("  ⎿ "), styleDim.Render(line))
+		fmt.Printf("%s%s\n", paint(styleDim, "  ⎿ "), paint(styleDim, line))
 	}
 }
 
