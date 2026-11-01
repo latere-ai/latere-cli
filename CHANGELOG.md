@@ -10,6 +10,15 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Fixed
+
+- **The oversight docs say what Limen decides in `learned` mode.** There,
+  Limen decides a step of a `progressive` session if it has evidence about
+  you, and elsewhere the rules and the risk score decide. The oversight
+  docs and help call one tool call of a session a step. `latere agents
+  session` says that a session from before the platform recorded why
+  Limen asks shows none.
+
 ## v0.41.0 - 2026-11-01
 
 ### Added

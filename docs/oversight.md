@@ -1,8 +1,16 @@
 # Oversight
 
-Limen is the platform's decision service. Before an agent's step runs, the
-session's rules decide it. For a step the rules leave open, Limen predicts
-how likely you are to allow it, from your own Allow and Deny answers.
+Limen is the platform's decision service. A step is one tool call of an
+agent in a session. Before a step runs, the session's rules decide it. For
+a step that the rules leave open, Limen predicts how likely you are to
+allow it, from your own Allow and Deny answers.
+
+In `learned` mode, Limen decides a step of a `progressive` session if it
+has evidence about you. Elsewhere, the rules and the risk score decide,
+and Limen only suggests. Limen has evidence if it suggests allow or block,
+or if it asks because your answers disagree (`split`). If it asks because
+you gave too few answers (`unsure`), it has no evidence yet.
+
 `latere oversight` shows what Limen recorded and learned about you, and
 lets you correct it. It uses your `latere login`.
 

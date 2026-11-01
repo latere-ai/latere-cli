@@ -197,16 +197,18 @@ each call it shows:
 - The chance that you were shown the call, and if a person started its
   turn (`attended`) or not (`unattended`).
 - Limen's suggestion, if the session asked for one: the verdict, the
-  chance that you allow the call, the uncertainty, and the ask kind when
-  the session recorded it.
+  chance that you allow the call, and the uncertainty. For an ask, it also
+  shows why Limen asks, `unsure` or `split`, if the session recorded it.
+  A session from before the platform recorded this shows none.
 - Your answer, if the call waited for you and you answered.
 
 A call of a subagent shows the subagent. `--json` prints the session as
 the API answered it, and each call's event with the answer to it.
 
 To learn why Limen suggested what it did, run `latere oversight explain
-<id>/<tool_use_id>`. To see your checks of these calls, run `latere
-oversight cases --session <id>`. [oversight.md](oversight.md) describes
+<id>/<tool_use_id>`. The oversight commands call each tool call a step.
+To see the steps of the session that Limen holds, with your checks of
+them, run `latere oversight cases --session <id>`. [oversight.md](oversight.md) describes
 these commands.
 
 The commands use your `latere login`. They exit 0 when they are done, 2
