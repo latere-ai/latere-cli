@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.40.1 - 2026-11-01
+
 ### Changed
 
 - A slug under three characters is approved per account by a platform admin,
