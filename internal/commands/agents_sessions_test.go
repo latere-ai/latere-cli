@@ -115,6 +115,9 @@ func TestAgentsSession(t *testing.T) {
 	if strings.Count(out, "   answered") != 1 || strings.Count(out, "   Limen suggested") != 1 {
 		t.Errorf("an answer or a suggestion is printed for a call that has none:\n%s", out)
 	}
+	if strings.Contains(out, "organization") {
+		t.Errorf("a session of a person's agent names an organization:\n%s", out)
+	}
 
 	out, _, code = runLatere(t, "", "agents", "session", "ses_1", "--json")
 	var got struct {
@@ -136,5 +139,25 @@ func TestAgentsSession(t *testing.T) {
 
 	if _, errOut, code := runLatere(t, "", "agents", "session", "ses_9"); code != exitRefused || !strings.Contains(errOut, "not_found") {
 		t.Errorf("an unknown session: exit %d, %s", code, errOut)
+	}
+}
+
+// A session of an organization's agent names the organization, and a call
+// Limen keeps in the organization's context names it too; a call keyed by
+// the person, or by no one as an older one is, names none.
+func TestAgentsSessionOfAnOrganizationsAgent(t *testing.T) {
+	s := newAgentsStub(t)
+	s.json("GET /sessions/ses_1", http.StatusOK, strings.Replace(agSession("ses_1", "Deploy", "progressive"), `"status":"idle"`, `"org":"org_7","status":"idle"`, 1))
+	s.json("GET /sessions/ses_1/events", http.StatusOK, `{"items":[`+
+		agEvent(1, "agent.tool_use", "", `{"tool_use_id":"toolu_1","name":"bash","input":{"command":"make deploy"},"verdict":"ask","decision_org":"org_7"}`)+`,`+
+		agEvent(2, "agent.tool_use", "", `{"tool_use_id":"toolu_2","name":"bash","input":{"command":"ls"},"verdict":"allow","decision_org":"https://auth.example|usr_42"}`)+`,`+
+		agEvent(3, "agent.tool_use", "", `{"tool_use_id":"toolu_3","name":"bash","input":{"command":"pwd"},"verdict":"allow"}`)+`]}`)
+	out, errOut, code := runLatere(t, "", "agents", "session", "ses_1")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	contains(t, out, "mode progressive, agent of organization org_7", "make deploy  [toolu_1]\n   ask\n   Limen keeps it in organization org_7\n")
+	if strings.Count(out, "Limen keeps it") != 1 {
+		t.Errorf("a call in the person's own context names an organization:\n%s", out)
 	}
 }

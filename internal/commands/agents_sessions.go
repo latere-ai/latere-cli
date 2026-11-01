@@ -206,9 +206,8 @@ type toolCall struct {
 	ToolUse  json.RawMessage `json:"tool_use"`
 	Answer   json.RawMessage `json:"answer,omitempty"`
 
-	use     agents.ToolUse
-	askKind string
-	answer  *agents.ToolConfirmation
+	use    agents.ToolUse
+	answer *agents.ToolConfirmation
 }
 
 func newAgentsSessionCmd() *cobra.Command {
@@ -229,10 +228,15 @@ shown the call, whether a person began its turn, and your answer to it,
 if you gave one. A session from before the platform recorded why Limen
 asks shows none.
 
+The first lines name the organization that owns the session's agent, if
+one does. A call that Limen keeps in an organization's context, not in
+yours, names that organization.
+
 The oversight commands call each tool call a step. 'latere oversight
 explain <id>/<tool_use_id>' says why Limen suggested what it did for a
 step, and 'latere oversight cases --session <id>' lists the session's
-steps that Limen holds, with your checks of them.
+steps that Limen holds, with your checks of them. Both read each step in
+the organization this command names for it.
 
 --json prints the session as the API answered it, with each tool call's
 event and the confirmation that answered it.`,
@@ -282,16 +286,6 @@ func (c *agentsClient) toolCalls(ctx context.Context, id string) ([]*toolCall, e
 			if err := e.Decode(&tc.use); err != nil {
 				return nil, &exitError{code: exitNoAnswer, err: err}
 			}
-			// A suggestion records why it asks only from a service and a
-			// session that write it; read it when it is there.
-			var extra struct {
-				Suggestion *struct {
-					AskKind string `json:"ask_kind"`
-				} `json:"suggestion"`
-			}
-			if json.Unmarshal(e.Payload, &extra) == nil && extra.Suggestion != nil {
-				tc.askKind = extra.Suggestion.AskKind
-			}
 			tc.ActionID = oversight.ActionID(id, tc.use.ToolUseID)
 			calls = append(calls, tc)
 			byID[tc.use.ToolUseID] = tc
@@ -314,7 +308,11 @@ func printSessionCalls(out io.Writer, s *agents.Session, calls []*toolCall) erro
 	if s.Title != "" {
 		fprintf(&b, "  %s", oneLine(s.Title))
 	}
-	fprintf(&b, "\n%s, started %s, mode %s\n", sessionStatus(s), formatTime(s.CreatedAt), sessionMode(s))
+	fprintf(&b, "\n%s, started %s, mode %s", sessionStatus(s), formatTime(s.CreatedAt), sessionMode(s))
+	if s.Org != "" {
+		fprintf(&b, ", agent of organization %s", s.Org)
+	}
+	fprint(&b, "\n")
 	if len(calls) == 0 {
 		fprint(&b, "\nThe session made no tool calls.\n")
 		fprint(out, stripANSI(b.String()))
@@ -359,10 +357,13 @@ func printSessionCalls(out io.Writer, s *agents.Session, calls []*toolCall) erro
 		}
 		if sg := u.Suggestion; sg != nil {
 			fprintf(&b, "\n   Limen suggested %s, %s allow, uncertainty %.2f", dash(string(sg.Verdict)), percent(sg.Approve), sg.Uncertainty)
-			if tc.askKind != "" {
-				fprintf(&b, ", %s", tc.askKind)
+			if sg.AskKind != "" {
+				fprintf(&b, ", %s", sg.AskKind)
 			}
 			fprintf(&b, " (%s)", dash(sg.Source))
+		}
+		if isOrganization(u.DecisionOrg) {
+			fprintf(&b, "\n   Limen keeps it in organization %s", u.DecisionOrg)
 		}
 		if a := tc.answer; a != nil {
 			fprintf(&b, "\n   answered %s", a.Decision)
