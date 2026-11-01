@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.40.0 - 2026-11-01
+
 ### Changed
 
 - **`latere agents run` follows your terminal's colors more closely.**
