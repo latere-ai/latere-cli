@@ -12,8 +12,11 @@ on:
   push:
     tags: ['v*']
 
+# contents: write publishes the release; actions: read lets the shared
+# pipeline read the ci.yaml run on the tagged commit.
 permissions:
   contents: write
+  actions: read
 
 jobs:
   release:
