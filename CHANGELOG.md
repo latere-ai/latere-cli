@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.41.0 - 2026-11-01
+
 ### Added
 
 - **`latere oversight` shows what Limen learned about when to ask you, and
