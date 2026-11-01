@@ -100,8 +100,8 @@ candidates of your current context, and the experiments run on them.
   latere evals experiments watch <id>    follow one to its end
 
 The console at https://platform.latere.ai/console/evals creates and runs
-experiments and shows their comparisons; 'experiments show' prints the
-address of each.
+experiments and shows their results, comparisons, runs and the files each
+run made; 'experiments show' prints the address of each.
 
 A <ref> is a name, which reads its current version, a name@digest, a
 digest, or an id. 'latere org' switches the context.
