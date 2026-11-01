@@ -6,6 +6,8 @@ real files, `latere agents provider` chooses the model it calls, and
 `latere agents review` runs an adversarial review of your latest Claude Code
 session. Hosted agents, which run in their own workload with a session you
 can follow, are created and run from the console and its API.
+`latere agents sessions` lists your hosted sessions, and `latere agents
+session <id>` shows how each tool call of one was decided.
 
 Until v0.16 these were `topos --local`, `topos login` and the top-level
 `review`. For one release those words exit 1 and name the command that
@@ -170,6 +172,48 @@ The global state directory is not cleaned when a repo is cleaned, so `latere age
 4. Runs the debate to a steady state and prints a summary, writing per-fork artifacts under the review-log location above.
 
 The critic model is billed to your current context; the console's Billing section shows the spend.
+
+## Hosted sessions
+
+```sh
+latere agents sessions                                  # your recent hosted sessions, newest first
+latere agents sessions --limit 3 --json                 # as the API answered them
+latere agents session ses_01JA3BQ7Z4M8N2P5R6S7T8V9WX    # how each tool call was decided
+```
+
+`latere agents sessions` shows each session's id, agent, title, status,
+start time, and approval mode (`plan`, `confirm` or `progressive`).
+`--limit` sets how many, 20 by default. `--limit 0` shows all.
+
+`latere agents session <id>` shows the session's tool calls in order. For
+each call it shows:
+
+- The tool, a short summary of its input, and the tool use id.
+- The verdict and the approval mode.
+- The layer of the rules that decided the call, such as `always_confirm`,
+  `sandbox`, `score` or `learned`, and the rule in that layer, such as the
+  pattern that matched.
+- The risk score and the rule set that scored it.
+- The chance that you were shown the call, and if a person started its
+  turn (`attended`) or not (`unattended`).
+- Limen's suggestion, if the session asked for one: the verdict, the
+  chance that you allow the call, the uncertainty, and the ask kind when
+  the session recorded it.
+- Your answer, if the call waited for you and you answered.
+
+A call of a subagent shows the subagent. `--json` prints the session as
+the API answered it, and each call's event with the answer to it.
+
+To learn why Limen suggested what it did, run `latere oversight explain
+<id>/<tool_use_id>`. To see your checks of these calls, run `latere
+oversight cases --session <id>`. [oversight.md](oversight.md) describes
+these commands.
+
+The commands use your `latere login`. They exit 0 when they are done, 2
+when the request was refused, and 3 when no answer came.
+`LATERE_AGENTS_URL` or `--api-url` sets the agents API, with its
+`/v1/agents` path. `LATERE_AGENTS_TOKEN` presents a bearer instead of a
+token minted from your login.
 
 ## Settings
 

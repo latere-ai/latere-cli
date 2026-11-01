@@ -10,6 +10,30 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Added
+
+- **`latere oversight` shows what Limen learned about when to ask you, and
+  lets you correct it.** `cases` lists the steps Limen holds, with what it
+  suggested, what was done and your answers; `--pending` lists the steps
+  waiting for you to check, and `--session` one session's. `explain
+  <session>/<tool_use_id>` says why Limen suggested what it did: the
+  answers that moved it most, its parts, the evidence ratio and, for an
+  ask, whether Limen is unsure or your answers are split. `learned` lists
+  what it learned per kind of step, with the trend of how much you let
+  steps run. `reliability` reports how often Limen, the verdicts applied,
+  or a rule set went against you. `profile` shows your trust profile and
+  `profile set careful|balanced|strict` chooses one. `answer` allows or
+  denies a step, and `forget` removes everything Limen holds about you.
+  Every command takes `--json`.
+- **`latere agents sessions` lists your hosted sessions, and `latere
+  agents session <id>` shows how each tool call was decided:** the
+  verdict and mode, the layer and rule that decided it, its risk, Limen's
+  suggestion, the chance you were shown it, and your answer.
+- The new commands exit 0 when done, 2 when refused and 3 when no answer
+  came, as `latere evals` does. `LATERE_OVERSIGHT_URL`,
+  `LATERE_OVERSIGHT_TOKEN`, `LATERE_AGENTS_URL` and `LATERE_AGENTS_TOKEN`
+  override their addresses and bearers.
+
 ## v0.40.1 - 2026-11-01
 
 ### Changed

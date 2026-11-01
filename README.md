@@ -9,11 +9,12 @@
 one binary reaches every capability with your identity: workloads in
 [Environments](docs/environments.md), [apps](docs/apps.md) you deploy with a
 git push, [models](docs/models.md) through the Latere API, the Latere
-[agent](docs/agents.md) on your machine and an adversarial review of a
-Claude Code session, [repositories](docs/repos.md) on Latere Code
-(`code.latere.ai`), the experiments you keep in [Evals](docs/evals.md),
-and your own computer as a [device](docs/devices.md) the sessions you
-start can work on. There is no API key to allocate and no
+[agent](docs/agents.md) on your machine, your hosted sessions, and an
+adversarial review of a Claude Code session, what Limen learned about when
+to ask you in [oversight](docs/oversight.md), [repositories](docs/repos.md)
+on Latere Code (`code.latere.ai`), the experiments you keep in
+[Evals](docs/evals.md), and your own computer as a
+[device](docs/devices.md) the sessions you start can work on. There is no API key to allocate and no
 second credential to manage.
 
 ```sh
@@ -184,7 +185,8 @@ git clone https://code.latere.ai/<owner>/<repo>.git
 | `latere models` | Call language models through the Latere API with a model key the CLI creates and keeps: list the models your key reaches, point a stock SDK at the API, and check a model with one call. | [docs/models.md](docs/models.md) |
 | `latere devices` | Your own computer as one of your environments: `connect` lets the sessions you start run commands and edit files in the folders you share, and serves it until Ctrl-C; your own sessions start there without asking, and a trigger that runs on mail or a webhook asks on the computer first; `pause` and `resume` stop and restart every session on it; `list`, `rename` and `remove` manage your devices; `policy` and `activity` show what the computer allows and what it was asked to do. macOS and Linux. | [docs/devices.md](docs/devices.md) |
 | `latere evals` | Experiments in Evals: list and show the suites, tasks, metrics, graders and candidates of your context, list experiments, show one with its progress, parked cells and comparisons, and follow one to its end, with exit codes a CI job can act on. | [docs/evals.md](docs/evals.md) |
-| `latere agents` | Latere Agents on this machine: `run` runs the agent in your directory against your files, interactively or on one prompt; `provider` chooses its model; `review` runs an adversarial review of your latest Claude Code session, whose unresolved attacks set the exit code. | [docs/agents.md](docs/agents.md) |
+| `latere agents` | Latere Agents: `run` runs the agent in your directory against your files, interactively or on one prompt; `provider` chooses its model; `review` runs an adversarial review of your latest Claude Code session, whose unresolved attacks set the exit code; `sessions` lists your hosted sessions, and `session` shows how each tool call of one was decided. | [docs/agents.md](docs/agents.md) |
+| `latere oversight` | What Limen, the decision service, recorded and learned about when to ask you: list the steps it holds or those waiting for you to check, explain one suggestion, show what it learned per kind of step and how often it went against you, show or choose your trust profile, answer a step, and forget everything. | [docs/oversight.md](docs/oversight.md) |
 
 [`docs/configuration.md`](docs/configuration.md) lists every environment
 variable the CLI reads and every file it keeps.

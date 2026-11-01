@@ -31,6 +31,7 @@ specs/
   021-app-name.md                    (implemented: latere apps name changes the name people read for an app and keeps its address)
   022-memory-tidies.md               (implemented: latere memory tidies lists what Tidy memory changed each night, shows it as a diff, undoes it, and applies or declines what waits)
   023-messages-while-the-agent-works.md (implemented: latere agents run takes a message typed while the agent works, reads it at its next step, sends it now with Ctrl+J, and takes it back with Up)
+  024-oversight-and-hosted-sessions.md (implemented: latere oversight reads and corrects what Limen recorded and learned about the person; latere agents sessions and session show how each call of a hosted session was decided)
 ```
 
 ## Status
@@ -165,6 +166,15 @@ Where each spec stands:
   message typed while the agent works, shows it above the prompt until the
   agent reads it at its next step, sends it now with Ctrl+J, and takes it
   back with Up, after topos spec 098. Released in v0.39.0.
+- `024-oversight-and-hosted-sessions.md`: `latere oversight` lists the
+  cases Limen holds about the person, explains one, shows what it learned
+  and how often it went against them, reads and sets their trust profile,
+  answers a step and forgets them, at `https://api.latere.ai/v1/oversight`;
+  `latere agents sessions` and `latere agents session <id>` list the
+  person's hosted sessions and how each tool call was decided, at
+  `https://api.latere.ai/v1/agents`; both with a token minted for the
+  audience `api.latere.ai`. On main; the release waits for sdk-go
+  v0.24.0.
 
 One surface shipped without a dedicated design record: the token-lifecycle
 work, which [docs/login-and-tokens.md](../docs/login-and-tokens.md) documents.

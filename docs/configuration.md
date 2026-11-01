@@ -30,6 +30,10 @@ setting, and each command's `--help` names the flags it takes.
 | `LATERE_APPS_TOKEN` | none | A bearer to present to the Apps API instead of minting one. |
 | `LATERE_EVALS_URL` | `https://api.latere.ai/v1/evals` | The Evals API base URL, including its `/v1/evals` path, which `latere evals` calls. `--api-url` overrides it. |
 | `LATERE_EVALS_TOKEN` | none | A bearer to present to the Evals API instead of minting one, such as a token exchanged from a key. |
+| `LATERE_OVERSIGHT_URL` | `https://api.latere.ai/v1/oversight` | The oversight API base URL, including its `/v1/oversight` path, which `latere oversight` calls. `--api-url` overrides it. |
+| `LATERE_OVERSIGHT_TOKEN` | none | A bearer to present to the oversight API instead of minting one. When it is a JWT, its subject is the person the commands read. |
+| `LATERE_AGENTS_URL` | `https://api.latere.ai/v1/agents` | The agents API base URL, including its `/v1/agents` path, which `latere agents sessions` and `latere agents session` call. `--api-url` overrides it. |
+| `LATERE_AGENTS_TOKEN` | none | A bearer to present to the agents API instead of minting one. |
 | `LATERE_PLATFORM_URL` | `https://platform.latere.ai` | The platform `latere repos` creates, lists and reads repositories on, `latere apps visibility`, `password`, `access`, `share` and `unshare` reach the people invited to an app and its password on, `latere devices` lists, names and removes your devices on, and `latere memory` keeps what Latere remembers about you on. `latere evals` links to its console. `--platform-url` overrides it. |
 | `LATERE_PLATFORM_TOKEN` | none | A bearer to present to the platform instead of minting one. |
 | `CODE_HOST` | `code.latere.ai` | The Latere Code host the git credential helper answers for, and the one `latere repos` prints clone URLs for. A nonblank value also allows plain HTTP, for a development host. |
