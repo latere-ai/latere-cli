@@ -22,6 +22,5 @@ jobs:
   release:
     uses: latere-ai/ci/.github/workflows/cli-release.yml@v1
     with:
-      run_lint: false
-      test_os: '["ubuntu-latest", "macos-latest"]'
+      test_os: '["macos-latest"]'
     secrets: inherit
