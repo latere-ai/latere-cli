@@ -34,10 +34,32 @@ id, with a `/` between them, for example
 `ses_01JA3BQ7Z4M8N2P5R6S7T8V9WX/toolu_01`. `latere oversight cases` and
 `latere agents session <id>` print them.
 
-Each command reads your own records. The organization and the subject are
-both your subject: your issuer and your sign-in id, with a `|` between
-them. This is true in every context, because Limen keeps the records of a
-hosted session by the person who started it.
+## Contexts
+
+Limen keeps your records in a context. The subject of each record is your
+subject: your issuer and your sign-in id, with a `|` between them. The
+organization of the record is the context:
+
+- Your own context. The organization is your subject.
+- The context of an organization. The organization is the ID of the
+  organization, for example `org_7`. The steps of an agent that the
+  organization owns can be in this context.
+
+Each step of a hosted session records the organization that its decision
+was sent to Limen under (`decision_org`). `explain`, `answer` and `cases
+--session` read the log of the session through the agents API, and use
+this organization for each step. A step without it is in your own
+context. Steps from before the platform recorded the organization have
+none. The other commands read your own context.
+
+Limen answers for the context of an organization only if you log in to
+that organization. If Limen refuses a step of an organization, the
+command gives the login to use, for example `latere login --org-id
+org_7`.
+
+If the command cannot read the log of the session, it reads your own
+context and writes a note to standard error. A session that the agents
+API does not have is in your own context, with no note.
 
 Every command takes `--json`. It prints the API's answer as it came.
 
@@ -61,12 +83,16 @@ A case is one step. Each row shows:
 | `ASK` | For an ask: `unsure` (your answers say little yet) or `split` (your answers disagree). |
 | `DECIDED` | The verdict that was applied. |
 | `SHOWN` | The chance that you were shown the step. 100% means it waited for you. |
-| `BY` | What decided: a rule set such as `topos/confirm`, or Limen's model. |
+| `BY` | What decided the step. Topos gives its mode and the layer that decided, for example `topos/progressive/score`. An older Topos gives only the mode, for example `topos/confirm`. |
 | `ANSWERS` | Your answers. `(check)` marks the answer that checked a step you were shown. |
 
 Limen keeps cases oldest first. The command reads all of them and shows
 the latest `--limit`, 20 by default. `--limit 0` shows all.
 `--pending` shows only the steps you were shown and did not check yet.
+
+Without `--session`, the command shows the cases of your own context.
+With `--session`, it reads the cases of each context that the steps of
+the session are in. It shows them in the order of the log of the session.
 
 ## Explain
 
@@ -74,7 +100,8 @@ the latest `--limit`, 20 by default. `--limit 0` shows all.
 latere oversight explain ses_01JA3BQ7Z4M8N2P5R6S7T8V9WX/toolu_01
 ```
 
-The explanation shows:
+The command reads the log of the session to find the context of the
+step ([Contexts](#contexts)). The explanation shows:
 
 - The suggestion, the chance that you allow the step, and the uncertainty.
 - A scale from stop to run. The bars are your thresholds, and the star is
@@ -154,7 +181,8 @@ latere oversight answer ses_01JA3BQ7Z4M8N2P5R6S7T8V9WX/toolu_02 deny
 is "Should have asked". Your first answer to a step you were shown counts
 toward how often Limen is wrong. Every answer teaches Limen. The command
 sends an answer once and does not send it again, because each answer that
-Limen receives counts.
+Limen receives counts. The answer goes to the context of the step
+([Contexts](#contexts)).
 
 ## Forget
 
@@ -181,4 +209,6 @@ type `yes`. `--yes` skips the question.
 |---|---|---|
 | `LATERE_OVERSIGHT_URL` | `https://api.latere.ai/v1/oversight` | The oversight API, with its `/v1/oversight` path. `--api-url` overrides it. |
 | `LATERE_OVERSIGHT_TOKEN` | none | A bearer to present instead of a token minted from your login. If it is a JWT, its subject is the person. |
+| `LATERE_AGENTS_URL` | `https://api.latere.ai/v1/agents` | The agents API, with its `/v1/agents` path. `explain`, `answer` and `cases --session` read the log of a session from it. |
+| `LATERE_AGENTS_TOKEN` | none | A bearer to present to the agents API instead of a token minted from your login. |
 | `AUTH_URL` | from the API URL | The issuer. `--auth-url` overrides it. |

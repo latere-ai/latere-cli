@@ -185,8 +185,9 @@ latere agents session ses_01JA3BQ7Z4M8N2P5R6S7T8V9WX    # how each tool call was
 start time, and approval mode (`plan`, `confirm` or `progressive`).
 `--limit` sets how many, 20 by default. `--limit 0` shows all.
 
-`latere agents session <id>` shows the session's tool calls in order. For
-each call it shows:
+`latere agents session <id>` shows the session's tool calls in order. If
+an organization owns the agent of the session, the first lines give the
+ID of the organization. For each call it shows:
 
 - The tool, a short summary of its input, and the tool use id.
 - The verdict and the approval mode.
@@ -200,6 +201,8 @@ each call it shows:
   chance that you allow the call, and the uncertainty. For an ask, it also
   shows why Limen asks, `unsure` or `split`, if the session recorded it.
   A session from before the platform recorded this shows none.
+- The organization that Limen keeps the call in, if it is not your own
+  context.
 - Your answer, if the call waited for you and you answered.
 
 A call of a subagent shows the subagent. `--json` prints the session as
@@ -208,8 +211,9 @@ the API answered it, and each call's event with the answer to it.
 To learn why Limen suggested what it did, run `latere oversight explain
 <id>/<tool_use_id>`. The oversight commands call each tool call a step.
 To see the steps of the session that Limen holds, with your checks of
-them, run `latere oversight cases --session <id>`. [oversight.md](oversight.md) describes
-these commands.
+them, run `latere oversight cases --session <id>`. These commands read
+each step in its context. [oversight.md](oversight.md) describes these
+commands and the contexts.
 
 The commands use your `latere login`. They exit 0 when they are done, 2
 when the request was refused, and 3 when no answer came.

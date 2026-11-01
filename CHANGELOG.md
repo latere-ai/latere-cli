@@ -10,6 +10,22 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Changed
+
+- **The oversight commands read a step of an organization's agent in the
+  organization's context.** `latere oversight explain`, `answer` and
+  `cases --session` read the session's log and use the organization that
+  each step's decision was sent to Limen under (`decision_org`). A step
+  without one is in your own context, as before. If Limen refuses a step
+  of an organization, the command names the login to use: `latere login
+  --org-id <id>`. `latere agents session` names the organization that
+  owns the session's agent, and the organization of each call that Limen
+  keeps outside your own context. The docs say that Topos now gives the
+  layer in a decision's source, for example `topos/progressive/score`.
+- Built on sdk-go main after v0.24.0, whose `agents.ToolUse` reads
+  `DecisionOrg` and whose `agents.Suggestion` reads `AskKind`. The
+  release pins the sdk-go release in its place.
+
 ### Fixed
 
 - **The oversight docs say what Limen decides in `learned` mode.** There,

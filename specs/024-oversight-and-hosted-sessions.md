@@ -5,6 +5,7 @@ depends_on:
   - specs/011-capability-commands.md
   - specs/015-evals-commands.md
   - "CROSS-REPO: Limen's oversight API at /v1/oversight; sdk-go oversight.ListCases, GetReliability, agents.Session.Policy and agents.ToolConfirmation (main after v0.23.0)"
+  - "CROSS-REPO: topos specs/100-the-organization-a-session-acts-in.md: a session's org and a call's decision_org; sdk-go agents.Session.Org, agents.ToolUse.DecisionOrg and agents.Suggestion.AskKind (main after v0.24.0)"
 affects:
   - go.mod (sdk-go main after v0.23.0, to be v0.24.0)
   - internal/commands/oversight.go, internal/commands/oversight_test.go
@@ -13,7 +14,7 @@ affects:
   - internal/commands/topos.go, internal/commands/root.go, internal/commands/capability_names_test.go
   - docs/oversight.md, docs/agents.md, docs/configuration.md, README.md, CHANGELOG.md
 created: 2026-11-01
-updated: 2026-11-01
+updated: 2026-11-02
 author: changkun
 ---
 
@@ -79,13 +80,44 @@ refused, 3 no answer. The type and wording moved to `apierror.go`.
 
 - **Org = subject in every context.** The directive named a person's own
   context, and Topos keys records by the person in every context, so an
-  org context is not refused.
+  org context is not refused. Superseded for a step of a hosted session
+  by the step's `decision_org` (above).
 - **No join with Limen in `agents session`.** A per-call or per-page join
   would cost a request per call, or every case of the person; the footer
   names the oversight commands instead.
 - **No ask kind in the SDK's suggestion.** Topos up to v0.67.0 does not
   record it, and the SDK holds its models to the agents API's document, so
   the command reads it from the event when the event carries it.
+  Superseded: sdk-go main after v0.24.0 reads `Suggestion.AskKind`.
+- **The step's organization is read, not given.** A flag for the
+  organization would make the person copy it from `agents session`. The
+  log already names it, at the cost of one log read per command.
+
+### The organization of a step (Topos spec 100)
+
+Topos after v0.67.0 records on each `agent.tool_use` the organization
+that its decision was sent to Limen under, `decision_org`, and on a
+session the organization that owns its agent, `org`. With
+`TOPOS_DECISIONS_ORG=agent`, a call of an organization's agent is keyed
+by the organization's bare ID, so a read with the person's subject as the
+organization misses it.
+
+- `explain <action>` and `answer <action>` read the action's session log
+  through the agents API and name the step's `decision_org` as the
+  organization, or the person's subject for a step without one.
+- `cases --session <id>` reads the session's log, lists cases in the
+  person's own context and in each organization its steps name, and
+  orders them as the log made them. `cases` without `--session`, and
+  `learned`, `reliability`, `profile` and `forget`, stay in the person's
+  own context.
+- A session the agents API answers 404 for is the person's own, silently.
+  A log that cannot be read is the person's own, with a note on stderr,
+  so the command still answers as it did before.
+- A 403 in an organization's context names `latere login --org-id <id>`:
+  Limen answers for an organization only to a token minted in it.
+- `agents session` names the session's `org` in its header, and a call's
+  `decision_org` when it has no `|`, which tells an organization's ID from
+  a person's subject.
 
 ## Not in this spec
 
@@ -103,6 +135,10 @@ refused, 3 no answer. The type and wording moved to `apierror.go`.
 | 5 | `answer` is sent once; `forget` asks for yes unless `--yes` | `TestOversightAnswer`, `TestOversightForget` |
 | 6 | A refusal exits 2 and an outage 3, with a 401 naming `latere login` | `TestOversightRefusals`, `TestOversightAnswer` |
 | 7 | `agents sessions` and `agents session` print the fields the directive names, join confirmations, and name the oversight commands | `TestAgentsSessions`, `TestAgentsSession` |
+| 8 | `explain` and `answer` name a step's `decision_org`, or the person's subject for a step without one or a session the agents API does not have; a 403 in an organization names `latere login --org-id` | `TestOversightStepInAnOrganization` |
+| 9 | A log that cannot be read leaves the step in the person's own context, with a note | `TestOversightStepWhenTheSessionCannotBeRead` |
+| 10 | `cases --session` reads each context the session's steps are in, in the log's order; `cases` alone reads the person's own | `TestOversightCasesOfASessionInAnOrganization` |
+| 11 | `agents session` names the session's organization, and a call's when Limen keeps it in an organization | `TestAgentsSessionOfAnOrganizationsAgent` |
 
 ## Outcome
 
@@ -116,3 +152,9 @@ Later, `docs/oversight.md` and the help say what Limen decides in
 `agents session` help and `docs/agents.md` use for the oversight
 commands. They say that a session from before the platform recorded the
 ask kind shows none.
+
+On 2026-11-02, the oversight commands read a step of a hosted session in
+the organization its `decision_org` names (criteria 8 to 11), on sdk-go
+main after v0.24.0. The release pins the sdk-go release in place of the
+pseudo-version. The docs give a decision's source in its three-part form,
+`topos/<mode>/<decided_by>`.
