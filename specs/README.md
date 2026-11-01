@@ -158,12 +158,12 @@ Where each spec stands:
 - `022-memory-tidies.md`: `latere memory tidies` lists the nightly tidies
   of Tidy memory, `show` prints what one changed as a diff of each memory,
   and `apply`, `decline` and `undo` decide its changes, one memory or all;
-  `latere memory settings` gains `chats` and `review`. Built on
-  2026-10-30, not released.
+  `latere memory settings` gains `chats` and `review`. Released in
+  v0.38.0.
 - `023-messages-while-the-agent-works.md`: `latere agents run` sends a
   message typed while the agent works, shows it above the prompt until the
   agent reads it at its next step, sends it now with Ctrl+J, and takes it
-  back with Up, after topos spec 098. Built on 2026-10-31, not released.
+  back with Up, after topos spec 098. Released in v0.39.0.
 
 One surface shipped without a dedicated design record: the token-lifecycle
 work, which [docs/login-and-tokens.md](../docs/login-and-tokens.md) documents.
