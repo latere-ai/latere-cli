@@ -19,10 +19,12 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"text/tabwriter"
 	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
 	"gopkg.in/yaml.v3"
 
 	"latere.ai/x/sdk-go/evals"
@@ -58,6 +60,16 @@ const evalsTimeout = 30 * time.Second
 
 // evalsPage is the page size a list asks for: the API's largest.
 const evalsPage = evals.MaxLimit
+
+// evalsReads bounds how many definitions a list reads at once to name
+// what its rows name by digest.
+const evalsReads = 8
+
+// experimentNameKey is the metadata key an experiment's name is kept
+// under. Examen keeps no name of its own on an experiment, so the console
+// keeps the name a person gives one at its start here, and an experiment
+// created through the API carries it the same way.
+const experimentNameKey = "name"
 
 // evalsStreamFloor is how long a run of the progress stream's own
 // reconnects must last, when it read no frame, for the watch to connect
@@ -598,9 +610,9 @@ func newEvalsExperimentsListCmd(apiURL, authURL *string) *cobra.Command {
 		Use:   "list",
 		Short: "List the experiments of your current context.",
 		Long: `List the experiments of your current context, newest first: the id, the
-suite, how many candidates, the state, the mode, the trials done of those
-there are, and when it started. The first page holds up to 200; --all reads
-every page.
+name it was given, its suite by name, how many candidates, the state, the
+mode, the trials done of those there are, and when it started. The first
+page holds up to 200; --all reads every page.
 
 --suite takes a suite's name, for every version of it, or its digest.
 --state and --mode keep the experiments in that state or mode. --json
@@ -627,7 +639,15 @@ prints the experiments as the API answers them, and -q their ids alone.`,
 			if jsonF {
 				return printJSON(out, raws(experiments))
 			}
-			printExperiments(out, experiments, quiet)
+			if quiet {
+				printExperiments(out, experiments, nil, true)
+				return nil
+			}
+			suites, err := c.suiteNames(cmd.Context(), experiments)
+			if err != nil {
+				return err
+			}
+			printExperiments(out, experiments, suites, false)
 			if more {
 				fprintln(cmd.ErrOrStderr(), "More on the next page; --all reads every page.")
 			}
@@ -643,7 +663,52 @@ prints the experiments as the API answers them, and -q their ids alone.`,
 	return cmd
 }
 
-func printExperiments(out io.Writer, experiments []*evals.Experiment, quiet bool) {
+// suiteNames reads the name of each suite the experiments name by digest,
+// each once and evalsReads at a time, and answers each digest's name. A
+// suite the caller may not read, such as another owner's, reads as missing
+// and has no entry.
+func (c *evalsClient) suiteNames(ctx context.Context, experiments []*evals.Experiment) (map[string]string, error) {
+	digests := map[string]bool{}
+	for _, e := range experiments {
+		if strings.HasPrefix(e.Suite, "sha256:") {
+			digests[e.Suite] = true
+		}
+	}
+	names := make(map[string]string, len(digests))
+	var mu sync.Mutex
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(evalsReads)
+	for digest := range digests {
+		g.Go(func() error {
+			v, err := c.ev.GetSuite(gctx, digest)
+			switch {
+			case errors.Is(err, latere.ErrNotFound):
+				return nil
+			case err != nil:
+				return c.refused(err)
+			}
+			mu.Lock()
+			names[digest] = v.Name
+			mu.Unlock()
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+	return names, nil
+}
+
+// experimentName is the name an experiment was given, or "" where it has
+// none.
+func experimentName(e *evals.Experiment) string {
+	return strings.TrimSpace(e.Metadata[experimentNameKey])
+}
+
+// printExperiments prints the experiments as a table, each suite by the
+// name suites gives its digest, or by its digest where suites has none; or
+// their ids alone when quiet.
+func printExperiments(out io.Writer, experiments []*evals.Experiment, suites map[string]string, quiet bool) {
 	if quiet {
 		for _, e := range experiments {
 			fprintln(out, stripANSI(e.ID))
@@ -655,9 +720,10 @@ func printExperiments(out io.Writer, experiments []*evals.Experiment, quiet bool
 		return
 	}
 	w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	fprintln(w, "ID\tSUITE\tCANDIDATES\tSTATE\tMODE\tTRIALS\tSTARTED")
+	fprintln(w, "ID\tNAME\tSUITE\tCANDIDATES\tSTATE\tMODE\tTRIALS\tSTARTED")
 	for _, e := range experiments {
-		fprintf(w, "%s\t%s\t%d\t%s\t%s\t%s\t%s\n", stripANSI(e.ID), stripANSI(shortRef(e.Suite)), len(e.Candidates),
+		suite := cmp.Or(suites[e.Suite], shortRef(e.Suite))
+		fprintf(w, "%s\t%s\t%s\t%d\t%s\t%s\t%s\t%s\n", stripANSI(e.ID), dash(stripANSI(oneLine(experimentName(e)))), stripANSI(suite), len(e.Candidates),
 			stripANSI(string(e.State)), stripANSI(string(e.Mode)), trialsDone(e.Progress), humanAge(e.CreatedAt))
 	}
 	if err := w.Flush(); err != nil {
@@ -683,8 +749,8 @@ func newEvalsExperimentsShowCmd(apiURL, authURL *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "show <id>",
 		Short: "Show an experiment, its progress and its comparisons.",
-		Long: `Show one experiment: its suite and candidates, its state and mode, the
-trials per cell and how many run at once, its spending cap with what it
+		Long: `Show one experiment: the name it was given, its suite and candidates by
+name, its state and mode, the trials per cell and how many run at once, its spending cap with what it
 spent and has left, who started it and when.
 
 Then its progress: its cells and trials by state, and its finished trials
@@ -749,8 +815,10 @@ func (c *evalsClient) parkedCells(ctx context.Context, e *evals.Experiment) ([]*
 
 // names reads the name of each definition an experiment names by digest
 // alone, its suite, its candidates and the tasks of its parked cells, and
-// answers each digest's name@digest. A definition the caller may not read,
-// such as another owner's suite, reads as missing and keeps its digest.
+// answers what each digest is printed as: its name, or name@ and its
+// short digest where two of the digests share a name, such as two versions
+// of one candidate. A definition the caller may not read, such as another
+// owner's suite, reads as missing and is printed by its short digest.
 func (c *evalsClient) names(ctx context.Context, e *evals.Experiment, parked []*evals.Cell) (map[string]string, error) {
 	names := map[string]string{}
 	// name reads the name of the version of a kind of definition a
@@ -784,11 +852,11 @@ func (c *evalsClient) names(ctx context.Context, e *evals.Experiment, parked []*
 		n, err := read(ctx, ref)
 		switch {
 		case errors.Is(err, latere.ErrNotFound):
-			names[ref] = ref
+			names[ref] = ""
 		case err != nil:
 			return c.refused(err)
 		default:
-			names[ref] = n + "@" + ref
+			names[ref] = n
 		}
 		return nil
 	}
@@ -808,13 +876,26 @@ func (c *evalsClient) names(ctx context.Context, e *evals.Experiment, parked []*
 			return nil, err
 		}
 	}
+	held := map[string]int{}
+	for _, n := range names {
+		held[n]++
+	}
+	for ref, n := range names {
+		switch {
+		case n == "":
+			names[ref] = shortDigest(ref)
+		case held[n] > 1:
+			names[ref] = n + "@" + shortDigest(ref)
+		}
+	}
 	return names, nil
 }
 
 // formatExperiment is the record `experiments show` prints. names maps a
-// digest to the name@digest it is printed as.
+// digest to what it is printed as; a reference names has no entry for is
+// printed by shortRef.
 func formatExperiment(e *evals.Experiment, parked []*evals.Cell, comparisons []*evals.Comparison, names map[string]string, link string) string {
-	named := func(ref string) string { return cmp.Or(names[ref], ref) }
+	named := func(ref string) string { return cmp.Or(names[ref], shortRef(ref)) }
 	var b strings.Builder
 	reference := ""
 	switch {
@@ -833,6 +914,7 @@ func formatExperiment(e *evals.Experiment, parked []*evals.Cell, comparisons []*
 	}
 	for _, f := range [][2]string{
 		{"id", e.ID},
+		{"name", experimentName(e)},
 		{"suite", named(e.Suite)},
 		{"candidates", strings.Join(candidates, ", ")},
 		{"reference", reference},
@@ -848,6 +930,9 @@ func formatExperiment(e *evals.Experiment, parked []*evals.Cell, comparisons []*
 		b.WriteString(formatWrappedField(f[0], stripANSI(f[1])))
 	}
 	for _, k := range slices.Sorted(maps.Keys(e.Metadata)) {
+		if k == experimentNameKey {
+			continue
+		}
 		b.WriteString(formatWrappedField("metadata", stripANSI(k+"="+e.Metadata[k])))
 	}
 
@@ -865,7 +950,7 @@ func formatExperiment(e *evals.Experiment, parked []*evals.Cell, comparisons []*
 		w := tabwriter.NewWriter(&t, 0, 4, 2, ' ', 0)
 		fprintln(w, "  CELL\tTASK\tCANDIDATE\tSTATE\tREASON")
 		for _, cell := range parked {
-			fprintf(w, "  %s\t%s\t%s\t%s\t%s\n", cell.ID, shortRef(named(cell.Task)), shortRef(named(cell.Candidate)), string(cell.State), dash(cell.ParkedReason))
+			fprintf(w, "  %s\t%s\t%s\t%s\t%s\n", cell.ID, named(cell.Task), named(cell.Candidate), string(cell.State), dash(cell.ParkedReason))
 		}
 		if err := w.Flush(); err != nil {
 			fprintln(&t, err)
@@ -899,18 +984,17 @@ func formatExperiment(e *evals.Experiment, parked []*evals.Cell, comparisons []*
 
 // comparisonSides says what a comparison compares: a candidate against the
 // reference candidate or a baseline, or one candidate's task against
-// another of its tasks. named gives a digest its name@digest.
+// another of its tasks. named gives a digest what it is printed as.
 func comparisonSides(c *evals.Comparison, named func(string) string) string {
-	short := func(ref string) string { return shortRef(named(ref)) }
 	switch {
 	case c.Task != "" && c.ReferenceTask != "":
-		return short(c.Candidate) + ": " + short(c.Task) + " vs " + short(c.ReferenceTask)
+		return named(c.Candidate) + ": " + named(c.Task) + " vs " + named(c.ReferenceTask)
 	case c.Baseline != "":
-		return short(c.Candidate) + " vs baseline " + c.Baseline
+		return named(c.Candidate) + " vs baseline " + c.Baseline
 	case c.ReferenceCandidate != "":
-		return short(c.Candidate) + " vs " + short(c.ReferenceCandidate)
+		return named(c.Candidate) + " vs " + named(c.ReferenceCandidate)
 	}
-	return short(c.Candidate)
+	return named(c.Candidate)
 }
 
 // formatBudget is an experiment's spending cap, what it spent and what is
@@ -1194,7 +1278,7 @@ func (w *evalsWatch) line(ev *evals.StreamEvent) (string, error) {
 		if !c.Final {
 			return "", nil
 		}
-		return fmt.Sprintf("comparison %s final: %s", c.ID, comparisonSides(&c, func(ref string) string { return ref })), nil
+		return fmt.Sprintf("comparison %s final: %s", c.ID, comparisonSides(&c, shortRef)), nil
 	case "bar.passed", "bar.failed":
 		return string(ev.Type) + " " + oneLine(string(ev.Data)), nil
 	}

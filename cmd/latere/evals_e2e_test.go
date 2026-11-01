@@ -124,7 +124,7 @@ func TestEvalsE2E(t *testing.T) {
 		t.Errorf("suites list = %d %q %q", code, out, errOut)
 	}
 	out, errOut, code = run("experiments", "show", "exp_1")
-	for _, want := range []string{"suite:      fix-flaky-tests@" + digest("1"), "candidates: acme-1-4@" + digest("a"), "budget:     $5.00 cap (eb-1)",
+	for _, want := range []string{"suite:      fix-flaky-tests\n", "candidates: acme-1-4\n", "budget:     $5.00 cap (eb-1)",
 		"outcomes:   completed 3", "console:    https://console.example/console/evals/experiments/exp_1"} {
 		if code != 0 || !strings.Contains(out, want) {
 			t.Errorf("experiments show = %d %q, lacks %q:\n%s", code, errOut, want, out)

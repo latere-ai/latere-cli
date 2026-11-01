@@ -209,13 +209,13 @@ func evalsExperimentJSON(state, cells string) string {
 "trials":10,"parallelism":4,"reference":{"candidate":"` + evalsDigest("a") + `"},"mode":"execute","state":"` + state + `","created_by":"u-2",
 "budget":{"name":"eb-1","cap_usd_micro":25000000,"spent_usd_micro":41234,"remaining_usd_micro":24958766},
 "progress":{"cells":` + cells + `,"trials":{"done":30,"pending":10},"outcomes":{"completed":28,"infra_failed":2}},
-"metadata":{"commit":"abc123"},"created_at":"2026-10-20T10:00:00Z","updated_at":"2026-10-20T11:00:00Z"}`
+"metadata":{"commit":"abc123","name":"opus-vs-sonnet"},"created_at":"2026-10-20T10:00:00Z","updated_at":"2026-10-20T11:00:00Z"}`
 }
 
-// show prints the experiment with its definitions named, its budget in
-// Examen's formats, its progress, the cells parked for a retry with their
-// reasons, each comparison and the console's address; a definition it may
-// not read keeps its digest.
+// show prints the experiment with the name it was given and its
+// definitions by name, its budget in Examen's formats, its progress, the
+// cells parked for a retry with their reasons, each comparison and the
+// console's address; a definition it may not read keeps its short digest.
 func TestEvalsShowExperiment(t *testing.T) {
 	s := newEvalsStub(t)
 	s.json("GET /experiments/exp_1", http.StatusOK, evalsExperimentJSON("running", `{"complete":2,"blocked":1,"running":1}`))
@@ -237,8 +237,9 @@ func TestEvalsShowExperiment(t *testing.T) {
 		t.Fatalf("show = %d %q", code, errOut)
 	}
 	for _, want := range []string{
-		"suite:      fix-flaky-tests@" + evalsDigest("1"),
-		"reference:  opus-high@" + evalsDigest("a"),
+		"id:         exp_1\nname:       opus-vs-sonnet\nsuite:      fix-flaky-tests\n",
+		"candidates: opus-high, sonnet-high\n",
+		"reference:  opus-high\n",
 		"parallel:   4 trials at once\n",
 		"budget:     $25.00 cap, $0.04123 spent, $24.96 left (eb-1)\n",
 		"created by: u-2\n",
@@ -254,12 +255,94 @@ func TestEvalsShowExperiment(t *testing.T) {
 			t.Errorf("show lacks %q:\n%s", want, out)
 		}
 	}
+	if strings.Contains(out, "sha256:aaaa") || strings.Contains(out, "name=") {
+		t.Errorf("show prints a digest it read a name for, or the name again as metadata:\n%s", out)
+	}
 	for _, r := range s.seen() {
 		if r.URL.Path == "/v1/evals/tasks/"+evalsDigest("c") {
 			return
 		}
 	}
 	t.Error("show did not ask the parked cell's task for its name")
+}
+
+// Two versions of one candidate share its name, so show tells them apart
+// by their short digests; an experiment with no name prints none.
+func TestEvalsShowExperimentVersionsOfOneCandidate(t *testing.T) {
+	s := newEvalsStub(t)
+	s.json("GET /experiments/exp_1", http.StatusOK, strings.Replace(evalsExperimentJSON("running", `{"running":2}`), `,"name":"opus-vs-sonnet"`, "", 1))
+	s.json("GET /experiments/exp_1/comparisons", http.StatusOK, `{"items":[]}`)
+	s.json("GET /suites/"+evalsDigest("1"), http.StatusOK, `{"id":"sui_1","name":"fix-flaky-tests","digest":"`+evalsDigest("1")+`","current":true,"created_at":"2026-10-20T10:00:00Z"}`)
+	s.json("GET /candidates/"+evalsDigest("a"), http.StatusOK, `{"id":"can_a","name":"open-builder","digest":"`+evalsDigest("a")+`","current":false,"created_at":"2026-10-20T10:00:00Z"}`)
+	s.json("GET /candidates/"+evalsDigest("b"), http.StatusOK, `{"id":"can_b","name":"open-builder","digest":"`+evalsDigest("b")+`","current":true,"created_at":"2026-10-20T10:00:00Z"}`)
+
+	out, errOut, code := runEvals(t, "experiments", "show", "exp_1")
+	if code != 0 {
+		t.Fatalf("show = %d %q", code, errOut)
+	}
+	want := "candidates: open-builder@sha256:aaaaaaaaaaaa, open-builder@sha256:bbbbbbbbbbbb\n"
+	if !strings.Contains(out, want) || strings.Contains(out, "name:") {
+		t.Errorf("show lacks %q, or prints a name the experiment has none of:\n%s", want, out)
+	}
+}
+
+// The list names each experiment by the name it was given, "-" for none,
+// and its suite by name, reading each suite once; a suite it may not read
+// keeps its short digest, and -q and --json read no suite.
+func TestEvalsListExperiments(t *testing.T) {
+	s := newEvalsStub(t)
+	experiment := func(id, suite, metadata string) string {
+		return `{"id":"` + id + `","owner":"o-1","suite":"` + suite + `","candidates":["` + evalsDigest("a") + `","` + evalsDigest("b") + `"],
+"trials":10,"parallelism":4,"reference":{"candidate":"` + evalsDigest("a") + `"},"mode":"execute","state":"complete",
+"budget":{"name":"eb-1"},"progress":{"trials":{"done":40}},"metadata":` + metadata + `,"created_at":"2026-10-20T10:00:00Z"}`
+	}
+	s.json("GET /experiments", http.StatusOK, `{"items":[`+
+		experiment("exp_1", evalsDigest("1"), `{"name":"haiku 4.5\tvs 5.5"}`)+","+
+		experiment("exp_2", evalsDigest("1"), `{"commit":"abc123"}`)+","+
+		experiment("exp_3", evalsDigest("2"), `{}`)+`]}`)
+	s.json("GET /suites/"+evalsDigest("1"), http.StatusOK, `{"id":"sui_1","name":"open-tasks","digest":"`+evalsDigest("1")+`","current":true,"created_at":"2026-10-20T10:00:00Z"}`)
+
+	out, errOut, code := runEvals(t, "experiments", "list")
+	if code != 0 {
+		t.Fatalf("list = %d %q", code, errOut)
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("list printed %d lines, want a head and 3 rows:\n%s", len(lines), out)
+	}
+	for i, want := range [][]string{
+		{"ID", "NAME", "SUITE", "CANDIDATES", "STATE", "MODE", "TRIALS", "STARTED"},
+		{"exp_1", "haiku 4.5 vs 5.5", "open-tasks", "2", "complete"},
+		{"exp_2", "-", "open-tasks", "2"},
+		{"exp_3", "-", "sha256:222222222222", "2"},
+	} {
+		for _, w := range want {
+			if !strings.Contains(lines[i], w) {
+				t.Errorf("line %d lacks %q:\n%s", i, w, out)
+			}
+		}
+	}
+	reads := map[string]int{}
+	for _, r := range s.seen() {
+		if strings.Contains(r.URL.Path, "/suites/") {
+			reads[r.URL.Path]++
+		}
+	}
+	if reads[evals.BasePath+"/suites/"+evalsDigest("1")] != 1 || reads[evals.BasePath+"/suites/"+evalsDigest("2")] != 1 || len(reads) != 2 {
+		t.Errorf("suite reads = %v, want each suite once", reads)
+	}
+
+	before := len(s.seen())
+	for _, flag := range []string{"-q", "--json"} {
+		if _, errOut, code := runEvals(t, "experiments", "list", flag); code != 0 {
+			t.Errorf("list %s = %d %q", flag, code, errOut)
+		}
+	}
+	for _, r := range s.seen()[before:] {
+		if r.URL.Path != evals.BasePath+"/experiments" {
+			t.Errorf("list -q or --json read %s", r.URL.Path)
+		}
+	}
 }
 
 // Each figure is formatted as Examen's reports format a cost.
