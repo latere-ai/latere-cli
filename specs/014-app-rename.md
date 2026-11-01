@@ -134,7 +134,7 @@ before a rename and what `delete` and `rename` print read them from there.
 | Decision | Chosen | Alternatives and why not |
 |---|---|---|
 | Whether to ask first | no question, as `visibility` | typing the slug back with `--yes`, as `delete`: a rename is undone by renaming back within the hold, and a delete is not. The help and the output both say that links to the old address stop working |
-| Checking the slug before sending | the four rules of its form, stated once with their sentences | sending and letting the platform refuse: a typing mistake would cost a request and read as the platform's refusal. Checking a short slug too: a plan may allow one |
+| Checking the slug before sending | the four rules of its form, stated once with their sentences | sending and letting the platform refuse: a typing mistake would cost a request and read as the platform's refusal. Checking a short slug too: a platform admin may have approved the account for one |
 | The app read before the rename | one `GET` | deriving the old push URL from the new one by swapping the last segment: a guess at the git host's layout, which the answer of the read states |
 | A new slug that is the app's own | no `PATCH`, exit 0, says nothing changed | sending it: the platform changes nothing, and the output would read as a rename. Exit 1: the state asked for already holds |
 | Which remote is set | `latere`, when its URL is the old push URL exactly | every remote that holds the old push URL: `create --remote` may have named another, which the line the command prints covers. A looser match: it would rewrite a remote of another owner's repository that shares the slug |

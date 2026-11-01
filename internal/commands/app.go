@@ -587,11 +587,11 @@ var invalidSlugReasons = map[string]string{
 // appSlugGrammar says what a slug is made of, for a command's help.
 var appSlugGrammar = fmt.Sprintf("1 to %d lowercase letters, digits and single hyphens", appSlugMax)
 
-// brokenSlugRule is the rule a slug breaks whatever the account's plan, as
+// brokenSlugRule is the rule a slug breaks whatever the account, as
 // invalid_slug names it, or "" for a slug that breaks none. The platform
 // checks the rules in this order and counts a slug in bytes, so the answer
-// here is the one it would give. A short slug is a plan's to allow, so only
-// the platform refuses one.
+// here is the one it would give. A short slug is a platform admin's to
+// approve for the account, so only the platform refuses one.
 func brokenSlugRule(slug string) string {
 	switch {
 	case slug == "" || len(slug) > appSlugMax:

@@ -411,7 +411,7 @@ exits 1:
 | `slug_taken` | another app has the slug, or it is held for the account that gave it up |
 | `slug_reserved` | the platform keeps the slug for itself |
 | `slug_held` | the slug is the name of a repository deleted recently, which is still held |
-| `invalid_slug` | the slug breaks a rule, or is under three characters on a plan that does not allow short slugs; the message names the rule |
+| `invalid_slug` | the slug breaks a rule, or is under three characters on an account a platform admin has not approved for short slugs; the message names the rule |
 | `repository_name_taken` | the app's owner already has a repository with the slug as its name, which the app's repository would take |
 | `repository_unavailable` | the app's repository could not be renamed; run the command again in a few minutes |
 | `forbidden` | you may not rename this app |
