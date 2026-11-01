@@ -886,7 +886,7 @@ outcomes to, for every command, through a typed error
 | 11 | `bars check` exits 0, 1, 2 and 3 in the cases of the table, and `--wait` reads until the evaluation completes | `TestEvalsBarCheckExitCodes`, against a stub server and a fake clock |
 | 12 | `exports create --wait` exits 0 on `complete`, 1 on `failed` and 3 when the wait passes | `TestEvalsExportWait` |
 | 13 | Every exit code of the group reaches the process unchanged | `TestHandleExitErrorKeepsTheEvalsCode` |
-| 14 | `eval` is a hidden word that exits 1 naming `latere evals` with any arguments; `EVAL_API_URL` or `EVAL_ADMIN_TOKEN` alone is refused naming its replacement; no shipped source or doc names the old command or variables; the old group's code and tests are gone | `TestRetiredCommands`, `TestRenamedVariables`, `TestNothingNamesARetiredCommand` |
+| 14 | `eval` is not a command; `EVAL_API_URL` and `EVAL_ADMIN_TOKEN` are unread; no shipped source or doc names the old command or variables; the old stub's code and tests are gone | `TestCapabilityCommandTree`, `TestNothingNamesARetiredCommand` |
 | 15 | The built binary applies a directory, creates an experiment of external candidates, is refused a create of agent candidates and prints the link, watches a stubbed experiment to its end, compares, asks for a comparison across two tasks, pins a baseline, applies a taxonomy, checks a bar, leases, renews and submits a trial, imports a run file, closes an import experiment, freezes, publishes at `aggregates` and shares a report, and is refused a benchmark's publish `sign_in_not_kept` with the console's Publish address, against a stub of the API, the mint and Storage | `cmd/latere/evals_e2e_test.go` |
 | 16 | `--inputs` writes `instruction.txt`, `trial.json` and `lease.json`; `--renew` extends a held lease and exits 2 on a lapsed one; a submit sends the lease, the failure members with `infra_failed`, the transcript, the final message, the declared harness version and image, the service versions and usage, and the ref; a file output is uploaded as itself and a directory output as one gzip-compressed tar archive under `files/evals-uploads/`, each sent as `{path, arca: {path, digest}}`, never inline; a file the task does not name is refused before sending | `TestEvalsHarnessRenew`, `TestEvalsHarnessSubmitMembers`, `TestEvalsHarnessDirectoryOutput` |
 | 17 | `harness import` sends every line to the import route, counts `already_imported` as imported so a second run changes nothing, reports refused lines with their `ref` and goes on, and exits 0, 1, 2 or 3 as its section says; `--plan` sends nothing | `TestEvalsImport`, `TestEvalsImportResumes`, `TestEvalsImportPlanSendsNothing` |
@@ -976,3 +976,17 @@ are the SDK's models now, `--json` prints each model's `RawJSON`, and the
 base path comes from `evals.BasePath`. An error event the stream ends with
 reaches `watch` as `evals.StreamError`; `watch --json` prints it as the
 frame the API sent.
+
+**2026-11-01: `latere eval` and its variables are removed.** The one
+release's grace promised in the removal note above ran from v0.32.0
+(2026-10-21) to v0.39.0 without the stub being dropped; it is gone now.
+`retired.go`, its hidden `eval` command and the `EVAL_API_URL` and
+`EVAL_ADMIN_TOKEN` refusals are deleted, along with the tests naming them
+(`TestRetiredCommandWords`, `TestRenamedEvalsVariables`,
+`TestRetiredEvalE2E`) and the environment-cleanup lines in the test
+entry points. `newEvalsClient` reads `LATERE_EVALS_URL` and
+`LATERE_EVALS_TOKEN` with a plain `os.Getenv`, the way `newAppClient` and
+`cellaClient` already read their own capability's variables. The scan in
+`capability_scan_test.go` keeps `latere eval\b`, `EVAL_(API_URL|ADMIN_TOKEN)\b`
+and `eval\.latere\.ai` as a permanent guard, the same as the older retired
+words it already held past their own removal.

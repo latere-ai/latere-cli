@@ -105,8 +105,9 @@ Where each spec stands:
   declared trials, reports, benchmarks and datasets published and shared,
   and bar checks for CI with fixed exit codes. Its first slice was built on
   2026-10-21: each definition's `list` and `show`, and `experiments list`,
-  `show` and `watch`, with the group's exit codes. `latere eval` is removed
-  and its word refused for one release.
+  `show` and `watch`, with the group's exit codes. `latere eval` is
+  removed; its word and variables were refused for one release, then
+  dropped outright on 2026-11-01.
 - `016-devices-command.md`: `latere devices connect` connects this computer
   as one of the person's environments and serves it in the foreground as a
   Cella worker on the local driver, confined to the folders the person

@@ -77,9 +77,6 @@ load it from your shell startup files.`,
 	root.AddCommand(newAppCmd())
 	root.AddCommand(newMemoryCmd())
 	root.AddCommand(newDevicesCmd(version))
-	for word := range retiredCommands {
-		root.AddCommand(newRetiredCmd(word))
-	}
 	root.AddCommand(newUpgradeCmd(version))
 	root.AddCommand(newCompletionCmd(root))
 	return root

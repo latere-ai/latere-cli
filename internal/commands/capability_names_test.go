@@ -4,10 +4,7 @@
 package commands
 
 import (
-	"bytes"
-	"regexp"
 	"slices"
-	"strings"
 	"testing"
 )
 
@@ -53,48 +50,11 @@ func TestCapabilityCommandTree(t *testing.T) {
 	if run.Flags().Lookup("local") != nil {
 		t.Error("agents run still takes --local; running locally is what the command is")
 	}
-	// The words named after an open core are not commands at all.
-	for _, word := range []string{"cella", "sandbox", "topos", "review", "app"} {
+	// The words named after an open core, or a retired service, are not
+	// commands at all.
+	for _, word := range []string{"cella", "sandbox", "topos", "review", "app", "eval"} {
 		if found, _, _ := root.Find([]string{word}); found != root {
 			t.Errorf("latere %s is still a command: %s", word, found.CommandPath())
-		}
-	}
-}
-
-// Each retired word is hidden from the help, takes whatever followed it, and
-// exits 1 with one sentence naming its replacement, so a script that still
-// calls it fails on its first run with the new command in the error.
-func TestRetiredCommandWords(t *testing.T) {
-	if !strings.Contains(retiredCommands["eval"], "'latere evals'") {
-		t.Errorf("the eval sentence = %q, want it to name latere evals", retiredCommands["eval"])
-	}
-	for word, sentence := range retiredCommands {
-		args := []string{word, "apply", "-f", "suite.yaml", "--dry-run"}
-		t.Run(strings.Join(args, " "), func(t *testing.T) {
-			root := NewRoot("test")
-			var out bytes.Buffer
-			root.SetOut(&out)
-			root.SetErr(&out)
-			root.SetArgs(args)
-			err := root.Execute()
-			if err == nil || err.Error() != sentence {
-				t.Fatalf("err = %v, want %q", err, sentence)
-			}
-			if code := HandleExitError(&bytes.Buffer{}, err); code != 1 {
-				t.Errorf("exit code %d, want 1", code)
-			}
-			if out.Len() != 0 {
-				t.Errorf("printed %q besides the error", out.String())
-			}
-		})
-	}
-	help, err := executeForHelp(NewRoot("test"), "--help")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for word := range retiredCommands {
-		if regexp.MustCompile(`(?m)^\s+` + word + `\s`).MatchString(help) {
-			t.Errorf("latere --help lists the retired word %q:\n%s", word, help)
 		}
 	}
 }

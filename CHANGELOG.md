@@ -17,6 +17,14 @@ committed: the commit log already holds that.
   while colors stay off, and formatted answers use only the colors your
   terminal supports.
 
+### Removed
+
+- **`latere eval` is gone.** It was refused with its replacement since
+  v0.32.0, and is now an unknown command. Use `latere evals`, which reads
+  your suites and experiments in Evals.
+  - `EVAL_API_URL` and `EVAL_ADMIN_TOKEN` are unread variables. Use
+    `LATERE_EVALS_URL` and `LATERE_EVALS_TOKEN`.
+
 ## v0.39.0 - 2026-10-31
 
 ### Added

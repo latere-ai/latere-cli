@@ -21,13 +21,11 @@ import (
 var retiredName = regexp.MustCompile(`latere (cella|topos|sandbox|review|app|eval)\b|LATERE_(CELLA_URL|CELLA_TOKEN|TOPOS_PROVIDER_FILE|APP_URL|APP_TOKEN)\b|EVAL_(API_URL|ADMIN_TOKEN)\b|eval\.latere\.ai|topos-provider\.json`)
 
 // No help, example, error, README or docs page names a retired command or
-// variable, except retired.go, which refuses them, and the provider file's
-// move. The changelog and the specs keep the history and are not scanned,
-// nor are the tests.
+// variable, except the provider file's move. The changelog and the specs
+// keep the history and are not scanned, nor are the tests.
 func TestNothingNamesARetiredCommand(t *testing.T) {
 	root := filepath.Join("..", "..")
 	allowed := map[string]bool{
-		filepath.Join("internal", "commands", "retired.go"): true,
 		// The legacy file name is read once to move the saved choice.
 		filepath.Join("internal", "commands", "topos_provider.go"): true,
 	}
