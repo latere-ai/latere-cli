@@ -11,6 +11,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"slices"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"latere.ai/x/pkg/authkit/jwt"
+	"latere.ai/x/sdk-go/agents"
 	"latere.ai/x/sdk-go/latere"
 	"latere.ai/x/sdk-go/oversight"
 
@@ -68,10 +70,14 @@ A step is one tool call of an agent in a session. An <action> names a
 step: the session's id and the step's tool use id with a / between them,
 as 'latere agents session <id>' and 'latere oversight cases' print it.
 
-Every command reads your own records: the organization and the subject
-are both your subject, your issuer and your sign-in id with a | between
-them, in every context, since Limen keeps a hosted session's records by
-the person who started it.
+Limen keeps your records in a context. Your own context is your subject:
+your issuer and your sign-in id with a | between them. The steps of an
+organization's agent can be in the organization's context. 'explain',
+'answer' and 'cases --session' read the session's log and use the
+organization each step was decided under, or your own context for a step
+that names none. The other commands read your own context. Limen answers
+for an organization's context only to a login in that organization:
+'latere login --org-id <id>'.
 
 The commands call https://api.latere.ai/v1/oversight with a token minted
 for your login. LATERE_OVERSIGHT_URL or --api-url overrides the address,
@@ -106,12 +112,16 @@ succeed.`,
 
 // oversightClient is one command's connection to the oversight API: the
 // SDK's client, the address as the command was given it, which messages
-// name, and the person every call is about.
+// name, the person every call is about, and the auth URL the agents API is
+// read with to find the organization of a session's steps.
 type oversightClient struct {
 	ov   *oversight.Client
 	base string
-	// me is the person's subject, the org and the subject of every call.
+	// me is the person's subject: the subject of every call, and the org
+	// of every call in the person's own context.
 	me string
+	// authURL is the --auth-url the command was given.
+	authURL string
 }
 
 // newOversightClient resolves the API's address, the flag, then
@@ -136,7 +146,79 @@ func newOversightClient(ctx context.Context, flagURL, authURL string) (*oversigh
 	if err != nil {
 		return nil, refusedf("%w", err)
 	}
-	return &oversightClient{ov: oversight.New(cfg), base: base, me: me}, nil
+	return &oversightClient{ov: oversight.New(cfg), base: base, me: me, authURL: authURL}, nil
+}
+
+// sessionSteps is the organization Limen holds each step of a hosted
+// session under, by tool use id, with the steps in the log's order. A
+// step's organization is the decision_org its agent.tool_use recorded
+// (topos spec 100): an organization's id when the installation keys an
+// organization's agent's calls by the organization, and otherwise the
+// initiator's subject. A step that recorded none, as every step did before
+// Topos recorded it, is in the person's own context.
+type sessionSteps struct {
+	org   map[string]string
+	order []string
+}
+
+// orgOf is the organization of the step toolUseID, the person's own
+// subject for a step the log does not name one for.
+func (st sessionSteps) orgOf(toolUseID, me string) string {
+	return cmp.Or(st.org[toolUseID], me)
+}
+
+// orgs are the organizations the session's steps are in, the person's own
+// first and each other once, in the order the log names them.
+func (st sessionSteps) orgs(me string) []string {
+	out := []string{me}
+	for _, id := range st.order {
+		if org := st.org[id]; org != "" && !slices.Contains(out, org) {
+			out = append(out, org)
+		}
+	}
+	return out
+}
+
+// steps reads the session's log through the agents API for the
+// organization of each of its steps. A session the agents API does not
+// have, such as a step's of another installation, has every step in the
+// person's own context. So does a log that cannot be read, with a note on
+// errOut: the command then reads the person's own records, as it did before
+// a step named its organization.
+func (c *oversightClient) steps(ctx context.Context, errOut io.Writer, session string) sessionSteps {
+	st := sessionSteps{org: map[string]string{}}
+	ag, err := newAgentsClient("", c.authURL)
+	if err == nil {
+		for e, ierr := range ag.ag.ListEvents(ctx, session, nil) {
+			if ierr != nil {
+				err = ierr
+				break
+			}
+			if e.Type != agents.EventAgentToolUse {
+				continue
+			}
+			var u agents.ToolUse
+			if derr := e.Decode(&u); derr != nil || u.ToolUseID == "" {
+				continue
+			}
+			if _, seen := st.org[u.ToolUseID]; !seen {
+				st.order = append(st.order, u.ToolUseID)
+			}
+			st.org[u.ToolUseID] = u.DecisionOrg
+		}
+	}
+	if err != nil && !errors.Is(err, latere.ErrNotFound) {
+		fprintf(errOut, "Could not read session %s to find the organization of its steps, so your own records are read: %v\n", session, err)
+		return sessionSteps{org: map[string]string{}}
+	}
+	return st
+}
+
+// orgOfAction is the organization Limen holds the step id names under, as
+// steps reads it from the step's session.
+func (c *oversightClient) orgOfAction(ctx context.Context, errOut io.Writer, id string) string {
+	session, tool, _ := strings.Cut(id, "/")
+	return c.steps(ctx, errOut, session).orgOf(tool, c.me)
 }
 
 // signedInSubject is the person the commands act for, rendered as Limen
@@ -167,13 +249,27 @@ func signedInSubject(ctx context.Context, origin, authURL, token string) (string
 // code, as apiRefused words it for the oversight API, after naming the
 // refusals a person meets with what to do about them.
 func (c *oversightClient) refused(err error) error {
+	return c.refusedIn(c.me, err)
+}
+
+// refusedIn is refused for a call in the context org: a refusal in an
+// organization's context names the login Limen answers it to.
+func (c *oversightClient) refusedIn(org string, err error) error {
 	switch {
 	case errors.Is(err, oversight.ErrNoDecision):
 		return refusedf("Limen has no decision recorded for that step, so there is nothing to answer yet")
 	case errors.Is(err, oversight.ErrAskTooCostly):
 		return refusedf("those costs would let Limen decide a step of yours without ever asking, so they are refused")
+	case errors.Is(err, latere.ErrForbidden) && isOrganization(org):
+		return refusedf("that step is in organization %s, and Limen answers for it only to a login in that organization: run `latere login --org-id %s`", org, org)
 	}
 	return apiRefused("oversight", c.base, err)
+}
+
+// isOrganization reports whether org names an organization's context: an
+// organization's id has no |, and a person's subject has one.
+func isOrganization(org string) bool {
+	return org != "" && !strings.Contains(org, "|")
 }
 
 // parseActionID reads <session>/<tool_use_id>.
@@ -248,8 +344,10 @@ whether it was unsure or split), what was done (the verdict, the chance
 you were shown the step, and what decided it), and your answers.
 
 --pending lists only the steps you were shown that you have not checked
-yet. --session keeps the steps of one session. --limit 0 lists them all.
---json prints the cases as the API answered them.`,
+yet. --session keeps the steps of one session, in the order the session
+made them, from each context its steps are in. Without --session, the
+command lists your own context. --limit 0 lists them all. --json prints
+the cases as the API answered them.`,
 		Example: `  latere oversight cases
   latere oversight cases --pending
   latere oversight cases --session ses_01JA3BQ7Z4M8N2P5R6S7T8V9WX --limit 0
@@ -264,7 +362,7 @@ yet. --session keeps the steps of one session. --limit 0 lists them all.
 				return err
 			}
 			session = strings.TrimSuffix(strings.TrimSpace(session), "/")
-			shown, total, err := c.cases(cmd.Context(), pending, session, limit)
+			shown, total, err := c.cases(cmd.Context(), cmd.ErrOrStderr(), pending, session, limit)
 			if err != nil {
 				return err
 			}
@@ -282,28 +380,52 @@ yet. --session keeps the steps of one session. --limit 0 lists them all.
 	return cmd
 }
 
-// cases reads every page of the person's cases, keeps those of session
-// when it names one, and returns the latest limit of them, oldest first,
-// with how many there were. Limen pages oldest first, so the latest are
-// on the last page.
-func (c *oversightClient) cases(ctx context.Context, pending bool, session string, limit int) ([]*oversight.Case, int, error) {
-	params := &oversight.CasesParams{Org: c.me, Subject: c.me, Pending: pending, Limit: oversight.MaxCasesLimit}
-	shown := []*oversight.Case{}
-	total := 0
-	for k, err := range c.ov.ListCases(ctx, params) {
-		if err != nil {
-			return nil, 0, c.refused(err)
-		}
-		if session != "" && !strings.HasPrefix(k.Action.ActionID, session+"/") {
-			continue
-		}
-		total++
-		shown = append(shown, k)
-		if limit > 0 && len(shown) > limit {
-			shown = shown[1:]
+// cases reads every page of the person's cases, and returns the latest
+// limit of them, oldest first, with how many there were. Limen pages
+// oldest first, so the latest are on the last page. Without a session they
+// are the person's own context's. With one, they are that session's, read
+// in each context its steps are in, and ordered as the session's log made
+// them.
+func (c *oversightClient) cases(ctx context.Context, errOut io.Writer, pending bool, session string, limit int) ([]*oversight.Case, int, error) {
+	orgs := []string{c.me}
+	var st sessionSteps
+	if session != "" {
+		st = c.steps(ctx, errOut, session)
+		orgs = st.orgs(c.me)
+	}
+	all := []*oversight.Case{}
+	for _, org := range orgs {
+		params := &oversight.CasesParams{Org: org, Subject: c.me, Pending: pending, Limit: oversight.MaxCasesLimit}
+		for k, err := range c.ov.ListCases(ctx, params) {
+			if err != nil {
+				return nil, 0, c.refusedIn(org, err)
+			}
+			if session != "" && !strings.HasPrefix(k.Action.ActionID, session+"/") {
+				continue
+			}
+			all = append(all, k)
 		}
 	}
-	return shown, total, nil
+	if len(orgs) > 1 {
+		// Each context pages oldest first; the session's log orders them
+		// together, with a step it does not name last.
+		at := make(map[string]int, len(st.order))
+		for i, id := range st.order {
+			at[session+"/"+id] = i
+		}
+		place := func(k *oversight.Case) int {
+			if i, ok := at[k.Action.ActionID]; ok {
+				return i
+			}
+			return len(st.order)
+		}
+		slices.SortStableFunc(all, func(a, b *oversight.Case) int { return cmp.Compare(place(a), place(b)) })
+	}
+	total := len(all)
+	if limit > 0 && total > limit {
+		all = all[total-limit:]
+	}
+	return all, total, nil
 }
 
 func printCases(out io.Writer, cases []*oversight.Case, total int, pending bool) error {
@@ -372,7 +494,11 @@ the answers of yours that moved it most, each with its share.
 
 The model that explains is named with how many of your answers it was
 fitted on; when it is not the one that made the suggestion, Limen has
-learned since.`,
+learned since.
+
+The command reads the step's session to find the organization the step
+was decided under, and reads your records there. A step that names none
+is in your own context.`,
 		Example: `  latere oversight explain ses_01JA3BQ7Z4M8N2P5R6S7T8V9WX/toolu_01
   latere oversight explain ses_01JA3BQ7Z4M8N2P5R6S7T8V9WX/toolu_01 --json`,
 		Args: cobra.ExactArgs(1),
@@ -385,9 +511,10 @@ learned since.`,
 			if err != nil {
 				return err
 			}
-			e, err := c.ov.GetExplanation(cmd.Context(), &oversight.ExplanationParams{Org: c.me, Subject: c.me, ActionID: id})
+			org := c.orgOfAction(cmd.Context(), cmd.ErrOrStderr(), id)
+			e, err := c.ov.GetExplanation(cmd.Context(), &oversight.ExplanationParams{Org: org, Subject: c.me, ActionID: id})
 			if err != nil {
-				return c.refused(err)
+				return c.refusedIn(org, err)
 			}
 			if jsonF {
 				return printRawJSON(cmd.OutOrStdout(), e.RawJSON())
@@ -784,7 +911,9 @@ step you were shown counts toward how often Limen is wrong; every answer
 teaches it.
 
 An answer is sent once and never again on its own, since each answer Limen
-receives counts.`,
+receives counts. It goes to the organization the step was decided under,
+which the command reads from the step's session, or to your own context
+for a step that names none.`,
 		Example: `  latere oversight answer ses_01JA3BQ7Z4M8N2P5R6S7T8V9WX/toolu_01 allow
   latere oversight answer ses_01JA3BQ7Z4M8N2P5R6S7T8V9WX/toolu_02 deny`,
 		Args:      cobra.ExactArgs(2),
@@ -806,9 +935,9 @@ receives counts.`,
 			if err != nil {
 				return err
 			}
-			params := &oversight.AnswerParams{Org: c.me, Subject: c.me, ActionID: id, Approve: approve}
+			params := &oversight.AnswerParams{Org: c.orgOfAction(cmd.Context(), cmd.ErrOrStderr(), id), Subject: c.me, ActionID: id, Approve: approve}
 			if err := c.ov.Answer(cmd.Context(), params); err != nil {
-				return c.refused(err)
+				return c.refusedIn(params.Org, err)
 			}
 			if jsonF {
 				return printJSON(cmd.OutOrStdout(), params)

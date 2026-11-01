@@ -109,11 +109,33 @@ func saveLogin(t *testing.T, claims map[string]any) {
 	}
 }
 
-// newOversightStub is the oversight API, with a person signed in.
+// newOversightStub is the oversight API, with a person signed in, and an
+// agents API that has no session, so a step is in the person's own context.
 func newOversightStub(t *testing.T) *apiStub {
 	t.Helper()
+	ov, _ := newOversightStubs(t)
+	return ov
+}
+
+// newOversightStubs is the oversight API, with a person signed in, and the
+// agents API, which the commands read a step's organization from.
+func newOversightStubs(t *testing.T) (ov, ag *apiStub) {
+	t.Helper()
 	saveLogin(t, map[string]any{"iss": "https://auth.example", "sub": "usr_42"})
-	return newAPIStub(t, oversight.BasePath, envOversightURL, envOversightToken)
+	return newAPIStub(t, oversight.BasePath, envOversightURL, envOversightToken), newAgentsStub(t)
+}
+
+// ovOrg is the organization whose agent made the steps of ses_O.
+const ovOrg = "org_7"
+
+// serveOrgSession serves ses_O's log on the agents API: toolu_1 decided in
+// the organization ovOrg, toolu_2 in the person's own context by name, and
+// toolu_3 recorded before a call named its organization.
+func serveOrgSession(ag *apiStub) {
+	ag.json("GET /sessions/ses_O/events", http.StatusOK, `{"items":[`+
+		agEvent(1, "agent.tool_use", "", `{"tool_use_id":"toolu_1","name":"bash","input":{},"verdict":"ask","decision_org":"`+ovOrg+`"}`)+`,`+
+		agEvent(2, "agent.tool_use", "", `{"tool_use_id":"toolu_2","name":"bash","input":{},"verdict":"allow","decision_org":"`+ovMe+`"}`)+`,`+
+		agEvent(3, "agent.tool_use", "", `{"tool_use_id":"toolu_3","name":"bash","input":{},"verdict":"allow"}`)+`]}`)
 }
 
 // runLatere runs `latere args...` with stdin and returns its output, its
@@ -425,5 +447,101 @@ func TestOversightRefusals(t *testing.T) {
 	t.Setenv(envOversightURL, s.srv.URL+"/v1/limen")
 	if _, errOut, code := runLatere(t, "", "oversight", "learned"); code != exitRefused || !strings.Contains(errOut, "not an oversight API base URL") {
 		t.Errorf("a wrong base: exit %d, %s", code, errOut)
+	}
+}
+
+// A step of an organization's agent is explained and answered in the
+// organization its session's log names for it; a step that names the
+// person, or none as an older one does, in the person's own context. A
+// session the agents API does not have is the person's own.
+func TestOversightStepInAnOrganization(t *testing.T) {
+	ov, ag := newOversightStubs(t)
+	serveOrgSession(ag)
+	ov.json("GET /explanations", http.StatusOK, ovExplanation)
+	ov.handle("POST /answers", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+
+	for i, step := range []struct{ id, org string }{
+		{"ses_O/toolu_1", ovOrg}, {"ses_O/toolu_2", ovMe}, {"ses_O/toolu_3", ovMe}, {"ses_X/toolu_1", ovMe},
+	} {
+		if _, errOut, code := runLatere(t, "", "oversight", "explain", step.id); code != 0 || errOut != "" {
+			t.Fatalf("explain %s: exit %d: %s", step.id, code, errOut)
+		}
+		if q := ov.seen()[2*i].URL.Query(); q.Get("org") != step.org || q.Get("subject") != ovMe || q.Get("action_id") != step.id {
+			t.Errorf("explain %s: query %v, want org %s", step.id, q, step.org)
+		}
+		if _, errOut, code := runLatere(t, "", "oversight", "answer", step.id, "allow"); code != 0 {
+			t.Fatalf("answer %s: exit %d: %s", step.id, code, errOut)
+		}
+		if b := ov.body(2*i + 1); b["org"] != step.org || b["subject"] != ovMe || b["action_id"] != step.id {
+			t.Errorf("answer %s: body %v, want org %s", step.id, b, step.org)
+		}
+	}
+
+	// Limen refuses an organization's step to a login in another context,
+	// and the command names the login it answers to.
+	ov.json("GET /explanations", http.StatusForbidden, `{"error":{"code":"forbidden","message":"Not yours.","details":{}}}`)
+	if _, errOut, code := runLatere(t, "", "oversight", "explain", "ses_O/toolu_1"); code != exitRefused || !strings.Contains(errOut, "latere login --org-id "+ovOrg) {
+		t.Errorf("forbidden in an organization: exit %d, %s", code, errOut)
+	}
+	if _, errOut, code := runLatere(t, "", "oversight", "explain", "ses_O/toolu_2"); code != exitRefused || strings.Contains(errOut, "--org-id") {
+		t.Errorf("forbidden in the person's own context: exit %d, %s", code, errOut)
+	}
+}
+
+// A log the agents API does not answer leaves every step in the person's
+// own context, with a note that says so.
+func TestOversightStepWhenTheSessionCannotBeRead(t *testing.T) {
+	ov, ag := newOversightStubs(t)
+	ag.json("GET /sessions/ses_O/events", http.StatusBadRequest, `{"error":{"code":"invalid_request","message":"No.","details":{}}}`)
+	ov.json("GET /explanations", http.StatusOK, ovExplanation)
+	_, errOut, code := runLatere(t, "", "oversight", "explain", "ses_O/toolu_1")
+	if code != 0 || !strings.Contains(errOut, "Could not read session ses_O") {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	if q := ov.seen()[0].URL.Query(); q.Get("org") != ovMe {
+		t.Errorf("query %v", q)
+	}
+}
+
+// --session reads the session's steps in each context they are in, the
+// person's own and the organization's, and lists them in the log's order.
+func TestOversightCasesOfASessionInAnOrganization(t *testing.T) {
+	ov, ag := newOversightStubs(t)
+	serveOrgSession(ag)
+	ov.handle("GET /cases", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("org") == ovOrg {
+			_, _ = io.WriteString(w, `{"entries":[`+ovCase("ses_O/toolu_1", "ask", false)+`,`+ovCase("ses_P/toolu_1", "ask", false)+`]}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"entries":[`+ovCase("ses_O/toolu_3", "allow", false)+`,`+ovCase("ses_O/toolu_2", "allow", true)+`]}`)
+	})
+	out, errOut, code := runLatere(t, "", "oversight", "cases", "--session", "ses_O", "--pending")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	first, second, third := strings.Index(out, "ses_O/toolu_1"), strings.Index(out, "ses_O/toolu_2"), strings.Index(out, "ses_O/toolu_3")
+	if first < 0 || second < first || third < second || strings.Contains(out, "ses_P") {
+		t.Errorf("the session's steps are not listed in the log's order:\n%s", out)
+	}
+	var orgs []string
+	for _, r := range ov.seen() {
+		q := r.URL.Query()
+		if q.Get("subject") != ovMe || !q.Has("pending") {
+			t.Errorf("query %v", q)
+		}
+		orgs = append(orgs, q.Get("org"))
+	}
+	if !slices.Equal(orgs, []string{ovMe, ovOrg}) {
+		t.Errorf("contexts read %v, want the person's own and then %s", orgs, ovOrg)
+	}
+
+	// Without --session, the person's own context alone is read.
+	n := len(ov.seen())
+	if _, errOut, code := runLatere(t, "", "oversight", "cases"); code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	if reqs := ov.seen()[n:]; len(reqs) != 1 || reqs[0].URL.Query().Get("org") != ovMe {
+		t.Errorf("%d requests, want one in the person's own context", len(reqs))
 	}
 }
