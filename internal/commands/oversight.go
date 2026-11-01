@@ -64,9 +64,9 @@ agent's step, recorded and learned about you, and correct it.
   latere oversight answer <action> allow    allow or deny a step you checked
   latere oversight forget                   remove everything it holds about you
 
-An <action> is a step of a session: the session's id and the step's tool
-use id with a / between them, as 'latere agents session <id>' and 'latere
-oversight cases' print it.
+A step is one tool call of an agent in a session. An <action> names a
+step: the session's id and the step's tool use id with a / between them,
+as 'latere agents session <id>' and 'latere oversight cases' print it.
 
 Every command reads your own records: the organization and the subject
 are both your subject, your issuer and your sign-in id with a | between

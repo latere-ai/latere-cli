@@ -224,13 +224,15 @@ tool and a short summary of its input, the verdict and the approval mode,
 the layer of the rules that decided it and the rule within it, its risk
 score and the rule set that scored it, what Limen suggested (the verdict,
 the chance you allow the call, how unsure it is, and for an ask whether
-it was unsure or split, when the session recorded it), the chance you
-were shown the call, whether a person began its turn, and your answer to
-it, if you gave one.
+it was unsure or split, if the session recorded it), the chance you were
+shown the call, whether a person began its turn, and your answer to it,
+if you gave one. A session from before the platform recorded why Limen
+asks shows none.
 
-'latere oversight explain <id>/<tool_use_id>' says why Limen suggested
-what it did for a call, and 'latere oversight cases --session <id>' lists
-the calls Limen holds with your checks of them.
+The oversight commands call each tool call a step. 'latere oversight
+explain <id>/<tool_use_id>' says why Limen suggested what it did for a
+step, and 'latere oversight cases --session <id>' lists the session's
+steps that Limen holds, with your checks of them.
 
 --json prints the session as the API answered it, with each tool call's
 event and the confirmation that answered it.`,
