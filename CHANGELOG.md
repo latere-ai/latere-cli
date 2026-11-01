@@ -34,6 +34,16 @@ committed: the commit log already holds that.
   `LATERE_OVERSIGHT_TOKEN`, `LATERE_AGENTS_URL` and `LATERE_AGENTS_TOKEN`
   override their addresses and bearers.
 
+### Changed
+
+- **`latere evals experiments list` names each experiment and its suite.**
+  A NAME column shows the name the experiment was given in the console or
+  through the API, `-` for one started without a name, and SUITE shows the
+  suite's name where it used to show its digest.
+- **`latere evals experiments show` names what it compares.** It prints the
+  experiment's name, and its suite, candidates and reference by name, adding
+  a short digest only where two versions of one candidate share a name.
+
 ## v0.40.1 - 2026-11-01
 
 ### Changed

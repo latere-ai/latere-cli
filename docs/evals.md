@@ -8,7 +8,8 @@ CI job can wait for an experiment the console started and act on how it
 ended.
 
 The console at <https://platform.latere.ai/console/evals> is where you
-create and run experiments and read their comparisons. Every command acts
+create and run experiments and read their results, comparisons, runs and
+the files each run made. Every command acts
 in your current context: your personal account, or the organization
 `latere org` selected. Run `latere login` first (see the
 [main README](../README.md#sign-in)).
@@ -47,18 +48,19 @@ latere evals experiments list --suite fix-flaky-tests --state complete
 latere evals experiments show exp_01jb2c3d4e5f6g7h8j9k0m1n2p
 ```
 
-`experiments list` prints each experiment newest first with its suite, its
-number of candidates, its state, its mode and how many of its trials are
-done. `--suite` takes a suite's name, for every version of it, or a digest;
+`experiments list` prints each experiment newest first with the name it was
+given, `-` for one started without a name, its suite by name, its number of
+candidates, its state, its mode and how many of its trials are done. `--suite` takes a suite's name, for every version of it, or a digest;
 `--state` and `--mode` keep the experiments in that state or mode.
 
 `experiments show` prints one experiment:
 
 ```text
 id:         exp_01jb2c3d4e5f6g7h8j9k0m1n2p
-suite:      fix-flaky-tests@sha256:9f2c…
-candidates: opus-high@sha256:41ab…, sonnet-high@sha256:77d0…
-reference:  opus-high@sha256:41ab…
+name:       opus-vs-sonnet
+suite:      fix-flaky-tests
+candidates: opus-high, sonnet-high
+reference:  opus-high
 state:      running
 mode:       execute
 trials:     10 per cell
@@ -82,12 +84,22 @@ comparisons
 console:    https://platform.latere.ai/console/evals/experiments/exp_01jb2c3d4e5f6g7h8j9k0m1n2p
 ```
 
+The name is the one given when the experiment was started, which the
+console asks for and an experiment created through the API keeps as the
+`name` of its metadata. Definitions are named by name; two versions of one
+candidate in the same experiment add their short digests, such as
+`open-builder@sha256:41ab…`, and one you may not read shows its digest.
+The trial counts are the API's, so a run that failed to start and was run
+again counts twice, once as `infra_failed`; the console's Runs tab shows
+each run once.
+
 A cell is one task of one candidate, and a parked cell waits for a retry.
 Each comparison says what it compares, what differs
 between its sides, what else differs that its verdicts cannot separate,
 whether it is computed, and whether its figures are final or may still
 change as trials finish. The console's page of the experiment shows each
-comparison's figures and verdicts.
+metric's figures and verdicts on its Results tab, and each comparison on
+its Comparison tab.
 
 ## Following an experiment
 
