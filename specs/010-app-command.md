@@ -14,7 +14,7 @@ affects:
   - .lateregate.yaml (the identity block's audience)
   - docs/app.md, docs/configuration.md, docs/login-and-tokens.md, README.md, CHANGELOG.md
 created: 2026-10-03
-updated: 2026-10-11
+updated: 2026-11-01
 author: changkun
 ---
 
@@ -109,7 +109,7 @@ on every refusal. The CLI prints `<code>: <sentence>` and the hint, and exits 1.
 For `create`, the sentence says what the details name: the slug for
 `slug_taken`, `slug_reserved` and `slug_held`, the hold's end for `slug_held`,
 the rule for `invalid_slug` (`short` reads "a slug under three characters
-needs a plan that allows short slugs"), the attempts for
+needs a platform admin's approval"), the attempts for
 `slug_generation_failed`, the stage for `repository_create_failed`, the
 authorizer's reason for `forbidden`. A `401` other than `audience_mismatch`
 adds the line that says to run `latere login`.

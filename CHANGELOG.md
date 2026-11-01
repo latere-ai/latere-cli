@@ -10,6 +10,12 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Changed
+
+- A slug under three characters is approved per account by a platform admin,
+  so `latere apps create` and `latere apps rename` now say that in place of
+  naming a plan.
+
 ## v0.40.0 - 2026-11-01
 
 ### Changed

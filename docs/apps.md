@@ -53,8 +53,8 @@ latere apps create --no-remote --json            # no remote; the app as JSON
 ```
 
 The slug is the app's address. It is 1 to 40 lowercase letters, digits and
-single hyphens, and a slug under three characters needs a plan that allows
-short slugs.
+single hyphens, and a slug under three characters needs a platform admin's
+approval, which is given per account.
 
 A new app is private. `--visibility unlisted` creates it open to anyone who
 has its address instead, and [Who can open an app](#who-can-open-an-app)

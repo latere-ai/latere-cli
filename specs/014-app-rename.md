@@ -13,7 +13,7 @@ affects:
   - cmd/latere/app_rename_e2e_test.go (new)
   - docs/apps.md, README.md, CHANGELOG.md
 created: 2026-10-12
-updated: 2026-10-12
+updated: 2026-11-01
 author: changkun
 ---
 
@@ -35,7 +35,7 @@ that was never written. This records it.
 | The app's repository is renamed on the git host before anything is written, so `repository.push_url` changes and `repository.clone_url`, which is by id, does not | insula spec 026 |
 | The old address answers 404 at once and is not redirected, by decision | insula spec 006 |
 | The old slug is held for the account that had it for seven days. The same account takes it again at once; nobody else can until the hold ends | insula spec 006, `internal/store/model.go` |
-| A slug is 1 to 40 characters of `[a-z0-9-]`, starts and ends with `[a-z0-9]`, and holds no `--`; the rules are checked in that order, in bytes. A slug under three characters needs a plan that allows it | insula `internal/slug/slug.go` |
+| A slug is 1 to 40 characters of `[a-z0-9-]`, starts and ends with `[a-z0-9]`, and holds no `--`; the rules are checked in that order, in bytes. A slug under three characters needs a platform admin's approval | insula `internal/slug/slug.go` |
 | A new slug that is the app's own is no rename: the answer is 200 and nothing is held | insula `internal/api/apps.go` |
 | Refusals: `invalid_slug` 400 with `details.reason`, `slug_reserved` 409, `slug_taken` 409, `repository_name_taken` 409, `repository_unavailable` 503, `forbidden` 403, `app_not_found` 404, `app_deleting` 409. Each leaves the app as it was | insula spec 006, platform `docs/apps/openapi.yaml` |
 | A rename is told that a slug held for another account is `slug_taken`, with no end of the hold. `slug_held` at a rename is the git host's refusal of a name it still keeps for a repository deleted recently, with `details.reason` `repository_name_held`. Spec 006's table lists `slug_held` with `hold_ends_at` for the code as a whole, which a create earns | insula `internal/api/apps.go`, `internal/gitplane/gitplane.go` |

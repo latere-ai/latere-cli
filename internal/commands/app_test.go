@@ -792,7 +792,7 @@ func TestAppCreateRefusals(t *testing.T) {
 		{"double hyphen", envelope("invalid_slug", "This slug is not a valid address.", `{"reason":"double_hyphen","hint":"h"}`), 400,
 			[]string{"not a valid address: a slug has no two hyphens in a row."}},
 		{"short", envelope("invalid_slug", "This slug is not a valid address.", `{"reason":"short","hint":"h"}`), 400,
-			[]string{"invalid_slug: The slug hello is not a valid address: a slug under three characters needs a plan that allows short slugs."}},
+			[]string{"invalid_slug: The slug hello is not a valid address: a slug under three characters needs a platform admin's approval."}},
 		{"unknown rule", envelope("invalid_slug", "This slug is not a valid address.", `{"reason":"new_rule","hint":"h"}`), 400,
 			[]string{"invalid_slug: The slug hello is not a valid address.\nh"}},
 		{"generation", envelope("slug_generation_failed", "The platform could not find a free address.", `{"attempts":5,"hint":"Try again."}`), 503,

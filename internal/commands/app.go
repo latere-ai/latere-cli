@@ -581,7 +581,7 @@ var invalidSlugReasons = map[string]string{
 	slugRuleCharset:      "a slug takes only lowercase letters, digits and hyphens",
 	slugRuleBoundary:     "a slug starts and ends with a letter or a digit",
 	slugRuleDoubleHyphen: "a slug has no two hyphens in a row",
-	slugRuleShort:        "a slug under three characters needs a plan that allows short slugs",
+	slugRuleShort:        "a slug under three characters needs a platform admin's approval",
 }
 
 // appSlugGrammar says what a slug is made of, for a command's help.

@@ -213,7 +213,7 @@ func TestAppRenameLeavesAShortSlugToThePlatform(t *testing.T) {
 	if err == nil {
 		t.Fatal("want a refusal")
 	}
-	wantContains(t, err.Error(), "invalid_slug: The slug hi is not a valid address: a slug under three characters needs a plan that allows short slugs.")
+	wantContains(t, err.Error(), "invalid_slug: The slug hi is not a valid address: a slug under three characters needs a platform admin's approval.")
 	if got := s.seen(); !slices.Equal(got, renameRequests) {
 		t.Errorf("requests = %v", got)
 	}
