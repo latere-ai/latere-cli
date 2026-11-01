@@ -9,14 +9,15 @@ import (
 
 // newAgentsCmd is the `latere agents …` command group of the platform's
 // Agents capability (spec 011): the Latere agent run on this machine, the
-// model provider it uses, and the adversarial review of a Claude Code
-// session. Hosted agents are created and run on the platform, from the
-// console and its API; this group is what runs here.
+// model provider it uses, the adversarial review of a Claude Code session,
+// and the person's hosted sessions with how their tool calls were decided
+// (spec 024). Hosted agents are created and run on the platform, from the
+// console and its API.
 func newAgentsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "agents",
-		Short: "Run the Latere agent on this machine, and review a Claude Code session.",
-		Long: `Commands of Latere Agents that run on this machine.
+		Short: "Run the Latere agent on this machine, review a Claude Code session, and read your hosted sessions.",
+		Long: `Commands of Latere Agents.
 
 'latere agents run' runs the Latere agent in your current directory, on your
 real files, with the model provider 'latere agents provider' chose.
@@ -24,17 +25,21 @@ real files, with the model provider 'latere agents provider' chose.
 session.
 
 Hosted agents, which run in their own workload with a session you can
-follow, are created and run from the console and its API.`,
+follow, are created and run from the console and its API. 'latere agents
+sessions' lists your hosted sessions, and 'latere agents session <id>'
+shows how each tool call of one was decided.`,
 		Example: `  latere agents run
   latere agents run -p "add a test for foo()"
   latere agents provider
-  latere agents review`,
+  latere agents review
+  latere agents sessions
+  latere agents session ses_01JA3BQ7Z4M8N2P5R6S7T8V9WX`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return cmd.Help()
 		},
 	}
-	cmd.AddCommand(newAgentsRunCmd(), newAgentsProviderCmd(), newReviewCmd())
+	cmd.AddCommand(newAgentsRunCmd(), newAgentsProviderCmd(), newReviewCmd(), newAgentsSessionsCmd(), newAgentsSessionCmd())
 	return cmd
 }
 

@@ -9,13 +9,15 @@ import (
 )
 
 // The command groups are named after the platform's capabilities (spec 011):
-// `environments` carries every workload command, and `agents` the local agent,
-// its provider and the review.
+// `environments` carries every workload command, `agents` the local agent,
+// its provider, the review and the person's hosted sessions, and
+// `oversight` what Limen learned about the person.
 func TestCapabilityCommandTree(t *testing.T) {
 	root := NewRoot("test")
 	for path, want := range map[string][]string{
 		"environments": {"apply", "cat", "delete", "exec", "export", "get", "import", "list", "logs", "ls", "mkdir", "mv", "port-forward", "rm", "run", "secrets", "shell", "start", "stop", "upload", "write"},
-		"agents":       {"provider", "review", "run"},
+		"agents":       {"provider", "review", "run", "session", "sessions"},
+		"oversight":    {"answer", "cases", "explain", "forget", "learned", "profile", "reliability"},
 		"evals":        {"candidates", "experiments", "graders", "metrics", "suites", "tasks"},
 	} {
 		group, _, err := root.Find([]string{path})
