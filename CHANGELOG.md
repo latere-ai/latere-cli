@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.44.0 - 2026-11-02
+
 ### Fixed
 
 - **Evals run counts match the console.** `latere evals experiments list`,
