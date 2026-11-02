@@ -7,18 +7,36 @@ allow it, from your own Allow and Deny answers.
 
 In `learned` mode, Limen decides a step of a `progressive` session if it
 has evidence about you. Elsewhere, the rules and the risk score decide,
-and Limen only suggests. Limen has evidence if it suggests allow or block,
-or if it asks with an evidence ratio of 0.5 or more (`split`). If it asks
-because you gave too few answers (`unsure`), it has no evidence yet.
+and Limen only suggests. Limen has evidence if it suggests allow or block.
+It also has evidence if it asks for one of two reasons:
 
-Limen gives `split` from the evidence ratio alone. Your answers can agree
-and the ask is still `split`: for example, two allows of a publish give
-80%, and `careful` runs a step on its own only above 90%. The commands
-say that your answers disagree only if the answers that moved the
-suggestion include an allow and a deny with the same label. A deny of a
-different kind of step is not a disagreement about this step. Otherwise
-the commands say `between`: the chance is between the thresholds of the
-trust profile.
+- `split`: you allowed and denied steps of this kind.
+- `wider`: the step reaches further than any step of this kind that you
+  allowed.
+
+For the other asks, the rules and the risk score decide:
+
+- `unsure`: you gave too few answers.
+- `short`: your answers agree, but the chance is between the thresholds
+  of the trust profile. For example, two allows of a publish give 80%,
+  and `careful` runs a step on its own only above 90%.
+- `few`: you allowed steps of this reach, but not with enough considered
+  answers or in enough sessions.
+
+The reach of a step tells if you can undo it, which boundaries it
+crosses, and what it changes. Examples of a boundary are the working
+directory, the network of the session, and the public. Limen suggests
+allow only if your approvals cover the step. An approval covers a step of
+the same kind if the reach of the step is not wider. By default, Limen
+needs approvals of weight 3 from 2 sessions. A quick approval with the
+details closed has no weight.
+
+An older Limen does not give `short`, `wider` or `few`. It gives `split`
+from the evidence ratio alone, also if your answers agree. For an
+explanation without a cover, the commands say `split` only in one case.
+The answers that moved the suggestion must include an allow and a deny
+with the same label. A deny of a different kind of step is not a disagreement about
+this step. Otherwise the commands say `short`.
 
 `latere oversight` shows what Limen recorded and learned about you, and
 lets you correct it. It uses your `latere login`.
@@ -99,7 +117,8 @@ A case is one step. Each row shows:
 | `SUGGESTED` | Limen's verdict: `allow`, `ask` or `block`. |
 | `ALLOW` | The chance that you allow the step. |
 | `UNCERTAINTY` | How unsure Limen is of that chance. |
-| `ASK` | For an ask, the word of Limen: `unsure` (your answers say little yet) or `split` (Limen has enough of your answers; they can agree or disagree). `explain` tells which. |
+| `ASK` | For an ask, the word of Limen: `unsure`, `split`, `short`, `wider` or `few`. [Oversight](#oversight) tells what each word means. From an older Limen, `split` can also mean that your answers agree, and `explain` tells which. |
+| `COVER` | `yes` if your approvals cover the step, else `no`. Then the weight of the approvals that cover it over the weight needed, and their sessions over the sessions needed. For example, `no 1/3 1/2`. A dash means that Limen did not send a cover. |
 | `DECIDED` | The verdict that was applied. |
 | `SHOWN` | The chance that you were shown the step. 100% means it waited for you. |
 | `BY` | What decided the step. Topos gives its mode and the layer that decided, for example `topos/progressive/score`. An older Topos gives only the mode, for example `topos/confirm`. |
@@ -128,16 +147,27 @@ step ([Contexts](#contexts)). The explanation shows:
 - For an ask, why Limen asks:
   - `unsure`: your answers say little about steps like this. More answers
     move the suggestion.
-  - `split`: the answers that moved the suggestion include an allow and a
-    deny with the same label. More answers do not move it much.
-  - `between`: Limen has enough of your answers, and they agree, but the
+  - `split`: your answers about steps like this went both ways. More
+    answers do not move it much. For an older Limen, the answers that
+    moved the suggestion include an allow and a deny with the same label.
+  - `short`: Limen has enough of your answers, and they agree, but the
     chance is between the thresholds of the trust profile. The line gives
     the chance, the profile, and the threshold that the chance does not
     reach, for example "not sure enough yet: Limen is 80% sure you would
     allow it, and Careful runs it on its own only above 90%". The profile
     is the preset nearest the thresholds of the explanation.
+  - `wider`: the step reaches further than any step of its kind that you
+    allowed. No approval of yours covers it.
+  - `few`: you allowed steps that reach this far. The line gives the
+    weight and the sessions that Limen needs, and the weight and the
+    sessions that it has.
 - The evidence ratio: how much of what Limen did not know your answers
   settled.
+- The cover (`Cover`): if your approvals cover the step, the weight of
+  the approvals that cover it, and their sessions. Each number shows
+  with the number that Limen needs. Then up to three approvals of yours
+  whose reach the step exceeds, the nearest first (`Nearest`). If Limen
+  does not send a cover, the command does not show these lines.
 - The parts: how much comes from steps like this one, from your answers
   lately, and from both together.
 - The model that explains, and how many answers it was fitted on. If a
@@ -158,11 +188,11 @@ latere oversight learned
 
 One row for each kind of step you answered: how many you allowed and
 denied, the chance that you allow it now, the uncertainty, the scale, the
-verdict now, and the ask kind. The ask kind is `split` only if you
-allowed and denied steps of that kind. A `split` of Limen for a kind that
-you only allowed or only denied shows as `between`. Under the table: the model, and the trend
-of how much you let steps run lately, compared with what Limen assumes of
-anyone.
+verdict now, and the ask kind. The ask kind is the word of Limen. An
+older Limen does not give `short`, `wider` or `few`. From it, a `split`
+for a kind that you only allowed or only denied shows as `short`. Under
+the table: the model, and the trend of how much you let steps run lately,
+compared with what Limen assumes of anyone.
 
 ## Reliability
 
@@ -321,6 +351,11 @@ toward how often Limen is wrong. Every answer teaches Limen. The command
 sends an answer once and does not send it again, because each answer that
 Limen receives counts. The answer goes to the context of the step
 ([Contexts](#contexts)).
+
+The answer tells Limen that you answered at a prompt (`surface:
+prompt`). The command cannot measure how long you looked at the step, if
+you opened its details, or if Limen showed you its suggestion first. The
+command does not send these.
 
 ## Forget
 

@@ -199,14 +199,35 @@ ID of the organization. For each call it shows:
   turn (`attended`) or not (`unattended`).
 - Limen's suggestion, if the session asked for one: the verdict, the
   chance that you allow the call, and the uncertainty. For an ask, it also
-  shows why Limen asks, `unsure` or `split`, if the session recorded it.
-  A session from before the platform recorded this shows none.
+  shows the reason, if the session recorded it: `unsure`, `split`,
+  `short`, `wider` or `few`. [oversight.md](oversight.md#oversight) tells
+  what each word means. A session from before the platform recorded this
+  shows none.
+- What the call reaches (`reach`). The line tells if you can undo the
+  call (`undo`), and the known boundaries that it crosses and does not
+  cross. It also gives the class and the kind of its target, and if it is
+  the first contact with that target. The words in parentheses tell if
+  Limen read the call or if the reach is the claims of the platform
+  alone. For a command that Limen did not read, the line says that the
+  reach is not known. A call from before the platform recorded the reach
+  shows no line.
 - The organization that Limen keeps the call in, if it is not your own
   context.
 - Your answer, if the call waited for you and you answered.
 
+After 3 refused calls in a row, or 20 in a session, the session hands its
+calls back to you. A refused call is one that the rules, the network of
+the session, Limen or you stopped. A line that starts with `--` shows the
+hand-back where it occurred, with the two counts. Until you write again,
+each call that changes something asks you. Its layer is `denials`.
+
+An unattended turn stops at the hand-back, and the session shows `idle
+(denials)`. The next turn that you start asks you for each call that
+changes something, until you write again.
+
 A call of a subagent shows the subagent. `--json` prints the session as
-the API answered it, and each call's event with the answer to it.
+the API answered it, each call's event with the answer to it, and each
+hand-back's event (`hand_backs`).
 
 To learn why Limen suggested what it did, run `latere oversight explain
 <id>/<tool_use_id>`. The oversight commands call each tool call a step.

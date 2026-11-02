@@ -7,11 +7,13 @@ depends_on:
   - "CROSS-REPO: Limen's oversight API at /v1/oversight; sdk-go oversight.ListCases, GetReliability, agents.Session.Policy and agents.ToolConfirmation (main after v0.23.0)"
   - "CROSS-REPO: topos specs/100-the-organization-a-session-acts-in.md: a session's org and a call's decision_org; sdk-go agents.Session.Org, agents.ToolUse.DecisionOrg and agents.Suggestion.AskKind (main after v0.24.0)"
   - "CROSS-REPO: platform specs/243-oversight-in-an-organization-the-extras.md and Limen specs/010-organizations.md: an agent's own profile, a member's stricter profile and an organization's weekly report; sdk-go oversight.DeleteProfile, Scope.Subject, GetReport, Prediction.Profile and agents.GetAgent (main after v0.25.0)"
+  - "CROSS-REPO: topos specs/101-what-a-person-consented-to.md and Limen specs/011-consent.md: a call's reach, the hand-back after refused calls, the cover and the short, wider and few asks; sdk-go agents.ToolUse.Scope, EventDenialsReached, LayerDenials, oversight.Prediction.Cover, Explanation.Cover and AnswerParams.Surface (main after v0.27.0)"
 affects:
   - go.mod (sdk-go main after v0.23.0, to be v0.24.0)
   - internal/commands/oversight.go, internal/commands/oversight_test.go
   - internal/commands/oversight_profile.go, internal/commands/oversight_report.go, internal/commands/oversight_org_test.go
   - internal/commands/agents_sessions.go, internal/commands/agents_sessions_test.go
+  - internal/commands/agents_reach_test.go, internal/commands/oversight_cover_test.go
   - internal/commands/apierror.go (the exit codes spec 015 gave evals, shared), internal/commands/evals.go, internal/commands/exit.go
   - internal/commands/topos.go, internal/commands/root.go, internal/commands/capability_names_test.go
   - docs/oversight.md, docs/agents.md, docs/configuration.md, README.md, CHANGELOG.md
@@ -176,6 +178,40 @@ command line gets them as flags of `profile` and a new command:
   that only an owner or an admin reads it. Every other refusal is
   `apiRefused`'s, with the exit codes above.
 
+### What a person consented to (Topos spec 101, Limen spec 011)
+
+Topos records on each `agent.tool_use` the reach it decided the call on,
+`scope`, and appends `session.denials_reached` when refused calls reach a
+limit. Limen caps an `allow` at `ask` for a step that the person's
+approvals do not cover, says how far the cover is in `cover`, and names
+two asks of the cover, `wider` and `few`, beside `short`, an ask whose
+answers agree. `split` is narrowed to answers that disagree.
+
+| Command | Shows |
+|---|---|
+| `agents session <id>` | each call's `reach`: `undo`, the boundaries it crosses and those it does not, `target <class> <kind>`, `<contact> contact`, and who read it; `not known` for a scope with nothing known, and for one of Topos's claims alone `not known: Limen did not read this call` |
+| `agents session <id>` | each `session.denials_reached` where the log has it, with both counts and its effect, and `decided by denials (handed back to you after refused calls)` for a call it decided; `--json` adds `hand_backs` |
+| `oversight explain <action>` | `Cover:` with covered or not, the weight against `min_weight` and the sessions against `min_sessions`, and `Nearest:` for each approval whose reach the step exceeds; `Why it asks:` for `short`, `wider` and `few` |
+| `oversight cases` | a `COVER` column: `yes` or `no`, weight/min and sessions/min, `-` without a cover |
+| `oversight learned` | Limen's word, `short`, `wider` and `few` included |
+| `oversight answer` | `surface: prompt`, and no time, details or suggestion field |
+
+- **A split of an older Limen.** Limen v0.6.0 still calls an ask `split`
+  by its evidence alone. An explanation that carries a cover comes from a
+  Limen that splits only on answers that disagree, so its `split` is
+  shown as split. Without a cover, the label rule of criterion 17 stays,
+  and its word is `short`, Limen's own, in place of `between`. In
+  `learned`, a view that names a `short`, `wider` or `few` ask is read
+  the same way, since a learned kind carries no cover.
+- **A boundary not known is not shown.** Topos leaves out a boundary it
+  does not know, and the line lists the known ones only, those crossed
+  and those not crossed. A scope with nothing known says so, since a
+  command whose reach nobody read is not one that reaches nothing.
+- **Where the answer was given, and nothing else.** `answer` is a command
+  the person types after `cases --pending`. It cannot measure how long
+  the step was in front of them, the details or the suggestion, so it
+  sends none of them. The surface is `prompt`, as the directive set.
+
 ## Not in this spec
 
 - Previews of another profile (`POST /previews`).
@@ -203,7 +239,12 @@ command line gets them as flags of `profile` and a new command:
 | 14 | `--for-me` and `report` in the person's own context are refused with `latere login --org-id <id>`, before any call | `TestOversightOrganizationOnlyInAnOrganization` |
 | 15 | `report` reads the 5 weeks before this week's Monday by default, refuses bounds that are not Mondays, out of order or more than 13 weeks apart, prints each week's state or counts, the latest ready week's agents and rates with withheld numbers as not shown, and says who reads it on a 403 | `TestOversightReport`, `TestOversightReportTooFew`, `TestMondayOf` |
 | 16 | `explain` of a step in an organization names whose profile applied from its case's prediction, and leaves the line out where the case is not read or the step is the person's own | `TestOversightExplainNamesTheProfileThatApplied` |
-| 17 | An ask that Limen calls `split` reads as split in `explain` only where the answers that moved it include an allow and a deny with the same label, and in `learned` only for a kind both allowed and denied; otherwise it reads as `between`, and `explain` gives the chance, the preset nearest the thresholds and the threshold it falls short of, as the console words it | `TestOversightAskWhoseAnswersAgree`, `TestOversightExplain` |
+| 17 | An ask that an older Limen calls `split` reads as split in `explain` only where the answers that moved it include an allow and a deny with the same label, and in `learned` only for a kind both allowed and denied; otherwise it reads as `short` (`between` before criterion 21), and `explain` gives the chance, the preset nearest the thresholds and the threshold it falls short of, as the console words it | `TestOversightAskWhoseAnswersAgree`, `TestOversightExplain` |
+| 18 | `agents session` shows each call's reach from its `scope`, the known boundaries only, says that the reach is not known for a scope with nothing known, and shows nothing for a call without a scope | `TestAgentsSessionShowsTheReachAndTheHandBack`, `TestReachWords` |
+| 19 | `agents session` shows each `session.denials_reached` in the log's order with its counts and effect, names a call decided by `denials`, and lists the events as `hand_backs` in `--json` | `TestAgentsSessionShowsTheReachAndTheHandBack` |
+| 20 | `explain` shows the cover and its nearest approvals and words `wider`, `few` and `short`, and `cases` shows the cover in a column, `-` without one | `TestOversightExplainSaysHowFarTheCoverIs`, `TestOversightCasesShowTheCover` |
+| 21 | A `split` from a Limen that sends a cover, or in a learned view that names a `short`, `wider` or `few` ask, reads as split; an older Limen's reads by criterion 17 | `TestOversightExplainSaysHowFarTheCoverIs`, `TestOversightLearnedFromALimenWithACover` |
+| 22 | `answer` sends `surface: prompt` and none of `answer_ms`, `waited_ms`, `details_opened`, `suggestion_shown` and `remembered` | `TestOversightAnswerSaysWhereThePersonAnswered` |
 
 ## Outcome
 
@@ -243,3 +284,15 @@ the chance, the profile and the threshold it falls short of, in the
 console's words: "not sure enough yet: Limen is 80% sure you would allow
 it, and Careful runs it on its own only above 90%". `cases` shows the word of Limen, which the docs now
 describe correctly. No call changes.
+
+On 2026-11-02, the commands show what a person consented to (criteria 18
+to 22, Topos spec 101, Limen spec 011): each call's reach and the
+hand-back after refused calls in `agents session`, the cover and its
+nearest approvals in `explain` and `cases`, the asks `short`, `wider` and
+`few`, and the surface of an answer. They are built on sdk-go main after
+v0.27.0, `v0.27.1-0.20261102221905-f3243b25663f`, for
+`agents.ToolUse.Scope`, `EventDenialsReached`, `LayerDenials`,
+`oversight.Prediction.Cover`, `Explanation.Cover` and
+`AnswerParams.Surface`. The release pins the sdk-go release in place of
+the pseudo-version. Neither Topos nor Limen sent these fields when the
+commands were built; the tests hold the commands to the specs.
