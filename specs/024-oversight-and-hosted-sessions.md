@@ -203,6 +203,7 @@ command line gets them as flags of `profile` and a new command:
 | 14 | `--for-me` and `report` in the person's own context are refused with `latere login --org-id <id>`, before any call | `TestOversightOrganizationOnlyInAnOrganization` |
 | 15 | `report` reads the 5 weeks before this week's Monday by default, refuses bounds that are not Mondays, out of order or more than 13 weeks apart, prints each week's state or counts, the latest ready week's agents and rates with withheld numbers as not shown, and says who reads it on a 403 | `TestOversightReport`, `TestOversightReportTooFew`, `TestMondayOf` |
 | 16 | `explain` of a step in an organization names whose profile applied from its case's prediction, and leaves the line out where the case is not read or the step is the person's own | `TestOversightExplainNamesTheProfileThatApplied` |
+| 17 | An ask that Limen calls `split` reads as split in `explain` only where the answers that moved it include an allow and a deny with the same label, and in `learned` only for a kind both allowed and denied; otherwise it reads as `between`, and `explain` gives the chance, the preset nearest the thresholds and the threshold it falls short of, as the console words it | `TestOversightAskWhoseAnswersAgree`, `TestOversightExplain` |
 
 ## Outcome
 
@@ -231,3 +232,14 @@ and name whose profile applied to a step in `explain` (criteria 12 to
 after v0.25.0, for `oversight.DeleteProfile`, `Scope.Subject`,
 `GetReport`, `Prediction.Profile` and `agents.GetAgent`. The release
 pins the sdk-go release in place of the pseudo-version.
+
+On 2026-11-02, after the owner's live test, `explain` and `learned` stop
+saying that answers that all went one way disagree (criterion 17). Limen
+calls an ask `split` from its evidence ratio alone, so two allows of a
+publish at 80% under `careful` were `split`. The commands now say `split`
+only for an allow and a deny with the same label, since a deny of another
+kind is no disagreement about this step, and `between` otherwise, with
+the chance, the profile and the threshold it falls short of, in the
+console's words: "not sure enough yet: Limen is 80% sure you would allow
+it, and Careful runs it on its own only above 90%". `cases` shows the word of Limen, which the docs now
+describe correctly. No call changes.
