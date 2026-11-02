@@ -254,8 +254,10 @@ run a step and the lower threshold to stop a step, from the two profiles.
   your pick.
 - `profile reset --for-me` removes your pick.
 
-`latere oversight forget` also removes your pick. `--for-me` needs a
-login in an organization.
+A forget in the organization, as the console offers it, also removes
+your pick. `latere oversight forget` forgets your own context, and does
+not remove your pick in an organization. `--for-me` needs a login in an
+organization.
 
 `profile reset` needs `--agent` or `--for-me`. To go back to the profile
 where everyone starts, run `latere oversight profile set careful`.
