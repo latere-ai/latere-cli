@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.44.1 - 2026-11-02
+
 ### Changed
 
 - **A comparison of two versions of one agent reads as the versions.** In
