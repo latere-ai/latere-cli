@@ -25,6 +25,9 @@ latere oversight learned                   # what Limen learned, per kind of ste
 latere oversight reliability               # how often Limen went against you
 latere oversight profile                   # your trust profile
 latere oversight profile set balanced      # choose careful, balanced or strict
+latere oversight profile --agent <name>    # the profile that an agent uses
+latere oversight profile set strict --for-me  # make your organization's profile stricter for you
+latere oversight report                    # your organization's weeks, for owners and admins
 latere oversight answer <action> allow     # allow or deny a step you checked
 latere oversight forget                    # remove everything Limen holds about you
 ```
@@ -51,8 +54,13 @@ was sent to Limen under (`decision_org`). `explain`, `answer` and `cases
 this organization for each step. A step without it is in your own
 context. Steps from before the platform recorded the organization have
 none. If the organization of a step has a `|`, it is the context of a
-person, and the command reads your own context. The other commands read
-your own context.
+person, and the command reads your own context.
+
+`profile --agent`, `profile --for-me` and `report` use the context that
+your login acts in. `latere login --org-id <id>` signs you in to an
+organization, and `latere org` shows the context. If
+`LATERE_OVERSIGHT_TOKEN` is a JWT, its `org_id` gives the context. The
+other commands read your own context.
 
 Limen answers for the context of an organization only if you log in to
 that organization. If Limen refuses a step of an organization, the
@@ -116,6 +124,12 @@ step ([Contexts](#contexts)). The explanation shows:
   lately, and from both together.
 - The model that explains, and how many answers it was fitted on. If a
   different model made the suggestion, Limen has learned since.
+- For a step in the context of an organization, the trust profile that
+  applied (`Profile`). The command reads it from the case of the step,
+  because the explanation does not give it. It is the profile of the
+  organization, the own profile of the agent, or "stricter, as you
+  picked" if your own profile made it stricter for you. If the command
+  cannot read the case, it does not show this line.
 - The answers of yours that moved the suggestion most, each with its share.
 
 ## Learned
@@ -172,6 +186,106 @@ Your trust profile sets when Limen lets a step run, asks you, or stops it.
 Each profile shows you 1 in 20 of the steps that run on their own, to
 check. Everyone starts on `careful`.
 
+### The own profile of an agent
+
+```sh
+latere oversight profile --agent release-notes
+latere oversight profile set strict --agent release-notes
+latere oversight profile reset --agent release-notes
+```
+
+An agent can have its own trust profile in a context. `--agent` names
+the agent by its name or its id. The command reads the agent from the
+agents API in the context of your login. Limen keeps the profile under
+the id of the agent.
+
+- `profile --agent` shows the profile that the agent uses: its own, or
+  the profile of the context, which it follows.
+- `profile set --agent` gives the agent its own profile. The profile
+  applies to the sessions of all persons with that agent, from the next
+  step. It does not change when the profile of the organization changes.
+- `profile reset --agent` removes the own profile of the agent. The agent
+  then follows the profile of the organization again, and its later
+  changes.
+
+In an organization, only an owner or an admin can set or remove the
+profile of an agent. Limen refuses a different member. In your personal
+context, the profile is yours.
+
+### Your stricter profile in an organization
+
+```sh
+latere oversight profile --for-me
+latere oversight profile set strict --for-me
+latere oversight profile reset --for-me
+```
+
+A member can make the profile of their organization stricter for their
+own sessions. It can only make Limen ask you more. It cannot make Limen
+ask you less. For each of your steps, Limen uses the higher threshold to
+run a step and the lower threshold to stop a step, from the two profiles.
+
+- `profile --for-me` shows your pick, the profile of the organization,
+  and what applies to your sessions. If your pick is not stricter, it
+  changes nothing now. It applies if the organization picks a less strict
+  profile later.
+- `profile set --for-me` saves your pick. The sessions of other persons
+  do not change. The owners and the admins of the organization cannot see
+  your pick.
+- `profile reset --for-me` removes your pick.
+
+`latere oversight forget` also removes your pick. `--for-me` needs a
+login in an organization.
+
+`profile reset` needs `--agent` or `--for-me`. To go back to the profile
+where everyone starts, run `latere oversight profile set careful`.
+
+## Report
+
+```sh
+latere oversight report
+latere oversight report --from 2026-08-03 --to 2026-11-02
+latere oversight report --json
+```
+
+The report of an organization shows how the steps of its agents went,
+week by week, for all persons who used them. Only an owner or an admin of
+the organization can read it. The command reads the organization of your
+login.
+
+The report never shows one person:
+
+- A week shows 7 days after it ends, so that late checks count. Before
+  that, the week is open.
+- A week shows only if 5 or more persons used the agents in it. A smaller
+  week says that it has too few people. It does not say how many.
+- A number that comes mostly from the checks of one person shows as `not
+  shown`.
+- An agent that fewer than 5 persons used is in `Other agents`.
+- A week that the report showed one time does not change.
+
+Each row shows:
+
+| Column | What it is |
+|---|---|
+| `WEEK` | The Monday that starts the week. |
+| `PEOPLE` | The number of persons who used the agents in the week. |
+| `RAN ON ITS OWN` | The steps that ran without a question: allowed, or flagged for a check. |
+| `ASKED` | The steps that waited for a person. |
+| `STOPPED` | The steps that were stopped. |
+| `SHOULD HAVE ASKED` | Of the flagged steps that persons checked, how many a check said should have asked. |
+
+After the weeks, the command shows the agents of the latest week that
+shows its numbers. Then it shows two rates for that week: of the steps
+that ran on their own, the share that the persons who checked them would
+have stopped. One rate is for the suggestions of Limen. The other rate is
+for the verdicts that were applied.
+
+`--from` and `--to` give the weeks. Each is a Monday, as a date such as
+`2026-10-05`, or a time at 00:00 UTC. They can be 13 weeks apart or
+less. The default is the 5 weeks before the Monday that starts this
+week. The command refuses other values before it calls Limen.
+
 ## Answer
 
 ```sh
@@ -202,7 +316,7 @@ type `yes`. `--yes` skips the question.
 | Code | Meaning |
 |---|---|
 | `0` | The command is done. |
-| `2` | The request was refused. The same command gets the same answer. Examples: you are not signed in, the id is not `<session>/<tool_use_id>`, Limen has no decision for the step. |
+| `2` | The request was refused. The same command gets the same answer. Examples: you are not signed in, the id is not `<session>/<tool_use_id>`, Limen has no decision for the step, you are not an owner or an admin of the organization, a bound of the report is not a Monday. |
 | `3` | No answer came, or the service was busy. The same command can succeed later. |
 
 ## Settings
@@ -210,7 +324,7 @@ type `yes`. `--yes` skips the question.
 | Setting | Default | Purpose |
 |---|---|---|
 | `LATERE_OVERSIGHT_URL` | `https://api.latere.ai/v1/oversight` | The oversight API, with its `/v1/oversight` path. `--api-url` overrides it. |
-| `LATERE_OVERSIGHT_TOKEN` | none | A bearer to present instead of a token minted from your login. If it is a JWT, its subject is the person. |
-| `LATERE_AGENTS_URL` | `https://api.latere.ai/v1/agents` | The agents API, with its `/v1/agents` path. `explain`, `answer` and `cases --session` read the log of a session from it. |
+| `LATERE_OVERSIGHT_TOKEN` | none | A bearer to present instead of a token minted from your login. If it is a JWT, its subject is the person, and its `org_id` is the organization. |
+| `LATERE_AGENTS_URL` | `https://api.latere.ai/v1/agents` | The agents API, with its `/v1/agents` path. `explain`, `answer` and `cases --session` read the log of a session from it, and `profile --agent` reads the agent. |
 | `LATERE_AGENTS_TOKEN` | none | A bearer to present to the agents API instead of a token minted from your login. |
 | `AUTH_URL` | from the API URL | The issuer. `--auth-url` overrides it. |
