@@ -105,7 +105,10 @@ A cell is one task of one candidate, and a parked cell waits for a retry.
 Each comparison says what it compares, what differs
 between its sides, what else differs that its verdicts cannot separate,
 whether it is computed, and whether its figures are final or may still
-change as trials finish. The console's page of the experiment shows each
+change as trials finish. Two versions of one agent are compared as the
+versions, as the console compares them: what varies reads
+`goalless-agent v1 → v2 (model haiku-4.5 → haiku-5.5)`, and the settings
+that change with the version leave the confounds. The console's page of the experiment shows each
 metric's figures and verdicts on its Results tab, and each comparison on
 its Comparison tab.
 

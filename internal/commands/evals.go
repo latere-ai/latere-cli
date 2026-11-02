@@ -145,6 +145,10 @@ type evalsClient struct {
 	// origin and authURL are what the agents client is built from, once a
 	// candidate names an agent version to read.
 	origin, authURL string
+	// versions are the agent candidates whose agent versions were read,
+	// by candidate digest: the agent, its version, its model's short name
+	// and its reasoning level.
+	versions map[string]agentVersion
 	// unnamed is why agent candidates kept their definitions' names when
 	// the agents API could not be read, such as a token for Evals alone;
 	// nil when it could, or when it answered that the agent is not one
@@ -804,7 +808,7 @@ the command prints, shows each comparison's figures.
 			if c.unnamed != nil {
 				fprintln(cmd.ErrOrStderr(), "Agent candidates are named by their definitions: their agents' versions could not be read: "+apiErrText(c.unnamed))
 			}
-			fprint(out, formatExperiment(e, parked, comparisons, names, c.experimentLink(e.ID)))
+			fprint(out, formatExperiment(e, parked, comparisons, names, c.versions, c.experimentLink(e.ID)))
 			return nil
 		},
 	}
@@ -982,6 +986,10 @@ func (c *evalsClient) agentLabels(ctx context.Context, names map[string]string, 
 		if model := shortModel(a.Model); model != "" {
 			label += " · " + model
 		}
+		if c.versions == nil {
+			c.versions = map[string]agentVersion{}
+		}
+		c.versions[ref] = agentVersion{agent: agent, n: n, model: shortModel(a.Model), reasoning: a.Reasoning}
 		found = append(found, labeled{ref, label, a.Reasoning})
 	}
 	byLabel := map[string][]labeled{}
@@ -1010,6 +1018,57 @@ func (c *evalsClient) agentLabels(ctx context.Context, names map[string]string, 
 	return nil
 }
 
+// agentVersion is an agent candidate as the version of its agent it runs.
+type agentVersion struct {
+	agent, model, reasoning string
+	n                       int
+}
+
+// tupleFields are the fields of a run's setup a comparison names among its
+// confounds when its two sides differ in them, as the console reads them.
+var tupleFields = []string{"candidate.kind", "agent_or_image_digest", "program", "model", "reasoning", "tools", "task_hash", "environment_digest", "workspace_ref", "grader_digests"}
+
+// versionFields are the setup fields a version of an agent carries, or a
+// candidate sets beside it: two versions of one agent that also differ in
+// these are compared as versions as a whole.
+var versionFields = []string{"candidate.kind", "agent_or_image_digest", "program", "model", "reasoning", "tools"}
+
+// versionPair reads a comparison of two versions of one agent as the
+// console does: what varies, "goalless-agent v1 → v2 (model haiku-4.5 →
+// haiku-5.5)", and its confounds without the settings that change with the
+// version. ok is false for any other comparison, which keeps the API's
+// variable and confounds.
+func versionPair(c *evals.Comparison, versions map[string]agentVersion) (varies string, confounds []string, ok bool) {
+	a, okA := versions[c.Candidate]
+	b, okB := versions[c.ReferenceCandidate]
+	if !okA || !okB || a.agent != b.agent || a.n == b.n {
+		return "", nil, false
+	}
+	differs := slices.DeleteFunc(slices.Clone(c.Confounds), func(f string) bool { return !slices.Contains(tupleFields, f) || slices.Contains(c.Variable, f) })
+	if len(differs) == 0 {
+		differs = c.Variable
+	}
+	for _, f := range differs {
+		if !slices.Contains(versionFields, f) {
+			return "", nil, false
+		}
+	}
+	// The reference is the earlier side the change is read from.
+	varies = fmt.Sprintf("%s v%d → v%d", a.agent, b.n, a.n)
+	var also []string
+	if a.model != b.model {
+		also = append(also, "model "+b.model+" → "+a.model)
+	}
+	if a.reasoning != b.reasoning {
+		also = append(also, "reasoning "+cmp.Or(b.reasoning, "default")+" → "+cmp.Or(a.reasoning, "default"))
+	}
+	if len(also) > 0 {
+		varies += " (" + strings.Join(also, ", ") + ")"
+	}
+	confounds = slices.DeleteFunc(slices.Clone(c.Confounds), func(f string) bool { return slices.Contains(versionFields, f) })
+	return varies, confounds, true
+}
+
 // apiErrText is the sentence of an error from an API: its refusal's text
 // with its status, or the error itself for one that is no refusal.
 func apiErrText(err error) string {
@@ -1032,7 +1091,7 @@ func shortModel(model string) string {
 // formatExperiment is the record `experiments show` prints. names maps a
 // digest to what it is printed as; a reference names has no entry for is
 // printed by shortRef.
-func formatExperiment(e *evals.Experiment, parked []*evals.Cell, comparisons []*evals.Comparison, names map[string]string, link string) string {
+func formatExperiment(e *evals.Experiment, parked []*evals.Cell, comparisons []*evals.Comparison, names map[string]string, versions map[string]agentVersion, link string) string {
 	named := func(ref string) string { return cmp.Or(names[ref], shortRef(ref)) }
 	var b strings.Builder
 	reference := ""
@@ -1109,8 +1168,12 @@ func formatExperiment(e *evals.Experiment, parked []*evals.Cell, comparisons []*
 			if c.Final {
 				figures = "final"
 			}
-			fprintf(w, "  %s\t%s\t%s\t%s\t%s\t%s\n", c.ID, comparisonSides(c, named), dash(strings.Join(c.Variable, ", ")),
-				dash(strings.Join(c.Confounds, ", ")), string(c.State), figures)
+			varies, confounds := strings.Join(c.Variable, ", "), c.Confounds
+			if v, cf, ok := versionPair(c, versions); ok {
+				varies, confounds = v, cf
+			}
+			fprintf(w, "  %s\t%s\t%s\t%s\t%s\t%s\n", c.ID, comparisonSides(c, named), dash(varies),
+				dash(strings.Join(confounds, ", ")), string(c.State), figures)
 		}
 		if err := w.Flush(); err != nil {
 			fprintln(&t, err)

@@ -10,6 +10,15 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Changed
+
+- **A comparison of two versions of one agent reads as the versions.** In
+  `latere evals experiments show`, its VARIES column said `-`, since the
+  API names no single variable for two versions that also differ in model,
+  and its confounds listed the agent and the model. It now reads
+  `goalless-agent v1 → v2 (model haiku-4.5 → haiku-5.5)`, and the settings
+  that change with the version leave the confounds, as in the console.
+
 ## v0.44.0 - 2026-11-02
 
 ### Fixed

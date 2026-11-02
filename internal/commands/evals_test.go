@@ -713,7 +713,10 @@ func TestEvalsShowExperimentNamesAgentCandidates(t *testing.T) {
 	serve := func(t *testing.T) *evalsStub {
 		s := newEvalsStub(t)
 		s.json("GET /experiments/exp_1", http.StatusOK, evalsExperimentJSON("complete", `{"complete":2}`))
-		s.json("GET /experiments/exp_1/comparisons", http.StatusOK, `{"items":[]}`)
+		// Examen leaves the variable of two versions empty and names the
+		// agent's digest and the model among the confounds.
+		s.json("GET /experiments/exp_1/comparisons", http.StatusOK, `{"items":[{"id":"cmp_1","experiment":"exp_1","candidate":"`+evalsDigest("b")+`","reference_candidate":"`+evalsDigest("a")+`",
+"automatic":true,"exploratory":false,"single_variable":false,"confounds":["agent_or_image_digest","missing","model","uncalibrated"],"state":"complete","final":true,"created_at":"2026-11-01T17:00:00Z"}]}`)
 		s.json("GET /suites/"+evalsDigest("1"), http.StatusOK, `{"id":"sui_1","name":"goalless","digest":"`+evalsDigest("1")+`","current":true,"created_at":"2026-10-20T10:00:00Z"}`)
 		for _, c := range []struct{ d, name, agent, model string }{
 			{"a", "goalless-agent-v1", v1, "anthropic/claude-haiku-4.5"},
@@ -729,14 +732,18 @@ func TestEvalsShowExperimentNamesAgentCandidates(t *testing.T) {
 		status     int
 		body       string
 		candidates string
+		compares   []string
 		note       bool
 	}{
 		{"by version", http.StatusOK, `{"items":[{"version":2,"digest":"` + v2 + `","created_by":"u-2","created_at":"2026-11-01T15:30:00Z"},{"version":1,"digest":"` + v1 + `","created_by":"u-2","created_at":"2026-11-01T15:27:00Z"}]}`,
-			"candidates: goalless-agent v1 · haiku-4.5, goalless-agent v2 · haiku-5.5\n", false},
+			"candidates: goalless-agent v1 · haiku-4.5, goalless-agent v2 · haiku-5.5\n",
+			[]string{"goalless-agent v2 · haiku-5.5 vs goalless-agent v1 · haiku-4.5", "goalless-agent v1 → v2 (model haiku-4.5 → haiku-5.5)", "missing, uncalibrated"}, false},
 		{"an agent the caller may not read", http.StatusNotFound, `{"error":{"code":"not_found","message":"Nothing is here."}}`,
-			"candidates: goalless-agent-v1, goalless-agent-v2\n", false},
+			"candidates: goalless-agent-v1, goalless-agent-v2\n",
+			[]string{"goalless-agent-v2 vs goalless-agent-v1", "agent_or_image_digest, missing, model, uncalibrated"}, false},
 		{"a token the agents API does not take", http.StatusUnauthorized, `{"error":{"code":"invalid_token","message":"The token is not for this API."}}`,
-			"candidates: goalless-agent-v1, goalless-agent-v2\n", true},
+			"candidates: goalless-agent-v1, goalless-agent-v2\n",
+			[]string{"goalless-agent-v2 vs goalless-agent-v1", "agent_or_image_digest, missing, model, uncalibrated"}, true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			s := serve(t)
@@ -747,6 +754,19 @@ func TestEvalsShowExperimentNamesAgentCandidates(t *testing.T) {
 			}
 			if !strings.Contains(out, c.candidates) {
 				t.Errorf("show lacks %q:\n%s", c.candidates, out)
+			}
+			// Two versions of one agent are compared as the versions, the
+			// model that changes with them named in what varies.
+			row := ""
+			for l := range strings.Lines(out) {
+				if strings.Contains(l, "cmp_1") {
+					row = l
+				}
+			}
+			for _, want := range c.compares {
+				if !strings.Contains(row, want) {
+					t.Errorf("the comparison's row lacks %q: %q", want, row)
+				}
 			}
 			if said := strings.Contains(errOut, "named by their definitions"); said != c.note {
 				t.Errorf("stderr %q; want the note said: %v", errOut, c.note)
