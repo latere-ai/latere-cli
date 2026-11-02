@@ -10,6 +10,34 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Added
+
+- **An agent's own trust profile.** `latere oversight profile --agent
+  <name>` shows the profile an agent uses in the context of your login:
+  its own, or the one it follows. `profile set <preset> --agent <name>`
+  gives it its own, for everyone's sessions with it, and `profile reset
+  --agent <name>` takes it back to the organization's. In an
+  organization, only an owner or an admin can change it. The agent is
+  named by its name or its id.
+- **Stricter for you.** In an organization, `latere oversight profile set
+  <preset> --for-me` makes the organization's profile ask you more in
+  your own sessions, and never less. `profile --for-me` shows your pick
+  and what applies, and `profile reset --for-me` removes it. Nobody
+  else's sessions change, and the owners and admins do not see it.
+- **The organization's weekly report.** `latere oversight report` shows
+  how the organization's agents did, week by week, across everyone who
+  used them, to its owners and admins. A week shows 7 days after it ends
+  and only with 5 or more people, a number that rests mostly on one
+  person's checks is not shown, and `--from` and `--to` take Mondays.
+- **Whose profile applied.** `latere oversight explain` of a step in an
+  organization names whose trust profile applied to it: the
+  organization's, the agent's own, or stricter, as you picked.
+
+### Changed
+
+- Built on sdk-go main after v0.25.0, for its organization extras and
+  `agents.GetAgent`. The release pins the sdk-go release in its place.
+
 ## v0.42.0 - 2026-11-02
 
 ### Changed
