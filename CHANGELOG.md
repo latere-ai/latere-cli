@@ -33,6 +33,17 @@ committed: the commit log already holds that.
   organization names whose trust profile applied to it: the
   organization's, the agent's own, or stricter, as you picked.
 
+### Fixed
+
+- **An ask whose answers agree.** `latere oversight explain` and
+  `learned` no longer say that your answers disagree when they all went
+  one way. Limen calls such an ask `split` from how much it knows alone.
+  The commands now say `split` only where an allow and a deny of the same
+  kind of step moved the suggestion, and otherwise `between`, with the
+  chance and the threshold it falls short of: "not sure enough yet: Limen
+  is 80% sure you would allow it, and Careful runs it on its own only
+  above 90%".
+
 ### Changed
 
 - Built on sdk-go main after v0.25.0, for its organization extras and
