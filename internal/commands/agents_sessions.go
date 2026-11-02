@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"slices"
 	"strings"
@@ -210,6 +211,25 @@ type toolCall struct {
 	answer *agents.ToolConfirmation
 }
 
+// handBack is a session.denials_reached of a session's log, as `latere
+// agents session --json` prints it: after a limit on refused calls, the
+// session asks the person for every call that changes something, or its
+// unattended turn stops.
+type handBack struct {
+	Seq     int64           `json:"seq"`
+	Time    time.Time       `json:"time"`
+	Payload json.RawMessage `json:"payload"`
+
+	denials agents.DenialsReached
+}
+
+// sessionLog is what `latere agents session` reads from a session's log:
+// its tool calls and its hand-backs, each in the log's order.
+type sessionLog struct {
+	calls     []*toolCall
+	handBacks []*handBack
+}
+
 func newAgentsSessionCmd() *cobra.Command {
 	var (
 		apiURL, authURL string
@@ -222,11 +242,18 @@ func newAgentsSessionCmd() *cobra.Command {
 tool and a short summary of its input, the verdict and the approval mode,
 the layer of the rules that decided it and the rule within it, its risk
 score and the rule set that scored it, what Limen suggested (the verdict,
-the chance you allow the call, how unsure it is, and for an ask whether
-it was unsure or split, if the session recorded it), the chance you were
-shown the call, whether a person began its turn, and your answer to it,
-if you gave one. A session from before the platform recorded why Limen
-asks shows none.
+the chance you allow the call, how unsure it is, and for an ask why it
+asks, if the session recorded it), what the call reaches (whether it can
+be undone, the boundaries it crosses, its target and whether it is a
+first contact), the chance you were shown the call, whether a person
+began its turn, and your answer to it, if you gave one. A session from
+before the platform recorded why Limen asks, or what a call reaches,
+shows none.
+
+After 3 refused calls in a row, or 20 in a session, the session hands its
+calls back to you, and the list shows it where it happened. Until you
+write again, every call that changes something asks you, decided by
+denials. An unattended turn stops there.
 
 The first lines name the organization that owns the session's agent, if
 one does. A call that Limen keeps in an organization's context, not in
@@ -239,7 +266,7 @@ steps that Limen holds, with your checks of them. Both read each step in
 the organization this command names for it.
 
 --json prints the session as the API answered it, with each tool call's
-event and the confirmation that answered it.`,
+event and the confirmation that answered it, and each hand-back's event.`,
 		Example: `  latere agents session ses_01JA3BQ7Z4M8N2P5R6S7T8V9WX
   latere agents session ses_01JA3BQ7Z4M8N2P5R6S7T8V9WX --json`,
 		Args: cobra.ExactArgs(1),
@@ -253,15 +280,15 @@ event and the confirmation that answered it.`,
 			if err != nil {
 				return c.refused(err)
 			}
-			calls, err := c.toolCalls(cmd.Context(), s.ID)
+			log, err := c.sessionLog(cmd.Context(), s.ID)
 			if err != nil {
 				return err
 			}
 			out := cmd.OutOrStdout()
 			if jsonF {
-				return printJSON(out, map[string]any{"session": s.RawJSON(), "tool_calls": calls})
+				return printJSON(out, map[string]any{"session": s.RawJSON(), "tool_calls": log.calls, "hand_backs": log.handBacks})
 			}
-			return printSessionCalls(out, s, calls)
+			return printSessionCalls(out, s, log)
 		},
 	}
 	cmd.Flags().StringVar(&apiURL, "api-url", "", agentsURLUsage)
@@ -270,11 +297,11 @@ event and the confirmation that answered it.`,
 	return cmd
 }
 
-// toolCalls reads the session's whole log and returns its tool calls in
+// sessionLog reads the session's whole log and returns its tool calls in
 // order, each with the person's confirmation of it, the latest when there
-// are several.
-func (c *agentsClient) toolCalls(ctx context.Context, id string) ([]*toolCall, error) {
-	calls := []*toolCall{}
+// are several, and its hand-backs in order.
+func (c *agentsClient) sessionLog(ctx context.Context, id string) (*sessionLog, error) {
+	log := &sessionLog{calls: []*toolCall{}, handBacks: []*handBack{}}
 	byID := map[string]*toolCall{}
 	for e, err := range c.ag.ListEvents(ctx, id, nil) {
 		if err != nil {
@@ -287,7 +314,7 @@ func (c *agentsClient) toolCalls(ctx context.Context, id string) ([]*toolCall, e
 				return nil, &exitError{code: exitNoAnswer, err: err}
 			}
 			tc.ActionID = oversight.ActionID(id, tc.use.ToolUseID)
-			calls = append(calls, tc)
+			log.calls = append(log.calls, tc)
 			byID[tc.use.ToolUseID] = tc
 		case agents.EventUserToolConfirmation:
 			var conf agents.ToolConfirmation
@@ -297,12 +324,101 @@ func (c *agentsClient) toolCalls(ctx context.Context, id string) ([]*toolCall, e
 			if tc := byID[conf.ToolUseID]; tc != nil && conf.ToolUseID != "" {
 				tc.answer, tc.Answer = &conf, e.Payload
 			}
+		case agents.EventDenialsReached:
+			hb := &handBack{Seq: e.Seq, Time: e.Time, Payload: e.Payload}
+			if err := e.Decode(&hb.denials); err != nil {
+				return nil, &exitError{code: exitNoAnswer, err: err}
+			}
+			log.handBacks = append(log.handBacks, hb)
 		}
 	}
-	return calls, nil
+	return log, nil
 }
 
-func printSessionCalls(out io.Writer, s *agents.Session, calls []*toolCall) error {
+// handBackWords say what a hand-back did: the limit it reached, with both
+// counts, and what the session does from then on.
+func handBackWords(d agents.DenialsReached) string {
+	var reached string
+	switch d.Limit {
+	case agents.DenialsTotal:
+		reached = fmt.Sprintf("%s in this session (%d in a row)", plural(d.Total, "refused call", "refused calls"), d.Consecutive)
+	default:
+		reached = fmt.Sprintf("%s in a row (%d in this session)", plural(d.Consecutive, "refused call", "refused calls"), d.Total)
+	}
+	switch d.Effect {
+	case agents.DenialsStop:
+		return "Handed back to you after " + reached + ": the unattended turn stopped, and the next turn you begin asks you for every call that changes something until you write again"
+	case agents.DenialsAsk:
+		return "Handed back to you after " + reached + ": every call that changes something asks you until you write again"
+	}
+	return "Handed back to you after " + reached
+}
+
+// reachWords say what a call reaches, from the scope it was decided on, in
+// the platform's words: whether it can be undone, the boundaries it
+// crosses and those it does not, its target's class and kind, and whether
+// it is a first contact, then who read it. A boundary that is not known is
+// left out. A scope with nothing known says so, since a command whose
+// reach nobody read is not one that reaches nothing; a call recorded
+// before the platform wrote a scope says nothing.
+func reachWords(sc *agents.CallScope) string {
+	if sc == nil {
+		return ""
+	}
+	by := "the platform's claims"
+	if sc.Source == agents.ScopeByService {
+		by = "read by Limen"
+	}
+	switch {
+	case !sc.Known() && sc.Source == agents.ScopeByService:
+		return "not known"
+	case !sc.Known():
+		return "not known: Limen did not read this call"
+	}
+	var parts []string
+	if sc.Undo != "" {
+		parts = append(parts, "undo "+string(sc.Undo))
+	}
+	if x := sc.Crosses; x != nil {
+		var yes, no []string
+		for _, b := range []struct {
+			name string
+			v    *bool
+		}{{"machine", x.Machine}, {"remote", x.Remote}, {"network", x.Network}, {"organization", x.Organization}, {"public", x.Public}} {
+			switch {
+			case b.v == nil:
+			case *b.v:
+				yes = append(yes, b.name)
+			default:
+				no = append(no, b.name)
+			}
+		}
+		if len(yes) > 0 {
+			parts = append(parts, "crosses "+joinWords(yes, "and"))
+		}
+		if len(no) > 0 {
+			parts = append(parts, "does not cross "+joinWords(no, "or"))
+		}
+	}
+	if target := strings.TrimSpace(string(sc.TargetClass) + " " + sc.TargetKind); target != "" {
+		parts = append(parts, "target "+target)
+	}
+	if sc.Contact != "" {
+		parts = append(parts, string(sc.Contact)+" contact")
+	}
+	return strings.Join(parts, ", ") + " (" + by + ")"
+}
+
+// joinWords joins words as a list a person reads, with conj before the
+// last: "a", "a and b", "a, b and c".
+func joinWords(words []string, conj string) string {
+	if len(words) < 2 {
+		return strings.Join(words, "")
+	}
+	return strings.Join(words[:len(words)-1], ", ") + " " + conj + " " + words[len(words)-1]
+}
+
+func printSessionCalls(out io.Writer, s *agents.Session, log *sessionLog) error {
 	var b strings.Builder
 	fprintf(&b, "%s  %s", s.ID, dash(s.Agent.Name))
 	if s.Title != "" {
@@ -313,12 +429,20 @@ func printSessionCalls(out io.Writer, s *agents.Session, calls []*toolCall) erro
 		fprintf(&b, ", agent of organization %s", s.Org)
 	}
 	fprint(&b, "\n")
-	if len(calls) == 0 {
+	calls, handBacks := log.calls, log.handBacks
+	if len(calls) == 0 && len(handBacks) == 0 {
 		fprint(&b, "\nThe session made no tool calls.\n")
 		fprint(out, stripANSI(b.String()))
 		return nil
 	}
+	next := 0
+	printHandBacks := func(before int64) {
+		for ; next < len(handBacks) && handBacks[next].Seq < before; next++ {
+			fprintf(&b, "\n-- %s.\n", handBackWords(handBacks[next].denials))
+		}
+	}
 	for i, tc := range calls {
+		printHandBacks(tc.Seq)
 		u := tc.use
 		fprintf(&b, "\n%d. %s", i+1, u.Name)
 		if sum := inputSummary(u.Name, u.Input); sum != "" {
@@ -336,6 +460,9 @@ func printSessionCalls(out io.Writer, s *agents.Session, calls []*toolCall) erro
 			fprintf(&b, ", decided by %s", u.DecidedBy)
 			if u.DecidedByRule != "" {
 				fprintf(&b, ": %s", u.DecidedByRule)
+			}
+			if u.DecidedBy == agents.LayerDenials {
+				fprint(&b, " (handed back to you after refused calls)")
 			}
 		}
 		var facts []string
@@ -362,6 +489,9 @@ func printSessionCalls(out io.Writer, s *agents.Session, calls []*toolCall) erro
 			}
 			fprintf(&b, " (%s)", dash(sg.Source))
 		}
+		if reach := reachWords(u.Scope); reach != "" {
+			fprintf(&b, "\n   reach: %s", reach)
+		}
 		if isOrganization(u.DecisionOrg) {
 			fprintf(&b, "\n   Limen keeps it in organization %s", u.DecisionOrg)
 		}
@@ -376,6 +506,7 @@ func printSessionCalls(out io.Writer, s *agents.Session, calls []*toolCall) erro
 		}
 		fprint(&b, "\n")
 	}
+	printHandBacks(math.MaxInt64)
 	fprintf(&b, "\nWhy Limen suggested what it did: latere oversight explain %s/<tool_use_id>\n", s.ID)
 	fprintf(&b, "Your checks of these calls:      latere oversight cases --session %s\n", s.ID)
 	fprint(out, stripANSI(b.String()))
