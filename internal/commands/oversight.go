@@ -66,6 +66,7 @@ agent's step, recorded and learned about you, and correct it.
   latere oversight profile --agent <name>   an agent's own profile, or the one it follows
   latere oversight profile set strict --for-me
                                             make your organization's ask you more
+  latere oversight report                   your organization's weeks, for owners and admins
   latere oversight answer <action> allow    allow or deny a step you checked
   latere oversight forget                   remove everything it holds about you
 
@@ -79,8 +80,8 @@ organization's agent can be in the organization's context. 'explain',
 'answer' and 'cases --session' read the session's log and use the
 organization each step was decided under, or your own context for a step
 that names none. 'profile --agent' reads an agent's profile in the context
-your login acts in, and 'profile --for-me' the organization your login
-acts in. The other commands read your own context. Limen
+your login acts in, and 'profile --for-me' and 'report' the organization
+your login acts in. The other commands read your own context. Limen
 answers for an organization's context only to a login in that
 organization: 'latere login --org-id <id>'.
 
@@ -107,6 +108,7 @@ succeed.`,
 		newOversightLearnedCmd(&apiURL, &authURL),
 		newOversightReliabilityCmd(&apiURL, &authURL),
 		newOversightProfileCmd(&apiURL, &authURL),
+		newOversightReportCmd(&apiURL, &authURL),
 		newOversightAnswerCmd(&apiURL, &authURL),
 		newOversightForgetCmd(&apiURL, &authURL),
 	)
@@ -126,8 +128,8 @@ type oversightClient struct {
 	// of every call in the person's own context.
 	me string
 	// org is the organization the bearer acts in, its id, or "" for the
-	// person's own context: the context of an agent's own profile and of
-	// the person's stricter profile.
+	// person's own context: the context of an agent's own profile, of the
+	// person's stricter profile and of the report.
 	org string
 	// authURL is the --auth-url the command was given.
 	authURL string

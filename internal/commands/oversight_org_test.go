@@ -218,14 +218,15 @@ func TestOversightProfileForMe(t *testing.T) {
 	}
 }
 
-// Outside an organization, --for-me has nothing to read, and says how to
-// sign in to one.
+// Outside an organization, --for-me and report have nothing to read, and
+// say how to sign in to one.
 func TestOversightOrganizationOnlyInAnOrganization(t *testing.T) {
 	ov := newOversightStub(t)
 	for _, args := range [][]string{
 		{"oversight", "profile", "--for-me"},
 		{"oversight", "profile", "set", "strict", "--for-me"},
 		{"oversight", "profile", "reset", "--for-me"},
+		{"oversight", "report"},
 	} {
 		if _, errOut, code := runLatere(t, "", args...); code != exitRefused || !strings.Contains(errOut, "latere login --org-id <id>") {
 			t.Errorf("%v: exit %d, %s", args, code, errOut)
