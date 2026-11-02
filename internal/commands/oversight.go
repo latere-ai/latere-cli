@@ -63,6 +63,9 @@ agent's step, recorded and learned about you, and correct it.
   latere oversight reliability              how often it went against you
   latere oversight profile                  your trust profile
   latere oversight profile set balanced     choose careful, balanced or strict
+  latere oversight profile --agent <name>   an agent's own profile, or the one it follows
+  latere oversight profile set strict --for-me
+                                            make your organization's ask you more
   latere oversight answer <action> allow    allow or deny a step you checked
   latere oversight forget                   remove everything it holds about you
 
@@ -75,9 +78,11 @@ your issuer and your sign-in id with a | between them. The steps of an
 organization's agent can be in the organization's context. 'explain',
 'answer' and 'cases --session' read the session's log and use the
 organization each step was decided under, or your own context for a step
-that names none. The other commands read your own context. Limen answers
-for an organization's context only to a login in that organization:
-'latere login --org-id <id>'.
+that names none. 'profile --agent' reads an agent's profile in the context
+your login acts in, and 'profile --for-me' the organization your login
+acts in. The other commands read your own context. Limen
+answers for an organization's context only to a login in that
+organization: 'latere login --org-id <id>'.
 
 The commands call https://api.latere.ai/v1/oversight with a token minted
 for your login. LATERE_OVERSIGHT_URL or --api-url overrides the address,
@@ -120,6 +125,10 @@ type oversightClient struct {
 	// me is the person's subject: the subject of every call, and the org
 	// of every call in the person's own context.
 	me string
+	// org is the organization the bearer acts in, its id, or "" for the
+	// person's own context: the context of an agent's own profile and of
+	// the person's stricter profile.
+	org string
 	// authURL is the --auth-url the command was given.
 	authURL string
 }
@@ -135,7 +144,7 @@ func newOversightClient(ctx context.Context, flagURL, authURL string) (*oversigh
 		return nil, refusedf("%s is not an oversight API base URL: it ends in %s, as %s does", base, oversight.BasePath, defaultOversightURL)
 	}
 	token := strings.TrimSpace(os.Getenv(envOversightToken))
-	me, err := signedInSubject(ctx, origin, authURL, token)
+	me, org, err := signedInSubject(ctx, origin, authURL, token)
 	if err != nil {
 		return nil, err
 	}
@@ -146,7 +155,7 @@ func newOversightClient(ctx context.Context, flagURL, authURL string) (*oversigh
 	if err != nil {
 		return nil, refusedf("%w", err)
 	}
-	return &oversightClient{ov: oversight.New(cfg), base: base, me: me, authURL: authURL}, nil
+	return &oversightClient{ov: oversight.New(cfg), base: base, me: me, org: org, authURL: authURL}, nil
 }
 
 // sessionSteps is the organization Limen holds each step of a hosted
@@ -228,27 +237,30 @@ func (c *oversightClient) orgOfAction(ctx context.Context, errOut io.Writer, id 
 }
 
 // signedInSubject is the person the commands act for, rendered as Limen
-// keys them: their issuer and their sign-in id with a | between them. It
+// keys them: their issuer and their sign-in id with a | between them, and
+// the organization the bearer acts in, "" for the person's own context. It
 // reads them from token when that is a JWT, and otherwise from the saved
-// login, whose issuer the actor tokens minted from it share. An issuer the
-// token does not name is the one the login resolves to.
-func signedInSubject(ctx context.Context, origin, authURL, token string) (string, error) {
+// login, whose issuer and organization the actor tokens minted from it
+// share. An issuer the token does not name is the one the login resolves
+// to.
+func signedInSubject(ctx context.Context, origin, authURL, token string) (subject, org string, err error) {
 	raw, issuer := token, api.ResolveAuthURL(origin, authURL)
 	if _, err := principalFromJWT(raw); raw == "" || err != nil {
 		access, authBase, err := api.LoginToken(ctx, issuer)
 		if err != nil {
-			return "", refusedf("find who you are signed in as: %w", err)
+			return "", "", refusedf("find who you are signed in as: %w", err)
 		}
 		raw, issuer = access, authBase
 	}
 	var claims struct {
-		Iss string `json:"iss"`
-		Sub string `json:"sub"`
+		Iss   string `json:"iss"`
+		Sub   string `json:"sub"`
+		OrgID string `json:"org_id"`
 	}
 	if err := jwt.DecodePayload(raw, &claims); err != nil || claims.Sub == "" {
-		return "", refusedf("the saved login names no subject; run `latere login`")
+		return "", "", refusedf("the saved login names no subject; run `latere login`")
 	}
-	return oversight.Subject(cmp.Or(claims.Iss, issuer), claims.Sub), nil
+	return oversight.Subject(cmp.Or(claims.Iss, issuer), claims.Sub), claims.OrgID, nil
 }
 
 // refused is what a command says of a call that failed, with its exit
@@ -517,8 +529,9 @@ is in your own context.`,
 			if err != nil {
 				return err
 			}
-			org := c.orgOfAction(cmd.Context(), cmd.ErrOrStderr(), id)
-			e, err := c.ov.GetExplanation(cmd.Context(), &oversight.ExplanationParams{Org: org, Subject: c.me, ActionID: id})
+			ctx := cmd.Context()
+			org := c.orgOfAction(ctx, cmd.ErrOrStderr(), id)
+			e, err := c.ov.GetExplanation(ctx, &oversight.ExplanationParams{Org: org, Subject: c.me, ActionID: id})
 			if err != nil {
 				return c.refusedIn(org, err)
 			}
@@ -761,146 +774,6 @@ func estimateWords(e oversight.Estimate, did string) string {
 		s += fmt.Sprintf("; %d shown and not checked yet", e.Unanswered)
 	}
 	return s
-}
-
-// ---- profile ----
-
-// oversightAuditRate is the share of the steps run on their own that every
-// preset shows the person to check: one in twenty, as the console's.
-const oversightAuditRate = 0.05
-
-// oversightPreset is a trust profile a person picks by name, as the
-// console offers them.
-type oversightPreset struct {
-	name, label string
-	costs       oversight.Costs
-}
-
-// oversightPresets are the console's trust profiles, Careful the one every
-// person starts on.
-var oversightPresets = []oversightPreset{
-	{"careful", "Careful", oversight.Costs{FalseAllow: 10, FalseBlock: 4, Ask: 1}},
-	{"balanced", "Balanced", oversight.Costs{FalseAllow: 2.857, FalseBlock: 2.857, Ask: 1}},
-	{"strict", "Strict", oversight.Costs{FalseAllow: 50, FalseBlock: 4, Ask: 1}},
-}
-
-// presetOf is the preset whose costs c carries, comparing their ratios to
-// a question's cost, or nil for costs no preset names.
-func presetOf(c oversight.Costs) *oversightPreset {
-	near := func(a, b float64) bool { return math.Abs(a-b) < 1e-6 }
-	if c.Ask <= 0 {
-		return nil
-	}
-	for i, p := range oversightPresets {
-		if near(p.costs.FalseAllow/p.costs.Ask, c.FalseAllow/c.Ask) && near(p.costs.FalseBlock/p.costs.Ask, c.FalseBlock/c.Ask) {
-			return &oversightPresets[i]
-		}
-	}
-	return nil
-}
-
-func newOversightProfileCmd(apiURL, authURL *string) *cobra.Command {
-	var jsonF bool
-	cmd := &cobra.Command{
-		Use:   "profile",
-		Short: "Show your trust profile, or choose another with 'profile set'.",
-		Long: `Show your trust profile: what a step that ran and that you would have
-denied, a step that was stopped and that you would have allowed, and one
-question cost, the thresholds that follow from them, and the share of the
-steps that run on their own shown to you to check.
-
-'latere oversight profile set' chooses one of the three profiles the
-console offers: careful, the one everyone starts on, balanced, which asks
-less, and strict, for money and production.`,
-		Example: `  latere oversight profile
-  latere oversight profile set balanced`,
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			c, err := newOversightClient(cmd.Context(), *apiURL, *authURL)
-			if err != nil {
-				return err
-			}
-			p, err := c.ov.GetProfile(cmd.Context(), oversight.Scope{Org: c.me})
-			if err != nil {
-				return c.refused(err)
-			}
-			if jsonF {
-				return printRawJSON(cmd.OutOrStdout(), p.RawJSON())
-			}
-			printProfile(cmd.OutOrStdout(), p)
-			return nil
-		},
-	}
-	cmd.Flags().BoolVar(&jsonF, "json", false, "print the profile as JSON")
-	cmd.AddCommand(newOversightProfileSetCmd(apiURL, authURL))
-	return cmd
-}
-
-func newOversightProfileSetCmd(apiURL, authURL *string) *cobra.Command {
-	var jsonF bool
-	cmd := &cobra.Command{
-		Use:   "set careful|balanced|strict",
-		Short: "Choose your trust profile.",
-		Long: `Choose your trust profile, one of the three the console offers:
-
-  careful    runs a step on its own at 90% sure you would allow it, and
-             stops it below 25%; the one everyone starts on
-  balanced   asks less: runs a step at 65% sure, and stops it below 35%
-  strict     for money and production: runs a step only at 98% sure
-
-Each shows you 1 in 20 of the steps that run on their own to check.`,
-		Example: `  latere oversight profile set balanced
-  latere oversight profile set careful --json`,
-		Args:      cobra.ExactArgs(1),
-		ValidArgs: []string{"careful", "balanced", "strict"},
-		RunE: func(cmd *cobra.Command, args []string) error {
-			var preset *oversightPreset
-			for i, p := range oversightPresets {
-				if strings.EqualFold(args[0], p.name) {
-					preset = &oversightPresets[i]
-				}
-			}
-			if preset == nil {
-				return refusedf("%q is not a trust profile; choose careful, balanced or strict", args[0])
-			}
-			c, err := newOversightClient(cmd.Context(), *apiURL, *authURL)
-			if err != nil {
-				return err
-			}
-			saved, err := c.ov.PutProfile(cmd.Context(), &oversight.Profile{Org: c.me, Costs: preset.costs, AuditRate: oversightAuditRate})
-			if err != nil {
-				return c.refused(err)
-			}
-			if jsonF {
-				return printRawJSON(cmd.OutOrStdout(), saved.RawJSON())
-			}
-			printProfile(cmd.OutOrStdout(), saved)
-			return nil
-		},
-	}
-	cmd.Flags().BoolVar(&jsonF, "json", false, "print the saved profile as JSON")
-	return cmd
-}
-
-func printProfile(out io.Writer, p *oversight.Profile) {
-	name := "Your own costs"
-	if preset := presetOf(p.Costs); preset != nil {
-		name = preset.label
-	}
-	if p.Default {
-		name += " (you have not chosen one, so this is where everyone starts)"
-	}
-	var b strings.Builder
-	fprintf(&b, "Trust profile: %s\n", name)
-	fprintf(&b, "Runs a step on its own at %s sure you would allow it, asks between, and stops it below %s.\n",
-		percent(p.Thresholds.AllowAbove), percent(p.Thresholds.BlockBelow))
-	fprintf(&b, "Costs: a wrong run %g, a wrong stop %g, a question %g.\n", p.Costs.FalseAllow, p.Costs.FalseBlock, p.Costs.Ask)
-	if p.AuditRate > 0 {
-		fprintf(&b, "Shows you 1 in %.0f of the steps that run on their own to check.\n", 1/p.AuditRate)
-	} else {
-		fprint(&b, "Shows you none of the steps that run on their own to check.\n")
-	}
-	fprint(out, stripANSI(b.String()))
 }
 
 // ---- answer ----
