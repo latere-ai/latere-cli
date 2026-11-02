@@ -313,15 +313,80 @@ func signed(v float64) string {
 	return fmt.Sprintf("%+.2f", v)
 }
 
-// askWords says what an ask kind means.
-func askWords(k oversight.AskKind) string {
-	switch k {
-	case oversight.AskUnsure:
+// askBetween is the word for an ask Limen calls split whose answers all
+// went one way: the chance falls between the trust profile's thresholds.
+// Limen calls an ask split by its evidence alone, so only answers on both
+// sides are split in the commands' words.
+const askBetween = "between"
+
+// askWhy says why Limen asks about the step an explanation explains:
+// unsure, too few answers yet; split, where the answers that moved it
+// went both ways on one kind of step; and between, where they did not,
+// with the chance and the threshold it falls short of, the run threshold
+// from one half up and the stop threshold below it, as the console says
+// it. The profile is the preset nearest the thresholds the explanation
+// was made under.
+func askWhy(e *oversight.Explanation) string {
+	switch {
+	case e.AskKind == oversight.AskUnsure:
 		return "unsure: your answers say little about steps like this yet, so more answers will move it"
-	case oversight.AskSplit:
-		return "split: your answers say a lot about steps like this, and they disagree, so more answers will not move it"
+	case e.AskKind == oversight.AskSplit && bothWays(e.Evidence):
+		return "split: your answers about steps like this went both ways, so more answers will not move it much"
+	case e.AskKind == oversight.AskSplit && e.Thresholds == (oversight.Thresholds{}):
+		return fmt.Sprintf("%s: not sure enough yet: Limen is %s sure you would allow it", askBetween, percent(e.Approve))
+	case e.AskKind == oversight.AskSplit && e.Approve >= 0.5:
+		return fmt.Sprintf("%s: not sure enough yet: Limen is %s sure you would allow it, and %s runs it on its own only above %s",
+			askBetween, percent(e.Approve), presetNear(e.Thresholds), percent(e.Thresholds.AllowAbove))
+	case e.AskKind == oversight.AskSplit:
+		return fmt.Sprintf("%s: not sure enough yet: Limen is %s sure you would allow it, and %s stops it only below %s",
+			askBetween, percent(e.Approve), presetNear(e.Thresholds), percent(e.Thresholds.BlockBelow))
 	}
-	return string(k)
+	return string(e.AskKind)
+}
+
+// presetNear is the name of the preset whose thresholds are nearest t,
+// as the console names the profile a step was decided under.
+func presetNear(t oversight.Thresholds) string {
+	best, far := oversightPresets[0].label, math.Inf(1)
+	for _, p := range oversightPresets {
+		run, stop := 1-p.costs.Ask/p.costs.FalseAllow, p.costs.Ask/p.costs.FalseBlock
+		if d := math.Abs(run-t.AllowAbove) + math.Abs(stop-t.BlockBelow); d < far {
+			best, far = p.label, d
+		}
+	}
+	return best
+}
+
+// bothWays reports whether the answers that moved a prediction went both
+// ways on one kind of step: an allow and a deny with the same label. A
+// deny of another kind moves it through your answers lately and is no
+// disagreement about this one. The explanation does not name the step's
+// own label, and the answers of its own kind move it most, so one label
+// with both counts.
+func bothWays(evidence []oversight.Evidence) bool {
+	allowed := map[string]bool{}
+	for _, a := range evidence {
+		if a.Approve {
+			allowed[a.Label] = true
+		}
+	}
+	for _, a := range evidence {
+		if !a.Approve && allowed[a.Label] {
+			return true
+		}
+	}
+	return false
+}
+
+// learnedAsk is a kind's ask kind in the commands' words: split only where
+// the person both allowed and denied steps of the kind, between for a
+// split ask whose answers all went one way, and Limen's own word
+// otherwise.
+func learnedAsk(k oversight.LearnedKind) string {
+	if k.AskKind == oversight.AskSplit && (k.Approved == 0 || k.Denied == 0) {
+		return askBetween
+	}
+	return string(k.AskKind)
 }
 
 // answerWord is an answer as a verb.
@@ -509,7 +574,8 @@ func newOversightExplainCmd(apiURL, authURL *string) *cobra.Command {
 and how unsure it is, where that sits between your trust profile's
 thresholds, how much of it comes from steps like this one, from your
 answers lately, and from both together, how much your answers say about
-it, and for an ask whether Limen is unsure or your answers are split. Then
+it, and for an ask why: too few answers yet, answers that went both ways,
+or a chance short of the trust profile's threshold. Then
 the answers of yours that moved it most, each with its share.
 
 The model that explains is named with how many of your answers it was
@@ -588,7 +654,7 @@ func printExplanation(out io.Writer, e *oversight.Explanation, applied string) e
 		fprintf(&b, "Profile:      %s\n", applied)
 	}
 	if e.AskKind != "" {
-		fprintf(&b, "Why it asks:  %s\n", askWords(e.AskKind))
+		fprintf(&b, "Why it asks:  %s\n", askWhy(e))
 	}
 	fprintf(&b, "Evidence:     your answers settled %s of what Limen did not know about this step (evidence ratio %.2f)\n", percent(e.EvidenceRatio), e.EvidenceRatio)
 	if p := e.Parts; p != nil {
@@ -661,7 +727,7 @@ func printLearned(out io.Writer, l *oversight.Learned) error {
 	fprintln(w, "STEP\tALLOWED\tDENIED\tALLOW\tUNCERTAINTY\tSCALE (stop | ask | run)\tNOW\tASK")
 	for _, k := range l.Kinds {
 		fprintf(w, "%s\t%d\t%d\t%s\t%.2f\t%s\t%s\t%s\n", dash(k.Label), k.Approved, k.Denied, percent(k.Approve), k.Uncertainty,
-			scale(k.Approve, k.Thresholds), k.Verdict, dash(string(k.AskKind)))
+			scale(k.Approve, k.Thresholds), k.Verdict, dash(learnedAsk(k)))
 	}
 	if err := w.Flush(); err != nil {
 		return err

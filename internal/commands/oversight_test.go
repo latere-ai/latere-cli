@@ -242,7 +242,7 @@ func TestOversightExplain(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, errOut)
 	}
-	contains(t, out, "ask, 52% likely you allow it (uncertainty 0.40)", "stops below 25%, runs above 90%", "split: your answers say a lot",
+	contains(t, out, "ask, 52% likely you allow it (uncertainty 0.40)", "stops below 25%, runs above 90%", "split: your answers about steps like this went both ways",
 		"settled 81%", "steps like this +0.05, your answers lately +0.10, both together -0.08 (sum +0.07)",
 		"learned/4, fitted on 40 answers", "learned/3, fitted on 38 answers; Limen has learned since",
 		"19%", "allow", "bash npm install", "2026-10-30 10:00 UTC", "ses_1/toolu_9", "18%", "deny")
@@ -260,6 +260,63 @@ func TestOversightExplain(t *testing.T) {
 	}
 	if len(s.seen()) != n {
 		t.Error("a bad id was sent")
+	}
+}
+
+// Limen calls an ask split by its evidence alone. An ask is split in the
+// commands' words only where the answers that moved it went both ways, or
+// for a kind where the person both allowed and denied it; otherwise it is
+// between, with the chance and the threshold it falls short of.
+func TestOversightAskWhoseAnswersAgree(t *testing.T) {
+	s := newOversightStub(t)
+	agreed := func(approve string) string {
+		return `{"org":"` + ovMe + `","subject":"` + ovMe + `","action_id":"ses_A/toolu_3","model":{"source":"learned/4","answers":2},
+"approve":` + approve + `,"uncertainty":1.07,"verdict":"ask","mean":0.8,"evidence_ratio":0.6,"ask_kind":"split","thresholds":{"allow_above":0.9,"block_below":0.25},
+"evidence":[{"action_id":"ses_1/toolu_9","label":"publish","at":"2026-10-30T10:00:00Z","approve":true,"share":0.6},
+{"action_id":"ses_1/toolu_8","label":"publish","at":"2026-10-29T10:00:00Z","approve":true,"share":0.4}]}`
+	}
+	s.json("GET /explanations", http.StatusOK, agreed("0.8"))
+	out, errOut, code := runLatere(t, "", "oversight", "explain", "ses_A/toolu_3")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	contains(t, out, "Why it asks:  between: not sure enough yet: Limen is 80% sure you would allow it, and Careful runs it on its own only above 90%\n")
+	if strings.Contains(out, "both ways") {
+		t.Errorf("answers that agree read as both ways: %s", out)
+	}
+	s.json("GET /explanations", http.StatusOK, agreed("0.3"))
+	out, _, _ = runLatere(t, "", "oversight", "explain", "ses_A/toolu_3")
+	contains(t, out, "between: not sure enough yet: Limen is 30% sure you would allow it, and Careful stops it only below 25%\n")
+	// A deny of another kind of step is no disagreement about this one.
+	s.json("GET /explanations", http.StatusOK, strings.Replace(agreed("0.8"), `"label":"publish","at":"2026-10-29T10:00:00Z","approve":true`, `"label":"bash rm","at":"2026-10-29T10:00:00Z","approve":false`, 1))
+	out, _, _ = runLatere(t, "", "oversight", "explain", "ses_A/toolu_3")
+	contains(t, out, "between: not sure enough yet: Limen is 80% sure you would allow it, and Careful runs it on its own only above 90%")
+	// An explanation without thresholds says the chance alone.
+	s.json("GET /explanations", http.StatusOK, strings.Replace(agreed("0.8"), `"thresholds":{"allow_above":0.9,"block_below":0.25},`, ``, 1))
+	out, _, _ = runLatere(t, "", "oversight", "explain", "ses_A/toolu_3")
+	contains(t, out, "between: not sure enough yet: Limen is 80% sure you would allow it\n")
+	if presetNear(oversight.Thresholds{AllowAbove: 0.98, BlockBelow: 0.25}) != "Strict" || presetNear(oversight.Thresholds{AllowAbove: 0.66, BlockBelow: 0.34}) != "Balanced" {
+		t.Error("the preset nearest the thresholds")
+	}
+
+	s.json("GET /learned", http.StatusOK, `{"org":"`+ovMe+`","subject":"`+ovMe+`","model":{"source":"learned/1","answers":13},"entries":[
+{"label":"publish","kind":"tool","name":"publish","approved":2,"denied":0,"approve":0.8,"uncertainty":1.07,"verdict":"ask","evidence_ratio":0.6,"ask_kind":"split","thresholds":{"allow_above":0.9,"block_below":0.25}},
+{"label":"bash npm install","kind":"tool","name":"bash","approved":6,"denied":5,"approve":0.52,"uncertainty":0.3,"verdict":"ask","evidence_ratio":0.8,"ask_kind":"split","thresholds":{"allow_above":0.9,"block_below":0.25}}],"recent":[]}`)
+	out, _, _ = runLatere(t, "", "oversight", "learned")
+	var publish, install string
+	for line := range strings.Lines(out) {
+		switch {
+		case strings.HasPrefix(line, "publish"):
+			publish = line
+		case strings.HasPrefix(line, "bash npm install"):
+			install = line
+		}
+	}
+	if !strings.HasSuffix(strings.TrimSpace(publish), "between") {
+		t.Errorf("a kind allowed alone: %q", publish)
+	}
+	if !strings.HasSuffix(strings.TrimSpace(install), "split") {
+		t.Errorf("a kind allowed and denied: %q", install)
 	}
 }
 
