@@ -6,9 +6,11 @@ depends_on:
   - specs/015-evals-commands.md
   - "CROSS-REPO: Limen's oversight API at /v1/oversight; sdk-go oversight.ListCases, GetReliability, agents.Session.Policy and agents.ToolConfirmation (main after v0.23.0)"
   - "CROSS-REPO: topos specs/100-the-organization-a-session-acts-in.md: a session's org and a call's decision_org; sdk-go agents.Session.Org, agents.ToolUse.DecisionOrg and agents.Suggestion.AskKind (main after v0.24.0)"
+  - "CROSS-REPO: platform specs/243-oversight-in-an-organization-the-extras.md and Limen specs/010-organizations.md: an agent's own profile, a member's stricter profile and an organization's weekly report; sdk-go oversight.DeleteProfile, Scope.Subject, GetReport, Prediction.Profile and agents.GetAgent (main after v0.25.0)"
 affects:
   - go.mod (sdk-go main after v0.23.0, to be v0.24.0)
   - internal/commands/oversight.go, internal/commands/oversight_test.go
+  - internal/commands/oversight_profile.go, internal/commands/oversight_report.go, internal/commands/oversight_org_test.go
   - internal/commands/agents_sessions.go, internal/commands/agents_sessions_test.go
   - internal/commands/apierror.go (the exit codes spec 015 gave evals, shared), internal/commands/evals.go, internal/commands/exit.go
   - internal/commands/topos.go, internal/commands/root.go, internal/commands/capability_names_test.go
@@ -38,7 +40,7 @@ with the login they already have.
 
 ## Design
 
-`latere oversight` has seven commands, each with `--json`:
+`latere oversight` has eight commands, each with `--json`:
 
 | Command | Calls |
 |---|---|
@@ -46,12 +48,14 @@ with the login they already have.
 | `explain <session>/<tool_use_id>` | `GET /explanations` |
 | `learned` | `GET /learned` |
 | `reliability [--of S] [--from T] [--to T]` | `GET /reliability` |
-| `profile`, `profile set careful\|balanced\|strict` | `GET`, `PUT /profiles` |
+| `profile`, `profile set careful\|balanced\|strict`, `profile reset` | `GET`, `PUT`, `DELETE /profiles` |
+| `report [--from T] [--to T]` | `GET /reports` |
 | `answer <session>/<tool_use_id> allow\|deny` | `POST /answers`, sent once |
 | `forget [--yes]` | `POST /subjects/forget` |
 
 Every call names the person as both the organization and the subject, in
-every context, as Topos keys them. The person is read from the bearer the
+every context, as Topos keys them, except a step of an organization's
+agent and the organization's own profiles and report (both below). The person is read from the bearer the
 command presents when it is a JWT, and otherwise from the saved login:
 its `iss`, or the resolved issuer, and its `sub`.
 
@@ -121,10 +125,63 @@ organization misses it.
   `decision_org` when it has no `|`, which tells an organization's ID from
   a person's subject.
 
+### In an organization: an agent's own profile, a member's stricter one, and the report (platform spec 243)
+
+Limen spec 010 adds a route that removes a saved profile, a profile
+scope with a person, and an organization's weekly report. Platform spec
+243 gives them to an organization's owners, admins and members. The
+command line gets them as flags of `profile` and a new command:
+
+| Command | Calls |
+|---|---|
+| `profile --agent <name>` | `GET /agents/{ref}` on the agents API, then `GET /profiles?org&agent` |
+| `profile set <preset> --agent <name>` | the same agent read, then `PUT /profiles` with `{org, agent}` |
+| `profile reset --agent <name>` | the same agent read, then `DELETE /profiles?org&agent`, then `GET` for what applies now |
+| `profile --for-me` | `GET /profiles?org&subject`, and `GET /profiles?org` when the person saved a pick |
+| `profile set <preset> --for-me` | `PUT /profiles` with `{org, subject}`, then `GET /profiles?org` for what the pick does now |
+| `profile reset --for-me` | `DELETE /profiles?org&subject` |
+| `report [--from T] [--to T]` | `GET /reports?org&from&to` |
+
+- **The context is the login's.** The organization is the `org_id` of the
+  bearer the command presents: `LATERE_OVERSIGHT_TOKEN` when it is a JWT,
+  else the saved login. `--for-me` and `report` in the person's own
+  context are refused before any call, with `latere login --org-id <id>`.
+  `--agent` in the person's own context is the agent's own profile under
+  the person's subject, which Limen keys a person's own agent's steps by.
+- **An agent by its name.** Limen keys an agent's steps by the agent's id
+  (`actor.id`, which Topos fills from the session's agent id). The
+  command reads the agent from the agents API, by its name in the login's
+  context or by its id, through sdk-go's `agents.GetAgent`, and names the
+  agent's `status.id` in the scope. An agent the API does not answer is
+  refused before Limen is asked.
+- **What applies to the member.** `GET /profiles` with `subject` answers
+  what the member picked, not what applies. The command reads the
+  organization's profile too and takes the higher run threshold and the
+  lower stop threshold, as Limen's `Stricter` does, to say whether the
+  pick changes anything now.
+- **The report** defaults to the console's window: the 5 weeks before the
+  Monday that starts this week. A bound that is not a Monday at 00:00 UTC,
+  bounds out of order, and more than 13 weeks are refused before any
+  call. It prints each week (too few people, open with the day it shows,
+  or its counts), the agents of the latest ready week with Other agents,
+  and that week's two false-allow rates, `not shown` where withheld.
+- **Whose profile applied.** `explain` of a step in an organization's
+  context also reads the step's case (`GET /cases?action_id&limit=1`) and
+  names the scope of the profile its prediction recorded, which the
+  explanation does not carry: a `subject` is "stricter, as you picked",
+  an `agent` the agent's own, and otherwise the organization's. A step in
+  the person's own context reads no case.
+- **Refusals.** A 403 on a change of an organization's agent's profile
+  says that only an owner or an admin can make it, and a 403 on `report`
+  that only an owner or an admin reads it. Every other refusal is
+  `apiRefused`'s, with the exit codes above.
+
 ## Not in this spec
 
 - Previews of another profile (`POST /previews`).
-- Profiles scoped to a kind or an agent.
+- Profiles scoped to a kind of step.
+- A profile of a member for one agent: Limen keeps one per member and
+  organization (Limen spec 010, Decisions 5).
 
 ## Acceptance criteria
 
@@ -141,6 +198,11 @@ organization misses it.
 | 9 | A log that cannot be read leaves the step in the person's own context, with a note | `TestOversightStepWhenTheSessionCannotBeRead` |
 | 10 | `cases --session` reads each context the session's steps are in, in the log's order; `cases` alone reads the person's own | `TestOversightCasesOfASessionInAnOrganization` |
 | 11 | `agents session` names the session's organization, and a call's when Limen keeps it in an organization | `TestAgentsSessionOfAnOrganizationsAgent` |
+| 12 | `profile --agent`, `profile set --agent` and `profile reset --agent` read the agent by its name and scope the profile by its id in the login's context; a 403 on a change names the owners and admins; an unknown agent is refused before Limen is asked | `TestOversightAgentProfile`, `TestOversightAgentProfileInThePersonsOwnContext` |
+| 13 | `profile --for-me`, `set --for-me` and `reset --for-me` scope the profile by the person's subject in the organization, and say what applies: the pick, nothing now, or the stricter of each threshold | `TestOversightProfileForMe` |
+| 14 | `--for-me` and `report` in the person's own context are refused with `latere login --org-id <id>`, before any call | `TestOversightOrganizationOnlyInAnOrganization` |
+| 15 | `report` reads the 5 weeks before this week's Monday by default, refuses bounds that are not Mondays, out of order or more than 13 weeks apart, prints each week's state or counts, the latest ready week's agents and rates with withheld numbers as not shown, and says who reads it on a 403 | `TestOversightReport`, `TestOversightReportTooFew`, `TestMondayOf` |
+| 16 | `explain` of a step in an organization names whose profile applied from its case's prediction, and leaves the line out where the case is not read or the step is the person's own | `TestOversightExplainNamesTheProfileThatApplied` |
 
 ## Outcome
 
@@ -160,3 +222,12 @@ the organization its `decision_org` names (criteria 8 to 11), on sdk-go
 main after v0.24.0. The release pins the sdk-go release in place of the
 pseudo-version. The docs give a decision's source in its three-part form,
 `topos/<mode>/<decided_by>`.
+
+On 2026-11-02, the commands give an organization's agent its own trust
+profile and take it back, let a member make the organization's profile
+stricter for their own sessions, read the organization's weekly report,
+and name whose profile applied to a step in `explain` (criteria 12 to
+16, platform spec 243, Limen spec 010). They are built on sdk-go main
+after v0.25.0, for `oversight.DeleteProfile`, `Scope.Subject`,
+`GetReport`, `Prediction.Profile` and `agents.GetAgent`. The release
+pins the sdk-go release in place of the pseudo-version.
