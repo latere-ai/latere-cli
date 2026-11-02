@@ -313,35 +313,87 @@ func signed(v float64) string {
 	return fmt.Sprintf("%+.2f", v)
 }
 
-// askBetween is the word for an ask Limen calls split whose answers all
-// went one way: the chance falls between the trust profile's thresholds.
-// Limen calls an ask split by its evidence alone, so only answers on both
-// sides are split in the commands' words.
-const askBetween = "between"
-
 // askWhy says why Limen asks about the step an explanation explains:
-// unsure, too few answers yet; split, where the answers that moved it
-// went both ways on one kind of step; and between, where they did not,
-// with the chance and the threshold it falls short of, the run threshold
-// from one half up and the stop threshold below it, as the console says
-// it. The profile is the preset nearest the thresholds the explanation
-// was made under.
+// unsure, too few answers yet; split, answers that went both ways on the
+// step's kind; short, answers that agree, with the chance and the
+// threshold it falls short of, the run threshold from one half up and the
+// stop threshold below it, as the console says it; wider, a reach no
+// approval of the person's covers; and few, a reach they allowed with too
+// little weight or in too few sessions. The profile is the preset nearest
+// the thresholds the explanation was made under.
+//
+// A Limen that sends a cover splits only on answers that disagree. An
+// older Limen calls an ask split by its evidence alone, so its split is
+// split in the commands' words only where the answers that moved it went
+// both ways, and short otherwise.
 func askWhy(e *oversight.Explanation) string {
+	split := e.AskKind == oversight.AskSplit && (e.Cover != nil || bothWays(e.Evidence))
 	switch {
 	case e.AskKind == oversight.AskUnsure:
 		return "unsure: your answers say little about steps like this yet, so more answers will move it"
-	case e.AskKind == oversight.AskSplit && bothWays(e.Evidence):
+	case split:
 		return "split: your answers about steps like this went both ways, so more answers will not move it much"
-	case e.AskKind == oversight.AskSplit && e.Thresholds == (oversight.Thresholds{}):
-		return fmt.Sprintf("%s: not sure enough yet: Limen is %s sure you would allow it", askBetween, percent(e.Approve))
-	case e.AskKind == oversight.AskSplit && e.Approve >= 0.5:
-		return fmt.Sprintf("%s: not sure enough yet: Limen is %s sure you would allow it, and %s runs it on its own only above %s",
-			askBetween, percent(e.Approve), presetNear(e.Thresholds), percent(e.Thresholds.AllowAbove))
-	case e.AskKind == oversight.AskSplit:
-		return fmt.Sprintf("%s: not sure enough yet: Limen is %s sure you would allow it, and %s stops it only below %s",
-			askBetween, percent(e.Approve), presetNear(e.Thresholds), percent(e.Thresholds.BlockBelow))
+	case e.AskKind == oversight.AskShort, e.AskKind == oversight.AskSplit:
+		return shortWhy(e)
+	case e.AskKind == oversight.AskWider:
+		return "wider: this step reaches further than any step of its kind that you allowed, so no approval of yours covers it"
+	case e.AskKind == oversight.AskFew && e.Cover != nil:
+		return fmt.Sprintf("few: you allowed steps that reach this far, but Limen runs one on its own only after approvals of weight %s from %s, and it has %s from %s",
+			weight(e.Cover.MinWeight), plural(e.Cover.MinSessions, "session", "sessions"), weight(e.Cover.Weight), plural(e.Cover.Sessions, "session", "sessions"))
+	case e.AskKind == oversight.AskFew:
+		return "few: you allowed steps that reach this far, but not with enough considered answers or in enough sessions"
 	}
 	return string(e.AskKind)
+}
+
+// shortWhy is the short ask's words: the answers agree, and the chance is
+// short of the threshold, as the console says it.
+func shortWhy(e *oversight.Explanation) string {
+	word := string(oversight.AskShort)
+	switch {
+	case e.Thresholds == (oversight.Thresholds{}):
+		return fmt.Sprintf("%s: not sure enough yet: Limen is %s sure you would allow it", word, percent(e.Approve))
+	case e.Approve >= 0.5:
+		return fmt.Sprintf("%s: not sure enough yet: Limen is %s sure you would allow it, and %s runs it on its own only above %s",
+			word, percent(e.Approve), presetNear(e.Thresholds), percent(e.Thresholds.AllowAbove))
+	}
+	return fmt.Sprintf("%s: not sure enough yet: Limen is %s sure you would allow it, and %s stops it only below %s",
+		word, percent(e.Approve), presetNear(e.Thresholds), percent(e.Thresholds.BlockBelow))
+}
+
+// weight is the weight of approvals as a person reads it: a whole number
+// without a point, and otherwise to one place.
+func weight(w float64) string {
+	if w == math.Trunc(w) {
+		return fmt.Sprintf("%.0f", w)
+	}
+	return fmt.Sprintf("%.1f", w)
+}
+
+// coverWords say how far a person's approvals cover a step: whether they
+// do, the weight of the approvals that cover it against the weight
+// needed, and their sessions against the sessions needed.
+func coverWords(c *oversight.Cover) string {
+	state := "not covered"
+	if c.Covered {
+		state = "covered"
+	}
+	return fmt.Sprintf("%s: approvals of weight %s of the %s needed, from %d of the %d sessions needed",
+		state, weight(c.Weight), weight(c.MinWeight), c.Sessions, c.MinSessions)
+}
+
+// coverCell is a case's cover in one column: yes or no, the weight over
+// the weight needed and the sessions over the sessions needed, or "-" for
+// a prediction without one.
+func coverCell(c *oversight.Cover) string {
+	if c == nil {
+		return "-"
+	}
+	state := "no"
+	if c.Covered {
+		state = "yes"
+	}
+	return fmt.Sprintf("%s %s/%s %d/%d", state, weight(c.Weight), weight(c.MinWeight), c.Sessions, c.MinSessions)
 }
 
 // presetNear is the name of the preset whose thresholds are nearest t,
@@ -378,15 +430,24 @@ func bothWays(evidence []oversight.Evidence) bool {
 	return false
 }
 
-// learnedAsk is a kind's ask kind in the commands' words: split only where
-// the person both allowed and denied steps of the kind, between for a
-// split ask whose answers all went one way, and Limen's own word
-// otherwise.
-func learnedAsk(k oversight.LearnedKind) string {
-	if k.AskKind == oversight.AskSplit && (k.Approved == 0 || k.Denied == 0) {
-		return askBetween
+// learnedAsk is a kind's ask kind in the commands' words, Limen's own
+// word, with one exception. A Limen that names no short, wider or few ask
+// in the view calls an ask split by its evidence alone, so its split is
+// short where the person did not both allow and deny steps of the kind.
+func learnedAsk(k oversight.LearnedKind, knowsShort bool) string {
+	if k.AskKind == oversight.AskSplit && !knowsShort && (k.Approved == 0 || k.Denied == 0) {
+		return string(oversight.AskShort)
 	}
 	return string(k.AskKind)
+}
+
+// knowsShort reports whether a learned view comes from a Limen that names
+// the asks of its cover, short, wider or few, and so splits only on
+// answers that disagree.
+func knowsShort(kinds []oversight.LearnedKind) bool {
+	return slices.ContainsFunc(kinds, func(k oversight.LearnedKind) bool {
+		return k.AskKind == oversight.AskShort || k.AskKind == oversight.AskWider || k.AskKind == oversight.AskFew
+	})
 }
 
 // answerWord is an answer as a verb.
@@ -425,8 +486,10 @@ func newOversightCasesCmd(apiURL, authURL *string) *cobra.Command {
 		Long: `List the steps Limen holds about you, oldest first, the latest --limit of
 them. Each shows the step's action id and kind, what Limen suggested (the
 verdict, the chance you allow the step, how unsure it is, and for an ask
-whether it was unsure or split), what was done (the verdict, the chance
-you were shown the step, and what decided it), and your answers.
+why it asks: unsure, split, short, wider or few), how far your approvals
+cover the step (yes or no, their weight over the weight needed and their
+sessions over the sessions needed), what was done (the verdict, the
+chance you were shown the step, and what decided it), and your answers.
 
 --pending lists only the steps you were shown that you have not checked
 yet. --session keeps the steps of one session, in the order the session
@@ -524,18 +587,18 @@ func printCases(out io.Writer, cases []*oversight.Case, total int, pending bool)
 	}
 	var b strings.Builder
 	w := tabwriter.NewWriter(&b, 0, 4, 2, ' ', 0)
-	fprintln(w, "ACTION\tSTEP\tSUGGESTED\tALLOW\tUNCERTAINTY\tASK\tDECIDED\tSHOWN\tBY\tANSWERS")
+	fprintln(w, "ACTION\tSTEP\tSUGGESTED\tALLOW\tUNCERTAINTY\tASK\tCOVER\tDECIDED\tSHOWN\tBY\tANSWERS")
 	for _, k := range cases {
-		suggested, allow, unsure, ask := "-", "-", "-", "-"
+		suggested, allow, unsure, ask, cover := "-", "-", "-", "-", "-"
 		if p := k.Prediction; p != nil {
-			suggested, allow, unsure, ask = string(p.Verdict), percent(p.Approve), fmt.Sprintf("%.2f", p.Uncertainty), dash(string(p.AskKind))
+			suggested, allow, unsure, ask, cover = string(p.Verdict), percent(p.Approve), fmt.Sprintf("%.2f", p.Uncertainty), dash(string(p.AskKind)), coverCell(p.Cover)
 		}
 		decided, shown, by := "-", "-", "-"
 		if d := k.Decision; d != nil {
 			decided, shown, by = string(d.Verdict), percent(d.ReviewProbability), dash(d.Source)
 		}
-		fprintf(w, "%s\t%s %s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", k.Action.ActionID, k.Action.Kind, k.Action.Name,
-			suggested, allow, unsure, ask, decided, shown, by, dash(answersWords(k.Answers)))
+		fprintf(w, "%s\t%s %s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", k.Action.ActionID, k.Action.Kind, k.Action.Name,
+			suggested, allow, unsure, ask, cover, decided, shown, by, dash(answersWords(k.Answers)))
 	}
 	if err := w.Flush(); err != nil {
 		return err
@@ -575,7 +638,10 @@ and how unsure it is, where that sits between your trust profile's
 thresholds, how much of it comes from steps like this one, from your
 answers lately, and from both together, how much your answers say about
 it, and for an ask why: too few answers yet, answers that went both ways,
-or a chance short of the trust profile's threshold. Then
+answers that agree with a chance short of the trust profile's threshold,
+a step that reaches further than any you allowed, or approvals with too
+little weight or from too few sessions. Then how far your approvals cover
+the step, with the approvals nearest to it whose reach it exceeds, and
 the answers of yours that moved it most, each with its share.
 
 The model that explains is named with how many of your answers it was
@@ -661,6 +727,16 @@ func printExplanation(out io.Writer, e *oversight.Explanation, applied string) e
 		fprintf(&b, "Parts:        steps like this %s, your answers lately %s, both together %s (sum %s)\n",
 			signed(p.Action), signed(p.Recent), signed(p.Interaction), signed(e.Mean))
 	}
+	if c := e.Cover; c != nil {
+		fprintf(&b, "Cover:        %s\n", coverWords(c))
+		for i, n := range c.Nearest {
+			lead := "              "
+			if i == 0 {
+				lead = "Nearest:      "
+			}
+			fprintf(&b, "%syou allowed %s, %s, %s\n", lead, dash(n.Label), formatTime(n.At), n.ActionID)
+		}
+	}
 	fprintf(&b, "Model:        %s, fitted on %s\n", dash(e.Model.Source), plural(int(e.Model.Answers), "answer", "answers"))
 	if p := e.PredictedBy; p != nil && *p != e.Model {
 		fprintf(&b, "Suggested by: %s, fitted on %s; Limen has learned since\n", dash(p.Source), plural(int(p.Answers), "answer", "answers"))
@@ -725,9 +801,10 @@ func printLearned(out io.Writer, l *oversight.Learned) error {
 	var b strings.Builder
 	w := tabwriter.NewWriter(&b, 0, 4, 2, ' ', 0)
 	fprintln(w, "STEP\tALLOWED\tDENIED\tALLOW\tUNCERTAINTY\tSCALE (stop | ask | run)\tNOW\tASK")
+	knows := knowsShort(l.Kinds)
 	for _, k := range l.Kinds {
 		fprintf(w, "%s\t%d\t%d\t%s\t%.2f\t%s\t%s\t%s\n", dash(k.Label), k.Approved, k.Denied, percent(k.Approve), k.Uncertainty,
-			scale(k.Approve, k.Thresholds), k.Verdict, dash(learnedAsk(k)))
+			scale(k.Approve, k.Thresholds), k.Verdict, dash(learnedAsk(k, knows)))
 	}
 	if err := w.Flush(); err != nil {
 		return err
@@ -895,7 +972,12 @@ teaches it.
 An answer is sent once and never again on its own, since each answer Limen
 receives counts. It goes to the organization the step was decided under,
 which the command reads from the step's session, or to your own context
-for a step that names none.`,
+for a step that names none.
+
+The answer tells Limen that you gave it at a prompt, and nothing else
+about how you gave it: the command does not see how long you looked at
+the step, whether you opened its details, or what Limen showed you
+first.`,
 		Example: `  latere oversight answer ses_01JA3BQ7Z4M8N2P5R6S7T8V9WX/toolu_01 allow
   latere oversight answer ses_01JA3BQ7Z4M8N2P5R6S7T8V9WX/toolu_02 deny`,
 		Args:      cobra.ExactArgs(2),
@@ -917,7 +999,10 @@ for a step that names none.`,
 			if err != nil {
 				return err
 			}
-			params := &oversight.AnswerParams{Org: c.orgOfAction(cmd.Context(), cmd.ErrOrStderr(), id), Subject: c.me, ActionID: id, Approve: approve}
+			// The command measures nothing of how the person answered but
+			// where: a time, the details and the suggestion are left out.
+			params := &oversight.AnswerParams{Org: c.orgOfAction(cmd.Context(), cmd.ErrOrStderr(), id), Subject: c.me, ActionID: id, Approve: approve,
+				Surface: oversight.SurfacePrompt}
 			if err := c.ov.Answer(cmd.Context(), params); err != nil {
 				return c.refusedIn(params.Org, err)
 			}

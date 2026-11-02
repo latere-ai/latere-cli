@@ -263,10 +263,11 @@ func TestOversightExplain(t *testing.T) {
 	}
 }
 
-// Limen calls an ask split by its evidence alone. An ask is split in the
-// commands' words only where the answers that moved it went both ways, or
-// for a kind where the person both allowed and denied it; otherwise it is
-// between, with the chance and the threshold it falls short of.
+// A Limen from before the cover calls an ask split by its evidence alone.
+// Its ask is split in the commands' words only where the answers that
+// moved it went both ways, or for a kind where the person both allowed and
+// denied it; otherwise it is short, with the chance and the threshold it
+// falls short of.
 func TestOversightAskWhoseAnswersAgree(t *testing.T) {
 	s := newOversightStub(t)
 	agreed := func(approve string) string {
@@ -280,21 +281,21 @@ func TestOversightAskWhoseAnswersAgree(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, errOut)
 	}
-	contains(t, out, "Why it asks:  between: not sure enough yet: Limen is 80% sure you would allow it, and Careful runs it on its own only above 90%\n")
+	contains(t, out, "Why it asks:  short: not sure enough yet: Limen is 80% sure you would allow it, and Careful runs it on its own only above 90%\n")
 	if strings.Contains(out, "both ways") {
 		t.Errorf("answers that agree read as both ways: %s", out)
 	}
 	s.json("GET /explanations", http.StatusOK, agreed("0.3"))
 	out, _, _ = runLatere(t, "", "oversight", "explain", "ses_A/toolu_3")
-	contains(t, out, "between: not sure enough yet: Limen is 30% sure you would allow it, and Careful stops it only below 25%\n")
+	contains(t, out, "short: not sure enough yet: Limen is 30% sure you would allow it, and Careful stops it only below 25%\n")
 	// A deny of another kind of step is no disagreement about this one.
 	s.json("GET /explanations", http.StatusOK, strings.Replace(agreed("0.8"), `"label":"publish","at":"2026-10-29T10:00:00Z","approve":true`, `"label":"bash rm","at":"2026-10-29T10:00:00Z","approve":false`, 1))
 	out, _, _ = runLatere(t, "", "oversight", "explain", "ses_A/toolu_3")
-	contains(t, out, "between: not sure enough yet: Limen is 80% sure you would allow it, and Careful runs it on its own only above 90%")
+	contains(t, out, "short: not sure enough yet: Limen is 80% sure you would allow it, and Careful runs it on its own only above 90%")
 	// An explanation without thresholds says the chance alone.
 	s.json("GET /explanations", http.StatusOK, strings.Replace(agreed("0.8"), `"thresholds":{"allow_above":0.9,"block_below":0.25},`, ``, 1))
 	out, _, _ = runLatere(t, "", "oversight", "explain", "ses_A/toolu_3")
-	contains(t, out, "between: not sure enough yet: Limen is 80% sure you would allow it\n")
+	contains(t, out, "short: not sure enough yet: Limen is 80% sure you would allow it\n")
 	if presetNear(oversight.Thresholds{AllowAbove: 0.98, BlockBelow: 0.25}) != "Strict" || presetNear(oversight.Thresholds{AllowAbove: 0.66, BlockBelow: 0.34}) != "Balanced" {
 		t.Error("the preset nearest the thresholds")
 	}
@@ -312,7 +313,7 @@ func TestOversightAskWhoseAnswersAgree(t *testing.T) {
 			install = line
 		}
 	}
-	if !strings.HasSuffix(strings.TrimSpace(publish), "between") {
+	if !strings.HasSuffix(strings.TrimSpace(publish), "short") {
 		t.Errorf("a kind allowed alone: %q", publish)
 	}
 	if !strings.HasSuffix(strings.TrimSpace(install), "split") {
