@@ -104,7 +104,9 @@ organization misses it.
 
 - `explain <action>` and `answer <action>` read the action's session log
   through the agents API and name the step's `decision_org` as the
-  organization, or the person's subject for a step without one.
+  organization when it is an organization's ID, and the person's subject
+  for a step without one or with a person's context (a `|`), however
+  Topos rendered that subject.
 - `cases --session <id>` reads the session's log, lists cases in the
   person's own context and in each organization its steps name, and
   orders them as the log made them. `cases` without `--session`, and

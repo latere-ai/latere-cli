@@ -161,10 +161,16 @@ type sessionSteps struct {
 	order []string
 }
 
-// orgOf is the organization of the step toolUseID, the person's own
-// subject for a step the log does not name one for.
+// orgOf is the organization of the step toolUseID: an organization's id
+// as the log names it, and the person's own subject for a step the log
+// names a person's context for, or none. A person's context is read as the
+// person's own subject, as the command renders it, so a core that renders
+// the subject another way reads as every step did before a core named one.
 func (st sessionSteps) orgOf(toolUseID, me string) string {
-	return cmp.Or(st.org[toolUseID], me)
+	if org := st.org[toolUseID]; isOrganization(org) {
+		return org
+	}
+	return me
 }
 
 // orgs are the organizations the session's steps are in, the person's own
@@ -172,7 +178,7 @@ func (st sessionSteps) orgOf(toolUseID, me string) string {
 func (st sessionSteps) orgs(me string) []string {
 	out := []string{me}
 	for _, id := range st.order {
-		if org := st.org[id]; org != "" && !slices.Contains(out, org) {
+		if org := st.orgOf(id, me); !slices.Contains(out, org) {
 			out = append(out, org)
 		}
 	}

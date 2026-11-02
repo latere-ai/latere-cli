@@ -50,7 +50,9 @@ was sent to Limen under (`decision_org`). `explain`, `answer` and `cases
 --session` read the log of the session through the agents API, and use
 this organization for each step. A step without it is in your own
 context. Steps from before the platform recorded the organization have
-none. The other commands read your own context.
+none. If the organization of a step has a `|`, it is the context of a
+person, and the command reads your own context. The other commands read
+your own context.
 
 Limen answers for the context of an organization only if you log in to
 that organization. If Limen refuses a step of an organization, the

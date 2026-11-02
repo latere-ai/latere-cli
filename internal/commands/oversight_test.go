@@ -129,13 +129,15 @@ func newOversightStubs(t *testing.T) (ov, ag *apiStub) {
 const ovOrg = "org_7"
 
 // serveOrgSession serves ses_O's log on the agents API: toolu_1 decided in
-// the organization ovOrg, toolu_2 in the person's own context by name, and
-// toolu_3 recorded before a call named its organization.
+// the organization ovOrg, toolu_2 in the person's own context by name,
+// toolu_3 recorded before a call named its organization, and toolu_4 in
+// the person's context with the issuer rendered with its slash.
 func serveOrgSession(ag *apiStub) {
 	ag.json("GET /sessions/ses_O/events", http.StatusOK, `{"items":[`+
 		agEvent(1, "agent.tool_use", "", `{"tool_use_id":"toolu_1","name":"bash","input":{},"verdict":"ask","decision_org":"`+ovOrg+`"}`)+`,`+
 		agEvent(2, "agent.tool_use", "", `{"tool_use_id":"toolu_2","name":"bash","input":{},"verdict":"allow","decision_org":"`+ovMe+`"}`)+`,`+
-		agEvent(3, "agent.tool_use", "", `{"tool_use_id":"toolu_3","name":"bash","input":{},"verdict":"allow"}`)+`]}`)
+		agEvent(3, "agent.tool_use", "", `{"tool_use_id":"toolu_3","name":"bash","input":{},"verdict":"allow"}`)+`,`+
+		agEvent(4, "agent.tool_use", "", `{"tool_use_id":"toolu_4","name":"bash","input":{},"verdict":"allow","decision_org":"https://auth.example/|usr_42"}`)+`]}`)
 }
 
 // runLatere runs `latere args...` with stdin and returns its output, its
@@ -461,7 +463,7 @@ func TestOversightStepInAnOrganization(t *testing.T) {
 	ov.handle("POST /answers", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
 
 	for i, step := range []struct{ id, org string }{
-		{"ses_O/toolu_1", ovOrg}, {"ses_O/toolu_2", ovMe}, {"ses_O/toolu_3", ovMe}, {"ses_X/toolu_1", ovMe},
+		{"ses_O/toolu_1", ovOrg}, {"ses_O/toolu_2", ovMe}, {"ses_O/toolu_3", ovMe}, {"ses_O/toolu_4", ovMe}, {"ses_X/toolu_1", ovMe},
 	} {
 		if _, errOut, code := runLatere(t, "", "oversight", "explain", step.id); code != 0 || errOut != "" {
 			t.Fatalf("explain %s: exit %d: %s", step.id, code, errOut)
