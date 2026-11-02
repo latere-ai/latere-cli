@@ -20,6 +20,7 @@ import (
 	"sync"
 	"testing"
 
+	"latere.ai/x/sdk-go/agents"
 	"latere.ai/x/sdk-go/evals"
 )
 
@@ -668,5 +669,97 @@ func TestEvalsRoutesAreExamens(t *testing.T) {
 		if !ok || !served(r.Method, path) {
 			t.Errorf("%s %s is not a route of the Evals API", r.Method, r.URL.Path)
 		}
+	}
+}
+
+// The runs an experiment has done count each run once: the goalless study's
+// 118 attempts, 18 of them replaced by a retry, are the 100 runs it
+// declares, 10 for each of its 10 cells, in the list and in show; an
+// import counts every run it brought in.
+func TestEvalsRunsCountEachRunOnce(t *testing.T) {
+	s := newEvalsStub(t)
+	goalless := strings.NewReplacer(`"progress":{"cells":{"complete":2},"trials":{"done":30,"pending":10}`, `"progress":{"cells":{"complete":10},"trials":{"done":118,"retried":18}`).
+		Replace(evalsExperimentJSON("complete", `{"complete":2}`))
+	imported := strings.NewReplacer(`"id":"exp_1"`, `"id":"exp_2"`, `"mode":"execute"`, `"mode":"import"`, `"trials":{"done":30,"pending":10}`, `"trials":{"done":12}`).
+		Replace(evalsExperimentJSON("complete", `{"complete":2}`))
+	s.json("GET /experiments", http.StatusOK, `{"items":[`+goalless+","+imported+`]}`)
+	s.json("GET /experiments/exp_1", http.StatusOK, goalless)
+	s.json("GET /experiments/exp_1/comparisons", http.StatusOK, `{"items":[]}`)
+
+	out, errOut, code := runEvals(t, "experiments", "list")
+	if code != 0 {
+		t.Fatalf("list = %d %q", code, errOut)
+	}
+	rows := strings.Split(strings.TrimSpace(out), "\n")
+	if len(rows) != 3 || !slices.Contains(strings.Fields(rows[1]), "100/100") || !slices.Contains(strings.Fields(rows[2]), "12") {
+		t.Errorf("list does not count 100/100 runs for the goalless study and 12 for the import:\n%s", out)
+	}
+	out, errOut, code = runEvals(t, "experiments", "show", "exp_1")
+	if code != 0 {
+		t.Fatalf("show = %d %q", code, errOut)
+	}
+	if !strings.Contains(out, "runs:       100 of 100\n") {
+		t.Errorf("show does not count 100 of 100 runs:\n%s", out)
+	}
+}
+
+// An Agent candidate is named by the version of its agent it runs and the
+// model it runs on, as the console names it; where the agent's versions
+// cannot be read it keeps its definition's name, and a failure other than
+// an agent the caller may not read is said on stderr, never failing show.
+func TestEvalsShowExperimentNamesAgentCandidates(t *testing.T) {
+	v1, v2 := evalsDigest("7"), evalsDigest("8")
+	versions := agents.BasePath + "/agents/goalless-agent/versions"
+	serve := func(t *testing.T) *evalsStub {
+		s := newEvalsStub(t)
+		s.json("GET /experiments/exp_1", http.StatusOK, evalsExperimentJSON("complete", `{"complete":2}`))
+		s.json("GET /experiments/exp_1/comparisons", http.StatusOK, `{"items":[]}`)
+		s.json("GET /suites/"+evalsDigest("1"), http.StatusOK, `{"id":"sui_1","name":"goalless","digest":"`+evalsDigest("1")+`","current":true,"created_at":"2026-10-20T10:00:00Z"}`)
+		for _, c := range []struct{ d, name, agent, model string }{
+			{"a", "goalless-agent-v1", v1, "anthropic/claude-haiku-4.5"},
+			{"b", "goalless-agent-v2", v2, "anthropic/claude-haiku-5.5"},
+		} {
+			s.json("GET /candidates/"+evalsDigest(c.d), http.StatusOK, `{"id":"can_`+c.d+`","name":"`+c.name+`","digest":"`+evalsDigest(c.d)+`","current":true,"created_at":"2026-10-20T10:00:00Z",
+"kind":"topos","topos":{"agent":"goalless-agent@`+c.agent+`","model":"`+c.model+`","reasoning":"low"}}`)
+		}
+		return s
+	}
+	for _, c := range []struct {
+		name       string
+		status     int
+		body       string
+		candidates string
+		note       bool
+	}{
+		{"by version", http.StatusOK, `{"items":[{"version":2,"digest":"` + v2 + `","created_by":"u-2","created_at":"2026-11-01T15:30:00Z"},{"version":1,"digest":"` + v1 + `","created_by":"u-2","created_at":"2026-11-01T15:27:00Z"}]}`,
+			"candidates: goalless-agent v1 · haiku-4.5, goalless-agent v2 · haiku-5.5\n", false},
+		{"an agent the caller may not read", http.StatusNotFound, `{"error":{"code":"not_found","message":"Nothing is here."}}`,
+			"candidates: goalless-agent-v1, goalless-agent-v2\n", false},
+		{"a token the agents API does not take", http.StatusUnauthorized, `{"error":{"code":"invalid_token","message":"The token is not for this API."}}`,
+			"candidates: goalless-agent-v1, goalless-agent-v2\n", true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			s := serve(t)
+			s.json("GET "+versions, c.status, c.body)
+			out, errOut, code := runEvals(t, "experiments", "show", "exp_1")
+			if code != 0 {
+				t.Fatalf("show = %d %q", code, errOut)
+			}
+			if !strings.Contains(out, c.candidates) {
+				t.Errorf("show lacks %q:\n%s", c.candidates, out)
+			}
+			if said := strings.Contains(errOut, "named by their definitions"); said != c.note {
+				t.Errorf("stderr %q; want the note said: %v", errOut, c.note)
+			}
+			read := 0
+			for _, r := range s.seen() {
+				if r.URL.Path == versions {
+					read++
+				}
+			}
+			if read != 1 {
+				t.Errorf("the agent's versions were read %d times, want once", read)
+			}
+		})
 	}
 }

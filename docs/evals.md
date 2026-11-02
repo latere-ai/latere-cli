@@ -92,9 +92,11 @@ console asks for and an experiment created through the API keeps as the
 candidate in the same experiment add their short digests, such as
 `open-builder@sha256:41ab…`, and one you may not read shows its digest.
 A candidate that runs an agent is named as the console names it, by the
-agent, its version and its model, such as `goalless-agent v2 · haiku-4.5`;
+agent, its version and its model, such as `goalless-agent v2 · haiku-5.5`;
 two that would read the same add their reasoning level, and one whose
-agent's versions you may not read keeps its definition's name.
+agent's versions you may not read keeps its definition's name. When the
+agents API cannot be read at all, such as with a token for Evals alone,
+`show` says so on stderr and names every candidate by its definition.
 `runs` counts each run once, as the console's Runs tab does, so a run that
 failed to start and was run again is one run. The `trials` line is the
 API's own count of attempts, where such a run counts twice.

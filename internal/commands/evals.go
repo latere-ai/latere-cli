@@ -145,6 +145,11 @@ type evalsClient struct {
 	// origin and authURL are what the agents client is built from, once a
 	// candidate names an agent version to read.
 	origin, authURL string
+	// unnamed is why agent candidates kept their definitions' names when
+	// the agents API could not be read, such as a token for Evals alone;
+	// nil when it could, or when it answered that the agent is not one
+	// the caller may read.
+	unnamed error
 }
 
 // newEvalsClient resolves the API's address, the flag, then
@@ -796,6 +801,9 @@ the command prints, shows each comparison's figures.
 			if err != nil {
 				return err
 			}
+			if c.unnamed != nil {
+				fprintln(cmd.ErrOrStderr(), "Agent candidates are named by their definitions: their agents' versions could not be read: "+apiErrText(c.unnamed))
+			}
 			fprint(out, formatExperiment(e, parked, comparisons, names, c.experimentLink(e.ID)))
 			return nil
 		},
@@ -914,30 +922,39 @@ func (c *evalsClient) names(ctx context.Context, e *evals.Experiment, parked []*
 // when it tells them apart; otherwise the candidates keep their
 // definitions' names. A candidate whose agent versions cannot be read, an
 // agent that is missing or another owner's, keeps its definition's name.
+// The names are a reading aid, so the agents API failing for any other
+// reason, a token for Evals alone among them, keeps them too and records
+// why in c.unnamed for the command to say; only the command's own context
+// ending fails it.
 func (c *evalsClient) agentLabels(ctx context.Context, names map[string]string, topos map[string]*evals.AgentCandidate) error {
 	// versions are the digests of each agent's versions, by number, read
 	// once per agent; nil where they could not be read.
 	versions := map[string]map[string]int{}
 	var ag *agents.Client
 	read := func(agent string) (map[string]int, error) {
-		if v, done := versions[agent]; done {
+		if v, done := versions[agent]; done || c.unnamed != nil {
 			return v, nil
 		}
 		if ag == nil {
 			a, err := newAgentsClient(cmp.Or(os.Getenv(envAgentsURL), c.origin+agents.BasePath), c.authURL)
 			if err != nil {
-				return nil, err
+				c.unnamed = err
+				return nil, nil
 			}
 			ag = a.ag
 		}
 		byDigest := map[string]int{}
 		for v, err := range ag.ListAgentVersions(ctx, agent, &agents.ListAgentVersionsParams{Limit: evalsPage}) {
 			switch {
+			case err == nil:
+			case ctx.Err() != nil:
+				return nil, ctx.Err()
 			case errors.Is(err, latere.ErrNotFound), errors.Is(err, latere.ErrForbidden):
 				versions[agent] = nil
 				return nil, nil
-			case err != nil:
-				return nil, c.refused(err)
+			default:
+				c.unnamed = err
+				return nil, nil
 			}
 			byDigest[v.Digest] = v.Version
 		}
@@ -991,6 +1008,16 @@ func (c *evalsClient) agentLabels(ctx context.Context, names map[string]string, 
 		}
 	}
 	return nil
+}
+
+// apiErrText is the sentence of an error from an API: its refusal's text
+// with its status, or the error itself for one that is no refusal.
+func apiErrText(err error) string {
+	var e *latere.Error
+	if errors.As(err, &e) {
+		return fmt.Sprintf("status %d: %s", e.StatusCode, api.RefusalText(e))
+	}
+	return err.Error()
 }
 
 // shortModel is a model's id past its vendor and a leading "claude-":

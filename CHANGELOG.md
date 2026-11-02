@@ -24,10 +24,12 @@ committed: the commit log already holds that.
 
 - **Agent candidates are named as in the console.** In `latere evals
   experiments show` and the places it names a candidate, one that runs an
-  agent reads `goalless-agent v2 · haiku-4.5`: the agent, its version and
+  agent reads `goalless-agent v2 · haiku-5.5`: the agent, its version and
   its model, with the reasoning level added where two would read the same.
   A candidate whose agent versions you cannot read keeps its definition's
-  name.
+  name, and when the agents API cannot be read at all, such as with a
+  token for Evals alone, `show` says so on stderr and still prints the
+  experiment.
 
 ## v0.43.0 - 2026-11-02
 
