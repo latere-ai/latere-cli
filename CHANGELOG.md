@@ -10,6 +10,37 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Added
+
+- **What a call reaches.** `latere agents session <id>` shows a `reach`
+  line for each call: if it can be undone, the boundaries it crosses and
+  those it does not, its target, and if it is a first contact, with who
+  read it. For a command that Limen did not read, the line says that the
+  reach is not known, not that the command reaches nothing.
+- **The hand-back after refused calls.** After 3 refused calls in a row,
+  or 20 in a session, a session asks you for every call that changes
+  something until you write again, and an unattended turn stops. `agents
+  session` shows where that happened, a call it decided reads `decided by
+  denials`, and `--json` lists the events as `hand_backs`.
+- **How far your approvals cover a step.** Limen suggests allow only for a
+  step that your approvals cover. `latere oversight explain` shows if they
+  do, their weight and sessions against what Limen needs, and the
+  approvals nearest to the step whose reach it exceeds. `cases` shows the
+  cover in a `COVER` column.
+- **Three more reasons to ask.** `short`: your answers agree, but the
+  chance is short of the threshold. `wider`: the step reaches further than
+  any step of its kind you allowed. `few`: you allowed this reach, but
+  with too little weight or in too few sessions. `explain` words each one.
+
+### Changed
+
+- `explain` and `learned` say `short` where they said `between`, since it
+  is now Limen's own word for an ask whose answers agree. A `split` from a
+  Limen that sends a cover reads as split.
+- `latere oversight answer` tells Limen that you answered at a prompt, and
+  nothing else about how you answered, since the command measures nothing
+  else.
+
 ## v0.44.1 - 2026-11-02
 
 ### Changed
