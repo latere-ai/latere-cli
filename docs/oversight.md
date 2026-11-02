@@ -8,8 +8,17 @@ allow it, from your own Allow and Deny answers.
 In `learned` mode, Limen decides a step of a `progressive` session if it
 has evidence about you. Elsewhere, the rules and the risk score decide,
 and Limen only suggests. Limen has evidence if it suggests allow or block,
-or if it asks because your answers disagree (`split`). If it asks because
-you gave too few answers (`unsure`), it has no evidence yet.
+or if it asks with an evidence ratio of 0.5 or more (`split`). If it asks
+because you gave too few answers (`unsure`), it has no evidence yet.
+
+Limen gives `split` from the evidence ratio alone. Your answers can agree
+and the ask is still `split`: for example, two allows of a publish give
+80%, and `careful` runs a step on its own only above 90%. The commands
+say that your answers disagree only if the answers that moved the
+suggestion include an allow and a deny with the same label. A deny of a
+different kind of step is not a disagreement about this step. Otherwise
+the commands say `between`: the chance is between the thresholds of the
+trust profile.
 
 `latere oversight` shows what Limen recorded and learned about you, and
 lets you correct it. It uses your `latere login`.
@@ -90,7 +99,7 @@ A case is one step. Each row shows:
 | `SUGGESTED` | Limen's verdict: `allow`, `ask` or `block`. |
 | `ALLOW` | The chance that you allow the step. |
 | `UNCERTAINTY` | How unsure Limen is of that chance. |
-| `ASK` | For an ask: `unsure` (your answers say little yet) or `split` (your answers disagree). |
+| `ASK` | For an ask, the word of Limen: `unsure` (your answers say little yet) or `split` (Limen has enough of your answers; they can agree or disagree). `explain` tells which. |
 | `DECIDED` | The verdict that was applied. |
 | `SHOWN` | The chance that you were shown the step. 100% means it waited for you. |
 | `BY` | What decided the step. Topos gives its mode and the layer that decided, for example `topos/progressive/score`. An older Topos gives only the mode, for example `topos/confirm`. |
@@ -116,8 +125,17 @@ step ([Contexts](#contexts)). The explanation shows:
 - The suggestion, the chance that you allow the step, and the uncertainty.
 - A scale from stop to run. The bars are your thresholds, and the star is
   the chance.
-- For an ask, why Limen asks: `unsure` or `split`. More answers move an
-  unsure ask. They do not move a split ask.
+- For an ask, why Limen asks:
+  - `unsure`: your answers say little about steps like this. More answers
+    move the suggestion.
+  - `split`: the answers that moved the suggestion include an allow and a
+    deny with the same label. More answers do not move it much.
+  - `between`: Limen has enough of your answers, and they agree, but the
+    chance is between the thresholds of the trust profile. The line gives
+    the chance, the profile, and the threshold that the chance does not
+    reach, for example "not sure enough yet: Limen is 80% sure you would
+    allow it, and Careful runs it on its own only above 90%". The profile
+    is the preset nearest the thresholds of the explanation.
 - The evidence ratio: how much of what Limen did not know your answers
   settled.
 - The parts: how much comes from steps like this one, from your answers
@@ -140,7 +158,9 @@ latere oversight learned
 
 One row for each kind of step you answered: how many you allowed and
 denied, the chance that you allow it now, the uncertainty, the scale, the
-verdict now, and the ask kind. Under the table: the model, and the trend
+verdict now, and the ask kind. The ask kind is `split` only if you
+allowed and denied steps of that kind. A `split` of Limen for a kind that
+you only allowed or only denied shows as `between`. Under the table: the model, and the trend
 of how much you let steps run lately, compared with what Limen assumes of
 anyone.
 
