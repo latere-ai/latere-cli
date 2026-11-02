@@ -50,7 +50,8 @@ latere evals experiments show exp_01jb2c3d4e5f6g7h8j9k0m1n2p
 
 `experiments list` prints each experiment newest first with the name it was
 given, `-` for one started without a name, its suite by name, its number of
-candidates, its state, its mode and how many of its trials are done. `--suite` takes a suite's name, for every version of it, or a digest;
+candidates, its state, its mode and how many of its runs are done, such as `100/100`; an
+import, which declares no runs, prints the number it holds. `--suite` takes a suite's name, for every version of it, or a digest;
 `--state` and `--mode` keep the experiments in that state or mode.
 
 `experiments show` prints one experiment:
@@ -70,6 +71,7 @@ started:    2026-10-20 10:00 UTC
 
 progress
   cells:      blocked 1, complete 30, running 11
+  runs:       320 of 400
   trials:     done 320, pending 80, running 20
   outcomes:   completed 311, infra_failed 9
 
@@ -89,9 +91,13 @@ console asks for and an experiment created through the API keeps as the
 `name` of its metadata. Definitions are named by name; two versions of one
 candidate in the same experiment add their short digests, such as
 `open-builder@sha256:41ab…`, and one you may not read shows its digest.
-The trial counts are the API's, so a run that failed to start and was run
-again counts twice, once as `infra_failed`; the console's Runs tab shows
-each run once.
+A candidate that runs an agent is named as the console names it, by the
+agent, its version and its model, such as `goalless-agent v2 · haiku-4.5`;
+two that would read the same add their reasoning level, and one whose
+agent's versions you may not read keeps its definition's name.
+`runs` counts each run once, as the console's Runs tab does, so a run that
+failed to start and was run again is one run. The `trials` line is the
+API's own count of attempts, where such a run counts twice.
 
 A cell is one task of one candidate, and a parked cell waits for a retry.
 Each comparison says what it compares, what differs
@@ -109,7 +115,7 @@ latere evals experiments watch exp_01jb2c3d4e5f6g7h8j9k0m1n2p --timeout 6h
 
 `watch` follows an experiment, started anywhere, until it is complete or
 canceled, and prints one line per change with its time: the experiment's
-state with its cells and trials, each cell that changes state, with the
+state with its cells and runs done, each cell that changes state, with the
 reason of one that parks, and each comparison whose figures become final.
 Trials are not printed one by one. `--json` prints every frame of the
 stream as one JSON line instead. A dropped connection connects again from

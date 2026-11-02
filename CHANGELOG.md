@@ -10,6 +10,25 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Fixed
+
+- **Evals run counts match the console.** `latere evals experiments list`,
+  `show` and `watch` counted every attempt a retry had replaced as a run, so
+  a study of 100 runs that retried 18 printed `118/136`. They now count each
+  run once and print `100/100`; the column is named RUNS, and an import,
+  which declares no runs, prints the number it holds. `show` gains a `runs`
+  line above its trials, and `watch` says `runs done` where it said `trials
+  done`.
+
+### Changed
+
+- **Agent candidates are named as in the console.** In `latere evals
+  experiments show` and the places it names a candidate, one that runs an
+  agent reads `goalless-agent v2 · haiku-4.5`: the agent, its version and
+  its model, with the reasoning level added where two would read the same.
+  A candidate whose agent versions you cannot read keeps its definition's
+  name.
+
 ## v0.43.0 - 2026-11-02
 
 ### Added

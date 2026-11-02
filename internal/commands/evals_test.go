@@ -49,8 +49,13 @@ func newEvalsStub(t *testing.T) *evalsStub {
 		s.requests = append(s.requests, r.Clone(r.Context()))
 		s.bearers = append(s.bearers, r.Header.Get("Authorization"))
 		h := s.routes[r.Method+" "+path]
+		if !ok {
+			// A route of another capability, such as the agents API,
+			// is keyed by its whole path.
+			h = s.routes[r.Method+" "+r.URL.Path]
+		}
 		s.mu.Unlock()
-		if !ok || h == nil {
+		if h == nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = io.WriteString(w, `{"error":{"code":"not_found","message":"Nothing is here.","details":{"retryable":false}}}`)
@@ -61,6 +66,8 @@ func newEvalsStub(t *testing.T) *evalsStub {
 	t.Cleanup(s.srv.Close)
 	t.Setenv(envEvalsURL, s.srv.URL+evals.BasePath)
 	t.Setenv(envEvalsToken, "evals-token")
+	t.Setenv(envAgentsToken, "agents-token")
+	t.Setenv(envAgentsURL, "")
 	t.Setenv("LATERE_PLATFORM_URL", "https://console.example")
 	t.Setenv("LATERE_NO_UPDATE_CHECK", "1")
 	return s
@@ -245,7 +252,7 @@ func TestEvalsShowExperiment(t *testing.T) {
 		"created by: u-2\n",
 		"metadata:   commit=abc123\n",
 		"cells:      blocked 1, complete 2, running 1\n",
-		"trials:     done 30, pending 10\n",
+		"runs:       30 of 40\n  trials:     done 30, pending 10\n",
 		"outcomes:   completed 28, infra_failed 2\n",
 		"cel_9", "sha256:cccccccccccc", "sonnet-high", "image_not_admitted",
 		"cmp_1", "sonnet-high vs opus-high", "model", "incomplete", "provisional",
@@ -294,7 +301,7 @@ func TestEvalsListExperiments(t *testing.T) {
 	experiment := func(id, suite, metadata string) string {
 		return `{"id":"` + id + `","owner":"o-1","suite":"` + suite + `","candidates":["` + evalsDigest("a") + `","` + evalsDigest("b") + `"],
 "trials":10,"parallelism":4,"reference":{"candidate":"` + evalsDigest("a") + `"},"mode":"execute","state":"complete",
-"budget":{"name":"eb-1"},"progress":{"trials":{"done":40}},"metadata":` + metadata + `,"created_at":"2026-10-20T10:00:00Z"}`
+"budget":{"name":"eb-1"},"progress":{"cells":{"complete":8},"trials":{"done":40}},"metadata":` + metadata + `,"created_at":"2026-10-20T10:00:00Z"}`
 	}
 	s.json("GET /experiments", http.StatusOK, `{"items":[`+
 		experiment("exp_1", evalsDigest("1"), `{"name":"haiku 4.5\tvs 5.5"}`)+","+
@@ -311,8 +318,8 @@ func TestEvalsListExperiments(t *testing.T) {
 		t.Fatalf("list printed %d lines, want a head and 3 rows:\n%s", len(lines), out)
 	}
 	for i, want := range [][]string{
-		{"ID", "NAME", "SUITE", "CANDIDATES", "STATE", "MODE", "TRIALS", "STARTED"},
-		{"exp_1", "haiku 4.5 vs 5.5", "open-tasks", "2", "complete"},
+		{"ID", "NAME", "SUITE", "CANDIDATES", "STATE", "MODE", "RUNS", "STARTED"},
+		{"exp_1", "haiku 4.5 vs 5.5", "open-tasks", "2", "complete", "40/80"},
 		{"exp_2", "-", "open-tasks", "2"},
 		{"exp_3", "-", "sha256:222222222222", "2"},
 	} {
@@ -407,7 +414,7 @@ func TestEvalsWatch(t *testing.T) {
 	quiet := func(w io.Writer) { _, _ = io.WriteString(w, ": keepalive\n\n") }
 	stream := &evalsStream{conns: []func(io.Writer){
 		func(w io.Writer) {
-			_, _ = io.WriteString(w, frame("3", "snapshot", evalsExperimentJSON("running", `{"running":2}`))+
+			_, _ = io.WriteString(w, frame("3", "snapshot", strings.Replace(evalsExperimentJSON("running", `{"running":2}`), `"done":30,"pending":10`, `"done":8,"pending":12`, 1))+
 				frame("4", "cell", `{"id":"cel_1","task":"fix@`+evalsDigest("c")+`","candidate":"opus@`+evalsDigest("a")+`","state":"grading"}`)+
 				frame("5", "trial", `{"id":"tri_1","cell":"cel_1","index":0,"state":"done","outcome":"completed"}`))
 		},
@@ -416,12 +423,12 @@ func TestEvalsWatch(t *testing.T) {
 			_, _ = io.WriteString(w, frame("6", "cell", `{"id":"cel_1","task":"fix@`+evalsDigest("c")+`","candidate":"opus@`+evalsDigest("a")+`","state":"complete"}`)+
 				frame("7", "comparison", `{"id":"cmp_1","candidate":"sonnet@`+evalsDigest("b")+`","reference_candidate":"opus@`+evalsDigest("a")+`","automatic":true,"final":false}`)+
 				frame("8", "comparison", `{"id":"cmp_1","candidate":"sonnet@`+evalsDigest("b")+`","reference_candidate":"opus@`+evalsDigest("a")+`","automatic":true,"final":true}`)+
-				frame("9", "experiment", `{"id":"exp_1","state":"complete","progress":{"cells":{"complete":2},"trials":{"done":30,"pending":10}}}`)+
+				frame("9", "experiment", `{"id":"exp_1","state":"complete","progress":{"cells":{"complete":2},"trials":{"done":23,"retried":3}}}`)+
 				frame("", "end", `{"state":"complete"}`))
 		},
 	}}
 	s.handle("GET /experiments/exp_1/stream", stream.serve)
-	s.json("GET /experiments/exp_1", http.StatusOK, evalsExperimentJSON("complete", `{"complete":2}`))
+	s.json("GET /experiments/exp_1", http.StatusOK, strings.Replace(evalsExperimentJSON("complete", `{"complete":2}`), `"done":30,"pending":10`, `"done":23,"retried":3,"pending":0`, 1))
 
 	out, errOut, code := runEvals(t, "experiments", "watch", "exp_1")
 	if code != 0 {
@@ -435,11 +442,11 @@ func TestEvalsWatch(t *testing.T) {
 		lines = append(lines, l)
 	}
 	want := []string{
-		"experiment exp_1 running · cells running 2 · trials done 30 of 40",
+		"experiment exp_1 running · cells running 2 · runs done 8 of 20",
 		"cell cel_1 fix × opus: grading",
 		"cell cel_1 fix × opus: complete",
 		"comparison cmp_1 final: sonnet vs opus",
-		"experiment exp_1 complete · cells complete 2 · trials done 30 of 40",
+		"experiment exp_1 complete · cells complete 2 · runs done 20 of 20",
 		"console:    https://console.example/console/evals/experiments/exp_1",
 	}
 	if !slices.Equal(lines, want) {

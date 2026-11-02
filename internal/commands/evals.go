@@ -27,6 +27,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"gopkg.in/yaml.v3"
 
+	"latere.ai/x/sdk-go/agents"
 	"latere.ai/x/sdk-go/evals"
 	"latere.ai/x/sdk-go/latere"
 
@@ -140,6 +141,10 @@ type evalsClient struct {
 	ev      *evals.Client
 	base    string
 	console string
+
+	// origin and authURL are what the agents client is built from, once a
+	// candidate names an agent version to read.
+	origin, authURL string
 }
 
 // newEvalsClient resolves the API's address, the flag, then
@@ -160,7 +165,7 @@ func newEvalsClient(flagURL, authURL string) (*evalsClient, error) {
 	if err != nil {
 		return nil, &exitError{code: exitRefused, err: err}
 	}
-	return &evalsClient{ev: evals.New(cfg), base: base, console: resolvePlatformURL("")}, nil
+	return &evalsClient{ev: evals.New(cfg), base: base, console: resolvePlatformURL(""), origin: origin, authURL: authURL}, nil
 }
 
 // raw is a model of the Evals API that keeps the JSON it was answered with,
@@ -611,7 +616,7 @@ func newEvalsExperimentsListCmd(apiURL, authURL *string) *cobra.Command {
 		Short: "List the experiments of your current context.",
 		Long: `List the experiments of your current context, newest first: the id, the
 name it was given, its suite by name, how many candidates, the state, the
-mode, the trials done of those there are, and when it started. The first
+mode, the runs done of those there are, and when it started. The first
 page holds up to 200; --all reads every page.
 
 --suite takes a suite's name, for every version of it, or its digest.
@@ -720,28 +725,30 @@ func printExperiments(out io.Writer, experiments []*evals.Experiment, suites map
 		return
 	}
 	w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	fprintln(w, "ID\tNAME\tSUITE\tCANDIDATES\tSTATE\tMODE\tTRIALS\tSTARTED")
+	fprintln(w, "ID\tNAME\tSUITE\tCANDIDATES\tSTATE\tMODE\tRUNS\tSTARTED")
 	for _, e := range experiments {
 		suite := cmp.Or(suites[e.Suite], shortRef(e.Suite))
 		fprintf(w, "%s\t%s\t%s\t%d\t%s\t%s\t%s\t%s\n", stripANSI(e.ID), dash(stripANSI(oneLine(experimentName(e)))), stripANSI(suite), len(e.Candidates),
-			stripANSI(string(e.State)), stripANSI(string(e.Mode)), trialsDone(e.Progress), humanAge(e.CreatedAt))
+			stripANSI(string(e.State)), stripANSI(string(e.Mode)), runsDone(e), humanAge(e.CreatedAt))
 	}
 	if err := w.Flush(); err != nil {
 		fprintln(out, err)
 	}
 }
 
-// trialsDone is "<done>/<all>" of an experiment's trials, or "-" when its
-// progress counts none.
-func trialsDone(p evals.Progress) string {
-	total := 0
-	for _, n := range p.Trials {
-		total += n
+// runsDone is the runs an experiment has finished, "<done>/<declared>" for
+// an execute experiment and the count alone for an import, which declares
+// none; "-" when nothing is declared and nothing ran. A run a retry
+// replaced counts once, as the console counts it.
+func runsDone(e *evals.Experiment) string {
+	done, declared := e.RunsDone(), e.RunsDeclared()
+	switch {
+	case declared > 0:
+		return fmt.Sprintf("%d/%d", done, declared)
+	case done > 0:
+		return strconv.Itoa(done)
 	}
-	if total == 0 {
-		return "-"
-	}
-	return fmt.Sprintf("%d/%d", p.Trials[evals.TrialDone], total)
+	return "-"
 }
 
 func newEvalsExperimentsShowCmd(apiURL, authURL *string) *cobra.Command {
@@ -753,7 +760,8 @@ func newEvalsExperimentsShowCmd(apiURL, authURL *string) *cobra.Command {
 name, its state and mode, the trials per cell and how many run at once, its spending cap with what it
 spent and has left, who started it and when.
 
-Then its progress: its cells and trials by state, and its finished trials
+Then its progress: its cells by state, the runs done of those declared
+(a run a retry replaced counts once), its trials by state, and its finished trials
 by outcome, such as completed, timed_out or infra_failed. A cell parked
 blocked or over_budget is listed with its reason. Last, each comparison:
 what it compares, whether it is computed, and whether its figures are
@@ -831,10 +839,15 @@ func (c *evalsClient) names(ctx context.Context, e *evals.Experiment, parked []*
 		}
 		return v.Name, nil
 	}
+	// topos holds the agent each agent candidate runs, by digest.
+	topos := map[string]*evals.AgentCandidate{}
 	candidate := func(ctx context.Context, digest string) (string, error) {
 		v, err := c.ev.GetCandidate(ctx, digest)
 		if err != nil {
 			return "", err
+		}
+		if v.Agent != nil {
+			topos[digest] = v.Agent
 		}
 		return v.Name, nil
 	}
@@ -876,6 +889,9 @@ func (c *evalsClient) names(ctx context.Context, e *evals.Experiment, parked []*
 			return nil, err
 		}
 	}
+	if err := c.agentLabels(ctx, names, topos); err != nil {
+		return nil, err
+	}
 	held := map[string]int{}
 	for _, n := range names {
 		held[n]++
@@ -889,6 +905,101 @@ func (c *evalsClient) names(ctx context.Context, e *evals.Experiment, parked []*
 		}
 	}
 	return names, nil
+}
+
+// agentLabels renames the agent candidates in names the way the console
+// does, "<agent> v<N> · <model>": the agent and the version of it the
+// candidate runs, and the model it runs on past its vendor and a leading
+// "claude-". Where two labels read the same, the reasoning level is added
+// when it tells them apart; otherwise the candidates keep their
+// definitions' names. A candidate whose agent versions cannot be read, an
+// agent that is missing or another owner's, keeps its definition's name.
+func (c *evalsClient) agentLabels(ctx context.Context, names map[string]string, topos map[string]*evals.AgentCandidate) error {
+	// versions are the digests of each agent's versions, by number, read
+	// once per agent; nil where they could not be read.
+	versions := map[string]map[string]int{}
+	var ag *agents.Client
+	read := func(agent string) (map[string]int, error) {
+		if v, done := versions[agent]; done {
+			return v, nil
+		}
+		if ag == nil {
+			a, err := newAgentsClient(cmp.Or(os.Getenv(envAgentsURL), c.origin+agents.BasePath), c.authURL)
+			if err != nil {
+				return nil, err
+			}
+			ag = a.ag
+		}
+		byDigest := map[string]int{}
+		for v, err := range ag.ListAgentVersions(ctx, agent, &agents.ListAgentVersionsParams{Limit: evalsPage}) {
+			switch {
+			case errors.Is(err, latere.ErrNotFound), errors.Is(err, latere.ErrForbidden):
+				versions[agent] = nil
+				return nil, nil
+			case err != nil:
+				return nil, c.refused(err)
+			}
+			byDigest[v.Digest] = v.Version
+		}
+		versions[agent] = byDigest
+		return byDigest, nil
+	}
+	type labeled struct{ ref, label, reasoning string }
+	var found []labeled
+	for _, ref := range slices.Sorted(maps.Keys(topos)) {
+		a := topos[ref]
+		i := strings.LastIndex(a.AgentVersion, "@")
+		if i <= 0 {
+			continue
+		}
+		agent, digest := a.AgentVersion[:i], a.AgentVersion[i+1:]
+		byDigest, err := read(agent)
+		if err != nil {
+			return err
+		}
+		n, ok := byDigest[digest]
+		if !ok {
+			continue
+		}
+		label := fmt.Sprintf("%s v%d", agent, n)
+		if model := shortModel(a.Model); model != "" {
+			label += " · " + model
+		}
+		found = append(found, labeled{ref, label, a.Reasoning})
+	}
+	byLabel := map[string][]labeled{}
+	for _, l := range found {
+		byLabel[l.label] = append(byLabel[l.label], l)
+	}
+	for label, group := range byLabel {
+		if len(group) == 1 {
+			names[group[0].ref] = label
+			continue
+		}
+		levels := map[string]bool{}
+		for _, l := range group {
+			levels[l.reasoning] = true
+		}
+		if len(levels) < len(group) {
+			continue
+		}
+		for _, l := range group {
+			names[l.ref] = label
+			if l.reasoning != "" {
+				names[l.ref] += " · " + l.reasoning + " reasoning"
+			}
+		}
+	}
+	return nil
+}
+
+// shortModel is a model's id past its vendor and a leading "claude-":
+// "anthropic/claude-haiku-4.5" is "haiku-4.5".
+func shortModel(model string) string {
+	if i := strings.LastIndex(model, "/"); i >= 0 {
+		model = model[i+1:]
+	}
+	return strings.TrimPrefix(model, "claude-")
 }
 
 // formatExperiment is the record `experiments show` prints. names maps a
@@ -939,6 +1050,7 @@ func formatExperiment(e *evals.Experiment, parked []*evals.Cell, comparisons []*
 	b.WriteString("\nprogress\n")
 	for _, f := range [][2]string{
 		{"cells", formatCounts(e.Progress.Cells)},
+		{"runs", strings.Replace(runsDone(e), "/", " of ", 1)},
 		{"trials", formatCounts(e.Progress.Trials)},
 		{"outcomes", formatCounts(e.Progress.Outcomes)},
 	} {
@@ -1113,6 +1225,9 @@ type evalsWatch struct {
 	// resumes after; snapshot reports the snapshot was printed.
 	lastSeq  int64
 	snapshot bool
+	// mode and trials are the experiment's, read from its snapshot.
+	mode   evals.Mode
+	trials int
 	// cells holds each cell's last printed state, so a repeat of a state
 	// is not printed again; last is the line printed last.
 	cells map[string]evals.CellState
@@ -1247,13 +1362,16 @@ func (w *evalsWatch) line(ev *evals.StreamEvent) (string, error) {
 		if err := ev.Decode(&e); err != nil {
 			return "", err
 		}
-		return experimentLine(e.ID, e.State, e.Progress), nil
+		w.mode, w.trials = e.Mode, e.Trials
+		return experimentLine(&e), nil
 	case evals.EventExperiment:
 		var e evals.ExperimentChange
 		if err := ev.Decode(&e); err != nil {
 			return "", err
 		}
-		return experimentLine(cmp.Or(e.ID, w.id), e.State, e.Progress), nil
+		// A change carries the progress alone; the mode and the trials per
+		// cell that declare the runs are the snapshot's.
+		return experimentLine(&evals.Experiment{ID: cmp.Or(e.ID, w.id), State: e.State, Progress: e.Progress, Mode: w.mode, Trials: w.trials}), nil
 	case evals.EventCell:
 		var cell evals.CellChange
 		if err := ev.Decode(&cell); err != nil {
@@ -1286,13 +1404,13 @@ func (w *evalsWatch) line(ev *evals.StreamEvent) (string, error) {
 }
 
 // experimentLine is an experiment's state and its progress on one line.
-func experimentLine(id string, state evals.ExperimentState, p evals.Progress) string {
-	line := fmt.Sprintf("experiment %s %s", id, state)
-	if cells := formatCounts(p.Cells); cells != "" {
+func experimentLine(e *evals.Experiment) string {
+	line := fmt.Sprintf("experiment %s %s", e.ID, e.State)
+	if cells := formatCounts(e.Progress.Cells); cells != "" {
 		line += " · cells " + cells
 	}
-	if trials := trialsDone(p); trials != "-" {
-		line += " · trials done " + strings.Replace(trials, "/", " of ", 1)
+	if runs := runsDone(e); runs != "-" {
+		line += " · runs done " + strings.Replace(runs, "/", " of ", 1)
 	}
 	return line
 }
@@ -1318,7 +1436,7 @@ func (w *evalsWatch) finish(ctx context.Context, ev *evals.StreamEvent) error {
 		parked += e.Progress.Cells[s]
 	}
 	if !w.jsonOut {
-		w.printLine(experimentLine(w.id, end.State, e.Progress))
+		w.printLine(experimentLine(&evals.Experiment{ID: w.id, State: end.State, Progress: e.Progress, Mode: e.Mode, Trials: e.Trials}))
 		fprint(w.out, formatWrappedField("console", w.c.experimentLink(w.id)))
 	}
 	switch {
