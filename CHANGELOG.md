@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.42.0 - 2026-11-02
+
 ### Changed
 
 - **The oversight commands read a step of an organization's agent in the
