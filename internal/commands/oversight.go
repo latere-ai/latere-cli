@@ -81,9 +81,9 @@ organization's agent can be in the organization's context. 'explain',
 organization each step was decided under, or your own context for a step
 that names none. 'profile --agent' reads an agent's profile in the context
 your login acts in, and 'profile --for-me' and 'report' the organization
-your login acts in. The other commands read your own context. Limen
-answers for an organization's context only to a login in that
-organization: 'latere login --org-id <id>'.
+your login acts in. The other commands read your own context. Limen answers
+for an organization's context only to a login in that organization:
+'latere login --org-id <id>'.
 
 The commands call https://api.latere.ai/v1/oversight with a token minted
 for your login. LATERE_OVERSIGHT_URL or --api-url overrides the address,
