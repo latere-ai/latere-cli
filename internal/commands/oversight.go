@@ -540,18 +540,53 @@ is in your own context.`,
 			if jsonF {
 				return printRawJSON(cmd.OutOrStdout(), e.RawJSON())
 			}
-			return printExplanation(cmd.OutOrStdout(), e)
+			return printExplanation(cmd.OutOrStdout(), e, c.appliedProfile(ctx, org, id))
 		},
 	}
 	cmd.Flags().BoolVar(&jsonF, "json", false, "print the explanation as JSON")
 	return cmd
 }
 
-func printExplanation(out io.Writer, e *oversight.Explanation) error {
+// appliedProfile says whose trust profile applied to the step id names in
+// the organization org, from the scope its recorded prediction names
+// (Limen spec 010), which the explanation does not carry: "" in the
+// person's own context, and where the case cannot be read or names none,
+// since the explanation stands without it.
+func (c *oversightClient) appliedProfile(ctx context.Context, org, id string) string {
+	if !isOrganization(org) {
+		return ""
+	}
+	page, err := c.ov.ListCasesPage(ctx, &oversight.CasesParams{Org: org, Subject: c.me, ActionID: id, Limit: 1})
+	if err != nil || len(page.Items) == 0 || page.Items[0].Prediction == nil {
+		return ""
+	}
+	return appliedWords(page.Items[0].Prediction.Profile)
+}
+
+// appliedWords say whose trust profile a prediction's scope names: the
+// person's own stricter pick where it has a subject, which made the
+// profile stricter for them; an agent's own where it has an agent; and
+// otherwise the organization's.
+func appliedWords(s oversight.Scope) string {
+	switch {
+	case s.Org == "":
+		return ""
+	case s.Subject != "":
+		return "stricter, as you picked with 'latere oversight profile set --for-me'"
+	case s.Agent != "":
+		return "the agent's own in organization " + s.Org
+	}
+	return "organization " + s.Org + "'s"
+}
+
+func printExplanation(out io.Writer, e *oversight.Explanation, applied string) error {
 	var b strings.Builder
 	fprintf(&b, "%s\n\n", e.ActionID)
 	fprintf(&b, "Suggestion:   %s, %s likely you allow it (uncertainty %.2f)\n", e.Verdict, percent(e.Approve), e.Uncertainty)
 	fprintf(&b, "Scale:        stop %s run  (stops below %s, runs above %s)\n", scale(e.Approve, e.Thresholds), percent(e.Thresholds.BlockBelow), percent(e.Thresholds.AllowAbove))
+	if applied != "" {
+		fprintf(&b, "Profile:      %s\n", applied)
+	}
 	if e.AskKind != "" {
 		fprintf(&b, "Why it asks:  %s\n", askWords(e.AskKind))
 	}

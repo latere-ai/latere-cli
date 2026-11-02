@@ -462,19 +462,21 @@ func TestOversightStepInAnOrganization(t *testing.T) {
 	ov.json("GET /explanations", http.StatusOK, ovExplanation)
 	ov.handle("POST /answers", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
 
-	for i, step := range []struct{ id, org string }{
+	for _, step := range []struct{ id, org string }{
 		{"ses_O/toolu_1", ovOrg}, {"ses_O/toolu_2", ovMe}, {"ses_O/toolu_3", ovMe}, {"ses_O/toolu_4", ovMe}, {"ses_X/toolu_1", ovMe},
 	} {
+		n := len(ov.seen())
 		if _, errOut, code := runLatere(t, "", "oversight", "explain", step.id); code != 0 || errOut != "" {
 			t.Fatalf("explain %s: exit %d: %s", step.id, code, errOut)
 		}
-		if q := ov.seen()[2*i].URL.Query(); q.Get("org") != step.org || q.Get("subject") != ovMe || q.Get("action_id") != step.id {
+		if q := ov.seen()[n].URL.Query(); q.Get("org") != step.org || q.Get("subject") != ovMe || q.Get("action_id") != step.id {
 			t.Errorf("explain %s: query %v, want org %s", step.id, q, step.org)
 		}
+		n = len(ov.seen())
 		if _, errOut, code := runLatere(t, "", "oversight", "answer", step.id, "allow"); code != 0 {
 			t.Fatalf("answer %s: exit %d: %s", step.id, code, errOut)
 		}
-		if b := ov.body(2*i + 1); b["org"] != step.org || b["subject"] != ovMe || b["action_id"] != step.id {
+		if b := ov.body(n); b["org"] != step.org || b["subject"] != ovMe || b["action_id"] != step.id {
 			t.Errorf("answer %s: body %v, want org %s", step.id, b, step.org)
 		}
 	}
@@ -545,5 +547,45 @@ func TestOversightCasesOfASessionInAnOrganization(t *testing.T) {
 	}
 	if reqs := ov.seen()[n:]; len(reqs) != 1 || reqs[0].URL.Query().Get("org") != ovMe {
 		t.Errorf("%d requests, want one in the person's own context", len(reqs))
+	}
+}
+
+// An organization's step names whose trust profile applied to it, from
+// the scope its recorded prediction names; a step in the person's own
+// context reads no case and names none.
+func TestOversightExplainNamesTheProfileThatApplied(t *testing.T) {
+	ov, ag := newOversightStubs(t)
+	serveOrgSession(ag)
+	ov.json("GET /explanations", http.StatusOK, ovExplanation)
+	for _, c := range []struct{ profile, want string }{
+		{`{"org":"` + ovOrg + `"}`, "Profile:      organization org_7's\n"},
+		{`{"org":"` + ovOrg + `","kind":"tool"}`, "Profile:      organization org_7's\n"},
+		{`{"org":"` + ovOrg + `","agent":"agent_01"}`, "Profile:      the agent's own in organization org_7\n"},
+		{`{"org":"` + ovOrg + `","agent":"agent_01","subject":"` + ovMe + `"}`, "Profile:      stricter, as you picked with 'latere oversight profile set --for-me'\n"},
+	} {
+		ov.json("GET /cases", http.StatusOK, `{"entries":[{"action":{"org":"`+ovOrg+`","subject":"`+ovMe+`","action_id":"ses_O/toolu_1","kind":"tool","name":"bash","effect":"write"},
+"prediction":{"verdict":"ask","approve":0.5,"uncertainty":0.4,"thresholds":{"allow_above":0.9,"block_below":0.25},"profile":`+c.profile+`,"audit_rate":0.05,"source":"learned/4"}}]}`)
+		n := len(ov.seen())
+		out, errOut, code := runLatere(t, "", "oversight", "explain", "ses_O/toolu_1")
+		if code != 0 {
+			t.Fatalf("exit %d: %s", code, errOut)
+		}
+		contains(t, out, c.want)
+		if q := ov.seen()[n+1].URL.Query(); ov.seen()[n+1].URL.Path != "/v1/oversight/cases" || q.Get("org") != ovOrg || q.Get("subject") != ovMe || q.Get("action_id") != "ses_O/toolu_1" || q.Get("limit") != "1" {
+			t.Errorf("case read %s %v", ov.seen()[n+1].URL.Path, q)
+		}
+	}
+	// A case that cannot be read leaves the line out, and the explanation
+	// stands.
+	ov.json("GET /cases", http.StatusForbidden, `{"error":{"code":"forbidden","message":"No.","details":{}}}`)
+	out, errOut, code := runLatere(t, "", "oversight", "explain", "ses_O/toolu_1")
+	if code != 0 || strings.Contains(out, "Profile:") {
+		t.Errorf("a case not read: exit %d, %s%s", code, out, errOut)
+	}
+	// The person's own context reads no case.
+	n := len(ov.seen())
+	out, _, code = runLatere(t, "", "oversight", "explain", "ses_O/toolu_2")
+	if code != 0 || strings.Contains(out, "Profile:") || len(ov.seen()) != n+1 {
+		t.Errorf("the person's own step: exit %d, %d requests, %s", code, len(ov.seen())-n, out)
 	}
 }
