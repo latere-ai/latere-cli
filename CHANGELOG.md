@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.43.0 - 2026-11-02
+
 ### Added
 
 - **An agent's own trust profile.** `latere oversight profile --agent
