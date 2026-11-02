@@ -37,9 +37,9 @@ committed: the commit log already holds that.
 - `explain` and `learned` say `short` where they said `between`, since it
   is now Limen's own word for an ask whose answers agree. A `split` from a
   Limen that sends a cover reads as split.
-- `latere oversight answer` tells Limen that you answered at a prompt, and
-  nothing else about how you answered, since the command measures nothing
-  else.
+- `latere oversight answer` tells Limen that you answered a step picked
+  from a list of steps, such as `cases --pending`, and nothing else about
+  how you answered, since the command measures nothing else.
 
 ## v0.44.1 - 2026-11-02
 

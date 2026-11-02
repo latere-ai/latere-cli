@@ -194,7 +194,7 @@ answers agree. `split` is narrowed to answers that disagree.
 | `oversight explain <action>` | `Cover:` with covered or not, the weight against `min_weight` and the sessions against `min_sessions`, and `Nearest:` for each approval whose reach the step exceeds; `Why it asks:` for `short`, `wider` and `few` |
 | `oversight cases` | a `COVER` column: `yes` or `no`, weight/min and sessions/min, `-` without a cover |
 | `oversight learned` | Limen's word, `short`, `wider` and `few` included |
-| `oversight answer` | `surface: prompt`, and no time, details or suggestion field |
+| `oversight answer` | `surface: queue`, and no time, details or suggestion field |
 
 - **A split of an older Limen.** Limen v0.6.0 still calls an ask `split`
   by its evidence alone. An explanation that carries a cover comes from a
@@ -210,7 +210,8 @@ answers agree. `split` is narrowed to answers that disagree.
 - **Where the answer was given, and nothing else.** `answer` is a command
   the person types after `cases --pending`. It cannot measure how long
   the step was in front of them, the details or the suggestion, so it
-  sends none of them. The surface is `prompt`, as the directive set.
+  sends none of them. The surface is `queue`, a step answered from a list
+  of steps (the owner's decision of 2026-11-02, in place of `prompt`).
 
 ## Not in this spec
 
@@ -244,7 +245,7 @@ answers agree. `split` is narrowed to answers that disagree.
 | 19 | `agents session` shows each `session.denials_reached` in the log's order with its counts and effect, names a call decided by `denials`, and lists the events as `hand_backs` in `--json` | `TestAgentsSessionShowsTheReachAndTheHandBack` |
 | 20 | `explain` shows the cover and its nearest approvals and words `wider`, `few` and `short`, and `cases` shows the cover in a column, `-` without one | `TestOversightExplainSaysHowFarTheCoverIs`, `TestOversightCasesShowTheCover` |
 | 21 | A `split` from a Limen that sends a cover, or in a learned view that names a `short`, `wider` or `few` ask, reads as split; an older Limen's reads by criterion 17 | `TestOversightExplainSaysHowFarTheCoverIs`, `TestOversightLearnedFromALimenWithACover` |
-| 22 | `answer` sends `surface: prompt` and none of `answer_ms`, `waited_ms`, `details_opened`, `suggestion_shown` and `remembered` | `TestOversightAnswerSaysWhereThePersonAnswered` |
+| 22 | `answer` sends `surface: queue` and none of `answer_ms`, `waited_ms`, `details_opened`, `suggestion_shown` and `remembered` | `TestOversightAnswerSaysWhereThePersonAnswered` |
 
 ## Outcome
 
@@ -289,7 +290,7 @@ On 2026-11-02, the commands show what a person consented to (criteria 18
 to 22, Topos spec 101, Limen spec 011): each call's reach and the
 hand-back after refused calls in `agents session`, the cover and its
 nearest approvals in `explain` and `cases`, the asks `short`, `wider` and
-`few`, and the surface of an answer. They are built on sdk-go main after
+`few`, and the surface of an answer, `queue`. They are built on sdk-go main after
 v0.27.0, `v0.27.1-0.20261102221905-f3243b25663f`, for
 `agents.ToolUse.Scope`, `EventDenialsReached`, `LayerDenials`,
 `oversight.Prediction.Cover`, `Explanation.Cover` and

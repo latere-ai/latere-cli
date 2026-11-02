@@ -974,10 +974,10 @@ receives counts. It goes to the organization the step was decided under,
 which the command reads from the step's session, or to your own context
 for a step that names none.
 
-The answer tells Limen that you gave it at a prompt, and nothing else
-about how you gave it: the command does not see how long you looked at
-the step, whether you opened its details, or what Limen showed you
-first.`,
+The answer tells Limen that you gave it from a list of steps, such as
+'latere oversight cases --pending', and nothing else about how you gave
+it: the command does not see how long you looked at the step, whether
+you opened its details, or what Limen showed you first.`,
 		Example: `  latere oversight answer ses_01JA3BQ7Z4M8N2P5R6S7T8V9WX/toolu_01 allow
   latere oversight answer ses_01JA3BQ7Z4M8N2P5R6S7T8V9WX/toolu_02 deny`,
 		Args:      cobra.ExactArgs(2),
@@ -1000,9 +1000,10 @@ first.`,
 				return err
 			}
 			// The command measures nothing of how the person answered but
-			// where: a time, the details and the suggestion are left out.
+			// where, a step picked from a list of steps such as cases
+			// --pending: a time, the details and the suggestion are left out.
 			params := &oversight.AnswerParams{Org: c.orgOfAction(cmd.Context(), cmd.ErrOrStderr(), id), Subject: c.me, ActionID: id, Approve: approve,
-				Surface: oversight.SurfacePrompt}
+				Surface: oversight.SurfaceQueue}
 			if err := c.ov.Answer(cmd.Context(), params); err != nil {
 				return c.refusedIn(params.Org, err)
 			}

@@ -352,10 +352,10 @@ sends an answer once and does not send it again, because each answer that
 Limen receives counts. The answer goes to the context of the step
 ([Contexts](#contexts)).
 
-The answer tells Limen that you answered at a prompt (`surface:
-prompt`). The command cannot measure how long you looked at the step, if
-you opened its details, or if Limen showed you its suggestion first. The
-command does not send these.
+The answer tells Limen that you answered a step from a list of steps,
+such as `cases --pending` (`surface: queue`). The command cannot measure
+how long you looked at the step, if you opened its details, or if Limen
+showed you its suggestion first. The command does not send these.
 
 ## Forget
 

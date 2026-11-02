@@ -124,7 +124,8 @@ func TestOversightLearnedFromALimenWithACover(t *testing.T) {
 	}
 }
 
-// answer tells Limen that the person answered at a prompt, and sends
+// answer tells Limen that the person answered a step picked from a list of
+// steps, and sends
 // nothing the command cannot measure.
 func TestOversightAnswerSaysWhereThePersonAnswered(t *testing.T) {
 	s := newOversightStub(t)
@@ -134,7 +135,7 @@ func TestOversightAnswerSaysWhereThePersonAnswered(t *testing.T) {
 		t.Fatalf("exit %d: %s", code, errOut)
 	}
 	b := s.body(0)
-	if b["surface"] != "prompt" {
+	if b["surface"] != "queue" {
 		t.Errorf("body %v", b)
 	}
 	for _, name := range []string{"answer_ms", "waited_ms", "details_opened", "suggestion_shown", "remembered"} {
@@ -142,7 +143,7 @@ func TestOversightAnswerSaysWhereThePersonAnswered(t *testing.T) {
 			t.Errorf("sent %s, which the command cannot measure: %v", name, b)
 		}
 	}
-	if !strings.Contains(out, `"surface": "prompt"`) {
+	if !strings.Contains(out, `"surface": "queue"`) {
 		t.Errorf("--json %s", out)
 	}
 }
