@@ -61,6 +61,7 @@ agent's step, recorded and learned about you, and correct it.
   latere oversight explain <action>         why it suggested what it did
   latere oversight learned                  what it learned, per kind of step
   latere oversight reliability              how often it went against you
+  latere oversight calibration              how its chances compare with your checks
   latere oversight profile                  your trust profile
   latere oversight profile set balanced     choose careful, balanced or strict
   latere oversight profile --agent <name>   an agent's own profile, or the one it follows
@@ -107,6 +108,7 @@ succeed.`,
 		newOversightExplainCmd(&apiURL, &authURL),
 		newOversightLearnedCmd(&apiURL, &authURL),
 		newOversightReliabilityCmd(&apiURL, &authURL),
+		newOversightCalibrationCmd(&apiURL, &authURL),
 		newOversightProfileCmd(&apiURL, &authURL),
 		newOversightReportCmd(&apiURL, &authURL),
 		newOversightAnswerCmd(&apiURL, &authURL),
@@ -326,7 +328,12 @@ func signed(v float64) string {
 // older Limen calls an ask split by its evidence alone, so its split is
 // split in the commands' words only where the answers that moved it went
 // both ways, and short otherwise.
-func askWhy(e *oversight.Explanation) string {
+//
+// hidden is the words that stand in for the chance, as chanceRule gives
+// them, and "" where the chance may be stated: a short ask then states no
+// chance and no threshold, since a threshold says which side the chance
+// is on.
+func askWhy(e *oversight.Explanation, hidden string) string {
 	split := e.AskKind == oversight.AskSplit && (e.Cover != nil || bothWays(e.Evidence))
 	switch {
 	case e.AskKind == oversight.AskUnsure:
@@ -334,7 +341,7 @@ func askWhy(e *oversight.Explanation) string {
 	case split:
 		return "split: your answers about steps like this went both ways, so more answers will not move it much"
 	case e.AskKind == oversight.AskShort, e.AskKind == oversight.AskSplit:
-		return shortWhy(e)
+		return shortWhy(e, hidden)
 	case e.AskKind == oversight.AskWider:
 		return "wider: this step reaches further than any step of its kind that you allowed, so no approval of yours covers it"
 	case e.AskKind == oversight.AskFew && e.Cover != nil:
@@ -347,10 +354,14 @@ func askWhy(e *oversight.Explanation) string {
 }
 
 // shortWhy is the short ask's words: the answers agree, and the chance is
-// short of the threshold, as the console says it.
-func shortWhy(e *oversight.Explanation) string {
+// short of the threshold, as the console says it. Where the chance is
+// hidden, they are Limen's own reason of a short ask, which states no
+// chance.
+func shortWhy(e *oversight.Explanation, hidden string) string {
 	word := string(oversight.AskShort)
 	switch {
+	case hidden != "":
+		return word + ": your answers about steps like this agree, but they are not enough yet to settle this step"
 	case e.Thresholds == (oversight.Thresholds{}):
 		return fmt.Sprintf("%s: not sure enough yet: Limen is %s sure you would allow it", word, percent(e.Approve))
 	case e.Approve >= 0.5:
@@ -462,12 +473,20 @@ func answerWord(approve bool) string {
 // to 1: stopped left of the first bar, asked between the bars, run on its
 // own right of the second, with p as the star.
 func scale(p float64, t oversight.Thresholds) string {
+	return drawScale(&p, t)
+}
+
+// drawScale draws the line of scale, with no star where p is nil: the
+// thresholds alone, for a chance that is not shown.
+func drawScale(p *float64, t oversight.Thresholds) string {
 	const width = 21
 	at := func(v float64) int { return min(width-1, max(0, int(math.Round(v*(width-1))))) }
 	line := []byte(strings.Repeat("-", width))
 	line[at(t.BlockBelow)] = '|'
 	line[at(t.AllowAbove)] = '|'
-	line[at(p)] = '*'
+	if p != nil {
+		line[at(*p)] = '*'
+	}
 	return "[" + string(line) + "]"
 }
 
@@ -634,8 +653,9 @@ func newOversightExplainCmd(apiURL, authURL *string) *cobra.Command {
 		Use:   "explain <session>/<tool_use_id>",
 		Short: "Say why Limen suggested what it did for one step.",
 		Long: `Say why Limen suggested what it did for one step: the chance you allow it
-and how unsure it is, where that sits between your trust profile's
-thresholds, how much of it comes from steps like this one, from your
+and how unsure it is, how the chances Limen stated in the suggestion's
+band compare with your checks, where the chance sits between your trust
+profile's thresholds, how much of it comes from steps like this one, from your
 answers lately, and from both together, how much your answers say about
 it, and for an ask why: too few answers yet, answers that went both ways,
 answers that agree with a chance short of the trust profile's threshold,
@@ -647,6 +667,13 @@ the answers of yours that moved it most, each with its share.
 The model that explains is named with how many of your answers it was
 fitted on; when it is not the one that made the suggestion, Limen has
 learned since.
+
+The chance is shown only where the suggestion's band is calibrated over
+the last 90 days ('latere oversight calibration'), and above the run
+threshold only while your trust profile's claim holds, which the command
+then reads ('latere oversight reliability'). Otherwise no line states the
+chance, and the command says why. --json prints the explanation as the
+API answered it, the chance included.
 
 The command reads the step's session to find the organization the step
 was decided under, and reads your records there. A step that names none
@@ -672,7 +699,14 @@ is in your own context.`,
 			if jsonF {
 				return printRawJSON(cmd.OutOrStdout(), e.RawJSON())
 			}
-			return printExplanation(cmd.OutOrStdout(), e, c.appliedProfile(ctx, org, id))
+			hidden := chanceRule(e, func() (bool, error) {
+				holds, err := c.certificateHolds(ctx, org)
+				if err != nil {
+					fprintf(cmd.ErrOrStderr(), "Could not read if your trust profile's claim holds, so the chance is not shown: %v\n", err)
+				}
+				return holds, err
+			})
+			return printExplanation(cmd.OutOrStdout(), e, c.appliedProfile(ctx, org, id), hidden)
 		},
 	}
 	cmd.Flags().BoolVar(&jsonF, "json", false, "print the explanation as JSON")
@@ -711,16 +745,28 @@ func appliedWords(s oversight.Scope) string {
 	return "organization " + s.Org + "'s"
 }
 
-func printExplanation(out io.Writer, e *oversight.Explanation, applied string) error {
+// printExplanation prints an explanation. hidden is the words that stand
+// in for its chance, as chanceRule gives them: where they are not "", no
+// line states the chance, neither as a number nor as the star of the
+// scale nor as the side of a threshold it is on.
+func printExplanation(out io.Writer, e *oversight.Explanation, applied, hidden string) error {
 	var b strings.Builder
 	fprintf(&b, "%s\n\n", e.ActionID)
-	fprintf(&b, "Suggestion:   %s, %s likely you allow it (uncertainty %.2f)\n", e.Verdict, percent(e.Approve), e.Uncertainty)
-	fprintf(&b, "Scale:        stop %s run  (stops below %s, runs above %s)\n", scale(e.Approve, e.Thresholds), percent(e.Thresholds.BlockBelow), percent(e.Thresholds.AllowAbove))
+	chance := &e.Approve
+	if hidden == "" {
+		fprintf(&b, "Suggestion:   %s, %s likely you allow it (uncertainty %.2f)\n", e.Verdict, percent(e.Approve), e.Uncertainty)
+	} else {
+		chance = nil
+		fprintf(&b, "Suggestion:   %s (uncertainty %.2f)\n", e.Verdict, e.Uncertainty)
+		fprintf(&b, "Chance:       %s\n", hidden)
+	}
+	fprintf(&b, "Calibration:  %s\n", calibrationWords(e.Calibration))
+	fprintf(&b, "Scale:        stop %s run  (stops below %s, runs above %s)\n", drawScale(chance, e.Thresholds), percent(e.Thresholds.BlockBelow), percent(e.Thresholds.AllowAbove))
 	if applied != "" {
 		fprintf(&b, "Profile:      %s\n", applied)
 	}
 	if e.AskKind != "" {
-		fprintf(&b, "Why it asks:  %s\n", askWhy(e))
+		fprintf(&b, "Why it asks:  %s\n", askWhy(e, hidden))
 	}
 	fprintf(&b, "Evidence:     your answers settled %s of what Limen did not know about this step (evidence ratio %.2f)\n", percent(e.EvidenceRatio), e.EvidenceRatio)
 	if p := e.Parts; p != nil {

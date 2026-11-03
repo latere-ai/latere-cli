@@ -17,7 +17,7 @@ func TestCapabilityCommandTree(t *testing.T) {
 	for path, want := range map[string][]string{
 		"environments": {"apply", "cat", "delete", "exec", "export", "get", "import", "list", "logs", "ls", "mkdir", "mv", "port-forward", "rm", "run", "secrets", "shell", "start", "stop", "upload", "write"},
 		"agents":       {"provider", "review", "run", "session", "sessions"},
-		"oversight":    {"answer", "cases", "explain", "forget", "learned", "profile", "reliability", "report"},
+		"oversight":    {"answer", "calibration", "cases", "explain", "forget", "learned", "profile", "reliability", "report"},
 		"evals":        {"candidates", "experiments", "graders", "metrics", "suites", "tasks"},
 	} {
 		group, _, err := root.Find([]string{path})

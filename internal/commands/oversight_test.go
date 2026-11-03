@@ -231,7 +231,7 @@ func TestOversightCasesPending(t *testing.T) {
 
 const ovExplanation = `{"org":"` + ovMe + `","subject":"` + ovMe + `","action_id":"ses_A/toolu_3","model":{"source":"learned/4","answers":40},"predicted_by":{"source":"learned/3","answers":38},
 "approve":0.52,"uncertainty":0.4,"verdict":"ask","mean":0.07,"parts":{"action":0.05,"recent":0.1,"interaction":-0.08},"evidence_ratio":0.81,"ask_kind":"split",
-"thresholds":{"allow_above":0.9,"block_below":0.25},
+"calibration":"calibrated","thresholds":{"allow_above":0.9,"block_below":0.25},
 "evidence":[{"action_id":"ses_1/toolu_9","label":"bash npm install","at":"2026-10-30T10:00:00Z","approve":true,"share":0.19},
 {"action_id":"ses_2/toolu_4","label":"bash npm install","at":"2026-10-29T10:00:00Z","approve":false,"share":0.18}]}`
 
@@ -272,7 +272,7 @@ func TestOversightAskWhoseAnswersAgree(t *testing.T) {
 	s := newOversightStub(t)
 	agreed := func(approve string) string {
 		return `{"org":"` + ovMe + `","subject":"` + ovMe + `","action_id":"ses_A/toolu_3","model":{"source":"learned/4","answers":2},
-"approve":` + approve + `,"uncertainty":1.07,"verdict":"ask","mean":0.8,"evidence_ratio":0.6,"ask_kind":"split","thresholds":{"allow_above":0.9,"block_below":0.25},
+"approve":` + approve + `,"uncertainty":1.07,"verdict":"ask","mean":0.8,"evidence_ratio":0.6,"ask_kind":"split","calibration":"calibrated","thresholds":{"allow_above":0.9,"block_below":0.25},
 "evidence":[{"action_id":"ses_1/toolu_9","label":"publish","at":"2026-10-30T10:00:00Z","approve":true,"share":0.6},
 {"action_id":"ses_1/toolu_8","label":"publish","at":"2026-10-29T10:00:00Z","approve":true,"share":0.4}]}`
 	}
@@ -292,7 +292,9 @@ func TestOversightAskWhoseAnswersAgree(t *testing.T) {
 	s.json("GET /explanations", http.StatusOK, strings.Replace(agreed("0.8"), `"label":"publish","at":"2026-10-29T10:00:00Z","approve":true`, `"label":"bash rm","at":"2026-10-29T10:00:00Z","approve":false`, 1))
 	out, _, _ = runLatere(t, "", "oversight", "explain", "ses_A/toolu_3")
 	contains(t, out, "short: not sure enough yet: Limen is 80% sure you would allow it, and Careful runs it on its own only above 90%")
-	// An explanation without thresholds says the chance alone.
+	// An explanation without thresholds says the chance alone, where the
+	// claim holds: with no run threshold, any chance is above it.
+	s.json("GET /reliability", http.StatusOK, ovReliabilityHolds(true))
 	s.json("GET /explanations", http.StatusOK, strings.Replace(agreed("0.8"), `"thresholds":{"allow_above":0.9,"block_below":0.25},`, ``, 1))
 	out, _, _ = runLatere(t, "", "oversight", "explain", "ses_A/toolu_3")
 	contains(t, out, "short: not sure enough yet: Limen is 80% sure you would allow it\n")

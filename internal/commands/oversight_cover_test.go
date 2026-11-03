@@ -13,7 +13,7 @@ import (
 // weight and sessions, and the approvals nearest to the step.
 func coverExplanation(askKind, cover string) string {
 	return `{"org":"` + ovMe + `","subject":"` + ovMe + `","action_id":"ses_A/toolu_3","model":{"source":"learned/1","answers":4},
-"approve":0.81,"uncertainty":0.5,"verdict":"ask","mean":0.9,"evidence_ratio":0.6,"ask_kind":"` + askKind + `","thresholds":{"allow_above":0.65,"block_below":0.35},
+"approve":0.81,"uncertainty":0.5,"verdict":"ask","mean":0.9,"evidence_ratio":0.6,"ask_kind":"` + askKind + `","calibration":"calibrated","thresholds":{"allow_above":0.65,"block_below":0.35},
 "evidence":[{"action_id":"ses_1/toolu_9","label":"publish: update","at":"2026-10-30T10:00:00Z","approve":true,"share":0.6},
 {"action_id":"ses_1/toolu_8","label":"publish: make public","at":"2026-10-29T10:00:00Z","approve":false,"share":0.4}],"cover":` + cover + `}`
 }
@@ -23,6 +23,9 @@ func coverExplanation(askKind, cover string) string {
 // Limen with a cover is split, whatever the labels of its answers.
 func TestOversightExplainSaysHowFarTheCoverIs(t *testing.T) {
 	s := newOversightStub(t)
+	// The chance, 81%, is above the run threshold of 65%, so the claim
+	// must hold for it to show.
+	s.json("GET /reliability", http.StatusOK, ovReliabilityHolds(true))
 	s.json("GET /explanations", http.StatusOK, coverExplanation("wider", `{"covered":false,"weight":0,"sessions":0,"min_weight":3,"min_sessions":2,
 "nearest":[{"action_id":"ses_1/toolu_9","label":"publish: update","at":"2026-10-30T10:00:00Z"},{"action_id":"ses_0/toolu_2","label":"publish: production","at":"2026-10-20T10:00:00Z"}]}`))
 	out, errOut, code := runLatere(t, "", "oversight", "explain", "ses_A/toolu_3")
