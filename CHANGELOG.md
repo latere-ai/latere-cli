@@ -10,6 +10,21 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Changed
+
+- **Strict runs a step on its own at 95% sure.** `latere oversight
+  profile set strict` saves the costs 20 / 4 / 1 in place of 50 / 4 / 1:
+  Strict runs a step on its own above 95% and stops it below 25%. Under
+  the old costs it ran a step only above 98%, which Limen's default model
+  never reaches, so it asked about every step. A profile saved as Strict
+  before this keeps its costs and shows as "Your own costs" or "Its own
+  costs", running a step on its own above 98%, and `latere oversight
+  profile set strict` saves the new costs. `explain` names a profile only
+  where a step's thresholds are that profile's, and says "your trust
+  profile" otherwise. A saved profile names a preset when its costs give
+  that preset's thresholds, so Balanced saved by Chat as 20/7 reads as
+  Balanced, not as costs of its own.
+
 ## v0.46.0 - 2026-11-03
 
 ### Added
