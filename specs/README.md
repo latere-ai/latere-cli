@@ -174,9 +174,8 @@ Where each spec stands:
   `latere agents sessions` and `latere agents session <id>` list the
   person's hosted sessions and how each tool call was decided, at
   `https://api.latere.ai/v1/agents`; both with a token minted for the
-  audience `api.latere.ai`. Released through v0.45.0; the calibration
-  report is on main, on an sdk-go pseudo-version, and its release waits
-  for an sdk-go release after v0.29.0.
+  audience `api.latere.ai`. Released through v0.46.0, which adds the
+  calibration report on sdk-go v0.30.0.
 
 One surface shipped without a dedicated design record: the token-lifecycle
 work, which [docs/login-and-tokens.md](../docs/login-and-tokens.md) documents.
