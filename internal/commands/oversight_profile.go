@@ -45,15 +45,18 @@ var oversightPresets = []oversightPreset{
 	{"strict", "Strict", oversight.Costs{FalseAllow: 20, FalseBlock: 4, Ask: 1}},
 }
 
-// presetOf is the preset whose costs c carries, comparing their ratios to
-// a question's cost, or nil for costs no preset names.
+// presetOf is the preset whose thresholds the costs c give, to a tenth of
+// a percent, or nil for costs no preset names. The thresholds compare, not
+// the costs, because the clients round Balanced differently: Chat saves
+// 20/7, the console and this command 2.857. The 0.98 of a profile saved as
+// Strict before Strict's costs changed stays apart from Strict's 0.95.
 func presetOf(c oversight.Costs) *oversightPreset {
-	near := func(a, b float64) bool { return math.Abs(a-b) < 1e-6 }
-	if c.Ask <= 0 {
+	if c.Ask <= 0 || c.FalseAllow <= 0 || c.FalseBlock <= 0 {
 		return nil
 	}
+	run, stop := 1-c.Ask/c.FalseAllow, c.Ask/c.FalseBlock
 	for i, p := range oversightPresets {
-		if near(p.costs.FalseAllow/p.costs.Ask, c.FalseAllow/c.Ask) && near(p.costs.FalseBlock/p.costs.Ask, c.FalseBlock/c.Ask) {
+		if math.Abs(1-p.costs.Ask/p.costs.FalseAllow-run) < 0.001 && math.Abs(p.costs.Ask/p.costs.FalseBlock-stop) < 0.001 {
 			return &oversightPresets[i]
 		}
 	}

@@ -341,6 +341,32 @@ func TestOversightAskWhoseAnswersAgree(t *testing.T) {
 	}
 }
 
+// A saved profile names the preset whose thresholds its costs give,
+// however a client rounded or scaled them; the old Strict names none.
+func TestOversightPresetOf(t *testing.T) {
+	for _, c := range []struct {
+		costs oversight.Costs
+		want  string
+	}{
+		{oversight.Costs{FalseAllow: 20.0 / 7, FalseBlock: 20.0 / 7, Ask: 1}, "Balanced"},
+		{oversight.Costs{FalseAllow: 2.857, FalseBlock: 2.857, Ask: 1}, "Balanced"},
+		{oversight.Costs{FalseAllow: 40, FalseBlock: 8, Ask: 2}, "Strict"},
+		{oversight.Costs{FalseAllow: 10, FalseBlock: 4, Ask: 1}, "Careful"},
+		{oversight.Costs{FalseAllow: 50, FalseBlock: 4, Ask: 1}, ""},
+		{oversight.Costs{FalseAllow: 12, FalseBlock: 4, Ask: 1}, ""},
+		{oversight.Costs{FalseAllow: 20, FalseBlock: 4}, ""},
+		{oversight.Costs{FalseBlock: 4, Ask: 1}, ""},
+	} {
+		got := ""
+		if p := presetOf(c.costs); p != nil {
+			got = p.label
+		}
+		if got != c.want {
+			t.Errorf("costs %+v name %q, want %q", c.costs, got, c.want)
+		}
+	}
+}
+
 func TestOversightLearned(t *testing.T) {
 	s := newOversightStub(t)
 	s.json("GET /learned", http.StatusOK, `{"org":"`+ovMe+`","subject":"`+ovMe+`","model":{"source":"learned/1","answers":33},"entries":[
