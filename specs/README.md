@@ -32,6 +32,7 @@ specs/
   022-memory-tidies.md               (implemented: latere memory tidies lists what Tidy memory changed each night, shows it as a diff, undoes it, and applies or declines what waits)
   023-messages-while-the-agent-works.md (implemented: latere agents run takes a message typed while the agent works, reads it at its next step, sends it now with Ctrl+J, and takes it back with Up)
   024-oversight-and-hosted-sessions.md (implemented: latere oversight reads and corrects what Limen recorded and learned about the person, and compares its chances with the person's checks; latere agents sessions and session show how each call of a hosted session was decided)
+  025-storage-parsing-and-hosted-agents.md (in-progress: the command grammar for latere storage, latere parsing and hosted latere agents start, send, follow and end; none of it built yet)
 ```
 
 ## Status
@@ -176,6 +177,14 @@ Where each spec stands:
   `https://api.latere.ai/v1/agents`; both with a token minted for the
   audience `api.latere.ai`. Released through v0.46.0, which adds the
   calibration report on sdk-go v0.30.0.
+- `025-storage-parsing-and-hosted-agents.md`: the command grammar for
+  `latere storage` (list, stat, download, upload, move, copy, delete with
+  a trash, shares and links), `latere parsing` (submit, watch, list and
+  read a result as JSON, Markdown, text or chunks) and hosted `latere
+  agents start`, `send`, `follow` and `end`, beside spec 024's `sessions`
+  and `session`. Drafted on 2026-11-03; nothing here is built. Copy, the
+  trash, shares, links and all of parsing wait on sdk-go, which has no
+  client method for any of them.
 
 One surface shipped without a dedicated design record: the token-lifecycle
 work, which [docs/login-and-tokens.md](../docs/login-and-tokens.md) documents.
