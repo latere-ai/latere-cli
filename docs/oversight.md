@@ -50,6 +50,7 @@ latere oversight cases --pending           # the steps waiting for you to check
 latere oversight explain <action>          # why Limen suggested what it did
 latere oversight learned                   # what Limen learned, per kind of step
 latere oversight reliability               # how often Limen went against you
+latere oversight calibration               # how the chances of Limen compare with your checks
 latere oversight profile                   # your trust profile
 latere oversight profile set balanced      # choose careful, balanced or strict
 latere oversight profile --agent <name>    # the profile that an agent uses
@@ -142,6 +143,13 @@ The command reads the log of the session to find the context of the
 step ([Contexts](#contexts)). The explanation shows:
 
 - The suggestion, the chance that you allow the step, and the uncertainty.
+  The chance shows only if Limen proved its numbers in this band
+  ([When the chance shows](#when-the-chance-shows)).
+- The calibration of the band of the suggestion (`Calibration`): the
+  state of the band in your calibration report for the last 90 days
+  ([Calibration](#calibration)). If Limen does not send a state, the line
+  says `not known`. An older Limen does not send it, and a step without a
+  recorded suggestion does not have it.
 - A scale from stop to run. The bars are your thresholds, and the star is
   the chance.
 - For an ask, why Limen asks:
@@ -155,7 +163,8 @@ step ([Contexts](#contexts)). The explanation shows:
     the chance, the profile, and the threshold that the chance does not
     reach, for example "not sure enough yet: Limen is 80% sure you would
     allow it, and Careful runs it on its own only above 90%". The profile
-    is the preset nearest the thresholds of the explanation.
+    is the preset nearest the thresholds of the explanation. If the
+    chance does not show, the line gives no chance and no threshold.
   - `wider`: the step reaches further than any step of its kind that you
     allowed. No approval of yours covers it.
   - `few`: you allowed steps that reach this far. The line gives the
@@ -179,6 +188,28 @@ step ([Contexts](#contexts)). The explanation shows:
   picked" if your own profile made it stricter for you. If the command
   cannot read the case, it does not show this line.
 - The answers of yours that moved the suggestion most, each with its share.
+
+### When the chance shows
+
+The command shows the chance only if two conditions are true:
+
+1. The band of the suggestion is `calibrated` in your calibration report
+   for the last 90 days.
+2. If the chance is above the run threshold, the claim of your trust
+   profile holds. The command then reads the claim for the suggestions of
+   Limen (`learned`) over the last 90 days
+   ([Reliability](#reliability)).
+
+If a condition is false, no line shows the chance. The `Chance:` line
+gives the reason, for example "not shown: Limen's numbers in this band
+are not proven yet". The scale shows the thresholds without the star.
+If the command cannot read the claim, it does not show the chance, and
+it writes a note to standard error.
+
+The state is for the band of the recorded suggestion. If Limen learned
+since the suggestion, the chance on the `Suggestion:` line comes from the
+current model. `--json` shows the explanation as Limen sent it, with the
+chance.
 
 ## Learned
 
@@ -216,6 +247,59 @@ the claim needs.
 verdicts applied, whatever decided them), or a rule set such as
 `rules/1`. `--from` and `--to` take a date or an RFC 3339 time. The
 default window is the last 30 days.
+
+## Calibration
+
+```sh
+latere oversight calibration
+latere oversight calibration --from 2026-10-01
+latere oversight calibration --json
+```
+
+The calibration report compares the chance that Limen stated for your
+steps with how often you allowed the steps that you checked. The report
+has ten bands of the stated chance: 0% to 10%, 10% to 20%, and so on to
+90% to 100%. A band includes its lower limit and not its upper limit.
+The last band includes 100%. Each row shows one band:
+
+| Column | What it is |
+|---|---|
+| `BAND` | The range of the stated chance. |
+| `CASES` | The number of steps with a suggestion in the band. |
+| `CHECKABLE` | The share of these steps that Limen could show you to check: their review probability is above zero. |
+| `STATED` | The mean chance that Limen stated for the checkable steps. A dash means that the band has no checkable step. |
+| `OBSERVED (95%)` | The rate of allow that your checks measured, with a 95% interval. Each check counts with the weight 1 divided by its review probability. A dash means that the band has too few checks. A dash is not 0%. |
+| `REVIEWS` | The number of your checks of the checkable steps. |
+| `CONSIDERED` | The number of these checks that are considered answers. |
+| `STATE` | The state of the band. |
+
+The states are:
+
+- `calibrated`: the stated chance is in the interval.
+- `overconfident`: the stated chance is outside the interval, and farther
+  from 50% than the measured rate. Limen was surer than your checks show.
+- `underconfident`: the stated chance is outside the interval, and not
+  farther from 50% than the measured rate. Limen was less sure than your
+  checks show.
+- `not_estimable`: the checks have a Kish effective size below 20. The
+  band has no measured rate.
+
+Under the bands, the report shows two numbers. They use only the bands
+that are not `not_estimable`:
+
+- `Error`: the mean distance between the stated chance and the measured
+  rate, in percentage points. Each band has the weight of its cases. If
+  no band has enough checks, the error is `not known`.
+- `Estimable`: the share of the cases that are in these bands.
+
+The bands between the thresholds get checks from each ask. The bands
+above the run threshold and below the stop threshold get checks only from
+the steps that Limen picks at random for you to check. These bands need
+an audit rate above zero.
+
+`--from` and `--to` take a date or an RFC 3339 time. The default window
+is the last 90 days, the window that `explain` uses. The command reads
+your own context.
 
 ## Profile
 
@@ -373,7 +457,7 @@ type `yes`. `--yes` skips the question.
 | Code | Meaning |
 |---|---|
 | `0` | The command is done. |
-| `2` | The request was refused. The same command gets the same answer. Examples: you are not signed in, the id is not `<session>/<tool_use_id>`, Limen has no decision for the step, you are not an owner or an admin of the organization, a bound of the report is not a Monday. |
+| `2` | The request was refused. The same command gets the same answer. Examples: you are not signed in, the id is not `<session>/<tool_use_id>`, Limen has no decision for the step, you are not an owner or an admin of the organization, a bound of the report is not a Monday, `--from` is not before `--to`. |
 | `3` | No answer came, or the service was busy. The same command can succeed later. |
 
 ## Settings

@@ -8,17 +8,19 @@ depends_on:
   - "CROSS-REPO: topos specs/100-the-organization-a-session-acts-in.md: a session's org and a call's decision_org; sdk-go agents.Session.Org, agents.ToolUse.DecisionOrg and agents.Suggestion.AskKind (main after v0.24.0)"
   - "CROSS-REPO: platform specs/243-oversight-in-an-organization-the-extras.md and Limen specs/010-organizations.md: an agent's own profile, a member's stricter profile and an organization's weekly report; sdk-go oversight.DeleteProfile, Scope.Subject, GetReport, Prediction.Profile and agents.GetAgent (main after v0.25.0)"
   - "CROSS-REPO: topos specs/101-what-a-person-consented-to.md and Limen specs/011-consent.md: a call's reach, the hand-back after refused calls, the cover and the short, wider and few asks; sdk-go agents.ToolUse.Scope, EventDenialsReached, LayerDenials, oversight.Prediction.Cover, Explanation.Cover and AnswerParams.Surface (main after v0.27.0)"
+  - "CROSS-REPO: Limen specs/011-consent.md, wave 2: the calibration report, an explanation's calibration and the rule for clients; sdk-go oversight.GetCalibration and Explanation.Calibration (main after v0.29.0)"
 affects:
   - go.mod (sdk-go main after v0.23.0, to be v0.24.0)
   - internal/commands/oversight.go, internal/commands/oversight_test.go
   - internal/commands/oversight_profile.go, internal/commands/oversight_report.go, internal/commands/oversight_org_test.go
   - internal/commands/agents_sessions.go, internal/commands/agents_sessions_test.go
   - internal/commands/agents_reach_test.go, internal/commands/oversight_cover_test.go
+  - internal/commands/oversight_calibration.go, internal/commands/oversight_calibration_test.go
   - internal/commands/apierror.go (the exit codes spec 015 gave evals, shared), internal/commands/evals.go, internal/commands/exit.go
   - internal/commands/topos.go, internal/commands/root.go, internal/commands/capability_names_test.go
   - docs/oversight.md, docs/agents.md, docs/configuration.md, README.md, CHANGELOG.md
 created: 2026-11-01
-updated: 2026-11-02
+updated: 2026-11-03
 author: changkun
 ---
 
@@ -42,7 +44,7 @@ with the login they already have.
 
 ## Design
 
-`latere oversight` has eight commands, each with `--json`:
+`latere oversight` has nine commands, each with `--json`:
 
 | Command | Calls |
 |---|---|
@@ -50,6 +52,7 @@ with the login they already have.
 | `explain <session>/<tool_use_id>` | `GET /explanations` |
 | `learned` | `GET /learned` |
 | `reliability [--of S] [--from T] [--to T]` | `GET /reliability` |
+| `calibration [--from T] [--to T]` | `GET /calibration` |
 | `profile`, `profile set careful\|balanced\|strict`, `profile reset` | `GET`, `PUT`, `DELETE /profiles` |
 | `report [--from T] [--to T]` | `GET /reports` |
 | `answer <session>/<tool_use_id> allow\|deny` | `POST /answers`, sent once |
@@ -213,12 +216,62 @@ answers agree. `split` is narrowed to answers that disagree.
   sends none of them. The surface is `queue`, a step answered from a list
   of steps (the owner's decision of 2026-11-02, in place of `prompt`).
 
+### The calibration report and the rule for clients (Limen spec 011, wave 2)
+
+Limen answers a person's calibration report at `GET /calibration`: for
+ten bands of the chance it stated, `[0, 0.1)` to `[0.9, 1]`, the cases,
+the share `covered`, the mean chance `stated`, the rate `observed` from
+the person's checks with its Wilson interval, the `reviews` and the
+`considered` answers, and a `state`. A band whose checks have a Kish
+effective size below 20 is `not_estimable`, and its `observed` is null.
+The report also gives `error` and `estimable`. An explanation carries
+`calibration`, the state of the band of the recorded prediction over the
+last 90 days. Limen's rule for clients: a client states the chance only
+where that band is `calibrated`, and above the allow threshold only while
+the certificate of `learned` also holds.
+
+| Command | Shows |
+|---|---|
+| `oversight calibration [--from T] [--to T]` | one row for each band: the band, the cases, the share Limen could show the person (`CHECKABLE`), `stated`, `observed` with its interval, the reviews, the considered answers and the state; `-` for a null `stated` or `observed`; then `error` in percentage points, or `not known` where null, and `estimable` |
+| `oversight explain <action>` | `Calibration:` with the state in words; the chance only where the rule allows it, and otherwise `Chance:` with the reason, a scale without the star, and a `short` ask in Limen's own reason, with no chance and no threshold |
+
+- **The window is 90 days.** `calibration` defaults to the 90 days
+  before now, the window of an explanation's `calibration`, so the
+  report and `explain` read the same cases. Like `reliability`, it reads
+  the person's own context.
+- **No chance without a state.** An explanation with no `calibration`,
+  from an older Limen or of a step with no recorded prediction, states no
+  chance, as the console does (platform spec 240). Every other state
+  says "not shown: Limen's numbers in this band are not proven yet".
+- **The certificate, read only when needed.** Above the run threshold,
+  `explain` reads `GET /reliability?of=learned` over the last 90 days in
+  the step's context, only for a `calibrated` band. A certificate that
+  does not hold hides the chance, and so does one that cannot be read,
+  with a note on stderr. An explanation without thresholds has every
+  chance above its run threshold, so it also reads the certificate.
+- **Every line that states the chance.** A hidden chance leaves the
+  `Suggestion:` line, the star of the scale, and the `short` words, whose
+  threshold tells the side of the chance. The `Parts` (latent values),
+  the evidence ratio and the shares of the evidence are no chance of
+  allowing, and stay.
+- **The band of the recorded prediction.** The state is of the recorded
+  prediction's band, and the chance on the `Suggestion:` line is the one
+  the current model explains. The command gates that chance by the state
+  and does not read the case for the recorded chance, as the console
+  does.
+- **`--json` is the API's answer.** It prints the explanation as Limen
+  sent it, the chance included.
+
 ## Not in this spec
 
 - Previews of another profile (`POST /previews`).
 - Profiles scoped to a kind of step.
 - A profile of a member for one agent: Limen keeps one per member and
   organization (Limen spec 010, Decisions 5).
+- The rule for clients in `cases`, `learned` and `agents session`. They
+  still state the chance of each row, with no calibration state per row.
+  A follow-up can read the report once and gate each row by the state of
+  its band.
 
 ## Acceptance criteria
 
@@ -246,6 +299,9 @@ answers agree. `split` is narrowed to answers that disagree.
 | 20 | `explain` shows the cover and its nearest approvals and words `wider`, `few` and `short`, and `cases` shows the cover in a column, `-` without one | `TestOversightExplainSaysHowFarTheCoverIs`, `TestOversightCasesShowTheCover` |
 | 21 | A `split` from a Limen that sends a cover, or in a learned view that names a `short`, `wider` or `few` ask, reads as split; an older Limen's reads by criterion 17 | `TestOversightExplainSaysHowFarTheCoverIs`, `TestOversightLearnedFromALimenWithACover` |
 | 22 | `answer` sends `surface: queue` and none of `answer_ms`, `waited_ms`, `details_opened`, `suggestion_shown` and `remembered` | `TestOversightAnswerSaysWhereThePersonAnswered` |
+| 23 | `calibration` reads the person's own context over the last 90 days by default, prints the ten bands with the cases, the checkable share, `stated`, `observed` with its interval, the reviews, the considered answers and the state, `not_estimable` as such and a null as `-`, then `error`, `not known` where null, and `estimable`; `--json` prints the report as answered | `TestOversightCalibration`, `TestOversightCalibrationWithNoEstimableBand` |
+| 24 | `explain` prints the calibration state, and states the chance only for a `calibrated` band; otherwise no line states it, `Chance:` says "not shown: Limen's numbers in this band are not proven yet", and no certificate is read | `TestOversightExplainFollowsTheRuleForClients`, `TestChanceRule` |
+| 25 | Above the run threshold, `explain` reads the certificate of `learned` over the last 90 days in the step's context, and states the chance only while it holds; one that does not hold, or cannot be read, hides it with its reason | `TestOversightExplainFollowsTheRuleForClients` |
 
 ## Outcome
 
@@ -297,3 +353,13 @@ v0.27.0, `v0.27.1-0.20261102221905-f3243b25663f`, for
 `AnswerParams.Surface`. The release pins the sdk-go release in place of
 the pseudo-version. Neither Topos nor Limen sent these fields when the
 commands were built; the tests hold the commands to the specs.
+
+On 2026-11-03, `latere oversight calibration` reads the person's
+calibration report, and `explain` names the state of the suggestion's
+band and states the chance only where Limen's rule for clients allows it
+(criteria 23 to 25, Limen spec 011, wave 2). They are built on sdk-go
+main after v0.29.0, `v0.29.1-0.20261103024912-25c1b6797229`, for
+`oversight.GetCalibration` and `Explanation.Calibration`. The release
+pins the sdk-go release in place of the pseudo-version. An explanation
+from a Limen without the report carries no state, so `explain` shows its
+chance no longer.
