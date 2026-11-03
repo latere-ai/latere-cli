@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.47.0 - 2026-11-03
+
 ### Changed
 
 - **Strict runs a step on its own at 95% sure.** `latere oversight
