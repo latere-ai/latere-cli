@@ -10,6 +10,29 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+### Added
+
+- **The calibration report.** `latere oversight calibration` compares the
+  chance that Limen stated for your steps with how often you allowed the
+  steps you checked, in ten bands from 0% to 100%: the cases in each band,
+  the share Limen could show you, the mean chance stated, the rate your
+  checks measured with a 95% interval, your checks, the considered ones,
+  and whether the band is `calibrated`, `overconfident`,
+  `underconfident` or `not_estimable`. Under the bands: the error, and the
+  share of the cases in bands with enough checks. The window is the last
+  90 days unless `--from` and `--to` say otherwise.
+
+### Changed
+
+- **`explain` shows a chance only where Limen proved it.** `latere
+  oversight explain` names the calibration of the suggestion's band, and
+  shows the chance that you allow the step only where that band is
+  `calibrated` over the last 90 days, and above the run threshold only
+  while your trust profile's claim holds. Otherwise it says "not shown:
+  Limen's numbers in this band are not proven yet", or why the claim
+  hides it, and no line states the chance. A Limen without the report
+  sends no calibration, so `explain` no longer shows its chance.
+
 ## v0.45.0 - 2026-11-03
 
 ### Added
