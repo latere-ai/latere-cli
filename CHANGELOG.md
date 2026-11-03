@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.46.0 - 2026-11-03
+
 ### Added
 
 - **The calibration report.** `latere oversight calibration` compares the
