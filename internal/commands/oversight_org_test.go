@@ -31,7 +31,10 @@ func ovProfile(scope, preset string) string {
 	costs := map[string]string{
 		"careful":  `"costs":{"false_allow":10,"false_block":4,"ask":1},"thresholds":{"allow_above":0.9,"block_below":0.25}`,
 		"balanced": `"costs":{"false_allow":2.857,"false_block":2.857,"ask":1},"thresholds":{"allow_above":0.65,"block_below":0.35}`,
-		"strict":   `"costs":{"false_allow":50,"false_block":4,"ask":1},"thresholds":{"allow_above":0.98,"block_below":0.25}`,
+		"strict":   `"costs":{"false_allow":20,"false_block":4,"ask":1},"thresholds":{"allow_above":0.95,"block_below":0.25}`,
+		// strict-50 is a profile saved as Strict before Strict's costs
+		// became 20, 4, 1: no preset names its costs any more.
+		"strict-50": `"costs":{"false_allow":50,"false_block":4,"ask":1},"thresholds":{"allow_above":0.98,"block_below":0.25}`,
 		// own is costs no preset names, that run a step at 80% and stop
 		// it below 10%.
 		"own": `"costs":{"false_allow":5,"false_block":10,"ask":1},"thresholds":{"allow_above":0.8,"block_below":0.1}`,
@@ -45,11 +48,11 @@ func ovProfile(scope, preset string) string {
 func TestOversightAgentProfile(t *testing.T) {
 	ov, ag := newOrgOversightStubs(t)
 	ag.json("GET /agents/release-notes", http.StatusOK, ovAgent)
-	own := true
+	own, ownPreset := true, "balanced"
 	ov.handle("GET /profiles", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if own {
-			_, _ = io.WriteString(w, ovProfile(`"org":"`+ovOrg+`","agent":"agent_01"`, "balanced"))
+			_, _ = io.WriteString(w, ovProfile(`"org":"`+ovOrg+`","agent":"agent_01"`, ownPreset))
 			return
 		}
 		_, _ = io.WriteString(w, ovProfile(`"org":"`+ovOrg+`"`, "careful"))
@@ -65,6 +68,15 @@ func TestOversightAgentProfile(t *testing.T) {
 	own = false
 	out, _, _ = runLatere(t, "", "oversight", "profile", "--agent", "release-notes")
 	contains(t, out, "Release notes follows organization org_7's trust profile.", "Trust profile: Careful\n")
+	// An agent's own profile saved as Strict before Strict's costs changed
+	// reads by its own thresholds and names no preset.
+	own, ownPreset = true, "strict-50"
+	out, _, _ = runLatere(t, "", "oversight", "profile", "--agent", "release-notes")
+	contains(t, out, "Release notes has its own trust profile in organization org_7", "Trust profile: Its own costs\n", "at 98% sure", "below 25%")
+	if strings.Contains(out, "Strict") {
+		t.Errorf("an earlier Strict reads as Strict: %s", out)
+	}
+	own = false
 
 	ov.json("PUT /profiles", http.StatusOK, ovProfile(`"org":"`+ovOrg+`","agent":"agent_01"`, "strict"))
 	n := len(ov.seen())
@@ -73,7 +85,7 @@ func TestOversightAgentProfile(t *testing.T) {
 		t.Fatalf("set: exit %d: %s", code, errOut)
 	}
 	contains(t, out, "Release notes now has its own trust profile in organization org_7: Strict, for everyone's sessions with it from its next step.")
-	if b := ov.body(n); b["org"] != ovOrg || b["agent"] != "agent_01" || b["subject"] != nil || b["audit_rate"] != 0.05 || b["costs"].(map[string]any)["false_allow"] != 50.0 {
+	if b := ov.body(n); b["org"] != ovOrg || b["agent"] != "agent_01" || b["subject"] != nil || b["audit_rate"] != 0.05 || b["costs"].(map[string]any)["false_allow"] != 20.0 {
 		t.Errorf("saved %v", b)
 	}
 
@@ -180,6 +192,15 @@ func TestOversightProfileForMe(t *testing.T) {
 	mine, org = "careful", "own"
 	out, _, _ = runLatere(t, "", "oversight", "profile", "--for-me")
 	contains(t, out, "Organization org_7's profile: costs of its own.", "it runs a step on its own at 90% sure you would allow it, and stops it below 10%")
+	// A pick saved as Strict before Strict's costs changed is said by its
+	// thresholds, never as Strict or as asking like a preset.
+	mine, org = "strict-50", "balanced"
+	out, _, _ = runLatere(t, "", "oversight", "profile", "--for-me")
+	contains(t, out, "Your own pick in organization org_7: costs of its own. Organization org_7's profile: Balanced.",
+		"it runs a step on its own at 98% sure you would allow it, and stops it below 25%", "Trust profile: Its own costs\n")
+	if strings.Contains(out, "Strict") || strings.Contains(out, "asks you as") {
+		t.Errorf("an earlier Strict pick: %s", out)
+	}
 	org, saved = "balanced", false
 	out, _, _ = runLatere(t, "", "oversight", "profile", "--for-me")
 	contains(t, out, "You have not made organization org_7's profile stricter for yourself", "Trust profile: Balanced\n")

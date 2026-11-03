@@ -366,10 +366,10 @@ func shortWhy(e *oversight.Explanation, hidden string) string {
 		return fmt.Sprintf("%s: not sure enough yet: Limen is %s sure you would allow it", word, percent(e.Approve))
 	case e.Approve >= 0.5:
 		return fmt.Sprintf("%s: not sure enough yet: Limen is %s sure you would allow it, and %s runs it on its own only above %s",
-			word, percent(e.Approve), presetNear(e.Thresholds), percent(e.Thresholds.AllowAbove))
+			word, percent(e.Approve), presetAt(e.Thresholds), percent(e.Thresholds.AllowAbove))
 	}
 	return fmt.Sprintf("%s: not sure enough yet: Limen is %s sure you would allow it, and %s stops it only below %s",
-		word, percent(e.Approve), presetNear(e.Thresholds), percent(e.Thresholds.BlockBelow))
+		word, percent(e.Approve), presetAt(e.Thresholds), percent(e.Thresholds.BlockBelow))
 }
 
 // weight is the weight of approvals as a person reads it: a whole number
@@ -407,17 +407,19 @@ func coverCell(c *oversight.Cover) string {
 	return fmt.Sprintf("%s %s/%s %d/%d", state, weight(c.Weight), weight(c.MinWeight), c.Sessions, c.MinSessions)
 }
 
-// presetNear is the name of the preset whose thresholds are nearest t,
-// as the console names the profile a step was decided under.
-func presetNear(t oversight.Thresholds) string {
-	best, far := oversightPresets[0].label, math.Inf(1)
+// presetAt is the name of the preset whose thresholds t are, as the
+// console names the profile a step was decided under, and "your trust
+// profile" for thresholds no preset gives, such as the 0.98 of a profile
+// saved as Strict before Strict's costs changed. The thresholds compare
+// to a half percent, which Balanced's rounded costs stay within.
+func presetAt(t oversight.Thresholds) string {
 	for _, p := range oversightPresets {
 		run, stop := 1-p.costs.Ask/p.costs.FalseAllow, p.costs.Ask/p.costs.FalseBlock
-		if d := math.Abs(run-t.AllowAbove) + math.Abs(stop-t.BlockBelow); d < far {
-			best, far = p.label, d
+		if math.Abs(run-t.AllowAbove) < 0.005 && math.Abs(stop-t.BlockBelow) < 0.005 {
+			return p.label
 		}
 	}
-	return best
+	return "your trust profile"
 }
 
 // bothWays reports whether the answers that moved a prediction went both

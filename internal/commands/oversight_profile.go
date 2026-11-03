@@ -34,11 +34,15 @@ type oversightPreset struct {
 }
 
 // oversightPresets are the console's trust profiles, Careful the one every
-// person starts on.
+// person starts on. Strict's costs are 20, 4, 1 since 2026-11-03, so it
+// runs a step on its own above 0.95: with Limen's default model a step's
+// approval probability levels off at 0.978, below the 0.98 of the earlier
+// 50, 4, 1. A profile saved with those earlier costs is no preset's: it
+// reads as costs of its own, with the thresholds Limen states for it.
 var oversightPresets = []oversightPreset{
 	{"careful", "Careful", oversight.Costs{FalseAllow: 10, FalseBlock: 4, Ask: 1}},
 	{"balanced", "Balanced", oversight.Costs{FalseAllow: 2.857, FalseBlock: 2.857, Ask: 1}},
-	{"strict", "Strict", oversight.Costs{FalseAllow: 50, FalseBlock: 4, Ask: 1}},
+	{"strict", "Strict", oversight.Costs{FalseAllow: 20, FalseBlock: 4, Ask: 1}},
 }
 
 // presetOf is the preset whose costs c carries, comparing their ratios to
@@ -239,14 +243,16 @@ func (c *oversightClient) printForMe(ctx context.Context, out io.Writer, mine *o
 
 // forMeWords say what the person's own pick does against the
 // organization's profile: Limen applies the stricter of each threshold,
-// the higher one to run a step and the lower one to stop it.
+// the higher one to run a step and the lower one to stop it. A pick with
+// costs no preset names, such as one saved as Strict before Strict's costs
+// changed, is said by its thresholds, never by a preset's name.
 func forMeWords(orgID string, mine, org *oversight.Profile) string {
 	run := max(mine.Thresholds.AllowAbove, org.Thresholds.AllowAbove)
 	stop := min(mine.Thresholds.BlockBelow, org.Thresholds.BlockBelow)
 	switch {
 	case run == org.Thresholds.AllowAbove && stop == org.Thresholds.BlockBelow:
 		return "It changes nothing now: the organization's profile already asks you at least this much. It applies if " + orgID + " picks a looser profile."
-	case run == mine.Thresholds.AllowAbove && stop == mine.Thresholds.BlockBelow:
+	case run == mine.Thresholds.AllowAbove && stop == mine.Thresholds.BlockBelow && presetOf(mine.Costs) != nil:
 		return "For your own sessions with its agents, Limen asks you as " + profileName(mine) + " does, the stricter of the two. With an agent that has its own profile, the stricter of that one and yours applies."
 	}
 	return "For your own sessions with its agents, Limen takes the stricter of each threshold: it runs a step on its own at " + percent(run) + " sure you would allow it, and stops it below " + percent(stop) + "."
@@ -265,7 +271,7 @@ func newOversightProfileSetCmd(apiURL, authURL *string) *cobra.Command {
   careful    runs a step on its own at 90% sure you would allow it, and
              stops it below 25%; the one everyone starts on
   balanced   asks less: runs a step at 65% sure, and stops it below 35%
-  strict     for money and production: runs a step only at 98% sure
+  strict     for money and production: runs a step only at 95% sure
 
 Each shows you 1 in 20 of the steps that run on their own to check.
 

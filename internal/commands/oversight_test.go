@@ -298,8 +298,26 @@ func TestOversightAskWhoseAnswersAgree(t *testing.T) {
 	s.json("GET /explanations", http.StatusOK, strings.Replace(agreed("0.8"), `"thresholds":{"allow_above":0.9,"block_below":0.25},`, ``, 1))
 	out, _, _ = runLatere(t, "", "oversight", "explain", "ses_A/toolu_3")
 	contains(t, out, "short: not sure enough yet: Limen is 80% sure you would allow it\n")
-	if presetNear(oversight.Thresholds{AllowAbove: 0.98, BlockBelow: 0.25}) != "Strict" || presetNear(oversight.Thresholds{AllowAbove: 0.66, BlockBelow: 0.34}) != "Balanced" {
-		t.Error("the preset nearest the thresholds")
+	// A step decided under a preset's thresholds names it; Balanced's
+	// rounded costs give thresholds a little off its own. The 0.98 of a
+	// profile saved as Strict before Strict's costs changed names none.
+	for at, want := range map[oversight.Thresholds]string{
+		{AllowAbove: 0.95, BlockBelow: 0.25}:             "Strict",
+		{AllowAbove: 0.9, BlockBelow: 0.25}:              "Careful",
+		{AllowAbove: 1 - 1/2.857, BlockBelow: 1 / 2.857}: "Balanced",
+		{AllowAbove: 0.65, BlockBelow: 0.35}:             "Balanced",
+		{AllowAbove: 0.98, BlockBelow: 0.25}:             "your trust profile",
+		{AllowAbove: 0.8, BlockBelow: 0.1}:               "your trust profile",
+	} {
+		if got := presetAt(at); got != want {
+			t.Errorf("thresholds %+v name %q, want %q", at, got, want)
+		}
+	}
+	s.json("GET /explanations", http.StatusOK, strings.Replace(agreed("0.97"), `"thresholds":{"allow_above":0.9,"block_below":0.25}`, `"thresholds":{"allow_above":0.98,"block_below":0.25}`, 1))
+	out, _, _ = runLatere(t, "", "oversight", "explain", "ses_A/toolu_3")
+	contains(t, out, "short: not sure enough yet: Limen is 97% sure you would allow it, and your trust profile runs it on its own only above 98%")
+	if strings.Contains(out, "Strict") {
+		t.Errorf("a step decided at 0.98 names Strict: %s", out)
 	}
 
 	s.json("GET /learned", http.StatusOK, `{"org":"`+ovMe+`","subject":"`+ovMe+`","model":{"source":"learned/1","answers":13},"entries":[
@@ -401,7 +419,7 @@ func TestOversightProfile(t *testing.T) {
 	if b["org"] != ovMe || b["audit_rate"] != 0.05 || costs["false_allow"] != 2.857 || costs["false_block"] != 2.857 || costs["ask"] != 1.0 {
 		t.Errorf("put %v", b)
 	}
-	for name, want := range map[string][2]float64{"careful": {10, 4}, "strict": {50, 4}} {
+	for name, want := range map[string][2]float64{"careful": {10, 4}, "strict": {20, 4}} {
 		if _, errOut, code := runLatere(t, "", "oversight", "profile", "set", name, "--json"); code != 0 {
 			t.Fatalf("%s: exit %d: %s", name, code, errOut)
 		}
@@ -417,6 +435,29 @@ func TestOversightProfile(t *testing.T) {
 	}
 	if len(s.seen()) != n {
 		t.Error("an unknown profile was sent")
+	}
+
+	// A profile saved as Strict before Strict's costs became 20, 4, 1
+	// keeps 50, 4, 1: it is no preset's, and reads by the thresholds Limen
+	// states for it. Strict chosen again saves the new costs.
+	s.json("GET /profiles", http.StatusOK, `{"org":"`+ovMe+`","costs":{"false_allow":50,"false_block":4,"ask":1},"audit_rate":0.05,"thresholds":{"allow_above":0.98,"block_below":0.25}}`)
+	out, errOut, code = runLatere(t, "", "oversight", "profile")
+	if code != 0 {
+		t.Fatalf("an earlier Strict: exit %d: %s", code, errOut)
+	}
+	contains(t, out, "Trust profile: Your own costs\n", "at 98% sure", "below 25%", "a wrong run 50, a wrong stop 4, a question 1")
+	if strings.Contains(out, "Strict") {
+		t.Errorf("an earlier Strict reads as Strict: %s", out)
+	}
+	s.json("PUT /profiles", http.StatusOK, `{"org":"`+ovMe+`","costs":{"false_allow":20,"false_block":4,"ask":1},"audit_rate":0.05,"thresholds":{"allow_above":0.95,"block_below":0.25}}`)
+	n = len(s.seen())
+	out, errOut, code = runLatere(t, "", "oversight", "profile", "set", "strict")
+	if code != 0 {
+		t.Fatalf("strict: exit %d: %s", code, errOut)
+	}
+	contains(t, out, "Trust profile: Strict\n", "at 95% sure", "below 25%")
+	if costs, _ := s.body(n)["costs"].(map[string]any); costs["false_allow"] != 20.0 || costs["false_block"] != 4.0 || costs["ask"] != 1.0 {
+		t.Errorf("strict put %v", s.body(n))
 	}
 }
 
