@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.45.0 - 2026-11-03
+
 ### Added
 
 - **What a call reaches.** `latere agents session <id>` shows a `reach`
