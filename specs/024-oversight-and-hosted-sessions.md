@@ -72,7 +72,8 @@ prefix, and shows the latest `--limit`, 20 by default, 0 for all.
 now, since Limen requires a window.
 
 `profile set` writes the console's three presets, each with the console's
-audit rate of 0.05: careful 10/4/1, balanced 2.857/2.857/1, strict 50/4/1.
+audit rate of 0.05: careful 10/4/1, balanced 2.857/2.857/1, strict 20/4/1
+(50/4/1 before 2026-11-03, see the Outcome).
 
 `latere agents sessions` lists the person's hosted sessions newest first
 with their mode. `latere agents session <id>` reads the whole log, lists
@@ -363,3 +364,17 @@ main after v0.29.0, `v0.29.1-0.20261103024912-25c1b6797229`, for
 pins the sdk-go release in place of the pseudo-version. An explanation
 from a Limen without the report carries no state, so `explain` shows its
 chance no longer.
+
+On 2026-11-03, the owner changed Strict's costs from 50/4/1 to 20/4/1, so
+`profile set strict` runs a step on its own above 0.95 and stops it below
+0.25. Under 50/4/1 it ran a step only above 0.98, which Limen's default
+model never reaches: a step's approval probability levels off at 0.978
+once the model holds its 512 answers. Measured with limend v0.8.0, a
+step answered only with considered allows from two sessions reaches 0.95
+after 20 allows, so the 21st runs on its own. A profile saved as Strict
+before the change keeps 50/4/1 and is no preset's: `profile` shows it as
+"Your own costs" or "Its own costs" with the thresholds Limen states for
+it, and `profile set strict` saves the new costs. `explain` names the
+preset whose thresholds a step was decided under, to a half percent, and
+"your trust profile" for any other thresholds, in place of the nearest
+preset of criterion 17, which would have called the old 0.98 Strict.

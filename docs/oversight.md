@@ -163,8 +163,9 @@ step ([Contexts](#contexts)). The explanation shows:
     the chance, the profile, and the threshold that the chance does not
     reach, for example "not sure enough yet: Limen is 80% sure you would
     allow it, and Careful runs it on its own only above 90%". The profile
-    is the preset nearest the thresholds of the explanation. If the
-    chance does not show, the line gives no chance and no threshold.
+    is the preset that has the thresholds of the explanation. If no
+    preset has these thresholds, the line says "your trust profile". If
+    the chance does not show, the line gives no chance and no threshold.
   - `wider`: the step reaches further than any step of its kind that you
     allowed. No approval of yours covers it.
   - `few`: you allowed steps that reach this far. The line gives the
@@ -315,10 +316,17 @@ Your trust profile sets when Limen lets a step run, asks you, or stops it.
 |---|---|---|---|
 | `careful` | 90% | 25% | 10 / 4 / 1 |
 | `balanced` | 65% | 35% | 2.857 / 2.857 / 1 |
-| `strict` | 98% | 25% | 50 / 4 / 1 |
+| `strict` | 95% | 25% | 20 / 4 / 1 |
 
 Each profile shows you 1 in 20 of the steps that run on their own, to
 check. Everyone starts on `careful`.
+
+A profile with costs that are not the costs of a preset shows as "Your
+own costs" or "Its own costs", with the thresholds that Limen calculates
+from its costs. A profile that you saved as `strict` before 2026-11-03
+has the costs 50 / 4 / 1. It runs a step on its own above 98% and stops
+a step below 25%, and it shows as a profile with its own costs. To use the new
+`strict`, run `latere oversight profile set strict` again.
 
 ### The own profile of an agent
 
