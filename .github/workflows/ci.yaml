@@ -9,10 +9,29 @@ name: ci
 # The release is release.yaml, which the shared pipeline cannot host: it runs
 # on a tag and needs write access to publish.
 
+# A push or pull request that changes only specs or markdown outside the
+# exceptions starts no run, because no build or test reads them. The exceptions
+# are README.md, CONTRIBUTING.md and docs/, which the command tests hold to the
+# CLI and scan for retired names. `lateregate release` runs the whole bar, the
+# spec tree included, before every tag.
 on:
   push:
     branches: [main]
+    paths:
+      - "**"
+      - "!specs/**"
+      - "!**.md"
+      - "README.md"
+      - "CONTRIBUTING.md"
+      - "docs/**"
   pull_request:
+    paths:
+      - "**"
+      - "!specs/**"
+      - "!**.md"
+      - "README.md"
+      - "CONTRIBUTING.md"
+      - "docs/**"
   workflow_dispatch:
 
 # A newer push to the same ref supersedes this run: its commit carries every
