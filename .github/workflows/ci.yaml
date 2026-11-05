@@ -1,83 +1,26 @@
 name: ci
 
-# Every Go gate this repository has runs through latere-ai/ci's reusable
-# pipeline, which probes the Makefile and runs the targets it finds. The
-# checks live in latere.ai/x/ci-gate, pinned in go.mod, so each of them runs
-# identically from a laptop: `make test`, `make spec-lint`, `make validate`
-# and the rest need nothing but this checkout.
-#
-# The release is release.yaml, which the shared pipeline cannot host: it runs
-# on a tag and needs write access to publish.
-
-# A push or pull request that changes only specs or markdown outside the
-# exceptions starts no run, because no build or test reads them. The exceptions
-# are README.md, CONTRIBUTING.md and docs/, which the command tests hold to the
-# CLI and scan for retired names. `lateregate release` runs the whole bar, the
-# spec tree included, before every tag.
+# The bar lives in latere-ai/ci-gate, pinned in go.mod, and the shared
+# workflow runs it. What this repository decides is in .lateregate.yaml.
+# `lateregate init` writes this file, the same in every repository.
 on:
   push:
     branches: [main]
-    paths:
-      - "**"
-      - "!specs/**"
-      - "!**.md"
-      - "README.md"
-      - "CONTRIBUTING.md"
-      - "docs/**"
   pull_request:
-    paths:
-      - "**"
-      - "!specs/**"
-      - "!**.md"
-      - "README.md"
-      - "CONTRIBUTING.md"
-      - "docs/**"
   workflow_dispatch:
 
 # A newer push to the same ref supersedes this run: its commit carries every
-# change this one would verify, and the runner is better spent on it.
+# change this one would verify.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
+# actions: read lets the gate find the last commit whose CI passed, which it
+# measures the change from.
 permissions:
   contents: read
+  actions: read
 
 jobs:
-  verify:
+  gate:
     uses: latere-ai/ci/.github/workflows/lateregate.yml@v1
-
-  # `latere devices` under the real sandbox on Linux. The gate's runners have
-  # no srt, so there the device tests run each command unconfined under a
-  # stand-in. This job installs srt and what it uses on Linux (bubblewrap,
-  # socat, ripgrep), so the command's tests and the end-to-end run against a
-  # real cellad go through Cella's local driver confined by srt over
-  # bubblewrap. The engine's own tests, confinement among them, run under the
-  # real sandbox in Cella's CI. Ubuntu's AppArmor blocks the unprivileged user
-  # namespaces bubblewrap needs until they are allowed. A test of this job
-  # that skips, or a run that falls back to the stand-in, fails the job, since
-  # it would prove nothing here.
-  device:
-    name: devices under the real sandbox on Linux
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-      - name: The sandbox runtime and what it uses
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y bubblewrap socat ripgrep netcat-openbsd
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          npm install -g @anthropic-ai/sandbox-runtime
-          srt echo ok
-      - name: The device tests with the real srt
-        run: |
-          set -o pipefail
-          go test -count=1 -v -run '^Test(Connect|Serve|SecondConnect|Devices|LogoutWarns)' ./internal/commands/ ./cmd/latere/ 2>&1 | tee commands.log
-          if grep -E -- '--- SKIP|under a stand-in' commands.log; then
-            echo "a device test skipped or ran under the stand-in, so the real sandbox did not run it" >&2
-            exit 1
-          fi
