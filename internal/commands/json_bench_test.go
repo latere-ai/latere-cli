@@ -5,7 +5,7 @@ package commands
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"io"
 	"strings"
@@ -29,7 +29,7 @@ func jsonBenchEvalsRaws(n int) []evalsRow {
 	rows := make([]evalsRow, n)
 	for i := range rows {
 		raw := fmt.Sprintf(`{"id":"ver_01JA3BQ7Z4M8N2P5R6S7%04d","owner":"org_01HZX3K9T5W2","name":"checkout-regression-%d","digest":"sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08","current":true,"created_at":"2026-10-14T09:30:00Z","kind":"suite","cases":[{"id":"c1","prompt":"Refund the order and explain the policy","expect":"mentions the 30 day window"},{"id":"c2","prompt":"Cancel my subscription","expect":"asks for confirmation"}]}`, i, i)
-		rows[i] = evalsRow{key: fmt.Sprintf("checkout-regression-%d", i), raw: json.RawMessage(raw)}
+		rows[i] = evalsRow{key: fmt.Sprintf("checkout-regression-%d", i), raw: jsontext.Value(raw)}
 	}
 	return rows
 }
@@ -64,8 +64,8 @@ func jsonBenchToolCalls(n int) []*toolCall {
 			Seq:      int64(i*2 + 1),
 			Time:     jsonBenchTime.Add(time.Duration(i) * time.Second),
 			ActionID: fmt.Sprintf("act_ses_01JA3BQ7Z4M8N2P5R6S7T8V9WX_toolu_01A9Q%05d", i),
-			ToolUse:  json.RawMessage(use),
-			Answer:   json.RawMessage(`{"tool_use_id":"toolu_01A9Q00000","result":"allow","message":"ok"}`),
+			ToolUse:  jsontext.Value(use),
+			Answer:   jsontext.Value(`{"tool_use_id":"toolu_01A9Q00000","result":"allow","message":"ok"}`),
 		}
 	}
 	return calls
@@ -74,7 +74,7 @@ func jsonBenchToolCalls(n int) []*toolCall {
 // BenchmarkJSONSessionLogEncode is `latere agents session <id> --json`: the
 // session as the API answered it with its tool calls and hand-backs.
 func BenchmarkJSONSessionLogEncode(b *testing.B) {
-	session := json.RawMessage(`{"id":"ses_01JA3BQ7Z4M8N2P5R6S7T8V9WX","agent_id":"agt_01HZX3K9T5W2","status":"idle","created_at":"2026-10-14T09:30:00Z","title":"Fix the checkout rounding bug"}`)
+	session := jsontext.Value(`{"id":"ses_01JA3BQ7Z4M8N2P5R6S7T8V9WX","agent_id":"agt_01HZX3K9T5W2","status":"idle","created_at":"2026-10-14T09:30:00Z","title":"Fix the checkout rounding bug"}`)
 	for _, sz := range []struct {
 		name  string
 		calls int
@@ -83,7 +83,7 @@ func BenchmarkJSONSessionLogEncode(b *testing.B) {
 			doc := map[string]any{
 				"session":    session,
 				"tool_calls": jsonBenchToolCalls(sz.calls),
-				"hand_backs": []*handBack{{Seq: 9, Time: jsonBenchTime, Payload: json.RawMessage(`{"limit":"consecutive","consecutive":3,"total":3,"effect":"ask"}`)}},
+				"hand_backs": []*handBack{{Seq: 9, Time: jsonBenchTime, Payload: jsontext.Value(`{"limit":"consecutive","consecutive":3,"total":3,"effect":"ask"}`)}},
 			}
 			var buf bytes.Buffer
 			if err := printJSON(&buf, doc); err != nil {
@@ -103,7 +103,7 @@ func BenchmarkJSONSessionLogEncode(b *testing.B) {
 // BenchmarkJSONToolInputSummaryUnmarshal is the one-line summary of a tool
 // call's input that `latere agents session` prints per call.
 func BenchmarkJSONToolInputSummaryUnmarshal(b *testing.B) {
-	input := json.RawMessage(`{"command":"go test ./internal/... -run TestCheckout -count=1 -v","description":"Run the checkout tests","timeout":120000}`)
+	input := jsontext.Value(`{"command":"go test ./internal/... -run TestCheckout -count=1 -v","description":"Run the checkout tests","timeout":120000}`)
 	b.ReportAllocs()
 	b.SetBytes(int64(len(input)))
 	for b.Loop() {
@@ -116,7 +116,7 @@ func BenchmarkJSONToolInputSummaryUnmarshal(b *testing.B) {
 // BenchmarkJSONEvalsWatchFrameMarshal is one line of `latere evals watch
 // --json`: a progress event framed with its id and event name.
 func BenchmarkJSONEvalsWatchFrameMarshal(b *testing.B) {
-	data := json.RawMessage(`{"cell":"model-a/suite-1","state":"running","trials_done":12,"trials":30,"passed":10,"failed":2,"updated_at":"2026-10-14T09:30:00Z"}`)
+	data := jsontext.Value(`{"cell":"model-a/suite-1","state":"running","trials_done":12,"trials":30,"passed":10,"failed":2,"updated_at":"2026-10-14T09:30:00Z"}`)
 	ev := &evals.StreamEvent{Seq: 4821, Type: "cell", Data: data}
 	w := &evalsWatch{out: io.Discard, jsonOut: true, now: func() time.Time { return jsonBenchTime }}
 	var buf bytes.Buffer
@@ -157,7 +157,7 @@ func BenchmarkJSONPlatformErrorUnmarshal(b *testing.B) {
 
 // jsonBenchMemoryList is the answer of the memory list call: n memories, a
 // few projects and the settings object.
-func jsonBenchMemoryList(n int) json.RawMessage {
+func jsonBenchMemoryList(n int) jsontext.Value {
 	var sb strings.Builder
 	sb.WriteString(`{"memories":[`)
 	for i := range n {
@@ -167,7 +167,7 @@ func jsonBenchMemoryList(n int) json.RawMessage {
 		fmt.Fprintf(&sb, `{"id":"mem_01JA3BQ7Z4M8N%05d","project_id":"prj_%d","kind":"feedback","text":"Prefer table driven tests and keep the fixtures next to the test. Run the linter before pushing, never after the review.","created_at":"2026-10-14T09:30:00Z","updated_at":"2026-10-14T09:30:00Z"}`, i, i%3)
 	}
 	sb.WriteString(`],"projects":[{"id":"prj_0","name":"checkout"},{"id":"prj_1","name":"billing"},{"id":"prj_2","name":"mobile"}],"settings":{"enabled":true,"tidy":false,"retention":"90d","scope":"project","share":true,"notes":"on"}}`)
-	return json.RawMessage(sb.String())
+	return jsontext.Value(sb.String())
 }
 
 // BenchmarkJSONMemoryListFilterRoundTrip is `latere memory list --project
@@ -195,7 +195,7 @@ func BenchmarkJSONMemoryListFilterRoundTrip(b *testing.B) {
 // BenchmarkJSONMemorySettingsDecode is `latere memory settings`: the settings
 // object read member by member in the platform's order.
 func BenchmarkJSONMemorySettingsDecode(b *testing.B) {
-	obj := json.RawMessage(`{"enabled":true,"tidy":false,"retention":"90d","scope":"project","share":true,"notes":"on","updated_at":"2026-10-14T09:30:00Z"}`)
+	obj := jsontext.Value(`{"enabled":true,"tidy":false,"retention":"90d","scope":"project","share":true,"notes":"on","updated_at":"2026-10-14T09:30:00Z"}`)
 	b.ReportAllocs()
 	b.SetBytes(int64(len(obj)))
 	for b.Loop() {

@@ -6,7 +6,7 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"io"
 	"net/http"
@@ -53,7 +53,7 @@ func TestAppNameE2E(t *testing.T) {
 			_, _ = io.WriteString(w, `{"error":{"code":"app_not_found","message":"There is no app with this slug in this account.","details":{}}}`)
 			return
 		}
-		if err := json.NewDecoder(r.Body).Decode(&patched); err != nil {
+		if err := json.UnmarshalRead(r.Body, &patched); err != nil {
 			t.Errorf("change body: %v", err)
 		}
 		_, _ = io.WriteString(w, `{"id":"123e4567-e89b-42d3-a456-426614174000","slug":"latere-clients","name":`+jsonString(t, patched["name"])+`,

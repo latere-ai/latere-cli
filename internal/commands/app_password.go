@@ -7,7 +7,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/rand"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"io"
@@ -317,14 +317,14 @@ func putPassword(ctx context.Context, platform *appPlatform, a *apps.App, passwo
 
 // passwordResult is what --json prints: the app as the API answers it,
 // whether it has a password now, and the value when the command made it.
-func passwordResult(app json.RawMessage, set bool, generated string) any {
+func passwordResult(app jsontext.Value, set bool, generated string) any {
 	type state struct {
 		Set       bool   `json:"set"`
 		Generated string `json:"generated,omitempty"`
 	}
 	return struct {
-		App      json.RawMessage `json:"app"`
-		Password state           `json:"password"`
+		App      jsontext.Value `json:"app"`
+		Password state          `json:"password"`
 	}{App: app, Password: state{Set: set, Generated: generated}}
 }
 

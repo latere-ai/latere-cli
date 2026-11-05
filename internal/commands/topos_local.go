@@ -10,7 +10,8 @@ package commands
 import (
 	"bufio"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -611,7 +612,7 @@ type localEvent struct {
 	kind  localEventKind
 	text  string
 	name  string
-	input json.RawMessage
+	input jsontext.Value
 	isErr bool
 	// id is the event id of a localPrompt's or a localRead's message, and
 	// cut is set on a localRead whose message stopped its turn to be read.
@@ -692,12 +693,12 @@ func (r *localRenderer) endTurn() {
 // summarizeToolInput renders a compact "(...)" hint from a tool call's input —
 // the most salient argument (command, path, pattern) — so an action block reads
 // like "⏺ bash (go build ./...)" without dumping the whole JSON.
-func summarizeToolInput(raw json.RawMessage) string {
+func summarizeToolInput(raw jsontext.Value) string {
 	if len(raw) == 0 {
 		return ""
 	}
 	var m map[string]any
-	if json.Unmarshal(raw, &m) != nil {
+	if json.Unmarshal(raw, &m, foreignJSON) != nil {
 		return ""
 	}
 	for _, k := range []string{"command", "file_path", "path", "pattern", "query"} {

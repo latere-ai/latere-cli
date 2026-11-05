@@ -8,7 +8,7 @@ package commands
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"io"
 	"net"
@@ -119,7 +119,7 @@ func (s *served) call(t *testing.T, method, route string, body any) (int, map[st
 	}
 	defer func() { _ = res.Body.Close() }()
 	var answer map[string]any
-	_ = json.NewDecoder(res.Body).Decode(&answer)
+	_ = json.UnmarshalRead(res.Body, &answer)
 	return res.StatusCode, answer
 }
 

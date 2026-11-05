@@ -6,7 +6,7 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -61,7 +61,7 @@ func TestAppAccessE2E(t *testing.T) {
 			var body struct {
 				Audience string `json:"audience"`
 			}
-			_ = json.NewDecoder(r.Body).Decode(&body)
+			_ = json.UnmarshalRead(r.Body, &body)
 			_, _ = fmt.Fprintf(w, `{"actor_token":"actor-for-%s","expires_in":300}`, body.Audience)
 			return
 		}
@@ -71,7 +71,7 @@ func TestAppAccessE2E(t *testing.T) {
 			_, _ = io.WriteString(w, app())
 		case r.Method == http.MethodPatch && r.URL.Path == "/v1/apps/apps/hello":
 			patched = nil
-			_ = json.NewDecoder(r.Body).Decode(&patched)
+			_ = json.UnmarshalRead(r.Body, &patched)
 			visibility = patched["visibility"]
 			_, _ = io.WriteString(w, app())
 		default:
@@ -98,7 +98,7 @@ func TestAppAccessE2E(t *testing.T) {
 				Emails []string `json:"emails"`
 				Role   string   `json:"role"`
 			}
-			_ = json.NewDecoder(r.Body).Decode(&body)
+			_ = json.UnmarshalRead(r.Body, &body)
 			if body.Role != "viewer" {
 				t.Errorf("invite role = %q", body.Role)
 			}

@@ -4,8 +4,8 @@
 package commands
 
 import (
-	"bytes"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -345,28 +345,41 @@ read back.`,
 // labels, so the rotation sends back what the read answered, fields this
 // CLI does not model included, as the console's Rotate does.
 func withSecretValue(raw []byte, value string) ([]byte, error) {
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.UseNumber()
-	var doc map[string]any
-	if err := dec.Decode(&doc); err != nil {
+	// The members are kept as the raw values they were read with, so a
+	// number keeps its digits and a field this CLI does not model is sent
+	// back as it came.
+	var doc map[string]jsontext.Value
+	if err := json.Unmarshal(raw, &doc, secretJSON); err != nil {
 		return nil, fmt.Errorf("the secret as read is not a JSON object: %w", err)
 	}
-	spec, ok := doc["spec"].(map[string]any)
-	if !ok {
+	var spec map[string]jsontext.Value
+	if err := json.Unmarshal(doc["spec"], &spec, secretJSON); err != nil || spec == nil {
 		return nil, errors.New("the secret as read has no spec to keep")
 	}
 	delete(doc, "status")
-	spec["value"] = value
-	var out bytes.Buffer
-	enc := json.NewEncoder(&out)
-	// The object's own text is sent as read; HTML escaping would change
-	// none of it but its bytes.
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(doc); err != nil {
+	quoted, err := json.Marshal(value, secretJSON)
+	if err != nil {
 		return nil, fmt.Errorf("encode the rotated secret: %w", err)
 	}
-	return bytes.TrimSuffix(out.Bytes(), []byte("\n")), nil
+	spec["value"] = quoted
+	if doc["spec"], err = json.Marshal(spec, secretJSON); err != nil {
+		return nil, fmt.Errorf("encode the rotated secret: %w", err)
+	}
+	out, err := json.Marshal(doc, secretJSON)
+	if err != nil {
+		return nil, fmt.Errorf("encode the rotated secret: %w", err)
+	}
+	return out, nil
 }
+
+// secretJSON reads and writes the platform's own answer for a rotation:
+// members in key order, so the body is the same bytes on every run, and a
+// raw member written as it is.
+var secretJSON = json.JoinOptions(
+	json.Deterministic(true),
+	jsontext.AllowDuplicateNames(true),
+	jsontext.AllowInvalidUTF8(true),
+)
 
 // pairHalf is the half of a two-part value that comes from a flag: the
 // username of a basic secret and the client ID of an oauth one, which the
@@ -594,7 +607,7 @@ was created and last used.`,
 			}
 			if jsonF {
 				if raws == nil {
-					raws = []json.RawMessage{}
+					raws = []jsontext.Value{}
 				}
 				return printJSON(cmd.OutOrStdout(), raws)
 			}

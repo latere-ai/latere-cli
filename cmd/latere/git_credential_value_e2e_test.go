@@ -6,7 +6,7 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -59,13 +59,13 @@ func TestGitCredentialRejectsProtocolControlBytesE2E(t *testing.T) {
 					switch {
 					case r.Method == http.MethodPost && r.URL.Path == "/token":
 						refreshes.Add(1)
-						_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "new-root", "refresh_token": "new-refresh", "token_type": "Bearer", "expires_in": 3600})
+						_ = json.MarshalWrite(w, map[string]any{"access_token": "new-root", "refresh_token": "new-refresh", "token_type": "Bearer", "expires_in": 3600})
 					case r.Method == http.MethodPost && r.URL.Path == "/actor-tokens":
 						mints.Add(1)
 						if got := r.Header.Get("Authorization"); got != wantBearer {
 							t.Errorf("mint bearer = %q, want %q", got, wantBearer)
 						}
-						_ = json.NewEncoder(w).Encode(map[string]any{"actor_token": tc.token, "expires_in": 300})
+						_ = json.MarshalWrite(w, map[string]any{"actor_token": tc.token, "expires_in": 300})
 					default:
 						t.Errorf("unexpected auth request: %s %s", r.Method, r.URL.Path)
 						http.NotFound(w, r)

@@ -11,7 +11,8 @@ import (
 	"bytes"
 	"cmp"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -92,7 +93,7 @@ func loadProviderConfig() (providerConfig, error) {
 	if err != nil {
 		return c, err
 	}
-	return c, json.Unmarshal(b, &c)
+	return c, json.Unmarshal(b, &c, foreignJSON)
 }
 
 func saveProviderConfig(c providerConfig) error {
@@ -100,7 +101,7 @@ func saveProviderConfig(c providerConfig) error {
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return err
 	}
-	b, err := json.MarshalIndent(c, "", "  ")
+	b, err := json.Marshal(c, json.Deterministic(true), jsontext.WithIndent("  "))
 	if err != nil {
 		return err
 	}
@@ -303,7 +304,7 @@ func ollamaModel(host, name string) localModel {
 // ollamaContextLength is the context length Ollama reports for model at
 // host: the "<architecture>.context_length" of its POST /api/show answer.
 func ollamaContextLength(ctx context.Context, host, model string) (int64, error) {
-	body, err := json.Marshal(map[string]string{"model": model})
+	body, err := json.Marshal(map[string]string{"model": model}, json.Deterministic(true), json.FormatNilSliceAsNull(true), json.FormatNilMapAsNull(true))
 	if err != nil {
 		return 0, err
 	}
@@ -327,7 +328,7 @@ func ollamaContextLength(ctx context.Context, host, model string) (int64, error)
 	var show struct {
 		ModelInfo map[string]any `json:"model_info"`
 	}
-	if err := json.Unmarshal(raw, &show); err != nil {
+	if err := json.Unmarshal(raw, &show, foreignJSON); err != nil {
 		return 0, fmt.Errorf("read Ollama's answer about %s: %w", model, err)
 	}
 	arch, _ := show.ModelInfo["general.architecture"].(string)

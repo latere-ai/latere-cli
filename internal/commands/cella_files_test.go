@@ -5,7 +5,7 @@ package commands
 
 import (
 	"archive/zip"
-	"encoding/json"
+	"encoding/json/v2"
 	"maps"
 	"os"
 	"path/filepath"

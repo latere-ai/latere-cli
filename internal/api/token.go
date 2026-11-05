@@ -4,7 +4,8 @@
 package api
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"os"
@@ -39,6 +40,14 @@ func AuthTokenPath() string {
 	return config.Path("auth-token.json")
 }
 
+// fileJSON reads auth-token.json, which a person can edit: duplicate keys,
+// invalid UTF-8 and any letter case in a name are accepted.
+var fileJSON = json.JoinOptions(
+	jsontext.AllowDuplicateNames(true),
+	jsontext.AllowInvalidUTF8(true),
+	json.MatchCaseInsensitiveNames(true),
+)
+
 // ErrNoToken means the file does not exist (the user hasn't logged in).
 var ErrNoToken = errors.New("not logged in; run `latere login`")
 
@@ -57,7 +66,7 @@ func LoadAuthToken() (Token, error) {
 		return Token{}, err
 	}
 	var t Token
-	if err := json.Unmarshal(b, &t); err != nil {
+	if err := json.Unmarshal(b, &t, fileJSON); err != nil {
 		return Token{}, fmt.Errorf("parse token file: %w", err)
 	}
 	return t, nil
@@ -74,7 +83,7 @@ func SaveAuthToken(t Token) error {
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 		return err
 	}
-	b, err := json.MarshalIndent(t, "", "  ")
+	b, err := json.Marshal(t, json.Deterministic(true), jsontext.WithIndent("  "))
 	if err != nil {
 		return err
 	}

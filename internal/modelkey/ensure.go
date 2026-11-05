@@ -5,7 +5,7 @@ package modelkey
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"os"
@@ -87,7 +87,7 @@ var DefaultAuth = Auth{
 		ctx, cancel := context.WithTimeout(ctx, keyTimeout)
 		defer cancel()
 		return api.Issuer(authBase, "").CreateKey(ctx, access, &signin.CreateKeyParams{
-			Name: r.Name, Grants: json.RawMessage(ModelGrant), OrgID: r.OrgID, ExpiresAt: r.ExpiresAt,
+			Name: r.Name, Grants: jsontext.Value(ModelGrant), OrgID: r.OrgID, ExpiresAt: r.ExpiresAt,
 		})
 	},
 	Revoke: func(ctx context.Context, authBase, access, id string) error {

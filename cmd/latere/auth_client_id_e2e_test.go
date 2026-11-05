@@ -5,7 +5,7 @@ package main
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"net/http"
@@ -60,7 +60,7 @@ func TestLoginRetainsOAuthClientAcrossSessionE2E(t *testing.T) {
 					}
 				case "/actor-tokens":
 					n := mints.Add(1)
-					_ = json.NewEncoder(w).Encode(map[string]any{
+					_ = json.MarshalWrite(w, map[string]any{
 						"actor_token": fmt.Sprintf("actor-%d", n), "expires_in": 300,
 					})
 				case "/v1/environments/sandboxes":

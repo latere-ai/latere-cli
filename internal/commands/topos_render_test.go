@@ -8,7 +8,7 @@
 package commands
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
 	"strings"
 	"testing"
 )
@@ -28,7 +28,7 @@ func TestSummarizeToolInput(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := summarizeToolInput(json.RawMessage(tc.in)); got != tc.want {
+			if got := summarizeToolInput(jsontext.Value(tc.in)); got != tc.want {
 				t.Fatalf("summarizeToolInput(%s) = %q, want %q", tc.in, got, tc.want)
 			}
 		})

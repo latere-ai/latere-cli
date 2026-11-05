@@ -7,7 +7,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -162,12 +163,12 @@ func (e *platformError) Error() string {
 func parsePlatformError(status int, body []byte) *platformError {
 	e := &platformError{Status: status}
 	var flat struct {
-		Error   json.RawMessage `json:"error"`
-		Code    string          `json:"code"`
-		Message string          `json:"message"`
-		Detail  string          `json:"detail"`
+		Error   jsontext.Value `json:"error"`
+		Code    string         `json:"code"`
+		Message string         `json:"message"`
+		Detail  string         `json:"detail"`
 	}
-	if json.Unmarshal(body, &flat) == nil {
+	if json.Unmarshal(body, &flat, foreignJSON) == nil {
 		e.Code, e.Message, e.Detail = flat.Code, flat.Message, flat.Detail
 		var code string
 		var nested struct {
@@ -177,9 +178,9 @@ func parsePlatformError(status int, body []byte) *platformError {
 		}
 		switch {
 		case len(flat.Error) == 0:
-		case json.Unmarshal(flat.Error, &code) == nil:
+		case json.Unmarshal(flat.Error, &code, foreignJSON) == nil:
 			e.Code = code
-		case json.Unmarshal(flat.Error, &nested) == nil:
+		case json.Unmarshal(flat.Error, &nested, foreignJSON) == nil:
 			e.Code, e.Details = nested.Code, nested.Details
 			if nested.Message != "" {
 				e.Message = nested.Message

@@ -4,7 +4,7 @@
 package main
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"net/http"
 )
 
@@ -18,7 +18,7 @@ func serveDiscovery(w http.ResponseWriter, r *http.Request) bool {
 	}
 	base := "http://" + r.Host
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{
+	_ = json.MarshalWrite(w, map[string]string{
 		"issuer":                        base,
 		"authorization_endpoint":        base + "/authorize",
 		"token_endpoint":                base + "/token",

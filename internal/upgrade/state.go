@@ -4,7 +4,8 @@
 package upgrade
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"os"
 	"path/filepath"
@@ -47,7 +48,7 @@ func configDir() string {
 // explicit false: auto-upgrade is on by default, and only an explicit
 // `latere upgrade --auto off` turns it off.
 type Config struct {
-	AutoUpgrade *bool `json:"auto_upgrade,omitempty"`
+	AutoUpgrade *bool `json:"auto_upgrade,omitzero"`
 }
 
 // AutoUpgradeEnabled reports the effective setting, defaulting to true when
@@ -55,6 +56,14 @@ type Config struct {
 func (c Config) AutoUpgradeEnabled() bool {
 	return c.AutoUpgrade == nil || *c.AutoUpgrade
 }
+
+// fileJSON reads config.json and update-check.json, which a person can edit:
+// duplicate keys, invalid UTF-8 and any letter case in a name are accepted.
+var fileJSON = json.JoinOptions(
+	jsontext.AllowDuplicateNames(true),
+	jsontext.AllowInvalidUTF8(true),
+	json.MatchCaseInsensitiveNames(true),
+)
 
 func configPath() string {
 	d := configDir()
@@ -77,7 +86,7 @@ func LoadConfig() Config {
 	if err != nil {
 		return c
 	}
-	_ = json.Unmarshal(b, &c)
+	_ = json.Unmarshal(b, &c, fileJSON)
 	return c
 }
 
@@ -88,7 +97,7 @@ func SaveConfig(c Config) error {
 	if p == "" {
 		return errors.New("cannot determine config path")
 	}
-	b, err := json.MarshalIndent(c, "", "  ")
+	b, err := json.Marshal(c, json.Deterministic(true), jsontext.WithIndent("  "))
 	if err != nil {
 		return err
 	}
@@ -165,7 +174,7 @@ func loadState() checkState {
 	if err != nil {
 		return s
 	}
-	_ = json.Unmarshal(b, &s)
+	_ = json.Unmarshal(b, &s, fileJSON)
 	return s
 }
 
@@ -174,7 +183,7 @@ func saveState(s checkState) error {
 	if p == "" {
 		return errors.New("cannot determine state path")
 	}
-	b, err := json.MarshalIndent(s, "", "  ")
+	b, err := json.Marshal(s, json.Deterministic(true), jsontext.WithIndent("  "))
 	if err != nil {
 		return err
 	}

@@ -5,7 +5,7 @@ package main
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -64,7 +64,7 @@ func TestProductCommandsNeverRefreshCellaCredentialsE2E(t *testing.T) {
 						var body struct {
 							Audience string `json:"audience"`
 						}
-						if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+						if err := json.UnmarshalRead(r.Body, &body); err != nil {
 							t.Error(err)
 						}
 						if body.Audience == platformAudience {

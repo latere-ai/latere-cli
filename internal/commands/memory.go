@@ -5,7 +5,8 @@ package commands
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -561,29 +562,29 @@ func writeProjectsWithMemory(b *strings.Builder, list *memory.List) {
 // filterRaw answers raw, a JSON object, with the array under key kept to
 // the elements keep accepts, so --json of one project keeps the shape of
 // the platform's answer.
-func filterRaw(raw json.RawMessage, key string, keep func(i int) bool) (json.RawMessage, error) {
-	var obj map[string]json.RawMessage
+func filterRaw(raw jsontext.Value, key string, keep func(i int) bool) (jsontext.Value, error) {
+	var obj map[string]jsontext.Value
 	if err := json.Unmarshal(raw, &obj); err != nil {
 		return nil, fmt.Errorf("parse the platform's answer: %w", err)
 	}
-	var items []json.RawMessage
+	var items []jsontext.Value
 	if len(obj[key]) > 0 {
 		if err := json.Unmarshal(obj[key], &items); err != nil {
 			return nil, fmt.Errorf("parse the platform's answer: %w", err)
 		}
 	}
-	kept := []json.RawMessage{}
+	kept := []jsontext.Value{}
 	for i, item := range items {
 		if keep(i) {
 			kept = append(kept, item)
 		}
 	}
-	b, err := json.Marshal(kept)
+	b, err := json.Marshal(kept, rawJSONOpts)
 	if err != nil {
 		return nil, err
 	}
 	obj[key] = b
-	return json.Marshal(obj)
+	return json.Marshal(obj, rawJSONOpts)
 }
 
 // plural is n and the word, with its plural when n is not one.

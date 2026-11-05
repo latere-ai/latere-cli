@@ -6,7 +6,7 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -65,7 +65,7 @@ func TestAppRenameE2E(t *testing.T) {
 			_, _ = io.WriteString(w, app())
 		case r.Method == http.MethodPatch && r.URL.Path == "/v1/apps/apps/"+slug:
 			var body map[string]string
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			if err := json.UnmarshalRead(r.Body, &body); err != nil {
 				t.Errorf("rename body: %v", err)
 			}
 			patched = append(patched, body)

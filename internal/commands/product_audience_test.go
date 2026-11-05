@@ -5,7 +5,7 @@ package commands
 
 import (
 	"encoding/base64"
-	"encoding/json"
+	"encoding/json/v2"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -41,8 +41,8 @@ func newProductStub(t *testing.T) *productStub {
 				Audience string `json:"audience"`
 				TTL      int64  `json:"ttl_seconds"`
 			}
-			_ = json.NewDecoder(r.Body).Decode(&body)
-			_ = json.NewEncoder(w).Encode(map[string]any{
+			_ = json.UnmarshalRead(r.Body, &body)
+			_ = json.MarshalWrite(w, map[string]any{
 				"actor_token": fakeJWT(t, map[string]any{
 					"sub": "u-1", "org_id": "o-1", "actor": true,
 					"iss": audienceIssuer, "aud": body.Audience,

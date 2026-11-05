@@ -4,7 +4,7 @@
 package commands
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"slices"
 	"strings"
 	"testing"
@@ -31,7 +31,7 @@ func TestCellaExecRunsToCompletion(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := `{"command":["make","test"],"env":{"DEBUG":"1"},"timeout":"30s","workdir":"/workspace/app"}`
-	if got, _ := json.Marshal(body); string(got) != want {
+	if got, _ := json.Marshal(body, json.Deterministic(true)); string(got) != want {
 		t.Errorf("exec body = %s, want %s", got, want)
 	}
 }
@@ -86,15 +86,21 @@ func TestCellaRunEphemeral(t *testing.T) {
 		t.Fatalf("requests = %v, want %v", got, want)
 	}
 	var manifest struct {
-		Metadata struct{ Name string }
-		Spec     struct {
-			Image     string
-			Resources struct{ CPU, Memory, Disk string }
+		Metadata struct {
+			Name string `json:"name"`
+		} `json:"metadata"`
+		Spec struct {
+			Image     string `json:"image"`
+			Resources struct {
+				CPU    string `json:"cpu"`
+				Memory string `json:"memory"`
+				Disk   string `json:"disk"`
+			} `json:"resources"`
 			Lifecycle struct {
 				AutoStop string `json:"autoStop"`
 				TTL      string `json:"ttl"`
-			}
-		}
+			} `json:"lifecycle"`
+		} `json:"spec"`
 	}
 	if err := json.Unmarshal(reqs[0].Body, &manifest); err != nil {
 		t.Fatal(err)

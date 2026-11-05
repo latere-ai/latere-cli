@@ -7,7 +7,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"io"
@@ -453,7 +453,7 @@ func newCeListCmd() *cobra.Command {
 			}
 			if jsonF {
 				if raws == nil {
-					raws = []json.RawMessage{}
+					raws = []jsontext.Value{}
 				}
 				return printJSON(cmd.OutOrStdout(), raws)
 			}
@@ -492,12 +492,12 @@ func newCeGetCmd() *cobra.Command {
 
 // printRawJSON writes the control plane's own bytes, indented.
 func printRawJSON(out io.Writer, raw []byte) error {
-	var buf bytes.Buffer
-	if err := json.Indent(&buf, raw, "", "  "); err != nil {
+	v := jsontext.Value(bytes.Clone(raw))
+	if err := v.Indent(jsontext.WithIndent("  "), jsontext.AllowDuplicateNames(true), jsontext.AllowInvalidUTF8(true)); err != nil {
 		return fmt.Errorf("the answer is not JSON: %w", err)
 	}
-	buf.WriteByte('\n')
-	_, err := out.Write(buf.Bytes())
+	v = append(v, '\n')
+	_, err := out.Write(v)
 	return err
 }
 

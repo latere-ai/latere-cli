@@ -6,7 +6,7 @@ package commands
 import (
 	"bytes"
 	"cmp"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -73,7 +73,7 @@ func newKeyWorld(t *testing.T, orgID string) *keyWorld {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/me/keys":
 			var body map[string]any
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			if err := json.UnmarshalRead(r.Body, &body); err != nil {
 				t.Errorf("decode: %v", err)
 			}
 			w.mu.Lock()
@@ -88,7 +88,7 @@ func newKeyWorld(t *testing.T, orgID string) *keyWorld {
 				return
 			}
 			rw.WriteHeader(http.StatusCreated)
-			_ = json.NewEncoder(rw).Encode(map[string]any{
+			_ = json.MarshalWrite(rw, map[string]any{
 				"id": id, "prefix": "pat_" + id, "key": "pat_" + id + ".value", "status": status,
 			})
 		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/me/keys/"):
@@ -97,7 +97,7 @@ func newKeyWorld(t *testing.T, orgID string) *keyWorld {
 			w.mu.Unlock()
 			rw.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/models/.well-known/lux":
-			_ = json.NewEncoder(rw).Encode(map[string]any{"name": "lux", "doors": map[string]string{
+			_ = json.MarshalWrite(rw, map[string]any{"name": "lux", "doors": map[string]string{
 				"anthropic": w.modelsURL() + "/anthropic", "openai": w.modelsURL() + "/openai", "lux": w.modelsURL() + "/lux",
 			}})
 		case strings.HasPrefix(r.URL.Path, "/v1/models/openai/v1/"), strings.HasPrefix(r.URL.Path, "/v1/models/anthropic/v1/"),
@@ -141,7 +141,7 @@ func (w *keyWorld) serveCore(t *testing.T, rw http.ResponseWriter, r *http.Reque
 		Stream bool   `json:"stream"`
 	}
 	if r.Method == http.MethodPost {
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		if err := json.UnmarshalRead(r.Body, &body); err != nil {
 			t.Errorf("decode core body: %v", err)
 		}
 	}

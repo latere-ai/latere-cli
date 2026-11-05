@@ -6,7 +6,7 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"io"
 	"net/http"
@@ -41,7 +41,7 @@ func TestReposE2E(t *testing.T) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/repositories":
 			var body map[string]string
-			_ = json.NewDecoder(r.Body).Decode(&body)
+			_ = json.UnmarshalRead(r.Body, &body)
 			if body["slug"] == "taken" {
 				w.WriteHeader(http.StatusConflict)
 				_, _ = io.WriteString(w, `{"error":"conflict","message":"That name is already taken under this owner."}`)
@@ -51,7 +51,7 @@ func TestReposE2E(t *testing.T) {
 			created = body
 			mu.Unlock()
 			w.WriteHeader(http.StatusCreated)
-			_ = json.NewEncoder(w).Encode(map[string]string{"id": body["id"], "owner_type": "principal", "owner_id": "p1",
+			_ = json.MarshalWrite(w, map[string]string{"id": body["id"], "owner_type": "principal", "owner_id": "p1",
 				"owner_label": body["owner_label"], "slug": body["slug"], "visibility": body["visibility"]})
 		case r.Method == http.MethodGet && r.URL.Path == "/repositories":
 			_, _ = io.WriteString(w, `{"context":{"owner_type":"principal","owner_id":"p1","label":"alice","name":"alice"},

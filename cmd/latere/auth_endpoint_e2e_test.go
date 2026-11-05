@@ -6,7 +6,7 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -106,7 +106,7 @@ func TestProductMintUsesConfiguredAuthEndpointE2E(t *testing.T) {
 						var body struct {
 							Audience string `json:"audience"`
 						}
-						_ = json.NewDecoder(r.Body).Decode(&body)
+						_ = json.UnmarshalRead(r.Body, &body)
 						if body.Audience != "origo" {
 							t.Errorf("actor mint audience = %q, want origo", body.Audience)
 						}

@@ -13,7 +13,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
-	"encoding/json"
+	"encoding/json/v2"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -224,7 +224,7 @@ func TestDevicesConnectEndToEnd(t *testing.T) {
 			_, _ = io.WriteString(w, `{"tenant":{"labels":{"platform.latere.ai/tenant":"p-alice","platform.latere.ai/principal":"alice"}}}`)
 		case r.Method == http.MethodPatch && strings.HasPrefix(r.URL.Path, "/v1/account/devices/"):
 			var body map[string]string
-			_ = json.NewDecoder(r.Body).Decode(&body)
+			_ = json.UnmarshalRead(r.Body, &body)
 			mu.Lock()
 			named[strings.TrimPrefix(r.URL.Path, "/v1/account/devices/")] = body["name"]
 			mu.Unlock()
@@ -536,7 +536,7 @@ func TestDevicesServeThroughTheSocketEndToEnd(t *testing.T) {
 			_, _ = io.WriteString(w, `{"tenant":{"labels":{"platform.latere.ai/tenant":"p-alice","platform.latere.ai/principal":"alice"}}}`)
 		case r.Method == http.MethodPatch && strings.HasPrefix(r.URL.Path, "/v1/account/devices/"):
 			var body map[string]string
-			_ = json.NewDecoder(r.Body).Decode(&body)
+			_ = json.UnmarshalRead(r.Body, &body)
 			mu.Lock()
 			named[strings.TrimPrefix(r.URL.Path, "/v1/account/devices/")] = body["name"]
 			mu.Unlock()
@@ -620,7 +620,7 @@ func TestDevicesServeThroughTheSocketEndToEnd(t *testing.T) {
 		}
 		defer func() { _ = res.Body.Close() }()
 		var answer map[string]any
-		_ = json.NewDecoder(res.Body).Decode(&answer)
+		_ = json.UnmarshalRead(res.Body, &answer)
 		return res.StatusCode, answer
 	}
 	waitState := func(want string) map[string]any {

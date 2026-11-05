@@ -6,7 +6,7 @@ package main
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -89,7 +89,7 @@ func TestOrgSwitchUpdatesTheSavedLoginE2E(t *testing.T) {
 					case "zero":
 						reply["expires_in"] = 0
 					}
-					_ = json.NewEncoder(w).Encode(reply)
+					_ = json.MarshalWrite(w, reply)
 				case "/actor-tokens":
 					if r.Header.Get("Authorization") != "Bearer "+newAuth {
 						t.Error("actor token minted from previous identity")

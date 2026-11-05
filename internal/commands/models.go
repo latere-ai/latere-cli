@@ -5,7 +5,7 @@ package commands
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -167,7 +167,7 @@ func commandModelsOrigin(modelsURL string) (string, error) {
 type modelEntry struct {
 	ID      string `json:"id"`
 	Object  string `json:"object,omitempty"`
-	Created int64  `json:"created,omitempty"`
+	Created int64  `json:"created,omitzero"`
 	OwnedBy string `json:"owned_by,omitempty"`
 }
 
@@ -390,7 +390,7 @@ Name the model as 'latere models' lists it.`,
 				return wrapModelsErr(err)
 			}
 			if jsonF {
-				raw, err := json.Marshal(answer.Response)
+				raw, err := json.Marshal(answer.Response, rawJSONOpts)
 				if err != nil {
 					return fmt.Errorf("render the response: %w", err)
 				}

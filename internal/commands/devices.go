@@ -7,7 +7,8 @@ package commands
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"os"
@@ -114,9 +115,7 @@ sessions use. This computer is marked with *.`,
 			}
 			if jsonF {
 				// The platform's own answer, with every field it sends.
-				enc := json.NewEncoder(cmd.OutOrStdout())
-				enc.SetIndent("", "  ")
-				return enc.Encode(list.RawJSON())
+				return printJSON(cmd.OutOrStdout(), list.RawJSON())
 			}
 			return printDevices(cmd.OutOrStdout(), list, policy.Device)
 		},
@@ -426,7 +425,7 @@ kept whatever the platform records.
 			out := cmd.OutOrStdout()
 			show := func(e device.Entry) error {
 				if jsonF {
-					return json.NewEncoder(out).Encode(e)
+					return json.MarshalEncode(jsontext.NewEncoder(out, jsontext.AllowInvalidUTF8(true)), e)
 				}
 				_, err := fmt.Fprintln(out, e.Line(paths.Home))
 				return err

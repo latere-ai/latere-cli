@@ -5,7 +5,7 @@ package commands
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"io"
@@ -594,8 +594,8 @@ one was set, or null.`,
 			out := cmd.OutOrStdout()
 			if jsonF {
 				return printJSON(out, struct {
-					App    json.RawMessage `json:"app"`
-					Access json.RawMessage `json:"access"`
+					App    jsontext.Value `json:"app"`
+					Access jsontext.Value `json:"access"`
 				}{App: a.RawJSON(), Access: access.RawJSON()})
 			}
 			return printAccess(out, a, access)

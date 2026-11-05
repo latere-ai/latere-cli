@@ -6,7 +6,7 @@ package commands
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"io"
 	"net/http"
@@ -53,14 +53,14 @@ func newAuthStub(t *testing.T) *authStub {
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{
+			_ = json.MarshalWrite(w, map[string]any{
 				"access_token": "access-new", "token_type": "Bearer",
 				"refresh_token": "refresh-new", "expires_in": 3600,
 			})
 		case "/actor-tokens":
 			s.mints++
 			var body map[string]any
-			_ = json.NewDecoder(r.Body).Decode(&body)
+			_ = json.UnmarshalRead(r.Body, &body)
 			s.mintBearer = r.Header.Get("Authorization")
 			s.mintAudience, _ = body["audience"].(string)
 			s.mintTTL, _ = body["ttl_seconds"].(float64)
@@ -69,7 +69,7 @@ func newAuthStub(t *testing.T) *authStub {
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{"actor_token": mintedActor, "expires_in": 300})
+			_ = json.MarshalWrite(w, map[string]any{"actor_token": mintedActor, "expires_in": 300})
 		default:
 			http.Error(w, "unexpected "+r.URL.Path, http.StatusNotFound)
 		}

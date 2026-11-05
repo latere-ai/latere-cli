@@ -6,7 +6,7 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"io"
 	"net/http"
@@ -49,7 +49,7 @@ func TestEvalsE2E(t *testing.T) {
 			var body struct {
 				Audience string `json:"audience"`
 			}
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			if err := json.UnmarshalRead(r.Body, &body); err != nil {
 				t.Errorf("mint body: %v", err)
 			}
 			mu.Lock()

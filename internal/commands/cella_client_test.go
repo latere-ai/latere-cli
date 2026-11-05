@@ -4,7 +4,7 @@
 package commands
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -155,13 +155,13 @@ func TestCellaTokenMintedAndReminted(t *testing.T) {
 				var body struct {
 					Audience string `json:"audience"`
 				}
-				_ = json.NewDecoder(r.Body).Decode(&body)
+				_ = json.UnmarshalRead(r.Body, &body)
 				if body.Audience != "cella" {
 					t.Errorf("minted for %q, want cella", body.Audience)
 				}
 				n := mints.Add(1)
 				w.Header().Set("Content-Type", "application/json")
-				_ = json.NewEncoder(w).Encode(map[string]any{
+				_ = json.MarshalWrite(w, map[string]any{
 					"actor_token": fakeJWT(t, map[string]any{"aud": body.Audience, "n": n}),
 					"expires_in":  tc.expiresIn,
 				})

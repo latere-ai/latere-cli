@@ -9,7 +9,7 @@ package commands
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"os"
 	"path/filepath"
@@ -343,7 +343,7 @@ func TestLocalSendNowMovesACommand(t *testing.T) {
 type holdTool struct{}
 
 func (holdTool) Definition() tools.Definition {
-	return tools.Definition{Name: "hold", Description: "Waits until canceled.", InputSchema: json.RawMessage(`{"type":"object"}`)}
+	return tools.Definition{Name: "hold", Description: "Waits until canceled.", InputSchema: jsontext.Value(`{"type":"object"}`)}
 }
 
 func (holdTool) Properties() tools.Properties { return tools.Properties{Effect: tools.EffectNone} }
@@ -696,7 +696,7 @@ func TestLocalRendererOutput(t *testing.T) {
 			r := &localRenderer{}
 			r.render(localEvent{kind: localText, text: "Hello"})
 			r.render(localEvent{kind: localText, text: " world"})
-			r.render(localEvent{kind: localToolUse, name: "bash", input: json.RawMessage(`{"command":"ls\tx"}`)})
+			r.render(localEvent{kind: localToolUse, name: "bash", input: jsontext.Value(`{"command":"ls\tx"}`)})
 			r.render(localEvent{kind: localToolResult, text: "ok\nmore"})
 			r.render(localEvent{kind: localToolResult, text: "bad", isErr: true})
 			r.endTurn()
@@ -818,7 +818,7 @@ func TestLocalRecordSkipsAnEventItCannotRead(t *testing.T) {
 	rec := &recorder{}
 	agent := &localAgent{emit: rec.emit}
 	for _, typ := range []session.Type{session.TypeAgentToolUse, session.TypeToolResult, session.TypeUserMessage, session.TypeModelRequest} {
-		agent.record(session.Event{Type: typ, Seq: agent.seen + 1, Payload: json.RawMessage(`{`)})
+		agent.record(session.Event{Type: typ, Seq: agent.seen + 1, Payload: jsontext.Value(`{`)})
 	}
 	if got := rec.all(); len(got) != 0 {
 		t.Fatalf("the agent told %+v of events it could not read", got)

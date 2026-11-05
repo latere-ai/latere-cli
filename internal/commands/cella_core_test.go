@@ -6,7 +6,7 @@ package commands
 import (
 	"archive/tar"
 	"bytes"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"io"
 	"net/http"
@@ -205,7 +205,7 @@ func coreSandbox(name, phase, reason string) map[string]any {
 func (f *fakeCore) answer(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(v); err != nil {
+	if err := json.MarshalWrite(w, v); err != nil {
 		f.t.Errorf("write answer: %v", err)
 	}
 }

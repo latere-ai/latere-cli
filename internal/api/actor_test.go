@@ -4,7 +4,7 @@
 package api
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -44,7 +44,7 @@ func newIssuerStub(t *testing.T) *issuerStub {
 			Audience string `json:"audience"`
 			TTL      int64  `json:"ttl_seconds"`
 		}
-		_ = json.NewDecoder(r.Body).Decode(&body)
+		_ = json.UnmarshalRead(r.Body, &body)
 		s.audience.Store(body.Audience)
 		s.ttl.Store(body.TTL)
 		if s.status != 0 {
@@ -53,7 +53,7 @@ func newIssuerStub(t *testing.T) *issuerStub {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		_ = json.MarshalWrite(w, map[string]any{
 			"actor_token": "actor-for-" + body.Audience,
 			"expires_in":  body.TTL,
 		})

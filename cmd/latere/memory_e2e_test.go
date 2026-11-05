@@ -6,7 +6,7 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"io"
 	"net/http"
@@ -55,7 +55,7 @@ func TestMemoryE2E(t *testing.T) {
 			var mint struct {
 				Audience string `json:"audience"`
 			}
-			if err := json.NewDecoder(r.Body).Decode(&mint); err != nil {
+			if err := json.UnmarshalRead(r.Body, &mint); err != nil {
 				t.Errorf("mint body: %v", err)
 			}
 			audiences = append(audiences, mint.Audience)

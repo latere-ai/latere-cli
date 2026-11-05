@@ -7,7 +7,8 @@ import (
 	"bytes"
 	"cmp"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -179,7 +180,7 @@ func newEvalsClient(flagURL, authURL string) (*evalsClient, error) {
 
 // raw is a model of the Evals API that keeps the JSON it was answered with,
 // which --json prints.
-type raw interface{ RawJSON() json.RawMessage }
+type raw interface{ RawJSON() jsontext.Value }
 
 // pages reads a list one page at a time from cursor "": its first page, or
 // with all every page. more reports a page the read left unread.
@@ -216,8 +217,8 @@ func every[T any](c *evalsClient, seq iter.Seq2[T, error]) ([]T, error) {
 }
 
 // raws are the items' JSON as the API answered them.
-func raws[T raw](items []T) []json.RawMessage {
-	out := make([]json.RawMessage, len(items))
+func raws[T raw](items []T) []jsontext.Value {
+	out := make([]jsontext.Value, len(items))
 	for i, item := range items {
 		out[i] = item.RawJSON()
 	}
@@ -246,11 +247,11 @@ var evalsRecordFields = []string{"id", "owner", "name", "digest", "current", "cr
 type evalsRow struct {
 	evals.Version
 	key string
-	raw json.RawMessage
+	raw jsontext.Value
 }
 
 // RawJSON is the version as the API answered it.
-func (r evalsRow) RawJSON() json.RawMessage { return r.raw }
+func (r evalsRow) RawJSON() jsontext.Value { return r.raw }
 
 // evalsKind is a kind of definition the API keeps in versions, how its
 // list shows it, and the SDK's calls that read it.
@@ -267,7 +268,7 @@ type evalsKind struct {
 	// version a ref names, as the API answered it.
 	list     func(ctx context.Context, ev *evals.Client, cursor string) (*latere.Page[evalsRow], error)
 	versions func(ctx context.Context, ev *evals.Client, name, cursor string) (*latere.Page[evalsRow], error)
-	get      func(ctx context.Context, ev *evals.Client, ref string) (json.RawMessage, error)
+	get      func(ctx context.Context, ev *evals.Client, ref string) (jsontext.Value, error)
 }
 
 // evalsRows is a page of definitions as rows, row giving each one's record
@@ -285,7 +286,7 @@ func evalsRows[P raw](page *latere.Page[P], err error, row func(P) (evals.Versio
 }
 
 // rawOf is a definition as the API answered it.
-func rawOf[P raw](v P, err error) (json.RawMessage, error) {
+func rawOf[P raw](v P, err error) (jsontext.Value, error) {
 	if err != nil {
 		return nil, err
 	}
@@ -331,7 +332,7 @@ var evalsKinds = []evalsKind{
 			p, err := ev.ListMetricVersionsPage(ctx, name, listParams(cursor))
 			return evalsRows(p, err, metricRow)
 		},
-		get: func(ctx context.Context, ev *evals.Client, ref string) (json.RawMessage, error) {
+		get: func(ctx context.Context, ev *evals.Client, ref string) (jsontext.Value, error) {
 			return rawOf(ev.GetMetric(ctx, ref))
 		},
 	},
@@ -345,7 +346,7 @@ var evalsKinds = []evalsKind{
 			p, err := ev.ListGraderVersionsPage(ctx, name, listParams(cursor))
 			return evalsRows(p, err, graderRow)
 		},
-		get: func(ctx context.Context, ev *evals.Client, ref string) (json.RawMessage, error) {
+		get: func(ctx context.Context, ev *evals.Client, ref string) (jsontext.Value, error) {
 			return rawOf(ev.GetGrader(ctx, ref))
 		},
 	},
@@ -359,7 +360,7 @@ var evalsKinds = []evalsKind{
 			p, err := ev.ListTaskVersionsPage(ctx, name, listParams(cursor))
 			return evalsRows(p, err, taskRow)
 		},
-		get: func(ctx context.Context, ev *evals.Client, ref string) (json.RawMessage, error) {
+		get: func(ctx context.Context, ev *evals.Client, ref string) (jsontext.Value, error) {
 			return rawOf(ev.GetTask(ctx, ref))
 		},
 	},
@@ -373,7 +374,7 @@ var evalsKinds = []evalsKind{
 			p, err := ev.ListSuiteVersionsPage(ctx, name, listParams(cursor))
 			return evalsRows(p, err, suiteRow)
 		},
-		get: func(ctx context.Context, ev *evals.Client, ref string) (json.RawMessage, error) {
+		get: func(ctx context.Context, ev *evals.Client, ref string) (jsontext.Value, error) {
 			return rawOf(ev.GetSuite(ctx, ref))
 		},
 	},
@@ -387,7 +388,7 @@ var evalsKinds = []evalsKind{
 			p, err := ev.ListCandidateVersionsPage(ctx, name, listParams(cursor))
 			return evalsRows(p, err, candidateRow)
 		},
-		get: func(ctx context.Context, ev *evals.Client, ref string) (json.RawMessage, error) {
+		get: func(ctx context.Context, ev *evals.Client, ref string) (jsontext.Value, error) {
 			return rawOf(ev.GetCandidate(ctx, ref))
 		},
 	},
@@ -531,7 +532,7 @@ current one marked. --json prints the API's answer.`,
 
 // printVersion prints a version's record as fields, then the kind's own
 // fields as YAML, the form a definition is written in.
-func printVersion(out io.Writer, raw json.RawMessage) error {
+func printVersion(out io.Writer, raw jsontext.Value) error {
 	var v evals.Version
 	if err := json.Unmarshal(raw, &v); err != nil {
 		return &exitError{code: exitNoAnswer, err: fmt.Errorf("read the Evals API's answer: %w", err)}
@@ -1380,7 +1381,7 @@ func (w *evalsWatch) follow(ctx context.Context) error {
 // otherwise. With --json it is printed first, as the API sent it.
 func (w *evalsWatch) refused(e *evals.StreamError) error {
 	if w.jsonOut {
-		data, err := json.Marshal(map[string]any{"error": map[string]any{"code": e.Code, "message": e.Message, "details": e.Details}})
+		data, err := json.Marshal(map[string]any{"error": map[string]any{"code": e.Code, "message": e.Message, "details": e.Details}}, rawJSONOpts)
 		if err != nil {
 			return fmt.Errorf("render the error frame: %w", err)
 		}
@@ -1426,11 +1427,15 @@ func (w *evalsWatch) printFrame(ev *evals.StreamEvent) error {
 	if ev.Seq > 0 {
 		id = strconv.FormatInt(ev.Seq, 10)
 	}
+	data := ev.Data
+	if len(data) == 0 {
+		data = nil
+	}
 	b, err := json.Marshal(struct {
-		ID    string          `json:"id,omitempty"`
-		Event string          `json:"event"`
-		Data  json.RawMessage `json:"data,omitempty"`
-	}{id, string(ev.Type), ev.Data})
+		ID    string         `json:"id,omitempty"`
+		Event string         `json:"event"`
+		Data  jsontext.Value `json:"data,omitzero"`
+	}{id, string(ev.Type), data}, rawJSONOpts)
 	if err != nil {
 		return fmt.Errorf("render the %s frame: %w", ev.Type, err)
 	}

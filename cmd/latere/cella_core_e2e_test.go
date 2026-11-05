@@ -5,7 +5,7 @@ package main
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"io"
 	"net/http"
@@ -77,7 +77,7 @@ func newE2ECore(t *testing.T) *e2eCore {
 		answer := func(status int, v any) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(status)
-			_ = json.NewEncoder(w).Encode(v)
+			_ = json.MarshalWrite(w, v)
 		}
 		parts := strings.Split(strings.TrimPrefix(rest, "/"), "/")
 		switch {
@@ -161,7 +161,7 @@ func (c *e2eCore) serveSecret(t *testing.T, w http.ResponseWriter, r *http.Reque
 	answer := func(status int, v any) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
-		_ = json.NewEncoder(w).Encode(v)
+		_ = json.MarshalWrite(w, v)
 	}
 	switch {
 	case rest == "" && r.Method == http.MethodPost:

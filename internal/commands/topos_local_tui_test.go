@@ -9,7 +9,7 @@ package commands
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"path/filepath"
 	"regexp"
@@ -35,7 +35,7 @@ func TestLocalTUIFrameLayout(t *testing.T) {
 	m.Update(localEventMsg{ev: localEvent{kind: localText,
 		text: "A **bold** word and a paragraph long enough that it must wrap at the viewport width rather than running off the right edge of the terminal, plus a `code` span.",
 	}})
-	m.Update(localEventMsg{ev: localEvent{kind: localToolUse, name: "bash", input: json.RawMessage(`{"command":"go build ./..."}`)}})
+	m.Update(localEventMsg{ev: localEvent{kind: localToolUse, name: "bash", input: jsontext.Value(`{"command":"go build ./..."}`)}})
 	m.Update(localTurnDoneMsg{elapsed: 3 * time.Second})
 
 	frame := ansiRE.ReplaceAllString(m.View().Content, "")
@@ -144,7 +144,7 @@ func TestLocalTUISizingAndStreaming(t *testing.T) {
 	}
 
 	// A tool call closes the assistant block and records name + arg hint.
-	m.Update(localEventMsg{ev: localEvent{kind: localToolUse, name: "glob", input: json.RawMessage(`{"pattern":"*.go"}`)}})
+	m.Update(localEventMsg{ev: localEvent{kind: localToolUse, name: "glob", input: jsontext.Value(`{"pattern":"*.go"}`)}})
 	if m.openAssistant() != nil {
 		t.Fatal("a tool call should close the assistant block")
 	}

@@ -4,7 +4,8 @@
 package api
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"os"
 	"path/filepath"
 	"testing"
@@ -27,14 +28,14 @@ func jsonBenchToken() Token {
 // and is left out.
 func BenchmarkJSONAuthTokenSaveMarshal(b *testing.B) {
 	t := jsonBenchToken()
-	enc, err := json.MarshalIndent(t, "", "  ")
+	enc, err := json.Marshal(t, json.Deterministic(true), jsontext.WithIndent("  "))
 	if err != nil {
 		b.Fatal(err)
 	}
 	b.ReportAllocs()
 	b.SetBytes(int64(len(enc)))
 	for b.Loop() {
-		if _, err := json.MarshalIndent(t, "", "  "); err != nil {
+		if _, err := json.Marshal(t, json.Deterministic(true), jsontext.WithIndent("  ")); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -43,7 +44,7 @@ func BenchmarkJSONAuthTokenSaveMarshal(b *testing.B) {
 // BenchmarkJSONAuthTokenLoadUnmarshal is LoadAuthToken, which every command
 // that talks to a product API runs to read the saved login.
 func BenchmarkJSONAuthTokenLoadUnmarshal(b *testing.B) {
-	enc, err := json.MarshalIndent(jsonBenchToken(), "", "  ")
+	enc, err := json.Marshal(jsonBenchToken(), json.Deterministic(true), jsontext.WithIndent("  "))
 	if err != nil {
 		b.Fatal(err)
 	}

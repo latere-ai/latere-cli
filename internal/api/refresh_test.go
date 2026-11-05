@@ -5,7 +5,7 @@ package api
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -60,7 +60,7 @@ func TestRefreshAuthTokenPersistsAndPreservesRefreshToken(t *testing.T) {
 		}
 		// Omit refresh_token in the reply: the previous one must be kept.
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		_ = json.MarshalWrite(w, map[string]any{
 			"access_token": "new-access", "token_type": "Bearer", "expires_in": 3600,
 		})
 	})

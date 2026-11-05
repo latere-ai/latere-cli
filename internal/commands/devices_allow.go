@@ -8,7 +8,7 @@ package commands
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"net"
@@ -136,7 +136,7 @@ func splitAllowed(arg string) (string, int, error) {
 // Nothing listening is device_not_serving; a refusal is the engine's own
 // code, with its sentence and its detail.
 func controlSend(ctx context.Context, socket, route string, body any) error {
-	raw, err := json.Marshal(body)
+	raw, err := json.Marshal(body, json.Deterministic(true))
 	if err != nil {
 		return device.Fail(device.CodeControlUnavailable, "", err)
 	}
@@ -162,7 +162,7 @@ func controlSend(ctx context.Context, socket, route string, body any) error {
 		return nil
 	}
 	var refusal httpjson.ErrorEnvelope
-	if err := json.NewDecoder(res.Body).Decode(&refusal); err != nil {
+	if err := json.UnmarshalRead(res.Body, &refusal); err != nil {
 		return device.Fail(device.CodeControlUnavailable, "POST "+route+" answered "+res.Status, err)
 	}
 	detail, _ := refusal.Error.Details["detail"].(string)

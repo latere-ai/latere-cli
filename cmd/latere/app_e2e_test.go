@@ -6,7 +6,7 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -47,7 +47,7 @@ func TestAppE2E(t *testing.T) {
 			var body struct {
 				Audience string `json:"audience"`
 			}
-			_ = json.NewDecoder(r.Body).Decode(&body)
+			_ = json.UnmarshalRead(r.Body, &body)
 			mu.Lock()
 			audiences = append(audiences, body.Audience)
 			mu.Unlock()
@@ -60,7 +60,7 @@ func TestAppE2E(t *testing.T) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/apps/apps":
 			var body map[string]string
-			_ = json.NewDecoder(r.Body).Decode(&body)
+			_ = json.UnmarshalRead(r.Body, &body)
 			mu.Lock()
 			created = body
 			mu.Unlock()

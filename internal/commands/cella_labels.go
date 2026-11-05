@@ -6,7 +6,8 @@ package commands
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -73,33 +74,31 @@ func stampTenantLabels(body []byte, labels map[string]string) ([]byte, error) {
 }
 
 func stampJSON(body []byte, labels map[string]string) ([]byte, error) {
-	dec := json.NewDecoder(bytes.NewReader(body))
-	dec.UseNumber()
-	var doc map[string]any
-	if err := dec.Decode(&doc); err != nil || doc == nil {
+	// Members are kept as the raw values they were written with, so a number
+	// keeps its digits and the labels the manifest does not name stay as they
+	// were.
+	var doc map[string]jsontext.Value
+	if err := json.Unmarshal(body, &doc, manifestJSON); err != nil || doc == nil {
 		return body, nil //nolint:nilerr // a manifest this cannot read is sent as written, so the control plane names the field
-	}
-	var ok bool
-	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
-		return body, nil
 	}
 	// An absent or null member is an empty one; any other value is the
 	// control plane's to refuse.
-	metadata := map[string]any{}
-	if raw := doc["metadata"]; raw != nil {
-		if metadata, ok = raw.(map[string]any); !ok {
-			return body, nil
+	metadata := map[string]jsontext.Value{}
+	if raw, ok := doc["metadata"]; ok && string(raw) != "null" {
+		if err := json.Unmarshal(raw, &metadata, manifestJSON); err != nil || metadata == nil {
+			return body, nil //nolint:nilerr // a manifest this cannot read is sent as written, so the control plane names the field
 		}
 	}
-	current := map[string]any{}
-	if raw := metadata["labels"]; raw != nil {
-		if current, ok = raw.(map[string]any); !ok {
-			return body, nil
+	current := map[string]jsontext.Value{}
+	if raw, ok := metadata["labels"]; ok && string(raw) != "null" {
+		if err := json.Unmarshal(raw, &current, manifestJSON); err != nil || current == nil {
+			return body, nil //nolint:nilerr // a manifest this cannot read is sent as written, so the control plane names the field
 		}
 	}
 	carries := true
 	for k, v := range labels {
-		if current[k] != v {
+		var held string
+		if json.Unmarshal(current[k], &held, manifestJSON) != nil || held != v || current[k][0] != '"' {
 			carries = false
 		}
 	}
@@ -108,20 +107,37 @@ func stampJSON(body []byte, labels map[string]string) ([]byte, error) {
 	}
 	merged := maps.Clone(current)
 	for k, v := range labels {
-		merged[k] = v
+		quoted, err := json.Marshal(v, manifestJSON)
+		if err != nil {
+			return nil, fmt.Errorf("encode the manifest with your account's labels: %w", err)
+		}
+		merged[k] = quoted
 	}
-	metadata["labels"] = merged
-	doc["metadata"] = metadata
-	var out bytes.Buffer
-	enc := json.NewEncoder(&out)
-	// The manifest's own text is a value the control plane reads as
-	// written; HTML escaping would change none of it but its bytes.
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(doc); err != nil {
+	var err error
+	if metadata["labels"], err = json.Marshal(merged, manifestJSON); err != nil {
 		return nil, fmt.Errorf("encode the manifest with your account's labels: %w", err)
 	}
-	return bytes.TrimSuffix(out.Bytes(), []byte("\n")), nil
+	if doc["metadata"], err = json.Marshal(metadata, manifestJSON); err != nil {
+		return nil, fmt.Errorf("encode the manifest with your account's labels: %w", err)
+	}
+	out, err := json.Marshal(doc, manifestJSON)
+	if err != nil {
+		return nil, fmt.Errorf("encode the manifest with your account's labels: %w", err)
+	}
+	return out, nil
 }
+
+// manifestJSON reads and writes a manifest a person wrote: a repeated key
+// (the last wins), text that is not UTF-8 and any letter case in a name are
+// read as they come, members are written in key order so a stamped
+// manifest is the same bytes on every run, and a raw member is written as
+// it is.
+var manifestJSON = json.JoinOptions(
+	json.Deterministic(true),
+	jsontext.AllowDuplicateNames(true),
+	jsontext.AllowInvalidUTF8(true),
+	json.MatchCaseInsensitiveNames(true),
+)
 
 func stampYAML(body []byte, labels map[string]string) ([]byte, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(body))

@@ -5,7 +5,8 @@ package commands
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -191,19 +192,19 @@ func newStubApps(t *testing.T) *stubApps {
 		var body struct {
 			Audience string `json:"audience"`
 		}
-		_ = json.NewDecoder(r.Body).Decode(&body)
+		_ = json.UnmarshalRead(r.Body, &body)
 		s.mu.Lock()
 		s.audiences = append(s.audiences, body.Audience)
 		s.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		_ = json.MarshalWrite(w, map[string]any{
 			"actor_token": fakeJWT(t, map[string]any{"sub": "u-1", "iss": audienceIssuer, "aud": body.Audience}),
 			"expires_in":  300,
 		})
 	})
 	mux.HandleFunc("POST /v1/apps/apps", func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]string
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		if err := json.UnmarshalRead(r.Body, &body); err != nil {
 			t.Errorf("create body: %v", err)
 		}
 		s.mu.Lock()
@@ -222,7 +223,7 @@ func newStubApps(t *testing.T) *stubApps {
 	})
 	mux.HandleFunc("PATCH /v1/apps/apps/{slug}", func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]string
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		if err := json.UnmarshalRead(r.Body, &body); err != nil {
 			t.Errorf("change body: %v", err)
 		}
 		slug := r.PathValue("slug")
@@ -360,7 +361,7 @@ func newStubApps(t *testing.T) *stubApps {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		s.invited.Emails, s.invited.Role = nil, ""
-		if err := json.NewDecoder(r.Body).Decode(&s.invited); err != nil {
+		if err := json.UnmarshalRead(r.Body, &s.invited); err != nil {
 			t.Errorf("invite body: %v", err)
 		}
 		if refused(w, s.inviteStatus, s.inviteBody) {
@@ -375,7 +376,7 @@ func newStubApps(t *testing.T) *stubApps {
 	})
 	access.HandleFunc("PUT /v1/account/apps/{app_id}/access/password", func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]string
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		if err := json.UnmarshalRead(r.Body, &body); err != nil {
 			t.Errorf("password body: %v", err)
 		}
 		s.mu.Lock()
@@ -983,7 +984,7 @@ func TestAppShowOfAnAppWithNothingYet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var got map[string]json.RawMessage
+	var got map[string]jsontext.Value
 	if err := json.Unmarshal([]byte(out), &got); err != nil || string(got["release"]) != "null" || string(got["preview"]) != "null" || len(got) != 3 {
 		t.Errorf("json = %s %v", out, err)
 	}
@@ -1205,13 +1206,13 @@ func TestAppAnswersThatCannotBeRead(t *testing.T) {
 	s := newStubApps(t)
 	s.apps["hello"] = `{"slug":7}`
 	out, _, err := runApp(t, s, "show", "hello")
-	if err == nil || !strings.HasPrefix(err.Error(), "parse the Apps API's answer: json: cannot unmarshal number") || out != "" {
+	if err == nil || !strings.HasPrefix(err.Error(), "parse the Apps API's answer: json: cannot unmarshal JSON number") || out != "" {
 		t.Errorf("show = %q, %v", out, err)
 	}
 	s = newStubApps(t)
 	s.access = `{"people":"none"}`
 	out, _, err = runApp(t, s, "access", "hello")
-	if err == nil || !strings.HasPrefix(err.Error(), "parse the platform's answer: json: cannot unmarshal string") || out != "" {
+	if err == nil || !strings.HasPrefix(err.Error(), "parse the platform's answer: json: cannot unmarshal JSON string") || out != "" {
 		t.Errorf("access = %q, %v", out, err)
 	}
 }

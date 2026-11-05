@@ -6,7 +6,7 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -86,7 +86,7 @@ func TestAuthRefreshRequiresPersistenceE2E(t *testing.T) {
 						payload["refresh_token"] = "new-refresh"
 					}
 					w.Header().Set("Content-Type", "application/json")
-					_ = json.NewEncoder(w).Encode(payload)
+					_ = json.MarshalWrite(w, payload)
 				}))
 				defer server.Close()
 				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)

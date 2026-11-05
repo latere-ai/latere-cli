@@ -8,7 +8,8 @@
 package modelkey
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"os"
@@ -71,6 +72,15 @@ type Keychain struct{}
 // Name is "system keychain".
 func (Keychain) Name() string { return "system keychain" }
 
+// storedJSON reads the keychain entries and the key file, which a person can
+// edit or an older release wrote: duplicate keys, invalid UTF-8 and any
+// letter case in a name are accepted.
+var storedJSON = json.JoinOptions(
+	jsontext.AllowDuplicateNames(true),
+	jsontext.AllowInvalidUTF8(true),
+	json.MatchCaseInsensitiveNames(true),
+)
+
 // Get reads slot's entry.
 func (Keychain) Get(slot string) (Record, bool, error) {
 	secret, err := keyring.Get(keychainService, slot)
@@ -81,7 +91,7 @@ func (Keychain) Get(slot string) (Record, bool, error) {
 		return Record{}, false, fmt.Errorf("keychain: %w", err)
 	}
 	var r Record
-	if err := json.Unmarshal([]byte(secret), &r); err != nil {
+	if err := json.Unmarshal([]byte(secret), &r, storedJSON); err != nil {
 		return Record{}, false, fmt.Errorf("keychain entry for %s: %w", slot, err)
 	}
 	return r, true, nil
@@ -89,7 +99,7 @@ func (Keychain) Get(slot string) (Record, bool, error) {
 
 // Put writes slot's entry and records the slot in the index.
 func (k Keychain) Put(slot string, r Record) error {
-	b, err := json.Marshal(r)
+	b, err := json.Marshal(r, json.Deterministic(true))
 	if err != nil {
 		return err
 	}
@@ -134,14 +144,14 @@ func (Keychain) Slots() ([]string, error) {
 		return nil, fmt.Errorf("keychain: %w", err)
 	}
 	var slots []string
-	if err := json.Unmarshal([]byte(raw), &slots); err != nil {
+	if err := json.Unmarshal([]byte(raw), &slots, storedJSON); err != nil {
 		return nil, fmt.Errorf("keychain index: %w", err)
 	}
 	return slots, nil
 }
 
 func (Keychain) writeIndex(slots []string) error {
-	b, err := json.Marshal(slots)
+	b, err := json.Marshal(slots, json.Deterministic(true))
 	if err != nil {
 		return err
 	}
@@ -174,7 +184,7 @@ func (f File) read() (map[string]Record, error) {
 		return nil, err
 	}
 	m := map[string]Record{}
-	if err := json.Unmarshal(b, &m); err != nil {
+	if err := json.Unmarshal(b, &m, storedJSON); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", f.Path, err)
 	}
 	return m, nil
@@ -187,7 +197,7 @@ func (f File) write(m map[string]Record) error {
 	if err := os.MkdirAll(filepath.Dir(f.Path), 0o700); err != nil {
 		return err
 	}
-	b, err := json.MarshalIndent(m, "", "  ")
+	b, err := json.Marshal(m, json.Deterministic(true), jsontext.WithIndent("  "))
 	if err != nil {
 		return err
 	}

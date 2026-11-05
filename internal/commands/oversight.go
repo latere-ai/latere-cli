@@ -1056,7 +1056,12 @@ you opened its details, or what Limen showed you first.`,
 				return c.refusedIn(params.Org, err)
 			}
 			if jsonF {
-				return printJSON(cmd.OutOrStdout(), params)
+				// The SDK tags Remembered omitempty, which v2 does not apply to
+				// false; the shallower field keeps it left out when unset.
+				return printJSON(cmd.OutOrStdout(), struct {
+					*oversight.AnswerParams
+					Remembered bool `json:"remembered,omitzero"`
+				}{params, params.Remembered})
 			}
 			fprintf(cmd.OutOrStdout(), "Answered %s for %s.\n", answerWord(approve), id)
 			return nil

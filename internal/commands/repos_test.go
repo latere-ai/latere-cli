@@ -5,7 +5,7 @@ package commands
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"io"
 	"net/http"
@@ -52,7 +52,7 @@ func newStubPlatform(t *testing.T) *stubPlatform {
 			_, _ = io.WriteString(w, p.list)
 		case r.Method == http.MethodPost && r.URL.Path == "/repositories":
 			var body map[string]string
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			if err := json.UnmarshalRead(r.Body, &body); err != nil {
 				t.Errorf("create body: %v", err)
 			}
 			p.mu.Lock()
@@ -65,7 +65,7 @@ func newStubPlatform(t *testing.T) *stubPlatform {
 				return
 			}
 			w.WriteHeader(http.StatusCreated)
-			_ = json.NewEncoder(w).Encode(map[string]string{"id": body["id"], "owner_type": "principal", "owner_id": "p1",
+			_ = json.MarshalWrite(w, map[string]string{"id": body["id"], "owner_type": "principal", "owner_id": "p1",
 				"owner_label": "alice", "slug": body["slug"], "visibility": body["visibility"]})
 		default:
 			w.WriteHeader(http.StatusNotFound)
@@ -358,7 +358,7 @@ func TestReposMintsForThePlatformsAudience(t *testing.T) {
 		var body struct {
 			Audience string `json:"audience"`
 		}
-		_ = json.NewDecoder(r.Body).Decode(&body)
+		_ = json.UnmarshalRead(r.Body, &body)
 		audience = body.Audience
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"actor_token":"platform-actor","expires_in":300}`)

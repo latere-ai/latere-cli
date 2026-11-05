@@ -6,7 +6,7 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -53,7 +53,7 @@ func TestGitCredentialValidatesProtocolBeforeRefreshE2E(t *testing.T) {
 					case r.Method == http.MethodPost && r.URL.Path == "/actor-tokens":
 						mints.Add(1)
 						var body map[string]any
-						_ = json.NewDecoder(r.Body).Decode(&body)
+						_ = json.UnmarshalRead(r.Body, &body)
 						if got := r.Header.Get("Authorization"); got != "Bearer new-root" {
 							t.Errorf("mint bearer = %q, want the refreshed root token", got)
 						}

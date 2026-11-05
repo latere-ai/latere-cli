@@ -6,7 +6,7 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -66,7 +66,7 @@ func TestAppPasswordE2E(t *testing.T) {
 			var body struct {
 				Audience string `json:"audience"`
 			}
-			_ = json.NewDecoder(r.Body).Decode(&body)
+			_ = json.UnmarshalRead(r.Body, &body)
 			_, _ = fmt.Fprintf(w, `{"actor_token":"actor-for-%s","expires_in":300}`, body.Audience)
 			return
 		}
@@ -76,7 +76,7 @@ func TestAppPasswordE2E(t *testing.T) {
 			_, _ = io.WriteString(w, app())
 		case r.Method == http.MethodPatch && r.URL.Path == "/v1/apps/apps/hello":
 			var patched map[string]string
-			_ = json.NewDecoder(r.Body).Decode(&patched)
+			_ = json.UnmarshalRead(r.Body, &patched)
 			if len(patched) != 1 || patched["visibility"] == "" {
 				t.Errorf("the change of the app carried %d fields, want the visibility alone", len(patched))
 			}
@@ -117,7 +117,7 @@ func TestAppPasswordE2E(t *testing.T) {
 				return
 			}
 			var body map[string]string
-			_ = json.NewDecoder(r.Body).Decode(&body)
+			_ = json.UnmarshalRead(r.Body, &body)
 			if n := utf8.RuneCountInString(body["password"]); len(body) != 1 || n < 8 || n > 128 {
 				w.WriteHeader(http.StatusBadRequest)
 				_, _ = io.WriteString(w, `{"error":{"code":"invalid_field","message":"The request could not be read.","details":{"field":"password","reason":"length","min":8,"max":128}}}`)

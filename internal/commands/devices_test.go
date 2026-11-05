@@ -7,7 +7,7 @@ package commands
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/v2"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -121,7 +121,7 @@ func newDevicePlatform(t *testing.T) *devicePlatform {
 	answer := func(w http.ResponseWriter, status int, v any) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
-		_ = json.NewEncoder(w).Encode(v)
+		_ = json.MarshalWrite(w, v)
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/account/environments/context", func(w http.ResponseWriter, r *http.Request) {
@@ -140,7 +140,7 @@ func newDevicePlatform(t *testing.T) *devicePlatform {
 	})
 	mux.HandleFunc("PATCH /v1/account/devices/{id}", func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]string
-		_ = json.NewDecoder(r.Body).Decode(&body)
+		_ = json.UnmarshalRead(r.Body, &body)
 		p.mu.Lock()
 		refuse := p.refuseRename
 		if !refuse {
@@ -393,7 +393,10 @@ func TestConnectCreatesTheEnvironment(t *testing.T) {
 	}
 	// The saved login's person owns the device, so an application that
 	// serves it later refuses another person's tokens.
-	var owner struct{ Device, Subject string }
+	var owner struct {
+		Device  string `json:"device"`
+		Subject string `json:"subject"`
+	}
 	if raw, err := os.ReadFile(paths.OwnerFile()); err != nil || json.Unmarshal(raw, &owner) != nil || owner.Device != id || owner.Subject != "p1" {
 		t.Errorf("the owner recorded at connect is %+v, %v", owner, err)
 	}

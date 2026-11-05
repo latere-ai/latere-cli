@@ -125,9 +125,9 @@ func TestTheSwitchesAreTheClientsMembers(t *testing.T) {
 	}
 	type mode string
 	type params struct {
-		Remember    *bool   `json:"remember,omitempty"`
-		SearchChats *bool   `json:"search_chats,omitempty"`
-		Note        *string `json:"note,omitempty"`
+		Remember    *bool   `json:"remember,omitzero"`
+		SearchChats *bool   `json:"search_chats,omitzero"`
+		Note        *string `json:"note,omitzero"`
 		Mode        mode    `json:"mode,omitempty"`
 		Skipped     *bool   `json:"-"`
 		Untagged    *bool

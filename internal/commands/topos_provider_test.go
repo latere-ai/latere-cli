@@ -9,7 +9,7 @@ package commands
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"io"
 	"io/fs"
@@ -86,7 +86,7 @@ func newOllamaStub(t *testing.T) *ollamaStub {
 		var body struct {
 			Model string `json:"model"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		if err := json.UnmarshalRead(r.Body, &body); err != nil {
 			t.Errorf("decode /api/show: %v", err)
 		}
 		o.record("show " + body.Model)
@@ -94,7 +94,7 @@ func newOllamaStub(t *testing.T) *ollamaStub {
 		if body.Model == "tiny" {
 			info = map[string]any{"general.architecture": "tiny"}
 		}
-		if err := json.NewEncoder(w).Encode(map[string]any{"model_info": info}); err != nil {
+		if err := json.MarshalWrite(w, map[string]any{"model_info": info}); err != nil {
 			t.Error(err)
 		}
 	})

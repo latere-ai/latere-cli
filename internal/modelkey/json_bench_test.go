@@ -4,7 +4,8 @@
 package modelkey
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -39,7 +40,7 @@ func BenchmarkJSONKeyFileGetUnmarshal(b *testing.B) {
 		n    int
 	}{{"small", 1}, {"medium", 25}} {
 		b.Run(sz.name, func(b *testing.B) {
-			enc, err := json.MarshalIndent(jsonBenchRecords(sz.n), "", "  ")
+			enc, err := json.Marshal(jsonBenchRecords(sz.n), json.Deterministic(true), jsontext.WithIndent("  "))
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -62,14 +63,14 @@ func BenchmarkJSONKeyFileGetUnmarshal(b *testing.B) {
 // model-keys.json; the write itself syncs to disk and is left out.
 func BenchmarkJSONKeyFilePutMarshal(b *testing.B) {
 	m := jsonBenchRecords(5)
-	enc, err := json.MarshalIndent(m, "", "  ")
+	enc, err := json.Marshal(m, json.Deterministic(true), jsontext.WithIndent("  "))
 	if err != nil {
 		b.Fatal(err)
 	}
 	b.ReportAllocs()
 	b.SetBytes(int64(len(enc)))
 	for b.Loop() {
-		if _, err := json.MarshalIndent(m, "", "  "); err != nil {
+		if _, err := json.Marshal(m, json.Deterministic(true), jsontext.WithIndent("  ")); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -79,19 +80,19 @@ func BenchmarkJSONKeyFilePutMarshal(b *testing.B) {
 // Keychain.Get store as one entry's secret.
 func BenchmarkJSONKeychainRecordRoundTrip(b *testing.B) {
 	r := jsonBenchRecords(1)["slot-0"]
-	enc, err := json.Marshal(r)
+	enc, err := json.Marshal(r, json.Deterministic(true))
 	if err != nil {
 		b.Fatal(err)
 	}
 	b.ReportAllocs()
 	b.SetBytes(int64(len(enc)))
 	for b.Loop() {
-		out, err := json.Marshal(r)
+		out, err := json.Marshal(r, json.Deterministic(true))
 		if err != nil {
 			b.Fatal(err)
 		}
 		var back Record
-		if err := json.Unmarshal(out, &back); err != nil {
+		if err := json.Unmarshal(out, &back, storedJSON); err != nil {
 			b.Fatal(err)
 		}
 	}

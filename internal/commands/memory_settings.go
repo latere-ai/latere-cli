@@ -5,7 +5,8 @@ package commands
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -100,21 +101,21 @@ func onOff(on bool) string {
 // readSwitches reads the settings of the JSON object obj, in the order it
 // holds them: every boolean member, a switch, and every string member
 // that is a setting taking a word.
-func readSwitches(obj json.RawMessage) ([]memorySwitch, error) {
+func readSwitches(obj jsontext.Value) ([]memorySwitch, error) {
 	settable := settableSwitches()
-	dec := json.NewDecoder(bytes.NewReader(obj))
-	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+	dec := jsontext.NewDecoder(bytes.NewReader(obj))
+	if tok, err := dec.ReadToken(); err != nil || tok.Kind() != '{' {
 		return nil, errors.New("parse the platform's answer: the settings are not a JSON object")
 	}
 	var out []memorySwitch
-	for dec.More() {
-		tok, err := dec.Token()
+	for dec.PeekKind() != '}' {
+		tok, err := dec.ReadToken()
 		if err != nil {
 			return nil, fmt.Errorf("parse the platform's answer: %w", err)
 		}
-		name, _ := tok.(string)
-		var v json.RawMessage
-		if err := dec.Decode(&v); err != nil {
+		name := tok.String()
+		v, err := dec.ReadValue()
+		if err != nil {
 			return nil, fmt.Errorf("parse the platform's answer: %w", err)
 		}
 		var on bool
@@ -132,7 +133,7 @@ func readSwitches(obj json.RawMessage) ([]memorySwitch, error) {
 
 // listedSwitches reads the switches of a list's settings object.
 func listedSwitches(list *memory.List) ([]memorySwitch, error) {
-	var top map[string]json.RawMessage
+	var top map[string]jsontext.Value
 	if err := json.Unmarshal(list.RawJSON(), &top); err != nil {
 		return nil, fmt.Errorf("parse the platform's answer: %w", err)
 	}
@@ -372,7 +373,7 @@ answers them.`,
 			out := cmd.OutOrStdout()
 			if len(args) == 0 {
 				if jsonF {
-					var top map[string]json.RawMessage
+					var top map[string]jsontext.Value
 					if err := json.Unmarshal(list.RawJSON(), &top); err != nil {
 						return fmt.Errorf("parse the platform's answer: %w", err)
 					}
@@ -422,9 +423,9 @@ answers them.`,
 }
 
 // defaultRaw is raw, or an empty object for an answer that held none.
-func defaultRaw(raw json.RawMessage) json.RawMessage {
+func defaultRaw(raw jsontext.Value) jsontext.Value {
 	if len(raw) == 0 {
-		return json.RawMessage("{}")
+		return jsontext.Value("{}")
 	}
 	return raw
 }

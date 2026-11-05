@@ -6,7 +6,8 @@ package commands
 import (
 	"cmp"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"math"
@@ -200,12 +201,12 @@ func clip(s string, n int) string {
 // action id in Limen, the call as the API recorded it, and the
 // confirmation that answered it, if one did.
 type toolCall struct {
-	Seq      int64           `json:"seq"`
-	Time     time.Time       `json:"time"`
-	Subagent string          `json:"subagent,omitempty"`
-	ActionID string          `json:"action_id"`
-	ToolUse  json.RawMessage `json:"tool_use"`
-	Answer   json.RawMessage `json:"answer,omitempty"`
+	Seq      int64          `json:"seq"`
+	Time     time.Time      `json:"time"`
+	Subagent string         `json:"subagent,omitempty"`
+	ActionID string         `json:"action_id"`
+	ToolUse  jsontext.Value `json:"tool_use"`
+	Answer   jsontext.Value `json:"answer,omitzero"`
 
 	use    agents.ToolUse
 	answer *agents.ToolConfirmation
@@ -216,9 +217,9 @@ type toolCall struct {
 // session asks the person for every call that changes something, or its
 // unattended turn stops.
 type handBack struct {
-	Seq     int64           `json:"seq"`
-	Time    time.Time       `json:"time"`
-	Payload json.RawMessage `json:"payload"`
+	Seq     int64          `json:"seq"`
+	Time    time.Time      `json:"time"`
+	Payload jsontext.Value `json:"payload"`
 
 	denials agents.DenialsReached
 }
@@ -322,7 +323,10 @@ func (c *agentsClient) sessionLog(ctx context.Context, id string) (*sessionLog, 
 				return nil, &exitError{code: exitNoAnswer, err: err}
 			}
 			if tc := byID[conf.ToolUseID]; tc != nil && conf.ToolUseID != "" {
-				tc.answer, tc.Answer = &conf, e.Payload
+				tc.answer = &conf
+				if len(e.Payload) > 0 {
+					tc.Answer = e.Payload
+				}
 			}
 		case agents.EventDenialsReached:
 			hb := &handBack{Seq: e.Seq, Time: e.Time, Payload: e.Payload}
@@ -516,9 +520,9 @@ func printSessionCalls(out io.Writer, s *agents.Session, log *sessionLog) error 
 // inputSummary is a short line of a call's input: the command of a shell
 // call, the path or address a file or web call names, or else the input's
 // first string field, cut to fit.
-func inputSummary(name string, input json.RawMessage) string {
+func inputSummary(name string, input jsontext.Value) string {
 	var fields map[string]any
-	if json.Unmarshal(input, &fields) != nil {
+	if json.Unmarshal(input, &fields, foreignJSON) != nil {
 		return ""
 	}
 	for _, key := range []string{"command", "file_path", "path", "url", "query", "pattern", "description"} {

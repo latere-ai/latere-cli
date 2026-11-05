@@ -7,7 +7,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -209,10 +210,10 @@ func (e *appError) detail(key string) string {
 
 // jsonError is the JSON decoding error err wraps, or nil.
 func jsonError(err error) error {
-	if e, ok := errors.AsType[*json.SyntaxError](err); ok {
+	if e, ok := errors.AsType[*jsontext.SyntacticError](err); ok {
 		return e
 	}
-	if e, ok := errors.AsType[*json.UnmarshalTypeError](err); ok {
+	if e, ok := errors.AsType[*json.SemanticError](err); ok {
 		return e
 	}
 	return nil
@@ -276,8 +277,8 @@ func (c *appClient) refused(err error) error {
 
 // rawJSON is the API's own bytes of each model, for --json: an empty list
 // is [] rather than null.
-func rawJSON[T interface{ RawJSON() json.RawMessage }](models []T) []json.RawMessage {
-	raws := make([]json.RawMessage, 0, len(models))
+func rawJSON[T interface{ RawJSON() jsontext.Value }](models []T) []jsontext.Value {
+	raws := make([]jsontext.Value, 0, len(models))
 	for _, m := range models {
 		raws = append(raws, m.RawJSON())
 	}
@@ -810,10 +811,10 @@ preview deploy, each as the API answers it, or null.`,
 			out := cmd.OutOrStdout()
 			if jsonF {
 				shown := struct {
-					App     json.RawMessage `json:"app"`
-					Release json.RawMessage `json:"release"`
-					Preview json.RawMessage `json:"preview"`
-				}{App: a.RawJSON(), Release: json.RawMessage("null"), Preview: json.RawMessage("null")}
+					App     jsontext.Value `json:"app"`
+					Release jsontext.Value `json:"release"`
+					Preview jsontext.Value `json:"preview"`
+				}{App: a.RawJSON(), Release: jsontext.Value("null"), Preview: jsontext.Value("null")}
 				if live >= 0 {
 					shown.Release = releases[live].RawJSON()
 				}

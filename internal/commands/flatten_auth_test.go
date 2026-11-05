@@ -5,7 +5,7 @@ package commands
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -154,7 +154,7 @@ func TestOrgSwitch(t *testing.T) {
 					t.Errorf("grant_type = %q", g)
 				}
 				w.Header().Set("Content-Type", "application/json")
-				_ = json.NewEncoder(w).Encode(map[string]any{
+				_ = json.MarshalWrite(w, map[string]any{
 					"access_token":  "new-access",
 					"refresh_token": "new-refresh",
 					"expires_in":    3600,

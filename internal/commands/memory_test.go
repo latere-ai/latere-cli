@@ -6,7 +6,7 @@ package commands
 import (
 	"archive/zip"
 	"bytes"
-	"encoding/json"
+	"encoding/json/v2"
 	"io"
 	"maps"
 	"net/http"
@@ -221,9 +221,13 @@ func TestMemoryListOfAProject(t *testing.T) {
 				t.Fatal(err)
 			}
 			var got struct {
-				Memories []struct{ ID string } `json:"memories"`
-				Projects []struct{ ID string } `json:"projects"`
-				Limits   map[string]any        `json:"limits"`
+				Memories []struct {
+					ID string `json:"id"`
+				} `json:"memories"`
+				Projects []struct {
+					ID string `json:"id"`
+				} `json:"projects"`
+				Limits map[string]any `json:"limits"`
 			}
 			if err := json.Unmarshal([]byte(out), &got); err != nil {
 				t.Fatalf("--json: %v\n%s", err, out)
@@ -265,7 +269,7 @@ func TestMemoryListJSONIsThePlatformsAnswer(t *testing.T) {
 
 func mustJSON(t *testing.T, v any) string {
 	t.Helper()
-	b, err := json.Marshal(v)
+	b, err := json.Marshal(v, json.Deterministic(true))
 	if err != nil {
 		t.Fatal(err)
 	}
