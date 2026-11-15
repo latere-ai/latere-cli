@@ -10,6 +10,8 @@ committed: the commit log already holds that.
 
 ## Unreleased
 
+## v0.47.1 - 2026-11-15
+
 - Built with Go 1.27.4, which fixes GO-2026-6859.
 
 ## v0.47.0 - 2026-11-03
