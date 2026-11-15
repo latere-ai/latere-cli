@@ -264,7 +264,7 @@ variable is in [configuration.md](configuration.md).
 - [Environments authentication](https://platform.latere.ai/docs/environments/authentication):
   the audience the Environments API requires and what a token grants
   inside a workload.
-- [Model keys](https://platform.latere.ai/docs/models/keys): the model keys
+- [Model keys](https://platform.latere.ai/docs/models/authentication): the model keys
   the Latere API takes.
 - [Latere Code access](https://platform.latere.ai/docs/repos/access): who
   may read and push a repository.
