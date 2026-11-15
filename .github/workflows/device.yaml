@@ -51,7 +51,9 @@ jobs:
   # it would prove nothing here.
   device:
     name: devices under the real sandbox on Linux
-    runs-on: ubuntu-latest
+    # Ubuntu 26.04 refuses the nested user namespace the sandbox runtime
+    # applies its seccomp filter from, even with the AppArmor sysctls off.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
