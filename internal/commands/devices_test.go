@@ -60,7 +60,8 @@ func deviceHome(t *testing.T) (device.Paths, string) {
 
 // sandboxStandIn puts a stand-in for srt on PATH where the real one is not
 // installed, so the engine's driver passes its preflight on every runner.
-// These tests prove the command's flow; confinement is internal/devices'.
+// These tests prove the command's flow; confinement is
+// proved by the device engine's tests in Cella.
 func sandboxStandIn(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("srt"); err == nil {
