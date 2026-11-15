@@ -99,7 +99,7 @@ Where each spec stands:
   says that the old address stopped working with no redirect and that the
   old slug is held for seven days, and sets the git remote `latere` when it
   held the app's old push URL, leaving any other remote with the line to
-  run. Built on 2026-10-12, not released.
+  run. Built on 2026-10-12.
 - `015-evals-commands.md`: `latere evals` on Evals at the platform origin,
   replacing the retired `latere eval` group: manifests applied from YAML,
   experiments run and followed, comparisons in the terminal, an external
@@ -140,7 +140,7 @@ Where each spec stands:
   makes no release check under `LATERE_NO_UPDATE_CHECK`, denies Latere
   Studio's data and cache to every session on macOS, and `logout` keeps a
   device another process serves. Drafted on 2026-10-19 for Latere Studio's
-  This Mac; F and G built on 2026-10-21, not released.
+  This Mac; F and G built on 2026-10-21.
 - `019-environments-secrets.md`: `latere environments secrets` manages the
   core's Secret kind. `create` makes one from flags in the five ways the
   console offers, with the value read from standard input or typed at a
@@ -154,10 +154,10 @@ Where each spec stands:
   `rm` one, `forget` everything, `restore` what a conversation forgot,
   `export` the zip, `import` another assistant's answer, and `settings`,
   which reads the switches the platform sends rather than a fixed list.
-  Built on 2026-10-29 on sdk-go's main, not released.
+  Built on 2026-10-29.
 - `021-app-name.md`: `latere apps name <name> [slug]` changes the name
   people read for an app and keeps its address; `rename --name` names that
-  command. Built on 2026-10-29, not released.
+  command. Built on 2026-10-29.
 - `022-memory-tidies.md`: `latere memory tidies` lists the nightly tidies
   of Tidy memory, `show` prints what one changed as a diff of each memory,
   and `apply`, `decline` and `undo` decide its changes, one memory or all;
