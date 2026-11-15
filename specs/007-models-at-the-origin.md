@@ -2,7 +2,7 @@
 title: "`latere models`: the CLI's model commands over the platform origin, and the `latere lux` namespace retired"
 status: implemented
 depends_on:
-  - specs/005-lux-env-redesign.md
+  - specs/.archive/005-lux-env-redesign.md
   - specs/006-model-key.md
   - "CROSS-REPO: latere-ai/specs infrastructure/platform/ps-09-lux-cutover.md, 'What is dropped': the `latere lux` namespace, BYOK, the hosted plane"
   - "CROSS-REPO: platform specs/90-models-at-the-origin.md, the core at https://api.latere.ai/v1/models"

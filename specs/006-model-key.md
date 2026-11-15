@@ -2,7 +2,7 @@
 title: "A model key on first use: the CLI's credential for the Lux core's model endpoints"
 status: implemented
 depends_on:
-  - specs/005-lux-env-redesign.md
+  - specs/.archive/005-lux-env-redesign.md
   - "CROSS-REPO: auth specs/084-keys-by-context.md, member keys, the key events, POST /me/keys"
   - "CROSS-REPO: platform specs/92-keys-by-context.md, the CLI half it names"
   - "CROSS-REPO: latere-ai/specs decisions/2026-09-23-keys-by-context.md"

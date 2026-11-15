@@ -1,13 +1,14 @@
 ---
 title: Redesign lux env around routes and token lifetime
-status: implemented
+status: archived
+superseded_by: specs/007-models-at-the-origin.md
 depends_on: []
 affects:
   - internal/commands/lux.go
   - docs/lux.md
 effort: small
 created: 2026-07-12
-updated: 2026-07-12
+updated: 2026-11-15
 author: changkun
 dispatched_task_id: null
 ---

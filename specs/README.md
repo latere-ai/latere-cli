@@ -12,7 +12,7 @@ specs/
   001-auth-unification-migration.md  (complete: adopts the shared device-code client and file token store)
   002-review-local-subcommand.md     (implemented: latere review; critics run through Lux and Topos)
   004-flatten-auth-commands.md       (implemented: latere login/logout/whoami/print-token/org as top-level verbs)
-  005-lux-env-redesign.md            (implemented: lux env keyed by dialect and provider, with token provenance and TTL)
+  .archive/005-lux-env-redesign.md   (archived, superseded by 007: lux env keyed by dialect and provider, with token provenance and TTL)
   006-model-key.md                   (implemented: a model key on first use, created at auth and kept in the keychain)
   007-models-at-the-origin.md        (implemented: latere models over the platform origin; latere lux retired)
   008-cella-at-the-origin.md         (implemented: latere cella on the Cella core under the platform origin)
@@ -46,7 +46,7 @@ Where each spec stands:
   with Drive's retirement.
 - `004-flatten-auth-commands.md`: session verbs are top-level
   (`latere login/logout/whoami/print-token/org`).
-- `005-lux-env-redesign.md`: `latere lux env` takes a `--compat` dialect or a
+- `.archive/005-lux-env-redesign.md` (superseded by 007): `latere lux env` takes a `--compat` dialect or a
   provider passthrough, and reports the exported token's provenance. The
   per-command lifetime knob it designed is gone; leaf id-03 of
   `latere-ai/specs/infrastructure/identity` fixed every token at the
